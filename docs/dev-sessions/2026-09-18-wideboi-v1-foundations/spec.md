@@ -272,6 +272,32 @@ rather than a redesign.
 Text typed into a pane bypasses layout entirely: `Input{paneID, bytes}` →
 `pane.pty.Write()`. One hop, nothing extra on the latency path.
 
+### Constraints that keep other client kinds possible
+
+Shipping cell data rather than PTY bytes means a client does not have to be a
+terminal emulator — only a grid renderer. That is a low enough bar to reach from
+a browser over a WebSocket, reusing this protocol unchanged. Three constraints
+preserve that option at no cost to v1:
+
+1. **`internal/protocol` stays codec-neutral.** Plain structs with concrete
+   fields. No `any`, no interface fields requiring registration, no funcs or
+   channels. `gob` is the tempting Go-to-Go default and would quietly foreclose
+   every non-Go client. The encoding choice is not real until v2, because v1
+   passes structs over a channel unencoded.
+2. **The server never assumes exactly one client.** Focus is shared session
+   state, following tmux: several clients see the same focused pane, each at its
+   own geometry. Independent per-client focus is a much larger question and is
+   explicitly not answered here.
+3. **`Attach` carries a protocol version.** Other client kinds will lag the Go
+   client; the server can refuse or degrade.
+
+Note for whenever a web client is attempted: xterm.js is the wrong tool for it.
+It expects a byte stream and runs its own emulator, which breaks the single
+authority, and it gives one terminal per DOM element, which cannot express a
+composited surface with overlapping panes and z-order. A canvas grid renderer
+consuming `[]LineData` and `[]Placement` is the right shape — and it gains
+sub-cell smooth animation, which a character grid cannot do at all.
+
 ### Concurrency
 
 **Server:** one goroutine per pane running `io.Copy(emulator, ptyMaster)`, each
