@@ -38,6 +38,38 @@ func TestKillReapsEscapedGrandchild(t *testing.T) {
 	}
 }
 
+// TestKillReapsSIGTERMIgnoringEscapee covers the gap where a root that
+// exits promptly hides an escaped descendant that ignores SIGTERM
+// entirely. Only unconditional SIGKILL escalation, applied to the
+// process-list snapshot taken before signalling anything, reaches it.
+func TestKillReapsSIGTERMIgnoringEscapee(t *testing.T) {
+	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// An escapee that both leaves the pane's process group and ignores
+	// SIGTERM. SIG_IGN dispositions survive exec, so the renamed sleep
+	// keeps ignoring TERM after the trap'd subshell execs into it.
+	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
+	cmd := fmt.Sprintf("sh -c 'trap \"\" TERM; exec -a %s sleep 300' &\n", tag)
+	if _, err := io.WriteString(p.Master, cmd); err != nil {
+		t.Fatalf("write to pty: %v", err)
+	}
+
+	if !waitForProcess(t, tag, true, 5*time.Second) {
+		t.Fatal("escapee never started")
+	}
+
+	if err := p.Kill(500 * time.Millisecond); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	if !waitForProcess(t, tag, false, 5*time.Second) {
+		t.Fatal("SIGTERM-ignoring escapee survived Kill — SIGKILL escalation never reached it")
+	}
+}
+
 func TestKillIsIdempotent(t *testing.T) {
 	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
 	if err != nil {

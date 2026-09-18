@@ -1,6 +1,7 @@
 package ptyx
 
 import (
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -14,6 +15,10 @@ import (
 // pid reaches a process that deliberately left the group, via nohup,
 // setsid, or an interactive shell's job control.
 func Descendants(pid int) ([]int, error) {
+	if pid <= 0 {
+		return nil, fmt.Errorf("ptyx: descendants: invalid pid %d", pid)
+	}
+
 	out, err := exec.Command("ps", "-axo", "pid=,ppid=").Output()
 	if err != nil {
 		return nil, err
@@ -33,10 +38,17 @@ func Descendants(pid int) ([]int, error) {
 		children[pp] = append(children[pp], p)
 	}
 
+	// seen guards against a self- or cross-referencing ppid row (e.g. pid
+	// 1's ppid is 0 on Linux) sending walk into infinite recursion.
+	seen := map[int]bool{pid: true}
 	var walk func(int) []int
 	walk = func(root int) []int {
 		var out []int
 		for _, c := range children[root] {
+			if seen[c] {
+				continue
+			}
+			seen[c] = true
 			out = append(out, walk(c)...)
 			out = append(out, c)
 		}
@@ -45,35 +57,64 @@ func Descendants(pid int) ([]int, error) {
 	return walk(pid), nil // deepest first
 }
 
-// Kill stops the pane's entire process tree. It sends SIGTERM by the
-// three routes below, waits up to grace for the root to exit, then
-// escalates to SIGKILL on anything left.
+// Kill stops the pane's entire process tree. It snapshots the tree's
+// descendants once, while the root is still alive, then sends SIGTERM by
+// the three routes below, waits up to grace, and unconditionally
+// escalates to SIGKILL against the same snapshot.
 //
-//  1. killpg on the pane's group  — the shell and its foreground job
-//  2. kill on the root pid        — the shell itself
-//  3. a ps tree walk, deepest first — anything that left the group
+//  1. kill on each snapshotted descendant, deepest first
+//  2. killpg on the pane's group  — the shell and its foreground job
+//  3. kill on the root pid        — the shell itself
 //
-// Kill is safe to call more than once.
+// Escalation does not depend on whether the root exited within grace: a
+// root that exits promptly says nothing about a descendant that ignored
+// SIGTERM by trapping it away or installing its own handler, and the
+// snapshot, taken before anything was signalled, is the only way to
+// still reach such a descendant once the root is gone, because a dead
+// root's escaped children reparent to init/launchd and a fresh ps walk
+// from the root pid can no longer find them. SIGKILL against an
+// already-dead pid is a harmless ESRCH.
+//
+// Kill is idempotent: once the tree has already been reaped, a later call
+// closes the master and returns immediately without signalling anything.
+//
+// The master is closed before escalating to SIGKILL, not after: on macOS
+// a PTY session leader that is SIGKILLed while another process still
+// holds the master open can wedge indefinitely in kernel exit teardown
+// (visible as "E" state in ps) and never reach Wait. Closing first — a
+// no-op if the root already exited on its own during grace — is what
+// lets the SIGKILL actually take effect.
+//
+// Kill returns an error if the root or any snapshotted descendant is
+// still alive after the SIGKILL pass.
 func (p *Pane) Kill(grace time.Duration) error {
-	p.signalTree(syscall.SIGTERM)
-
-	if p.waitForExit(grace) {
+	select {
+	case <-p.done:
 		_ = p.Master.Close()
 		return nil
+	default:
 	}
 
-	p.signalTree(syscall.SIGKILL)
-	p.waitForExit(time.Second)
+	descendants, _ := Descendants(p.Cmd.Process.Pid)
+
+	p.signalTree(descendants, syscall.SIGTERM)
+	p.waitForExit(grace)
+
 	_ = p.Master.Close()
+
+	p.signalTree(descendants, syscall.SIGKILL)
+	rootExited := p.waitForExit(time.Second)
+
+	if !rootExited || anyAlive(descendants, 500*time.Millisecond) {
+		return fmt.Errorf("ptyx: kill: process tree for pid %d survived SIGKILL", p.Cmd.Process.Pid)
+	}
 	return nil
 }
 
-func (p *Pane) signalTree(sig syscall.Signal) {
+func (p *Pane) signalTree(descendants []int, sig syscall.Signal) {
 	// Deepest-first, so a parent cannot respawn a child we already killed.
-	if kids, err := Descendants(p.Cmd.Process.Pid); err == nil {
-		for _, pid := range kids {
-			_ = syscall.Kill(pid, sig)
-		}
+	for _, pid := range descendants {
+		_ = syscall.Kill(pid, sig)
 	}
 	if p.PGID > 0 {
 		_ = syscall.Kill(-p.PGID, sig)
@@ -90,4 +131,38 @@ func (p *Pane) waitForExit(within time.Duration) bool {
 	case <-time.After(within):
 		return false
 	}
+}
+
+// anyAlive reports whether any pid is still alive after polling for up to
+// within. It exists because SIGKILL delivery is not synchronous — a
+// process can take a moment to actually leave the process table.
+func anyAlive(pids []int, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for {
+		alive := false
+		for _, pid := range pids {
+			if processAlive(pid) {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			return false
+		}
+		if time.Now().After(deadline) {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// processAlive reports whether pid still exists, probed via signal 0.
+// EPERM means the process exists but is owned by someone else; treat
+// that as alive, since we cannot confirm it is gone.
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	return err != syscall.ESRCH
 }
