@@ -611,3 +611,26 @@ Ruling: BLOCKING, and I agree — the new comments at pane.go:179-185 and :95-99
   deliver (I3, I5); shipping a fresh instance of that is not acceptable.
   Dispatching a comment-and-spec-only correction. No behaviour change, no
   re-test beyond make check. This is not a second fix wave.
+
+## Manual verification — DISCHARGED (2026-09-18, by Les)
+
+The three "MANUAL VERIFICATION OWED BY LES" entries above are closed. Note that
+Tasks 3 and 6 asked about binaries that no longer exist (main.go was rewritten
+twice), so only Task 10's checks were meaningful.
+
+Les ran the delivered binary interactively and confirmed:
+- vim (alternate screen + cursor management)
+- top and htop (full-screen, colour, dynamic layout)
+- telnet to an ASCII Star Wars server (continuous ANSI animation stream)
+- shifted keys working
+- cursor visible
+
+This exercises rendering fidelity, which is the part no automated check on this
+branch can reach. Note it also implicitly stresses the frame loop harder than
+anything in the suite does.
+
+Two defects were found by this manual pass and fixed in 9bd3139, both of which
+every automated check and every review had missed:
+- ALL shifted keys were silently dropped (x/vt's SendKey emits nothing for
+  ModShift). The Task 8 key table had seven cases, none shifted.
+- No cursor was ever rendered; the emulator tracked it, nothing read it.
