@@ -59,31 +59,41 @@ func Descendants(pid int) ([]int, error) {
 
 // Kill stops the pane's entire process tree. It snapshots the tree's
 // descendants once, while the root is still alive, then sends SIGTERM by
-// the three routes below, waits up to grace, and unconditionally
-// escalates to SIGKILL against the same snapshot.
+// the three routes below and waits up to grace.
 //
 //  1. kill on each snapshotted descendant, deepest first
 //  2. killpg on the pane's group  — the shell and its foreground job
 //  3. kill on the root pid        — the shell itself
 //
-// Escalation does not depend on whether the root exited within grace: a
-// root that exits promptly says nothing about a descendant that ignored
-// SIGTERM by trapping it away or installing its own handler, and the
-// snapshot, taken before anything was signalled, is the only way to
-// still reach such a descendant once the root is gone, because a dead
-// root's escaped children reparent to init/launchd and a fresh ps walk
-// from the root pid can no longer find them. SIGKILL against an
-// already-dead pid is a harmless ESRCH.
+// Escalation to SIGKILL then splits by target:
+//
+//   - The snapshot is signalled unconditionally. A root that exits
+//     promptly says nothing about a descendant that ignored SIGTERM by
+//     trapping it away or installing its own handler, and the snapshot,
+//     taken before anything was signalled, is the only way to still
+//     reach such a descendant once the root is gone, because a dead
+//     root's escaped children reparent to init/launchd and a fresh ps
+//     walk from the root pid can no longer find them.
+//   - The group and root pid are signalled only if the root is confirmed
+//     still alive after grace. Once the root has been reaped, its pid —
+//     and, since Setsid made them equal, its pgid — may already have
+//     been recycled by the OS; signalling a recycled pid's group is
+//     exactly the blast radius an idempotent Kill must not have.
+//
+// SIGKILL against an already-dead snapshot pid is a harmless ESRCH.
 //
 // Kill is idempotent: once the tree has already been reaped, a later call
 // closes the master and returns immediately without signalling anything.
 //
-// The master is closed before escalating to SIGKILL, not after: on macOS
-// a PTY session leader that is SIGKILLed while another process still
-// holds the master open can wedge indefinitely in kernel exit teardown
-// (visible as "E" state in ps) and never reach Wait. Closing first — a
-// no-op if the root already exited on its own during grace — is what
-// lets the SIGKILL actually take effect.
+// The master is closed before any SIGKILL is sent, not after: on macOS a
+// PTY session leader that is SIGKILLed while another process still holds
+// the master open can wedge indefinitely in kernel exit teardown (visible
+// as "E" state in ps) and never reach Wait. This is conditional on
+// nothing else draining the master concurrently — true in this package's
+// own tests, but not necessarily true of the real multiplexer, where a
+// reader goroutine is expected to pump the pty continuously; closing
+// first is a no-op either way if the root already exited on its own
+// during grace.
 //
 // Kill returns an error if the root or any snapshotted descendant is
 // still alive after the SIGKILL pass.
@@ -97,13 +107,26 @@ func (p *Pane) Kill(grace time.Duration) error {
 
 	descendants, _ := Descendants(p.Cmd.Process.Pid)
 
-	p.signalTree(descendants, syscall.SIGTERM)
-	p.waitForExit(grace)
+	p.signalDescendants(descendants, syscall.SIGTERM)
+	p.signalRoot(syscall.SIGTERM)
+
+	rootExited := p.waitForExit(grace)
 
 	_ = p.Master.Close()
 
-	p.signalTree(descendants, syscall.SIGKILL)
-	rootExited := p.waitForExit(time.Second)
+	// Unconditional: escapees live in the snapshot, and this is what
+	// preserves the anti-leak guarantee even when the root exits
+	// promptly on its own.
+	p.signalDescendants(descendants, syscall.SIGKILL)
+
+	if !rootExited {
+		// Gated: the root is confirmed still alive, so its pid and pgid
+		// are still its own. Signalling them after the root is already
+		// gone would risk hitting whatever the OS has since done with
+		// that recycled pid.
+		p.signalRoot(syscall.SIGKILL)
+		rootExited = p.waitForExit(time.Second)
+	}
 
 	if !rootExited || anyAlive(descendants, 500*time.Millisecond) {
 		return fmt.Errorf("ptyx: kill: process tree for pid %d survived SIGKILL", p.Cmd.Process.Pid)
@@ -111,11 +134,19 @@ func (p *Pane) Kill(grace time.Duration) error {
 	return nil
 }
 
-func (p *Pane) signalTree(descendants []int, sig syscall.Signal) {
+// signalDescendants signals each pid in a Descendants snapshot.
+func (p *Pane) signalDescendants(descendants []int, sig syscall.Signal) {
 	// Deepest-first, so a parent cannot respawn a child we already killed.
 	for _, pid := range descendants {
 		_ = syscall.Kill(pid, sig)
 	}
+}
+
+// signalRoot signals the pane's own process group and root pid. Kill
+// calls this only when the root has not been confirmed exited, to avoid
+// signalling a pid — and, via PGID, a process group — that the OS may
+// have already recycled. See Kill's gating rationale.
+func (p *Pane) signalRoot(sig syscall.Signal) {
 	if p.PGID > 0 {
 		_ = syscall.Kill(-p.PGID, sig)
 	}
