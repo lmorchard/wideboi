@@ -399,7 +399,11 @@ gets harder to cut the longer it waits, so 6 must not slip past 7.
 
 ## Open questions
 
-- Does `Emulator.Resize` reflow? Resolved at milestone 4.
+- `Emulator.Resize` truncates rather than reflows: narrowing drops the
+  tail and widening cannot recover it. Verified by
+  `internal/server/term/reflow_test.go` (2026-09-18). This is the same
+  defect that forced gwae's ADR-004 emulator swap. Revisit the emulator
+  choice before Plan 2.
 - Which key is `$mod`? gwae uses Option universally on macOS; over SSH that
   depends on the client terminal sending Meta. May need to differ by platform.
 - Sliver content for `CardStrategy` is a chrome design, not a content crop — a
