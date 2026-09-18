@@ -4,7 +4,10 @@
 package hostterm
 
 import (
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 )
 
 // Guard runs a shutdown function at most once, from whichever exit path
@@ -32,4 +35,26 @@ func (g *Guard) Stop() error {
 		return g.err
 	}
 	return nil
+}
+
+// Arm installs a handler for the given signals. On receipt it runs the
+// shutdown function, then re-raises the signal with the default handler
+// so the parent process observes the conventional 128+signo status.
+//
+// Go delivers signals on an ordinary goroutine, so this handler may
+// allocate, take locks, and run arbitrary code.
+func (g *Guard) Arm(sigs ...os.Signal) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sigs...)
+
+	go func() {
+		s := <-ch
+		_ = g.Stop()
+
+		signal.Stop(ch)
+		signal.Reset(s)
+		if sig, ok := s.(syscall.Signal); ok {
+			_ = syscall.Kill(os.Getpid(), sig)
+		}
+	}()
 }
