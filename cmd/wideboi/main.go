@@ -41,26 +41,46 @@ func run() error {
 		return fmt.Errorf("start terminal: %w", err)
 	}
 
+	// From here on, every exit out of run() — a normal return, an early
+	// return below, or a panic unwinding through this function (e.g. a
+	// degenerate pty size reaching the emulator; see the width/height
+	// clamp below) — must restore the terminal. t.Stop and
+	// scr.ExitAltScreen/Flush are all safe to call more than once
+	// (verified against the vendored source: Stop's own idempotence
+	// guards, and console.Restore no-ops once its saved state is nil),
+	// so this defer is harmless to run again even when the guard's
+	// shutdown closure already did the same restore on a normal exit.
+	defer func() {
+		scr.ExitAltScreen()
+		_ = scr.Flush()
+		_ = t.Stop()
+	}()
+
 	width, height, err := t.GetSize()
-	if err != nil {
+	if err != nil || width <= 0 || height <= 0 {
+		// Some ptys report a size of 0x0 with no error at all (observed
+		// with no winsize set on the pty), so checking err alone misses
+		// it. Left unclamped, (0-1)/2 and 0-1 both go negative below,
+		// which panics inside the emulator's buffer allocation rather
+		// than degrading gracefully the way a genuine zero does.
 		width, height = 80, 24
 	}
 
 	// Hardcoded layout: two equal columns with a one-cell divider.
-	paneCols := (width - 1) / 2
-	paneRows := height - 1 // one row of chrome at the bottom
+	// Floored at 1: even after the fallback above, nothing stops some
+	// other pty from reporting a real-but-tiny size, and this arithmetic
+	// must never hand the emulator a non-positive dimension.
+	paneCols := max((width-1)/2, 1)
+	paneRows := max(height-1, 1) // one row of chrome at the bottom
 
 	var panes []*client.Pane
 	for i := 0; i < 2; i++ {
 		p, err := client.NewPane([]string{shell}, paneCols, paneRows, cwd)
 		if err != nil {
 			// No pane has been Start()ed yet, so nothing races this: tear
-			// down whatever already spawned and restore the terminal
-			// before returning, rather than stranding both.
+			// down whatever already spawned before returning. The
+			// deferred restore above handles the terminal.
 			closePanes(panes)
-			scr.ExitAltScreen()
-			_ = scr.Flush()
-			_ = t.Stop()
 			return fmt.Errorf("pane %d: %w", i, err)
 		}
 		panes = append(panes, p)
@@ -133,15 +153,24 @@ func run() error {
 		select {
 		case <-quit:
 			if stopped.Load() {
-				// The guard's closure is restoring (or has restored) the
-				// terminal, and hostterm.Guard.Arm re-raises the signal
-				// with its default disposition right after that closure
-				// returns — that re-raise is what is supposed to end
-				// this process with 128+signo. Returning immediately
-				// here would race it and risk exiting 0 first. Give the
-				// re-raise a bounded window to land; if it never
-				// arrives, fall through so the process still exits
-				// rather than hanging forever.
+				// The guard's closure is already running (or has
+				// finished) on the signal goroutine, and
+				// hostterm.Guard.Arm re-raises the signal with its
+				// default disposition right after that closure returns
+				// — that re-raise is what is supposed to end this
+				// process with 128+signo. Returning immediately here
+				// would race it and risk exiting 0 first, so give the
+				// re-raise a bounded window to land before falling
+				// through to return.
+				//
+				// The sleep bounds this wait; it is not what keeps
+				// run() from hanging afterward. The deferred guard.Stop()
+				// below blocks on sync.Once until the signal goroutine's
+				// closure actually finishes, however long that takes.
+				// What guarantees it finishes is that this select loop
+				// is about to exit for good: nothing will ever contend
+				// for screenLock again, so the closure's own
+				// screenLock.Lock() can always succeed.
 				time.Sleep(2 * time.Second)
 			}
 			return nil

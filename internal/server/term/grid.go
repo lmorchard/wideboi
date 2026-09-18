@@ -65,7 +65,7 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 // override Close, so this call reaches the promoted (*Emulator).Close
 // directly, which writes e.closed with no se.mu held — while
 // SafeEmulator.Write reads e.closed under that same lock. Reproduced
-// under -race at x/vt's emulator.go:263 (Close's write) vs. :270
+// under -race at x/vt's emulator.go:264 (Close's write) vs. :270
 // (Write's read). Practically inert here: e.closed is a single bool,
 // Close is its only writer, and a Write losing the race just sees
 // io.ErrClosedPipe a moment later than it "should" — but -race will
