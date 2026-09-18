@@ -4,7 +4,14 @@
 # read-only. fmt is deliberately NOT one of them: it rewrites files, and a
 # gate that mutates the tree it is judging cannot be trusted by either CI
 # or a reviewer. Run `make fmt` yourself; `make check` only tells you.
-check: fmt-check lint seam-check test
+#
+# verify-exit is included even though it costs ~18s (against a fraction of
+# a second for the rest of check combined): it's the only target in this
+# file that exercises the real binary in a real pty, and it's what proves
+# the exit-status/teardown contract that the other tests only exercise in
+# isolation. build's output (bin/wideboi) is gitignored, so verify-exit is
+# still read-only with respect to the tree check is judging.
+check: fmt-check lint seam-check test verify-exit
 
 test:
 	go test ./...

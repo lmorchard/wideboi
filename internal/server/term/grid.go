@@ -39,8 +39,10 @@ type Grid interface {
 	//     are touched again, so the pane goes blank rather than
 	//     re-rendering what it still holds.
 	//
-	// Both are demonstrated by reflow_test.go and recorded in the v1
-	// spec's open questions.
+	// Both are covered by reflow_test.go's two cases, which are t.Skip'd
+	// (they document a defect, not a regression this package causes)
+	// but were run un-skipped and confirmed to fail exactly as described
+	// above. Recorded in the v1 spec's open questions.
 	Resize(cols, rows int)
 	Draw(dst uv.Screen, area image.Rectangle)
 	Size() (cols, rows int)

@@ -97,9 +97,10 @@ func NewPane(argv []string, cols, rows int, dir string) (*Pane, error) {
 // The third exists because that same chain can block in the other
 // direction: the emulator->PTY pump parks in Master.Write whenever a
 // child stops draining its stdin, which stops it reading the pipe, which
-// makes SendKey block. Whoever calls SendKey would then block too — and
-// that caller is the client's single event loop, which owns rendering
-// and the quit keys. See SendKey.
+// makes Grid.SendKey block. This goroutine is what now absorbs that
+// block instead of SendKey's caller — but it is not a full fix, only a
+// narrower one: the emulator's own write lock is still held across the
+// block, so the event loop can still wedge one hop away. See SendKey.
 //
 // A panic in any of the three is recovered, recorded, and marks this
 // pane dead; the other panes and the event loop carry on. onExit is
@@ -181,9 +182,23 @@ func (p *Pane) Start(onExit func()) {
 // This never blocks and never fails: if the queue is full — which means
 // the child has stopped reading its stdin for the length of a 256-key
 // backlog — the key is dropped and counted, and the count is reported by
-// Close. Dropping is deliberate. The alternative is blocking the
-// client's event loop on an unresponsive child, which would freeze
-// rendering and the quit keys for every pane at once.
+// Close. Dropping is deliberate: SendKey is called from the client's
+// event loop, and the alternative — blocking the caller until the
+// backlog drains — would freeze that event loop against a child that
+// has stopped reading.
+//
+// That said, this does not fully protect the event loop from a wedged
+// child, one lock hop away. The key-writer goroutine (see Start) calls
+// Grid.SendKey, and x/vt's SafeEmulator.SendKey takes the emulator's
+// exclusive lock across a blocking pipe write to the child.
+// Surface -> Grid.Draw takes the same lock to read, so once the
+// key-writer parks on a wedged child's pty, the event loop's render pass
+// blocks behind it too — while it holds cmd/wideboi/main.go's
+// screenLock, so every pane freezes, not just the wedged one. Teardown
+// is unaffected: main.go's shutdown closure reaps every pane's process
+// tree (closePanes) before it ever takes screenLock. See the spec's
+// parked-items section (Known wedge path) for the root cause and the
+// deferred fix.
 func (p *Pane) SendKey(k uv.KeyEvent) {
 	select {
 	case p.keys <- k:

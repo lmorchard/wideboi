@@ -378,6 +378,37 @@ state: a pane exists only as a PTY, a pid, and a pgid. The place for it is Plan
 2's server-owned pane lifecycle, where the server already has a per-pane
 goroutine and an event loop to hang the bookkeeping on.
 
+**Known wedge path, parked for Plan 2 (recorded 2026-09-18).** A pane child
+that stops reading its stdin wedges rendering and input for every pane at
+once, and Ctrl+Q becomes unreachable. The fix for the earlier finding (a
+buffered per-pane key queue and its own key-writer goroutine, see
+`internal/client/pane.go`) removes the direct block — `SendKey` no longer
+blocks its caller — but the wedge still happens one lock hop away: `x/vt`'s
+`SafeEmulator.SendKey` takes the emulator's exclusive lock across
+`Emulator.SendKey`'s blocking `io.WriteString` to the child's pty, and
+`SafeEmulator.Draw` takes the same lock (`RLock`) to read. So once the
+key-writer goroutine parks on a wedged child, it holds the emulator's write
+lock indefinitely, and the event loop's `Pane.Surface()` -> `Grid.Draw` blocks
+behind it — while the event loop holds `screenLock` in
+`cmd/wideboi/main.go`, so every pane freezes, not just the wedged one. This
+was reproduced three ways against the shipped code, including end-to-end
+through the real binary: after typing ~4KB into a wedged streaming pane,
+render output is 0 bytes over a 2-second window and Ctrl+Q is unreachable.
+
+Teardown is unaffected. SIGTERM against a fully wedged process still produces
+death by signal 15 with the alt-screen exit sequence emitted and panes
+reaped, because the shutdown closure runs `closePanes` before it ever takes
+`screenLock` (see the screenLock comment in `main.go`).
+
+The root cause is the pty-writer pump (`internal/client/pane.go`, the
+emulator-output-to-PTY goroutine), which parks forever in `Master.Write` once
+the child stops draining its end. That in turn is what makes `grid.Read`
+never return and `SendKey` never park downstream. The fix is a write
+deadline on the pty master, so the pump can never block longer than the
+deadline; that trades dropped child-bound bytes for a bounded worst case and
+needs its own review, so it is Plan 2 work rather than folded into this
+wave's fix.
+
 ## Testing
 
 | Target | Approach |
@@ -418,9 +449,12 @@ gets harder to cut the longer it waits, so 6 must not slip past 7.
 - `Emulator.Resize` truncates rather than reflows: narrowing drops the
   tail and widening cannot recover it. `Draw` also paints nothing after a
   resize until the affected lines are touched again, so a resized pane
-  goes blank rather than repainting what it still holds. Both verified by
-  `internal/server/term/reflow_test.go` (2026-09-18). This is the same
-  defect that forced gwae's ADR-004 emulator swap.
+  goes blank rather than repainting what it still holds. Both cases are
+  written up in `internal/server/term/reflow_test.go`, which exist but
+  are `t.Skip`ped (Plan 1 never resizes an emulator, so there is nothing
+  running against real behavior yet); run un-skipped, they fail exactly
+  as documented above (2026-09-18). This is the same defect that forced
+  gwae's ADR-004 emulator swap.
 
   **Decision (2026-09-18): keep `x/vt`, revisit when width-cycling makes
   reflow real.** Plan 1 never resizes an emulator, so neither defect is

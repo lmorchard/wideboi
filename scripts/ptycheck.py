@@ -167,7 +167,7 @@ def drain(master_fd: int, stop: threading.Event, saw_restore: threading.Event) -
             return
         if not saw_restore.is_set() and ALT_SCREEN_EXIT in carry + data:
             saw_restore.set()
-        carry = data[-(len(ALT_SCREEN_EXIT) - 1):]
+        carry = (carry + data)[-(len(ALT_SCREEN_EXIT) - 1):]
 
 
 def ps_rows() -> list[tuple[int, int, str]]:
