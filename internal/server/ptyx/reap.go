@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+// Budgets for the work Kill does after its caller's grace window has
+// expired. They are named, and summed into KillResidual, because a
+// caller that has to wait out a Kill needs the bound rather than a copy
+// of these numbers; see client.CloseResidual.
+const (
+	// killWait is how long Kill waits for the root to die after the
+	// gated SIGKILL.
+	killWait = time.Second
+	// aliveWait is how long anyAlive polls before concluding a pid is
+	// really still there. SIGKILL delivery is not synchronous.
+	aliveWait = 500 * time.Millisecond
+)
+
+// KillResidual is the worst-case time Kill still needs once its grace
+// window has expired: the SIGKILL pass's wait for the root, plus the
+// confirmation poll over the descendant snapshot. Kill closes the pty
+// master before that residual work begins, so a caller woken by the
+// master closing must allow at least this long for Kill to finish.
+const KillResidual = killWait + aliveWait
+
 // Descendants returns every process descended from pid, deepest first.
 //
 // This exists because neither a process-group kill nor a kill of the root
@@ -85,6 +105,21 @@ func Descendants(pid int) ([]int, error) {
 // Kill is idempotent: once the tree has already been reaped, a later call
 // closes the master and returns immediately without signalling anything.
 //
+// Kill has no mutual exclusion and must not be called concurrently for
+// the same Pane; the done check, the descendant snapshot, and the
+// escalation gate would all interleave. cmd/wideboi's closePanes runs
+// one Kill per pane in parallel, which is fine — those are distinct
+// Panes — and nothing calls Kill twice for one pane at the same time.
+// Making it safe to is Plan 2's problem, along with pane lifecycle
+// generally.
+//
+// Known, deliberately parked leak path: the p.done short-circuit above
+// means that if a pane's root exits on its own before Kill is ever
+// called, Kill signals nothing and reports success, so anything that
+// escaped the pane's process group is never reaped. Closing that needs
+// a descendant snapshot maintained while the root is alive, which this
+// design does not keep. Recorded in the v1 spec under Teardown.
+//
 // The master is closed before any SIGKILL is sent, not after: on macOS a
 // PTY session leader that is SIGKILLed while another process still holds
 // the master open can wedge indefinitely in kernel exit teardown (visible
@@ -125,10 +160,10 @@ func (p *Pane) Kill(grace time.Duration) error {
 		// gone would risk hitting whatever the OS has since done with
 		// that recycled pid.
 		p.signalRoot(syscall.SIGKILL)
-		rootExited = p.waitForExit(time.Second)
+		rootExited = p.waitForExit(killWait)
 	}
 
-	if !rootExited || anyAlive(descendants, 500*time.Millisecond) {
+	if !rootExited || anyAlive(descendants, aliveWait) {
 		return fmt.Errorf("ptyx: kill: process tree for pid %d survived SIGKILL", p.Cmd.Process.Pid)
 	}
 	return nil

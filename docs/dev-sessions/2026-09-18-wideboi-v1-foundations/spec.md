@@ -362,6 +362,22 @@ goroutine. gwae's teardown table — force-quit, last pane closed, each of
 SIGTERM/SIGHUP/SIGINT/SIGQUIT, panic, early return, SIGKILL — is adopted as the
 test matrix.
 
+**Known leak path, parked for Plan 2 (recorded 2026-09-18).** The reaper above
+snapshots a pane's descendants at the moment `Kill` is called, and `Kill`
+short-circuits when the pane's root has already been reaped. Those two facts
+combine into a real hole: if a pane's root exits on its own *before* `Kill` is
+ever called — the user backgrounds a `nohup`'d job, types `exit`, and only then
+quits the multiplexer — `Kill` returns immediately, signals nothing, and reports
+success. The escapee is never reaped. This is reachable in the delivered Plan 1
+binary, not a theoretical case.
+
+It is parked deliberately rather than overlooked. Closing it requires keeping a
+descendant snapshot maintained *while* the root is alive — a periodic `ps` walk
+per pane, or a process-exit notification — and Plan 1's design keeps no such
+state: a pane exists only as a PTY, a pid, and a pgid. The place for it is Plan
+2's server-owned pane lifecycle, where the server already has a per-pane
+goroutine and an event loop to hang the bookkeeping on.
+
 ## Testing
 
 | Target | Approach |
@@ -400,10 +416,35 @@ gets harder to cut the longer it waits, so 6 must not slip past 7.
 ## Open questions
 
 - `Emulator.Resize` truncates rather than reflows: narrowing drops the
-  tail and widening cannot recover it. Verified by
+  tail and widening cannot recover it. `Draw` also paints nothing after a
+  resize until the affected lines are touched again, so a resized pane
+  goes blank rather than repainting what it still holds. Both verified by
   `internal/server/term/reflow_test.go` (2026-09-18). This is the same
-  defect that forced gwae's ADR-004 emulator swap. Revisit the emulator
-  choice before Plan 2.
+  defect that forced gwae's ADR-004 emulator swap.
+
+  **Decision (2026-09-18): keep `x/vt`, revisit when width-cycling makes
+  reflow real.** Plan 1 never resizes an emulator, so neither defect is
+  reachable in the delivered binary; they become real the moment
+  `CycleWidth` lands. Four options were weighed:
+
+  1. **Keep `x/vt` and revisit in Plan 2.** Zero cost now, and the `Grid`
+     interface already confines the blast radius to one file. *Taken.*
+  2. **Own the grid ourselves, behind `Grid`.** Full control over reflow,
+     and the interface is already shaped for it — but writing a VT parser
+     plus scrollback is a project of its own, and it would displace the
+     layout and animation work this plan exists to reach.
+  3. **Fix reflow upstream in `x/vt`.** Best outcome for everyone and the
+     smallest diff in this repo, but it puts this project's schedule on
+     someone else's review queue, against a dependency with no tagged
+     release.
+  4. **Switch emulators.** The option gwae took (ADR-004) — but there is
+     no good Go target to switch *to*. The alternatives are less complete
+     than `x/vt` on exactly the things this design leans on: `Scrollback`,
+     `RegisterOscHandler`, `SafeEmulator`, and `Draw` into a `uv` buffer.
+
+  What would reopen this: `CycleWidth` in milestone 5, or a pane that must
+  survive a host-terminal resize. Until then, do not call `Grid.Resize`
+  from production code.
 - Which key is `$mod`? gwae uses Option universally on macOS; over SSH that
   depends on the client terminal sending Meta. May need to differ by platform.
 - Sliver content for `CardStrategy` is a chrome design, not a content crop — a

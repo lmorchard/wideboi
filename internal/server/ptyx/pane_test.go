@@ -14,7 +14,15 @@ func TestSpawnRunsCommandAndEchoesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	t.Cleanup(func() { _ = p.Close() })
+	// Kill, not Close: Close only drops the master and leaves the
+	// child to be reaped by the kernel's HUP, which these tests then
+	// depend on. Kill is the teardown path the rest of the program
+	// uses, and it reports a tree that survived.
+	t.Cleanup(func() {
+		if err := p.Kill(2 * time.Second); err != nil {
+			t.Errorf("Kill: %v", err)
+		}
+	})
 
 	if _, err := io.WriteString(p.Master, "echo wideboi-ok\n"); err != nil {
 		t.Fatalf("write to pty: %v", err)
@@ -30,7 +38,15 @@ func TestSpawnReportsWindowSizeToChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	t.Cleanup(func() { _ = p.Close() })
+	// Kill, not Close: Close only drops the master and leaves the
+	// child to be reaped by the kernel's HUP, which these tests then
+	// depend on. Kill is the teardown path the rest of the program
+	// uses, and it reports a tree that survived.
+	t.Cleanup(func() {
+		if err := p.Kill(2 * time.Second); err != nil {
+			t.Errorf("Kill: %v", err)
+		}
+	})
 
 	if _, err := io.WriteString(p.Master, "stty size\n"); err != nil {
 		t.Fatalf("write to pty: %v", err)
@@ -47,7 +63,15 @@ func TestSpawnPutsChildInItsOwnProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	t.Cleanup(func() { _ = p.Close() })
+	// Kill, not Close: Close only drops the master and leaves the
+	// child to be reaped by the kernel's HUP, which these tests then
+	// depend on. Kill is the teardown path the rest of the program
+	// uses, and it reports a tree that survived.
+	t.Cleanup(func() {
+		if err := p.Kill(2 * time.Second); err != nil {
+			t.Errorf("Kill: %v", err)
+		}
+	})
 
 	if p.PGID == 0 {
 		t.Fatal("PGID is zero")

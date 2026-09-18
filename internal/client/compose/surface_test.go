@@ -50,8 +50,7 @@ func TestBlitLaterDrawsCoverEarlierOnes(t *testing.T) {
 	got := compose.Text(dst, dst.Bounds())
 	// Column 5 is outside blit 2's dest rect (cols 2-4), so it keeps the
 	// "U" written by blit 1 — later draws only cover the cells within
-	// their own dest rectangle. Verified against uv.Buffer.Draw directly:
-	// see task-7-report.md for the trace.
+	// their own dest rectangle. Verified against uv.Buffer.Draw directly.
 	want := []string{"UUOOOU  "}
 	assertLines(t, got, want)
 }

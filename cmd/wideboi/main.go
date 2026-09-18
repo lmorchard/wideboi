@@ -17,6 +17,11 @@ import (
 	"github.com/lmorchard/wideboi/internal/hostterm"
 )
 
+// signalExitMargin is the slack added to client.CloseResidual when the
+// <-quit case waits for the signal goroutine's re-raise. See that case
+// for the derivation.
+const signalExitMargin = 500 * time.Millisecond
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -56,42 +61,6 @@ func run() error {
 		_ = t.Stop()
 	}()
 
-	width, height, err := t.GetSize()
-	if err != nil || width <= 0 || height <= 0 {
-		// Some ptys report a size of 0x0 with no error at all (observed
-		// with no winsize set on the pty), so checking err alone misses
-		// it. Left unclamped, (0-1)/2 and 0-1 both go negative below,
-		// which panics inside the emulator's buffer allocation rather
-		// than degrading gracefully the way a genuine zero does.
-		width, height = 80, 24
-	}
-
-	// Hardcoded layout: two equal columns with a one-cell divider.
-	// Floored at 1: even after the fallback above, nothing stops some
-	// other pty from reporting a real-but-tiny size, and this arithmetic
-	// must never hand the emulator a non-positive dimension.
-	paneCols := max((width-1)/2, 1)
-	paneRows := max(height-1, 1) // one row of chrome at the bottom
-
-	var panes []*client.Pane
-	for i := 0; i < 2; i++ {
-		p, err := client.NewPane([]string{shell}, paneCols, paneRows, cwd)
-		if err != nil {
-			// No pane has been Start()ed yet, so nothing races this: tear
-			// down whatever already spawned before returning. The
-			// deferred restore above handles the terminal.
-			closePanes(panes)
-			return fmt.Errorf("pane %d: %w", i, err)
-		}
-		panes = append(panes, p)
-	}
-
-	quit := make(chan struct{})
-	var once sync.Once
-	for _, p := range panes {
-		p.Start(func() { once.Do(func() { close(quit) }) })
-	}
-
 	// screenLock keeps the shutdown closure's scr/t restore and the main
 	// loop's own scr/t access mutually exclusive (hostterm.Guard runs the
 	// shutdown closure on its own signal goroutine, independent of this
@@ -123,6 +92,21 @@ func run() error {
 		stopped    atomic.Bool
 	)
 
+	// panesMu guards the slice header only, and exists solely because
+	// the guard below is armed before the spawn loop runs: the signal
+	// goroutine may read this slice while this goroutine is still
+	// appending to it. Once the spawn loop is done there are no further
+	// writes, so the main loop reads it unlocked.
+	var (
+		panesMu sync.Mutex
+		panes   []*client.Pane
+	)
+	snapshotPanes := func() []*client.Pane {
+		panesMu.Lock()
+		defer panesMu.Unlock()
+		return append([]*client.Pane(nil), panes...)
+	}
+
 	guard := hostterm.NewGuard(func() error {
 		// See the stopped/screenLock comment above for why this is set
 		// before closePanes, unconditionally, with no lock involved.
@@ -132,18 +116,88 @@ func run() error {
 		// touches neither scr nor t, so it never needed the lock, and
 		// gating it behind one would make child teardown wait on
 		// whatever the render loop is doing — including scr.Flush()
-		// parked on a stalled consumer, which would make SIGTERM/SIGHUP/
-		// SIGQUIT unable to reap children at all.
-		closePanes(panes)
+		// parked on a stalled consumer, which would make the armed
+		// signals unable to reap children at all.
+		paneErrs := closePanes(snapshotPanes())
 
 		screenLock.Lock()
 		defer screenLock.Unlock()
 		scr.ExitAltScreen()
 		_ = scr.Flush()
-		return t.Stop()
+		err := t.Stop()
+
+		// Only now, with the alt screen exited and the console restored,
+		// is it safe to write diagnostics: anything printed earlier
+		// lands in the alt screen and is erased by the restore that
+		// follows it. Printing here rather than from a defer in run() is
+		// deliberate — on the signal path, Guard.Arm re-raises the
+		// signal as soon as this closure returns, so run()'s defers
+		// usually never execute at all.
+		for _, e := range paneErrs {
+			fmt.Fprintln(os.Stderr, "wideboi: teardown:", e)
+		}
+		return err
 	})
-	guard.Arm(syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+
+	// Arm before anything is spawned, and register Stop in the same
+	// breath. Both halves matter. The window between t.Start() (raw mode
+	// and the alt screen are live) and this point must contain no
+	// blocking work and no child processes: a signal arriving in it
+	// would kill the process by default disposition, leaving the host
+	// terminal in raw mode on the alt screen, and leaving any pane
+	// already spawned orphaned. Registering the defer here likewise
+	// covers a panic out of the spawn loop below, which would otherwise
+	// restore the terminal (via the defer above) while reaping nothing.
+	//
+	// The signal set is the spec's adopted teardown matrix. SIGINT is in
+	// it even though raw mode clears ISIG — so Ctrl+C reaches the
+	// focused pane as \x03 rather than as a signal — because a `kill
+	// -INT` from outside is an ordinary way to stop a process and must
+	// not bypass teardown.
 	defer guard.Stop()
+	guard.Arm(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+
+	width, height, err := t.GetSize()
+	if err != nil || width <= 0 || height <= 0 {
+		// Some ptys report a size of 0x0 with no error at all (observed
+		// with no winsize set on the pty), so checking err alone misses
+		// it. Left unclamped, (0-1)/2 and 0-1 both go negative below,
+		// which panics inside the emulator's buffer allocation rather
+		// than degrading gracefully the way a genuine zero does.
+		width, height = 80, 24
+	}
+
+	// Hardcoded layout: two equal columns with a one-cell divider.
+	// Floored at 1: even after the fallback above, nothing stops some
+	// other pty from reporting a real-but-tiny size, and this arithmetic
+	// must never hand the emulator a non-positive dimension.
+	paneCols := max((width-1)/2, 1)
+	paneRows := max(height-1, 1) // one row of chrome at the bottom
+
+	for i := 0; i < 2; i++ {
+		p, err := client.NewPane([]string{shell}, paneCols, paneRows, cwd)
+		if err != nil {
+			// No explicit teardown here: the deferred guard.Stop() above
+			// runs the shutdown closure, which reaps whatever already
+			// spawned and restores the terminal.
+			return fmt.Errorf("pane %d: %w", i, err)
+		}
+		panesMu.Lock()
+		panes = append(panes, p)
+		panesMu.Unlock()
+	}
+
+	// quit is closed by whichever pane's shell exits first, and that
+	// ends the whole multiplexer. That is correct for this hardcoded
+	// two-pane layout — there is no UI for a pane-shaped hole and no way
+	// to open a replacement — but onExit reads as a per-pane callback
+	// and is not one. Plan 2 owns per-pane close: a pane exiting should
+	// remove its column and only the last one should end the session.
+	quit := make(chan struct{})
+	var once sync.Once
+	for _, p := range panes {
+		p.Start(func() { once.Do(func() { close(quit) }) })
+	}
 
 	focus := 0
 	frame := time.NewTicker(16 * time.Millisecond)
@@ -163,6 +217,18 @@ func run() error {
 				// re-raise a bounded window to land before falling
 				// through to return.
 				//
+				// The bound is derived, not picked. quit fires when a
+				// pane's Close reaches the point of shutting the pty
+				// master, which is *after* the SIGTERM grace window has
+				// already elapsed; what is left at that instant is
+				// client.CloseResidual (ptyx's SIGKILL wait plus its
+				// liveness poll), and then the closure's restore and
+				// the re-raise, which are effectively instant.
+				// signalExitMargin covers those. Deriving it this way is
+				// what keeps a change to either the grace period or
+				// ptyx's escalation budget from silently breaking the
+				// exit-status contract.
+				//
 				// The sleep bounds this wait; it is not what keeps
 				// run() from hanging afterward. The deferred guard.Stop()
 				// below blocks on sync.Once until the signal goroutine's
@@ -171,13 +237,33 @@ func run() error {
 				// is about to exit for good: nothing will ever contend
 				// for screenLock again, so the closure's own
 				// screenLock.Lock() can always succeed.
-				time.Sleep(2 * time.Second)
+				time.Sleep(client.CloseResidual + signalExitMargin)
 			}
 			return nil
 
 		case ev := <-t.Events():
 			switch ev := ev.(type) {
 			case uv.WindowSizeEvent:
+				// Resize is NOT implemented. This resizes the host
+				// screen buffer so rendering stays in bounds and
+				// nothing panics — and that is all it does.
+				//
+				// Specifically, after a resize: paneCols/paneRows and
+				// the pane emulators keep their launch-time geometry,
+				// so a narrowed window crops pane 0 and can push pane 1
+				// and the status line entirely off-screen (SetCell
+				// silently drops out-of-bounds writes); and no
+				// ptyx.Pane.Resize / TIOCSWINSZ is issued, so each
+				// child keeps wrapping at the width it was started
+				// with. Nothing recovers when the window is widened
+				// again.
+				//
+				// Doing it properly means recomputing the layout and
+				// resizing the emulators, and Grid.Resize on the pinned
+				// x/vt neither reflows nor repaints (see
+				// internal/server/term/reflow_test.go and the spec).
+				// Real resize belongs to Plan 2, together with the
+				// layout engine. Do not add Grid.Resize here.
 				screenLock.Lock()
 				if !stopped.Load() {
 					scr.Resize(ev.Width, ev.Height)
@@ -192,6 +278,8 @@ func run() error {
 				default:
 					// SendKey, never Write(ev.String()) — String() is a
 					// display name like "ctrl+c", not the byte \x03.
+					// SendKey is also the only non-blocking route to a
+					// child; see client.Pane.SendKey.
 					panes[focus].SendKey(uv.KeyEvent(ev))
 				}
 			}
@@ -207,8 +295,13 @@ func run() error {
 				for y := 0; y < paneRows; y++ {
 					compose.WriteString(scr, paneCols, y, "│")
 				}
-				compose.WriteString(scr, 0, height-1,
-					fmt.Sprintf(" focus: pane %d   ctrl+o switch   ctrl+q quit ", focus))
+				status := fmt.Sprintf(" focus: pane %d   ctrl+o switch   ctrl+q quit ", focus)
+				for i, p := range panes {
+					if p.Dead() {
+						status += fmt.Sprintf("  [pane %d dead] ", i)
+					}
+				}
+				compose.WriteString(scr, 0, height-1, status)
 
 				scr.Render()
 				_ = scr.Flush()
@@ -218,18 +311,35 @@ func run() error {
 	}
 }
 
-// closePanes tears down every pane concurrently. An interactive shell on a
-// pty ignores SIGTERM, so each Close (via ptyx.Kill) burns its full grace
-// period; running them concurrently means teardown waits ~1x grace instead
-// of ~len(panes)x.
-func closePanes(panes []*client.Pane) {
+// closePanes tears down every pane concurrently and returns whatever
+// each one had to report. An interactive shell on a pty ignores SIGTERM,
+// so each Close (via ptyx.Kill) burns its full grace period; running
+// them concurrently means teardown waits ~1x grace instead of
+// ~len(panes)x.
+//
+// The errors are returned rather than logged here because this runs
+// while the alt screen is still up. The caller prints them after the
+// terminal has been restored. Discarding them is not an option: a
+// process tree that survived SIGKILL is reported nowhere else.
+func closePanes(panes []*client.Pane) []error {
+	errs := make([]error, len(panes))
 	var wg sync.WaitGroup
-	for _, p := range panes {
+	for i, p := range panes {
 		wg.Add(1)
-		go func(p *client.Pane) {
+		go func(i int, p *client.Pane) {
 			defer wg.Done()
-			_ = p.Close()
-		}(p)
+			if err := p.Close(); err != nil {
+				errs[i] = fmt.Errorf("pane %d: %w", i, err)
+			}
+		}(i, p)
 	}
 	wg.Wait()
+
+	out := errs[:0]
+	for _, err := range errs {
+		if err != nil {
+			out = append(out, err)
+		}
+	}
+	return out
 }

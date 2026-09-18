@@ -28,6 +28,19 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 }
 
 // WriteString writes plain unstyled text into s starting at (x, y).
+//
+// Caveat: one rune per cell. It does not consult Cell.Width, so it is
+// correct only for single-width glyphs. A double-width rune is written
+// into one cell and everything after it on the line lands one column
+// left of where it should. Combining marks get a cell of their own
+// instead of joining the base rune.
+//
+// This matters sooner than it looks: WriteString is what a reader will
+// reach for when the spec's status glyphs (`»` working, `!` needs
+// input, `✓` done, `✗` failed) land. Widen this to grapheme clusters
+// with their measured width — uv.Cell already carries Width, and
+// Surface exposes WidthMethod — before using it for anything but ASCII
+// chrome.
 func WriteString(s uv.Screen, x, y int, text string) {
 	for i, r := range []rune(text) {
 		s.SetCell(x+i, y, uv.NewCell(s.WidthMethod(), string(r)))
@@ -35,6 +48,12 @@ func WriteString(s uv.Screen, x, y int, text string) {
 }
 
 // Text renders a screen region to plain strings, for tests and snapshots.
+//
+// Caveat: the mirror image of WriteString's. It emits exactly one rune
+// per cell — the first rune of each cell's content — so a wide glyph
+// reads as its base rune followed by whatever the continuation cell
+// holds, and combining marks are dropped. Adequate for the ASCII
+// snapshots it exists to serve; not a faithful rendering.
 func Text(s uv.Screen, area image.Rectangle) []string {
 	lines := make([]string, 0, area.Dy())
 	for y := area.Min.Y; y < area.Max.Y; y++ {

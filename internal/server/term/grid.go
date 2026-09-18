@@ -27,6 +27,20 @@ type Grid interface {
 	io.Writer
 	io.Reader
 	SendKey(k uv.KeyEvent)
+
+	// Resize changes the emulator's dimensions. Two properties of the
+	// pinned x/vt make it unsafe to use casually, and both are load
+	// bearing enough that nothing in Plan 1 calls it outside tests:
+	//
+	//   - It does not reflow. Narrowing truncates the tail of every
+	//     wrapped line and widening cannot recover it. This is the
+	//     same defect that forced gwae's ADR-004 emulator swap.
+	//   - Draw paints nothing after a resize until the affected lines
+	//     are touched again, so the pane goes blank rather than
+	//     re-rendering what it still holds.
+	//
+	// Both are demonstrated by reflow_test.go and recorded in the v1
+	// spec's open questions.
 	Resize(cols, rows int)
 	Draw(dst uv.Screen, area image.Rectangle)
 	Size() (cols, rows int)
