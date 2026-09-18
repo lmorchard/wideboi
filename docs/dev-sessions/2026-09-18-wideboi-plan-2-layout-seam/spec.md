@@ -158,7 +158,11 @@ Plan 1 spent roughly 25 subagents and 8 reviews, each more sophisticated than th
 
 `make smoke` must run in seconds and be wired into `make check`, so it is exercised continuously rather than at the end.
 
-## Inherited items that come due in Plan 2
+## Inherited items from Plan 1
+
+Plan 2's implementation plan splits these across Plans 2-4 and re-homes each
+explicitly; see its "Inherited items this plan does NOT take" table. The
+column below records when each becomes *unavoidable*, not which plan owns it.
 
 | Item | Source | Disposition |
 | --- | --- | --- |
