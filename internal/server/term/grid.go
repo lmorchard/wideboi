@@ -19,6 +19,10 @@ import (
 // terminal replies, destined for the PTY. Routing input through the
 // emulator keeps it the single authority on pane state, and is the only
 // way to turn a decoded uv.KeyEvent back into the bytes a child expects.
+//
+// Close releases the emulator's own resources. Grid.Read blocks on an
+// internal pipe with no other way to unblock it, so a caller that owns a
+// Grid must call Close to let a pending Read return.
 type Grid interface {
 	io.Writer
 	io.Reader
@@ -26,6 +30,7 @@ type Grid interface {
 	Resize(cols, rows int)
 	Draw(dst uv.Screen, area image.Rectangle)
 	Size() (cols, rows int)
+	Close() error
 }
 
 // vtGrid adapts x/vt's SafeEmulator to Grid. SafeEmulator rather than
@@ -49,3 +54,10 @@ func (g *vtGrid) Size() (int, int)            { return g.em.Width(), g.em.Height
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	g.em.Draw(dst, area)
 }
+
+// Close closes the underlying emulator, which unblocks any goroutine
+// parked in Read: SafeEmulator embeds *vt.Emulator, whose Close calls
+// CloseWithError(io.EOF) on the pipe writer Read's pipe reader drains
+// from, so the pending Read returns (0, io.EOF) rather than blocking
+// forever.
+func (g *vtGrid) Close() error { return g.em.Close() }

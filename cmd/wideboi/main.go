@@ -33,6 +33,10 @@ func run() error {
 	scr := t.Screen()
 	scr.EnterAltScreen()
 	if err := t.Start(); err != nil {
+		// t.Stop is documented safe to call without a prior successful
+		// Start, and it un-does the alt-screen-enter sequence buffered
+		// above (still unflushed at this point) before returning.
+		_ = t.Stop()
 		return fmt.Errorf("start terminal: %w", err)
 	}
 
@@ -49,6 +53,13 @@ func run() error {
 	for i := 0; i < 2; i++ {
 		p, err := client.NewPane([]string{shell}, paneCols, paneRows, cwd)
 		if err != nil {
+			// No pane has been Start()ed yet, so nothing races this: tear
+			// down whatever already spawned and restore the terminal
+			// before returning, rather than stranding both.
+			closePanes(panes)
+			scr.ExitAltScreen()
+			_ = scr.Flush()
+			_ = t.Stop()
 			return fmt.Errorf("pane %d: %w", i, err)
 		}
 		panes = append(panes, p)
@@ -60,20 +71,19 @@ func run() error {
 		p.Start(func() { once.Do(func() { close(quit) }) })
 	}
 
+	// screenLock makes the shutdown closure below and the main loop's own
+	// scr/t access mutually exclusive. Without it, a signal arriving
+	// mid-Render/Flush races the shutdown closure's ExitAltScreen/Flush/
+	// Stop on the same *TerminalScreen and *Terminal from a different
+	// goroutine (hostterm.Guard runs its shutdown func on its own signal
+	// goroutine, independent of this loop).
+	var screenLock sync.Mutex
+
 	guard := hostterm.NewGuard(func() error {
-		// Kill panes concurrently: an interactive shell on a pty ignores
-		// SIGTERM, so each Kill burns its full grace period. Serial
-		// teardown would make quitting a two-pane session wait ~2x
-		// grace; concurrent teardown waits ~1x.
-		var wg sync.WaitGroup
-		for _, p := range panes {
-			wg.Add(1)
-			go func(p *client.Pane) {
-				defer wg.Done()
-				_ = p.Close()
-			}(p)
-		}
-		wg.Wait()
+		screenLock.Lock()
+		defer screenLock.Unlock()
+
+		closePanes(panes)
 
 		scr.ExitAltScreen()
 		_ = scr.Flush()
@@ -94,7 +104,9 @@ func run() error {
 		case ev := <-t.Events():
 			switch ev := ev.(type) {
 			case uv.WindowSizeEvent:
+				screenLock.Lock()
 				scr.Resize(ev.Width, ev.Height)
+				screenLock.Unlock()
 			case uv.KeyPressEvent:
 				switch {
 				case ev.MatchString("ctrl+q"):
@@ -109,6 +121,7 @@ func run() error {
 			}
 
 		case <-frame.C:
+			screenLock.Lock()
 			// Composite: each pane's surface into the screen buffer.
 			for i, p := range panes {
 				x := i * (paneCols + 1)
@@ -122,6 +135,23 @@ func run() error {
 
 			scr.Render()
 			_ = scr.Flush()
+			screenLock.Unlock()
 		}
 	}
+}
+
+// closePanes tears down every pane concurrently. An interactive shell on a
+// pty ignores SIGTERM, so each Close (via ptyx.Kill) burns its full grace
+// period; running them concurrently means teardown waits ~1x grace instead
+// of ~len(panes)x.
+func closePanes(panes []*client.Pane) {
+	var wg sync.WaitGroup
+	for _, p := range panes {
+		wg.Add(1)
+		go func(p *client.Pane) {
+			defer wg.Done()
+			_ = p.Close()
+		}(p)
+	}
+	wg.Wait()
 }

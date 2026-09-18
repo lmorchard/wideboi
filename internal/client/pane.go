@@ -109,7 +109,17 @@ func (p *Pane) Write(b []byte) (int, error) { return p.pty.Master.Write(b) }
 // Size reports the pane's logical size.
 func (p *Pane) Size() (cols, rows int) { return p.cols, p.rows }
 
-// Close tears down the pane's entire process tree.
-func (p *Pane) Close() error { return p.pty.Kill(2 * time.Second) }
+// Close tears down the pane's entire process tree and its emulator.
+//
+// Both matter: killing the PTY closes Master, which unblocks the PTY->
+// emulator pump in Start; closing the grid unblocks the emulator->PTY
+// pump, which is otherwise parked forever on Grid.Read once the pane
+// stops receiving keys. Without the second, that goroutine leaks for
+// the life of the process.
+func (p *Pane) Close() error {
+	err := p.pty.Kill(2 * time.Second)
+	_ = p.grid.Close()
+	return err
+}
 
 var _ io.Writer = (*Pane)(nil)
