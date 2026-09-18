@@ -60,4 +60,14 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 // CloseWithError(io.EOF) on the pipe writer Read's pipe reader drains
 // from, so the pending Read returns (0, io.EOF) rather than blocking
 // forever.
+//
+// Known upstream data race, not ours to fix: SafeEmulator does not
+// override Close, so this call reaches the promoted (*Emulator).Close
+// directly, which writes e.closed with no se.mu held — while
+// SafeEmulator.Write reads e.closed under that same lock. Reproduced
+// under -race at x/vt's emulator.go:263 (Close's write) vs. :270
+// (Write's read). Practically inert here: e.closed is a single bool,
+// Close is its only writer, and a Write losing the race just sees
+// io.ErrClosedPipe a moment later than it "should" — but -race will
+// flag it for anyone who runs this path with the race detector.
 func (g *vtGrid) Close() error { return g.em.Close() }
