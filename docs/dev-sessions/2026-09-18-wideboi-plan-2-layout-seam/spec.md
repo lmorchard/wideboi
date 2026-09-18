@@ -25,22 +25,102 @@ Explicitly temporary, to be dismantled here:
 - `cmd/wideboi/main.go` computes placement arithmetic inline. That moves into `internal/layout`.
 - `make seam-check` allowlists three Plan 1 boundary violations. Plan 2 should retire two of them and leave the allowlist empty or near-empty.
 
-## The emulator decision comes due here, and earlier than expected
+## The emulator decision — RESOLVED by spike, 2026-09-18
 
-Plan 1 established that the pinned `x/vt` **does not reflow**: narrowing a pane truncates each line and widening pads with blanks, so text is destroyed permanently. A second defect compounds it — `Emulator.Draw` paints nothing after a `Resize` until lines are touched again, so a resized pane renders blank.
+Plan 1 established that the pinned `x/vt` does not reflow on resize. A spike
+(`/tmp/reflow-spike`, throwaway) probed fixing it in our own adapter behind
+`Grid`, and turned up a fact that reframes the whole problem.
 
-The decision was to keep `x/vt` and revisit when width-cycling made reflow real. **That framing was too narrow.** Plain host-window resize also requires resizing every pane's emulator, and host-window resize is already broken in the merged binary (the screen buffer resizes; panes and their PTYs do not). So Plan 2 must call `Grid.Resize` in production code regardless of whether width-cycling ships, and the moment it does, both defects fire.
+### `Resize` damages only the visible screen. Scrollback is untouched.
 
-This is therefore a Plan 2 blocker, not a Plan 2 nice-to-have, and it should be resolved **before** milestone 5 rather than discovered during milestone 7. The four options from Plan 1, unchanged:
+Measured directly. Write eight long lines into a 60x4 emulator so most of them
+scroll into history, then narrow to 40 and grow back:
 
-1. Keep `x/vt`, accept destroyed text on narrow. Cheapest; makes width-cycling and window resize quietly lossy, in a tool for long-running agent output. Hard to defend.
-2. Own the grid behind `Grid` — keep `x/vt` for VT parsing, implement our own cell storage, resize, and reflow. Substantial, and effectively the "write the emulator" fork declined at the outset, scoped down to the grid half.
-3. Fix reflow upstream in `charmbracelet/x/vt`. Best outcome for everyone; blocked on someone else's review cycle.
-4. Switch emulators. No good Go target is known.
+```
+BEFORE narrow (60):  scrollback[0]: "line01-...-BBBBBBBBBBBBBBBBBBBB-tail01"  full
+AFTER Resize(40,4):  scrollback[0]: "line01-...-BBBBBBBBBBBBBBBBBBBB-tail01"  still full
+                     screen[0]:     "line06-...-BBBBBBBBBBBB"                 chopped
+AFTER back to 60:    screen[0]:     "line06-...-BBBBBBBBBBBB"                 never returns
+```
 
-A cheap partial exists for the second defect independent of the first: force a full redraw after `Resize` by touching every line, which fixes blank-after-resize without addressing reflow. Worth doing either way.
+So the destructive case is narrower than feared: **only the screenful visible at
+the moment of narrowing is lost.** Everything already scrolled into history
+survives at its original width.
 
-**Open question, to be answered first:** which option. This spec does not pick one.
+That leaves a presentation problem in place of a data-loss one: scrollback holds
+lines wider than the viewport, which will need reflowing **for display** when
+Plan 4 adds scroll-back navigation. Non-destructive, and deferrable at no
+accumulating cost.
+
+### What the division of labour actually is
+
+An app owns what it is currently drawing; the terminal owns what has already
+been written. Once a program emits text, it forgets it — only the terminal holds
+it, and nothing can ask for it again.
+
+- **Alt-screen apps** (`vim`, `top`, `htop`) repaint everything from their own
+  model on `SIGWINCH`. Nothing for us to do; skip reflow entirely.
+- **Shells and line-oriented programs** redraw only the current input line.
+  Output scrolled above is ours. Demonstrated: a child that received `SIGWINCH`
+  and kept working perfectly still had its earlier output permanently chopped.
+
+Real terminals differ here — iTerm2, kitty and Terminal.app reflow; `xterm`
+historically does not. "Accept lossy" is a legitimate product choice, not a
+failure. It is rejected here only because this tool exists to hold long-running
+agent output.
+
+### Decision: reflow the visible screen only
+
+| scenario | cost | disposition |
+| --- | --- | --- |
+| alt screen | 0 | skip; the app repaints |
+| visible screen | **0.83 ms** | **reflow in the adapter — Plan 2** |
+| scrollback | 177 ms if rebuilt | **do not touch**; undamaged, and Plan 4 reflows for display |
+
+The 177 ms figure drove an earlier assumption that debouncing and incremental
+reflow were mandatory. Since scrollback is not damaged, that work is not needed
+at all — the real cost of fixing the real bug is sub-millisecond, on every
+resize event, with no debouncing.
+
+Mechanism: on `Grid.Resize`, read the screen cells out, rejoin wrapped runs
+using the "row's last cell is non-blank, so it probably soft-wrapped" heuristic,
+resize, re-split at the new width, and write back with `SetCell`. Verified in
+the spike: bold/colour styles survive (`attrs=1 fg=196`), wide CJK glyphs
+round-trip, and it fixes the blank-after-resize defect for free because
+`SetCell` re-touches the lines that `Screen.Resize` cleared.
+
+### Three hazards the spike found — all must be handled
+
+1. **Blank rows must not be priced as full-width logical lines.** The naive
+   implementation treated the cursor's own blank row as a wrapped continuation
+   and pushed real, still-fitting content off the visible screen. Silently. This
+   is worse than the documented heuristic failure and needs a used-vs-filler row
+   model.
+2. **Never write a wide glyph's placeholder cell explicitly.** It trips
+   `uv.Line.Set`'s partial-overwrite protection and blanks the whole glyph.
+   Advance by each cell's own `Width`.
+3. **There is no public cursor setter.** `setCursor` is unexported, so restoring
+   the cursor after reflow requires injecting a CUP sequence through `Write`,
+   which must land before real PTY output resumes. Likely mitigated because
+   `SIGWINCH` makes most programs reposition themselves — but untested, and the
+   fallback is fragile.
+
+The known heuristic failure — a hard line break landing at exactly the pane
+width, joining two lines — is cosmetic and accepted.
+
+## Open question: how much does this matter for coding agents?
+
+The target workload is CLI coding agents, and how much reflow matters depends on
+whether they use the alternate screen.
+
+- A full-screen TUI agent repaints itself; we are off the hook.
+- An agent using the primary screen with a live region (the Ink pattern, which
+  Claude Code appears to use — its transcript stays in your scrollback after
+  quitting) commits completed output upward into terminal-owned scrollback and
+  redraws only the live region. Same split as a shell, larger live region.
+
+Unverified per agent. Cheap check: run each in a pty and look for `ESC[?1049h`
+in its first output. Worth doing before Plan 4 sizes the scrollback-display work.
 
 ## Testing strategy
 
@@ -97,6 +177,17 @@ Unchanged from the v1 spec: card layout, detach/reattach over a socket, config f
 
 ## Open questions
 
-1. **Which emulator option.** Blocking; see above.
-2. **Does width-cycling ship in Plan 2?** The layout verb is trivial arithmetic in the pure core, so it costs nothing to *implement*; the cost is entirely in the emulator resize it triggers. Once question 1 is answered this is nearly free either way.
-3. **What is `$mod`?** The v1 spec notes gwae uses Option universally on macOS, but over SSH that depends on the client terminal sending Meta. Plan 1 verified `alt+l` encodes as `\x1bl`, so the mechanism works locally; the open part is the remote story and whether a different `$mod` is needed per platform.
+1. ~~Which emulator option.~~ **Resolved by spike** — reflow the visible screen
+   in the adapter; leave scrollback alone. See above.
+2. **Does width-cycling ship in Plan 2?** Now nearly free either way: the layout
+   verb is trivial arithmetic in the pure core, and the resize it triggers is the
+   same sub-millisecond screen reflow that host-window resize already needs.
+   Leaning yes, since it is the signature verb of the scrolling model and Plan 3
+   will want to animate it.
+3. **What is `$mod`?** The v1 spec notes gwae uses Option universally on macOS,
+   but over SSH that depends on the client terminal sending Meta. Plan 1 verified
+   `alt+l` encodes as `\x1bl`, so the mechanism works locally; the open part is
+   the remote story and whether a different `$mod` is needed per platform.
+4. **Do the target agents use the alternate screen?** See the section above —
+   determines how much the reflow work matters in practice. One-line check per
+   agent, worth doing before Plan 4.
