@@ -1,6 +1,7 @@
 package term_test
 
 import (
+	"image"
 	"io"
 	"testing"
 	"time"
@@ -45,6 +46,52 @@ func TestGridHonoursResize(t *testing.T) {
 	}
 }
 
+// TestGridTracksCursorPosition guards the translation Defect 2's fix
+// depends on: main.go composites the host cursor from
+// Grid.CursorPosition() plus a pane's destination-rect origin, so this
+// has to report cell coordinates relative to the grid's own origin, not
+// the host screen's.
+func TestGridTracksCursorPosition(t *testing.T) {
+	g := term.NewVT(10, 4)
+
+	if got := g.CursorPosition(); got != (image.Point{}) {
+		t.Fatalf("CursorPosition() at start = %v, want (0,0)", got)
+	}
+
+	io.WriteString(g, "abc")
+	if got, want := g.CursorPosition(), (image.Point{X: 3, Y: 0}); got != want {
+		t.Fatalf("CursorPosition() after %q = %v, want %v", "abc", got, want)
+	}
+
+	io.WriteString(g, "\r\nxy")
+	if got, want := g.CursorPosition(), (image.Point{X: 2, Y: 1}); got != want {
+		t.Fatalf("CursorPosition() after CRLF+%q = %v, want %v", "xy", got, want)
+	}
+}
+
+// TestGridTracksCursorVisibility guards the other half of Defect 2: a
+// full-screen application that hides its cursor (DECTCEM, mode ?25) must
+// be respected, and a freshly started shell — which has issued no such
+// sequence — must default to visible so the very first frame still shows
+// a cursor.
+func TestGridTracksCursorVisibility(t *testing.T) {
+	g := term.NewVT(10, 4)
+
+	if !g.CursorVisible() {
+		t.Fatal("CursorVisible() at start = false, want true (nothing has hidden it yet)")
+	}
+
+	io.WriteString(g, "\x1b[?25l") // DECTCEM off
+	if g.CursorVisible() {
+		t.Fatal("CursorVisible() after DECTCEM-off = true, want false")
+	}
+
+	io.WriteString(g, "\x1b[?25h") // DECTCEM on
+	if !g.CursorVisible() {
+		t.Fatal("CursorVisible() after DECTCEM-on = false, want true")
+	}
+}
+
 func TestGridAppliesSGRWithoutPrintingIt(t *testing.T) {
 	g := term.NewVT(10, 1)
 	// Bold "hi" — the escape sequence must not appear as text.
@@ -71,11 +118,28 @@ func TestGridEncodesKeysForTheChild(t *testing.T) {
 		want string
 	}{
 		{"printable", uv.KeyPressEvent{Code: 'a', Text: "a"}, "a"},
+		{"printable m", uv.KeyPressEvent{Code: 'm', Text: "m"}, "m"},
 		{"ctrl+c", uv.KeyPressEvent{Code: 'c', Mod: uv.ModCtrl}, "\x03"},
 		{"enter", uv.KeyPressEvent{Code: uv.KeyEnter}, "\r"},
 		{"up arrow", uv.KeyPressEvent{Code: uv.KeyUp}, "\x1b[A"},
 		{"tab", uv.KeyPressEvent{Code: uv.KeyTab}, "\t"},
 		{"backspace", uv.KeyPressEvent{Code: uv.KeyBackspace}, "\x7f"},
+
+		// The regression this whole test exists to guard: x/vt's own
+		// SendKey requires Mod == 0 in its default case, and Shift never
+		// clears, so every shifted key — capitals, shifted digits,
+		// shifted punctuation — used to vanish silently. vtGrid.SendKey
+		// must route these through SendText instead.
+		{"shift+m", uv.KeyPressEvent{Code: 'm', Text: "M", Mod: uv.ModShift}, "M"},
+		{"shift+1", uv.KeyPressEvent{Code: '1', Text: "!", Mod: uv.ModShift}, "!"},
+
+		// The trap in that fix: alt+l must still become "\x1bl", not the
+		// bare "l" its Text carries. Alt changes the encoding; SendText
+		// would lose the Meta prefix. This is the case that would go red
+		// if the routing rule were ever "simplified" to always prefer
+		// Text over SendKey whenever Text is non-empty — see the report
+		// in .superpowers/keyfix-report.md for that failure captured
+		// live.
 		{"alt+l", uv.KeyPressEvent{Code: 'l', Text: "l", Mod: uv.ModAlt}, "\x1bl"},
 	}
 

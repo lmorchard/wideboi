@@ -303,6 +303,27 @@ func run() error {
 				}
 				compose.WriteString(scr, 0, height-1, status)
 
+				// Place the host cursor at the focused pane's cursor,
+				// translated into screen coordinates by that pane's
+				// destination rect origin (see the compositing loop
+				// above — x here must match it exactly, and paneRows
+				// bounds it the same way the composite's Blit does).
+				// Non-focused panes get no cursor at all: there is only
+				// one host cursor to place. SetCursorPosition must be
+				// called before ShowCursor/HideCursor, not after: on the
+				// very first call it creates the screen's cursor already
+				// hidden, and only ShowCursor's own bookkeeping flips
+				// that back.
+				fx := focus * (paneCols + 1)
+				cp := panes[focus].CursorPosition()
+				if panes[focus].CursorVisible() &&
+					cp.X >= 0 && cp.X < paneCols && cp.Y >= 0 && cp.Y < paneRows {
+					scr.SetCursorPosition(fx+cp.X, cp.Y)
+					scr.ShowCursor()
+				} else {
+					scr.HideCursor()
+				}
+
 				scr.Render()
 				_ = scr.Flush()
 			}

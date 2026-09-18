@@ -4,6 +4,7 @@ package client
 import (
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"runtime/debug"
 	"sync"
@@ -228,6 +229,20 @@ func (p *Pane) Write(b []byte) (int, error) { return p.pty.Master.Write(b) }
 
 // Size reports the pane's logical size.
 func (p *Pane) Size() (cols, rows int) { return p.cols, p.rows }
+
+// CursorPosition reports the pane's cursor, in cell coordinates relative
+// to the pane's own top-left corner. A caller compositing this pane onto
+// a larger screen still owes it the translation to that pane's
+// destination rect origin; see term.Grid.CursorPosition.
+//
+// Safe to call concurrently with the PTY-reader pump's writes to the
+// grid: SafeEmulator (see term.NewVT) serializes them.
+func (p *Pane) CursorPosition() image.Point { return p.grid.CursorPosition() }
+
+// CursorVisible reports whether this pane's cursor is currently shown —
+// false once a full-screen application (e.g. an editor drawing its own
+// status line) has hidden it with DECTCEM.
+func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 
 // Close tears down the pane's entire process tree and its emulator.
 //
