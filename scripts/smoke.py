@@ -105,6 +105,24 @@ def case_focus_switch_moves_the_cursor(fail):
     s.quit_and_reap()
 
 
+def case_new_column_opens_pane(fail):
+    s = Session()
+    s.type("\x0e")  # ctrl+n
+    s.type("echo pane-three\r")
+    if b"pane-three" not in s.output():
+        fail("input did not reach newly opened column pane")
+    s.quit_and_reap()
+
+
+def case_cycle_width(fail):
+    s = Session()
+    s.type("\x17")  # ctrl+w
+    s.type("echo cycled-width\r")
+    if b"cycled-width" not in s.output():
+        fail("input failed to reach pane after cycling column width")
+    s.quit_and_reap()
+
+
 def case_quit_restores_and_reaps(fail):
     s = Session()
     s.type("echo before-quit\r")
@@ -125,6 +143,8 @@ CASES = [
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
     ("shifted keys reach the pane", case_shifted_keys_reach_the_pane),
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
+    ("new column opens pane", case_new_column_opens_pane),
+    ("cycle width adjusts column", case_cycle_width),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
 ]
 

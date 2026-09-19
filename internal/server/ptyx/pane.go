@@ -28,6 +28,14 @@ type Pane struct {
 // Done returns a channel closed when the pane's child process exits.
 func (p *Pane) Done() <-chan struct{} { return p.done }
 
+// PID returns the root process PID of the spawned child.
+func (p *Pane) PID() int {
+	if p.Cmd != nil && p.Cmd.Process != nil {
+		return p.Cmd.Process.Pid
+	}
+	return 0
+}
+
 // Spawn starts argv on a new PTY sized cols x rows, with dir as its
 // working directory.
 func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
