@@ -1,4 +1,4 @@
-.PHONY: check test lint fmt fmt-check seam-check build run tidy verify-exit
+.PHONY: check test lint fmt fmt-check seam-check build run tidy verify-exit smoke golden
 
 # check is the pre-merge / CI gate, so every target it depends on must be
 # read-only. fmt is deliberately NOT one of them: it rewrites files, and a
@@ -11,7 +11,7 @@
 # the exit-status/teardown contract that the other tests only exercise in
 # isolation. build's output (bin/wideboi) is gitignored, so verify-exit is
 # still read-only with respect to the tree check is judging.
-check: fmt-check lint seam-check test verify-exit
+check: fmt-check lint seam-check test verify-exit smoke
 
 test:
 	go test ./...
@@ -75,3 +75,13 @@ verify-exit: build
 	for sig in SIGINT SIGHUP; do \
 		python3 scripts/ptycheck.py --size 80x24 --signal $$sig || exit 1; \
 	done
+
+# Regenerate the golden wire snapshot. Review the diff before committing.
+golden: build
+	python3 scripts/golden.py --update
+
+# Scripted acceptance checks, asserted on the bytes wideboi writes to the
+# pty. See scripts/smoke.py for why the wire is the right layer.
+smoke: build
+	python3 scripts/smoke.py
+	python3 scripts/golden.py

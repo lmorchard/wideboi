@@ -1,0 +1,225 @@
+#!/usr/bin/env python3
+"""Shared pty plumbing for wideboi's out-of-process checks.
+
+Not a test in itself. scripts/ptycheck.py asserts the signal-exit contract
+with it; scripts/smoke.py drives user journeys with it.
+
+The one rule that matters here: ALWAYS drain the master. wideboi's render
+loop writes frames to the pty, and a full buffer blocks that write, which
+looks exactly like a hang in the thing under test.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import os
+import pty
+import re
+import signal
+import struct
+import subprocess
+import sys
+import termios
+import threading
+import time
+
+ALT_SCREEN_ENTER = b"\x1b[?1049h"
+ALT_SCREEN_EXIT = b"\x1b[?1049l"
+
+
+class Drainer:
+    """Continuously reads a pty master on a background thread.
+
+    Accumulates everything read so callers can assert against the whole
+    stream after the fact, not only against a flag sampled live.
+    """
+
+    def __init__(self, master_fd: int) -> None:
+        self._fd = master_fd
+        self._buf = bytearray()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                data = os.read(self._fd, 65536)
+            except OSError:
+                return
+            if not data:
+                return
+            with self._lock:
+                self._buf.extend(data)
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.0)
+
+    def output(self) -> bytes:
+        with self._lock:
+            return bytes(self._buf)
+
+    def saw(self, needle: bytes) -> bool:
+        return needle in self.output()
+
+
+def parse_size(text: str) -> tuple[int, int]:
+    m = re.fullmatch(r"(\d+)x(\d+)", text)
+    if not m:
+        raise argparse.ArgumentTypeError(f"size must be COLSxROWS, got {text!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def parse_signal(text: str) -> int:
+    name = text.upper()
+    if not name.startswith("SIG"):
+        name = "SIG" + name
+    try:
+        return signal.Signals[name].value
+    except KeyError:
+        pass
+    try:
+        return int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"unrecognized signal {text!r}")
+
+
+def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool) -> tuple[int, int]:
+    """Forks argv onto a fresh pty, as the session leader with that pty as
+    its controlling terminal. Winsize (if any) is applied to the pty
+    before the fork, so the child can never observe an unset-then-set
+    race -- it either sees the size from the moment it can ask, or (when
+    set_winsize is False) never sees one at all, matching a pty that
+    genuinely never had TIOCSWINSZ called on it.
+
+    Returns (child_pid, master_fd) in the calling (parent) process.
+    """
+    master_fd, slave_fd = pty.openpty()
+
+    if set_winsize:
+        winsize = struct.pack("HHHH", rows, cols, 0, 0)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(master_fd)
+            os.setsid()
+            fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+            os.dup2(slave_fd, 0)
+            os.dup2(slave_fd, 1)
+            os.dup2(slave_fd, 2)
+            if slave_fd > 2:
+                os.close(slave_fd)
+            env = dict(os.environ)
+            env["SHELL"] = "/bin/sh"
+            os.execvpe(argv[0], argv, env)
+        except Exception:
+            pass
+        os._exit(127)
+
+    os.close(slave_fd)
+    return pid, master_fd
+
+
+def ps_rows() -> list[tuple[int, int, str]]:
+    """Returns (pid, ppid, command) for every visible process."""
+    try:
+        out = subprocess.run(
+            ["ps", "-axo", "pid=,ppid=,command="],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+
+    rows = []
+    for line in out.splitlines():
+        fields = line.split(None, 2)
+        if len(fields) < 2:
+            continue
+        try:
+            rows.append((int(fields[0]), int(fields[1]), fields[2] if len(fields) > 2 else ""))
+        except ValueError:
+            continue
+    return rows
+
+
+def descendants(pid: int) -> list[tuple[int, str]]:
+    """Returns (pid, command) for every process descended from pid."""
+    rows = ps_rows()
+    kids: dict[int, list[int]] = {}
+    cmds: dict[int, str] = {}
+    for p, pp, cmd in rows:
+        kids.setdefault(pp, []).append(p)
+        cmds[p] = cmd
+
+    out: list[tuple[int, str]] = []
+    seen = {pid}
+    stack = list(kids.get(pid, []))
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        out.append((cur, cmds.get(cur, "")))
+        stack.extend(kids.get(cur, []))
+    return out
+
+
+def pane_children(pid: int) -> list[tuple[int, str]]:
+    """Returns wideboi's direct children -- its pane shells."""
+    return [(p, cmd) for p, pp, cmd in ps_rows() if pp == pid]
+
+
+def still_alive(pids: list[int], within: float) -> list[int]:
+    """Polls until none of pids are left or within elapses, then returns
+    whatever is still there. Exit is not synchronous, so a bare one-shot
+    check would be flaky.
+    """
+    deadline = time.monotonic() + within
+    while True:
+        alive = []
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            except PermissionError:
+                pass
+            alive.append(pid)
+        if not alive or time.monotonic() >= deadline:
+            return alive
+        time.sleep(0.05)
+
+
+def wait_for_exit(pid: int, timeout: float) -> int | None:
+    """Polls for pid's exit with WNOHANG, bounded by timeout. Returns the
+    raw wait status, or None on timeout. Never blocks past timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        got_pid, status = os.waitpid(pid, os.WNOHANG)
+        if got_pid == pid:
+            return status
+        time.sleep(0.05)
+    return None
+
+
+def force_cleanup(pid: int) -> None:
+    """Best-effort: SIGKILL pid and reap it, bounded, so a run that
+    discovers a hang still doesn't leave a stray process behind.
+    """
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    wait_for_exit(pid, timeout=3.0)
