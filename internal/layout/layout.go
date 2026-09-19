@@ -244,3 +244,36 @@ func ToProtocol(placements []Placement) []protocol.PlacementData {
 	}
 	return out
 }
+
+// ToColumnData converts columns to protocol.ColumnData for wire transport.
+func ToColumnData(columns []Column) []protocol.ColumnData {
+	out := make([]protocol.ColumnData, len(columns))
+	for i, c := range columns {
+		out[i] = protocol.ColumnData{
+			PaneID: c.PaneID,
+			Width:  c.Width,
+			Height: c.Height,
+		}
+	}
+	return out
+}
+
+// Columns returns a copy of the strip's columns.
+func (s *Strip) Columns() []Column {
+	cols := make([]Column, len(s.columns))
+	copy(cols, s.columns)
+	return cols
+}
+
+// SyncColumns updates the strip's columns and focused pane from protocol ColumnData.
+func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
+	s.columns = make([]Column, len(cols))
+	for i, c := range cols {
+		s.columns[i] = Column{
+			PaneID: c.PaneID,
+			Width:  c.Width,
+			Height: c.Height,
+		}
+	}
+	s.FocusPaneID(focusPaneID)
+}

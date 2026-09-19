@@ -19,6 +19,13 @@ const (
 	VerbSmartJump
 )
 
+// ColumnData describes a column's logical width and height.
+type ColumnData struct {
+	PaneID int
+	Width  int
+	Height int
+}
+
 // PlacementData describes where a pane's content buffer is cropped from (Src)
 // and where on the host screen surface it blits (Dst), plus layer depth Z.
 type PlacementData struct {
@@ -60,6 +67,7 @@ type MsgScroll struct {
 
 // MsgLayoutSnapshot is sent by the server to update the client on placements, focus, and statuses.
 type MsgLayoutSnapshot struct {
+	Columns      []ColumnData
 	Placements   []PlacementData
 	FocusPaneID  int
 	PaneStatuses map[int]string

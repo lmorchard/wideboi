@@ -324,6 +324,7 @@ func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 		statuses[id] = p.Status().Glyph()
 	}
 	snapshot := protocol.MsgLayoutSnapshot{
+		Columns:      layout.ToColumnData(s.strip.Columns()),
 		Placements:   layout.ToProtocol(placements),
 		FocusPaneID:  s.strip.FocusedPaneID(),
 		PaneStatuses: statuses,
