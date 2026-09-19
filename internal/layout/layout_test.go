@@ -1,0 +1,113 @@
+package layout_test
+
+import (
+	"image"
+	"testing"
+
+	"github.com/lmorchard/wideboi/internal/layout"
+)
+
+func TestStripInitializesWithOneColumn(t *testing.T) {
+	s := layout.NewStrip()
+	if s.ColCount() != 0 {
+		t.Fatalf("ColCount() = %d, want 0", s.ColCount())
+	}
+
+	s.AddColumn(1, 40, 20)
+	if s.ColCount() != 1 {
+		t.Fatalf("ColCount() = %d, want 1", s.ColCount())
+	}
+	if got := s.FocusedPaneID(); got != 1 {
+		t.Fatalf("FocusedPaneID() = %d, want 1", got)
+	}
+}
+
+func TestStripNavigationLeftRight(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20)
+	s.AddColumn(2, 40, 20)
+
+	if got := s.FocusedPaneID(); got != 2 {
+		t.Fatalf("FocusedPaneID() after 2nd add = %d, want 2", got)
+	}
+
+	s.FocusLeft()
+	if got := s.FocusedPaneID(); got != 1 {
+		t.Fatalf("FocusedPaneID() after FocusLeft = %d, want 1", got)
+	}
+
+	s.FocusLeft() // stays at 1
+	if got := s.FocusedPaneID(); got != 1 {
+		t.Fatalf("FocusedPaneID() at left boundary = %d, want 1", got)
+	}
+
+	s.FocusRight()
+	if got := s.FocusedPaneID(); got != 2 {
+		t.Fatalf("FocusedPaneID() after FocusRight = %d, want 2", got)
+	}
+}
+
+func TestStripComputesPlacements(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 23)
+	s.AddColumn(2, 39, 23) // 40 + 1 divider + 39 = 80 total width
+	s.FocusLeft()          // focus column 1
+
+	placements := s.ComputePlacements(80, 24)
+	if len(placements) != 2 {
+		t.Fatalf("got %d placements, want 2", len(placements))
+	}
+
+	// Two columns filling 80x24 viewport
+	p1 := placements[0]
+	if p1.PaneID != 1 || p1.Dst != image.Rect(0, 0, 40, 23) {
+		t.Errorf("p1 = %+v, want Dst (0,0,40,23)", p1)
+	}
+
+	p2 := placements[1]
+	if p2.PaneID != 2 || p2.Dst != image.Rect(41, 0, 80, 23) {
+		t.Errorf("p2 = %+v, want Dst (41,0,80,23)", p2)
+	}
+}
+
+func TestStripScrollsToKeepFocusVisible(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 50, 23)
+	s.AddColumn(2, 50, 23)
+	s.AddColumn(3, 50, 23) // Total strip width = 150, viewport = 80
+
+	// Focused on column 3 (rightmost)
+	placements := s.ComputePlacements(80, 24)
+	
+	// Column 3 must be visible on screen
+	var p3 *layout.Placement
+	for i := range placements {
+		if placements[i].PaneID == 3 {
+			p3 = &placements[i]
+		}
+	}
+	if p3 == nil {
+		t.Fatal("pane 3 missing from placements")
+	}
+	if p3.Dst.Max.X > 80 || p3.Dst.Min.X < 0 {
+		t.Errorf("focused pane 3 Dst %v not fully visible in 80-wide viewport", p3.Dst)
+	}
+}
+
+func TestStripKillPaneAdjustsFocus(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20)
+	s.AddColumn(2, 40, 20)
+	s.AddColumn(3, 40, 20)
+
+	s.FocusLeft() // focus pane 2
+	s.KillPane(2)
+
+	if s.ColCount() != 2 {
+		t.Fatalf("ColCount() = %d, want 2", s.ColCount())
+	}
+	// Focus should move to adjacent pane
+	if got := s.FocusedPaneID(); got != 1 && got != 3 {
+		t.Fatalf("FocusedPaneID() = %d, want 1 or 3", got)
+	}
+}
