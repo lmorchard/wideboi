@@ -141,3 +141,22 @@ reason a content-destroying bug survived a plan and twelve reviews.
 When a bug class depends on interaction *between* rows, columns, panes or
 messages, a fixture with one of the thing cannot see it. Ask what the fixture's
 shape makes structurally invisible, not just whether the assertion is right.
+
+## A binding nobody typed is a binding nobody verified
+
+`cmd/wideboi/main.go` matched the key name `"pgdn"`. Ultraviolet's name
+for that key is `"pgdown"`, so `MatchString("pgdn")` is false for every
+event that will ever exist — PageDown scroll never worked, from the
+commit that introduced it.
+
+Nothing could have caught it. `MatchString` takes a string and returns a
+bool; an unparseable name is indistinguishable from a key the user did
+not press. There is no error, no panic, no log line. The binding sat in
+the matrix through two plans looking exactly like the `pgup` line above
+it, which did work.
+
+**Any binding table entry that no test types is decoration.** When the
+matching API swallows bad names silently, enumerate the table in a test
+and assert each entry routes somewhere — the assertion is cheap and it
+is the only thing standing between a typo and a feature that does not
+exist.
