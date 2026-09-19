@@ -19,21 +19,8 @@ set -euo pipefail
 
 MODULE="github.com/lmorchard/wideboi"
 
-# Plan 1 temporaries, dated 2026-09-18. Every entry here is a boundary
-# violation that exists because Plan 1 runs both halves in one process
-# with no protocol or transport package yet. Plan 2 cuts the seam for
-# real (spec milestone 6) and must empty this list; nothing new should
-# ever be added to it.
-#
-#   internal/client -> internal/server/{ptyx,term}
-#       client.Pane owns a PTY and an emulator directly. The spec puts
-#       both server-side, behind protocol messages.
-#   internal/server/term -> internal/client/compose
-#       term's tests render into a compose.Surface to assert on emulator
-#       output. Test-only, but still the seam.
+# Plan 3 seam state. Only test-only crossings remain allowlisted.
 ALLOW="
-internal/client -> internal/server/ptyx
-internal/client -> internal/server/term
 internal/server/term -> internal/client/compose
 "
 
