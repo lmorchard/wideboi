@@ -14,7 +14,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/client"
 	"github.com/lmorchard/wideboi/internal/hostterm"
-	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -33,6 +32,15 @@ func run() error {
 		shell = "/bin/sh"
 	}
 	cwd, _ := os.Getwd()
+
+	prefixName := os.Getenv("WIDEBOI_PREFIX")
+	if prefixName == "" {
+		prefixName = defaultPrefix
+	}
+	prefix, prefixLabel, err := parsePrefix(prefixName)
+	if err != nil {
+		return err
+	}
 
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
@@ -80,12 +88,13 @@ func run() error {
 	defer guard.Stop()
 	guard.Arm(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 
-	width, height, err := t.GetSize()
-	if err != nil || width <= 0 || height <= 0 {
+	width, height, termErr := t.GetSize()
+	if termErr != nil || width <= 0 || height <= 0 {
 		width, height = 80, 24
 	}
 
-	cli := client.NewClient(tp, width, height, "C-b")
+	cli := client.NewClient(tp, width, height, prefixLabel)
+	rt := &router{prefix: prefix}
 
 	go func() {
 		_ = srv.Run(ctx)
@@ -118,34 +127,22 @@ func run() error {
 				cli.SendResize(ctx, ev.Width, ev.Height)
 
 			case uv.KeyPressEvent:
-				switch {
-				// ctrl fallbacks are deliberately minimal. ctrl+w, ctrl+l,
-				// ctrl+n and ctrl+h are delete-word, clear-screen,
-				// next-history and backspace: claiming them makes every
-				// shell in every pane worse. ctrl+q and ctrl+o survive as
-				// the escape hatch for a terminal that is not sending
-				// Option as Meta.
-				case ev.MatchString("alt+q") || ev.MatchString("ctrl+q"):
+				act := rt.route(ev)
+				switch act.Kind {
+				case routeQuit:
 					return nil
-				case ev.MatchString("alt+h") || ev.MatchString("alt+left"):
-					cli.SendVerb(ctx, protocol.VerbFocusLeft)
-				case ev.MatchString("alt+l") || ev.MatchString("alt+right") || ev.MatchString("ctrl+o"):
-					cli.SendVerb(ctx, protocol.VerbFocusRight)
-				case ev.MatchString("alt+n"):
-					cli.SendVerb(ctx, protocol.VerbNewColumn)
-				case ev.MatchString("alt+w"):
-					cli.SendVerb(ctx, protocol.VerbCycleWidth)
-				case ev.MatchString("alt+x"):
-					cli.SendVerb(ctx, protocol.VerbKillPane)
-				case ev.MatchString("alt+j"):
-					cli.SendVerb(ctx, protocol.VerbSmartJump)
-				case ev.MatchString("alt+u") || ev.MatchString("pgup"):
-					cli.SendScroll(ctx, 10)
-				case ev.MatchString("alt+d") || ev.MatchString("pgdn"):
-					cli.SendScroll(ctx, -10)
-				default:
+				case routeVerb:
+					cli.SendVerb(ctx, act.Verb)
+				case routeScroll:
+					cli.SendScroll(ctx, act.Scroll)
+				case routeForward:
 					cli.SendKey(ctx, uv.KeyEvent(ev))
+				case routeIgnore:
 				}
+				// After every key, not only the ones that changed the
+				// mode: the bar must never be able to disagree with the
+				// router about which mode is active.
+				cli.SetControlMode(rt.control)
 			}
 
 		case <-frame.C:
