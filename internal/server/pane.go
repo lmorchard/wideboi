@@ -214,19 +214,44 @@ func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 
 // Close tears down the process tree and emulator.
 //
-// Also held under resizeMu, the same lock Resize takes: without it, Close
-// could run its own Kill/grid.Close concurrently with a Resize that is
-// mid read-out/reflow/write-back on the same buffer, or resurrect fields a
-// resize is about to touch on an already-closed pty.
+// pty.Kill and grid.Close run BEFORE resizeMu is taken, not after. They
+// are the only two things that can unblock a Resize wedged mid-flight: the
+// pinned x/vt writes an in-band resize notification into the emulator's
+// own reply pipe during Resize when that mode is enabled, that pipe is
+// unbuffered, and its only drainer is the pane's pty-writer pump -- which
+// can itself be blocked in Master.Write against a child that has stopped
+// reading its stdin. Kill closes Master, unparking the pump so it drains
+// the pipe; grid.Close unblocks the pipe directly. An earlier version of
+// this fix took resizeMu first, which meant Close waited on the very lock
+// a wedged Resize was holding, and only Close's own Kill/grid.Close could
+// ever release that Resize -- an unrecoverable hang on quit, not a race.
+//
+// This does reopen a window: Kill/grid.Close can now run concurrently with
+// a Resize that is not wedged, merely still in flight -- confirmed under
+// -race as a real race on the underlying pty fd (ptyx.Pane.Kill's
+// Master.Close vs. ptyx.Pane.Resize's Setsize ioctl), not merely a
+// contained Go-level data race. Accepted anyway: removing resizeMu
+// entirely (the fallback considered for this fix) does not avoid this
+// specific race either, since Close still would not wait for Resize, and
+// it would also reopen Resize-vs-Resize, which this lock still closes. No
+// design with a single pane-level mutex can give both "Close never blocks
+// on a wedged Resize" and "Close never races an in-flight one" at once --
+// the pipe an unwedge depends on is exactly what a concurrently-running
+// Resize is also touching. resizeMu is still taken for the bookkeeping
+// that follows, once any wedge still in progress has had its chance to
+// break.
 func (p *Pane) Close() error {
+	p.closeOnce.Do(func() { close(p.closed) })
+
+	killErr := p.pty.Kill(CloseGrace)
+	gridErr := p.grid.Close()
+
 	p.resizeMu.Lock()
 	defer p.resizeMu.Unlock()
 
-	p.closeOnce.Do(func() { close(p.closed) })
-
-	errs := []error{p.pty.Kill(CloseGrace)}
-	if err := p.grid.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close emulator: %w", err))
+	errs := []error{killErr}
+	if gridErr != nil {
+		errs = append(errs, fmt.Errorf("close emulator: %w", gridErr))
 	}
 	if n := p.dropped.Load(); n > 0 {
 		errs = append(errs, fmt.Errorf("dropped %d keystroke(s): the child stopped reading its stdin", n))

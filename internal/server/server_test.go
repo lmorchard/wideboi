@@ -336,3 +336,50 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 	<-drainDone
 	_ = srv.Close()
 }
+
+// Regression guard for "s.rows <= 0 no longer short-circuits":
+// layout.AvailHeight(0) is max(-1, 1) == 1, a positive number, so
+// resizePanesLocked iterating PaneIDs directly (rather than
+// ComputePlacements, which used to return nil for a non-positive
+// viewport) would resize every pane down to a 1-row grid and SIGWINCH
+// every child if a verb ever reached it before the first MsgAttach set
+// s.rows.
+func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	// No MsgAttach: s.rows is still its zero value.
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbNewColumn})
+
+	select {
+	case msg := <-tp.ServerSend:
+		snap, ok := msg.(protocol.MsgLayoutSnapshot)
+		if !ok {
+			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
+		}
+		if snap.FocusPaneID <= 0 {
+			t.Fatalf("expected a focused pane after VerbNewColumn, got %+v", snap)
+		}
+		_, rows, ok := srv.PaneSize(snap.FocusPaneID)
+		if !ok {
+			t.Fatalf("pane %d not found", snap.FocusPaneID)
+		}
+		if rows == 1 {
+			t.Errorf("pane %d has rows=1 -- resizePanesLocked ran against an unset (0) viewport instead of skipping it", snap.FocusPaneID)
+		}
+		if rows <= 0 {
+			t.Errorf("pane %d has non-positive rows=%d", snap.FocusPaneID, rows)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for MsgLayoutSnapshot after VerbNewColumn")
+	}
+
+	_ = srv.Close()
+}

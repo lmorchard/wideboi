@@ -256,7 +256,20 @@ func (s *Server) removePaneLocked(id int) {
 // closes) rather than logged: log.Printf writes to stderr, which corrupts
 // the user's screen while the alt screen is active. One child failing
 // TIOCSWINSZ must not stop the others from being resized.
+//
+// s.rows <= 0 returns immediately: layout.AvailHeight(0) is
+// max(-1, 1) == 1, a positive number, so it would otherwise resize every
+// pane to a 1-row grid and SIGWINCH every child -- Pane.Resize's own
+// non-positive guard is on cols/rows individually and does not catch a
+// viewport that simply hasn't been set yet (e.g. a verb arriving before
+// the first MsgAttach). ComputePlacements used to give this for free by
+// returning nil for a non-positive viewport; iterating PaneIDs directly
+// does not.
 func (s *Server) resizePanesLocked() {
+	if s.rows <= 0 {
+		return
+	}
+
 	type resizeJob struct {
 		pane *Pane
 		w, h int
@@ -274,6 +287,9 @@ func (s *Server) resizePanesLocked() {
 			continue
 		}
 		jobs = append(jobs, resizeJob{pane: p, w: w, h: h})
+	}
+	if len(jobs) == 0 {
+		return
 	}
 
 	s.mu.Unlock()
@@ -303,10 +319,16 @@ func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 // PaneSize reports pane id's current logical dimensions, as last set by
 // resizePanesLocked. Exposed for observability and tests, which otherwise
 // have no way to see across the package boundary that a resize landed.
+//
+// s.mu guards the map lookup only, released before Pane.Size, matching
+// DrawPane's precedent: Size takes p.resizeMu internally, and Resize can
+// hold that lock for an unbounded time (see Pane.Close's doc comment).
+// Holding s.mu across the call would park it, and with it the Run loop and
+// srv.Close(), on the same wedge this pattern exists to avoid elsewhere.
 func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	p, ok := s.panes[id]
+	s.mu.Unlock()
 	if !ok {
 		return 0, 0, false
 	}
