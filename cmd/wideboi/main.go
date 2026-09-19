@@ -85,7 +85,7 @@ func run() error {
 		width, height = 80, 24
 	}
 
-	cli := client.NewClient(tp, width, height)
+	cli := client.NewClient(tp, width, height, "C-b")
 
 	go func() {
 		_ = srv.Run(ctx)
