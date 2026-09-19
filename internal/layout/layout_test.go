@@ -115,7 +115,7 @@ func TestStripKillPaneAdjustsFocus(t *testing.T) {
 
 func TestCycleWidthTransitionsPresets(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 99, 20) // Custom initial width
+	s.AddColumn(1, 99, 20) // Custom initial width (e.g. 200-col host)
 
 	s.CycleWidth()
 	if w, _ := s.ColumnWidth(1); w != 40 {
@@ -135,6 +135,14 @@ func TestCycleWidthTransitionsPresets(t *testing.T) {
 	s.CycleWidth()
 	if w, _ := s.ColumnWidth(1); w != 40 {
 		t.Errorf("after 4th cycle: width = %d, want 40", w)
+	}
+
+	// Also verify 50 (100-col host spawn width)
+	s2 := layout.NewStrip()
+	s2.AddColumn(1, 50, 20)
+	s2.CycleWidth()
+	if w, _ := s2.ColumnWidth(1); w != 80 {
+		t.Errorf("from 50: width = %d, want 80", w)
 	}
 }
 
