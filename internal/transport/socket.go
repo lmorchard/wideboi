@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/gob"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"sync"
@@ -67,8 +66,8 @@ func (sl *SocketListener) Close() error {
 	return err
 }
 
-// SocketConn bridges a net.Conn to ClientSend/ServerSend channels.
-type SocketConn struct {
+// ServerSocketConn bridges a server-side net.Conn to ClientSend/ServerSend channels.
+type ServerSocketConn struct {
 	conn       net.Conn
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
@@ -76,12 +75,12 @@ type SocketConn struct {
 	decoder    *gob.Decoder
 }
 
-// NewSocketConn wraps a net.Conn with buffered channels and gob encoding.
-func NewSocketConn(conn net.Conn, bufSize int) *SocketConn {
+// NewServerSocketConn wraps a server-side net.Conn with buffered channels.
+func NewServerSocketConn(conn net.Conn, bufSize int) *ServerSocketConn {
 	if bufSize <= 0 {
 		bufSize = 128
 	}
-	return &SocketConn{
+	return &ServerSocketConn{
 		conn:       conn,
 		ClientSend: make(chan ClientMessage, bufSize),
 		ServerSend: make(chan ServerMessage, bufSize),
@@ -91,12 +90,12 @@ func NewSocketConn(conn net.Conn, bufSize int) *SocketConn {
 }
 
 // RunPumps starts background read and write loops for the connection.
-func (sc *SocketConn) RunPumps(ctx context.Context) {
+func (sc *ServerSocketConn) RunPumps(ctx context.Context) {
 	go sc.writeLoop(ctx)
 	go sc.readLoop(ctx)
 }
 
-func (sc *SocketConn) writeLoop(ctx context.Context) {
+func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 	defer sc.conn.Close()
 	for {
 		select {
@@ -113,14 +112,11 @@ func (sc *SocketConn) writeLoop(ctx context.Context) {
 	}
 }
 
-func (sc *SocketConn) readLoop(ctx context.Context) {
+func (sc *ServerSocketConn) readLoop(ctx context.Context) {
 	defer close(sc.ClientSend)
 	for {
 		var msg ClientMessage
 		if err := sc.decoder.Decode(&msg); err != nil {
-			if err != io.EOF {
-				// connection closed or error
-			}
 			return
 		}
 		select {
@@ -132,7 +128,7 @@ func (sc *SocketConn) readLoop(ctx context.Context) {
 }
 
 // SendServer sends a server message over the socket connection.
-func (sc *SocketConn) SendServer(ctx context.Context, msg ServerMessage) bool {
+func (sc *ServerSocketConn) SendServer(ctx context.Context, msg ServerMessage) bool {
 	select {
 	case sc.ServerSend <- msg:
 		return true
@@ -141,7 +137,121 @@ func (sc *SocketConn) SendServer(ctx context.Context, msg ServerMessage) bool {
 	}
 }
 
+// SendClient is a no-op for server-side socket conn.
+func (sc *ServerSocketConn) SendClient(ctx context.Context, msg ClientMessage) bool {
+	return false
+}
+
+// ClientSendChan returns the channel where client messages arrive.
+func (sc *ServerSocketConn) ClientSendChan() <-chan ClientMessage {
+	return sc.ClientSend
+}
+
+// ServerSendChan returns the channel where server messages are queued.
+func (sc *ServerSocketConn) ServerSendChan() <-chan ServerMessage {
+	return sc.ServerSend
+}
+
 // Close closes the underlying network connection.
-func (sc *SocketConn) Close() error {
+func (sc *ServerSocketConn) Close() error {
 	return sc.conn.Close()
+}
+
+// ClientSocketConn bridges a client-side net.Conn to ClientSend/ServerSend channels.
+type ClientSocketConn struct {
+	conn       net.Conn
+	ClientSend chan ClientMessage
+	ServerSend chan ServerMessage
+	encoder    *gob.Encoder
+	decoder    *gob.Decoder
+}
+
+// NewClientSocketConn wraps a client-side net.Conn with buffered channels.
+func NewClientSocketConn(conn net.Conn, bufSize int) *ClientSocketConn {
+	if bufSize <= 0 {
+		bufSize = 128
+	}
+	return &ClientSocketConn{
+		conn:       conn,
+		ClientSend: make(chan ClientMessage, bufSize),
+		ServerSend: make(chan ServerMessage, bufSize),
+		encoder:    gob.NewEncoder(conn),
+		decoder:    gob.NewDecoder(conn),
+	}
+}
+
+// RunPumps starts background read and write loops for the connection.
+func (cc *ClientSocketConn) RunPumps(ctx context.Context) {
+	go cc.writeLoop(ctx)
+	go cc.readLoop(ctx)
+}
+
+func (cc *ClientSocketConn) writeLoop(ctx context.Context) {
+	defer cc.conn.Close()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-cc.ClientSend:
+			if !ok {
+				return
+			}
+			if err := cc.encoder.Encode(&msg); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (cc *ClientSocketConn) readLoop(ctx context.Context) {
+	defer close(cc.ServerSend)
+	for {
+		var msg ServerMessage
+		if err := cc.decoder.Decode(&msg); err != nil {
+			return
+		}
+		select {
+		case cc.ServerSend <- msg:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// SendClient sends a client message over the socket connection.
+func (cc *ClientSocketConn) SendClient(ctx context.Context, msg ClientMessage) bool {
+	select {
+	case cc.ClientSend <- msg:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// SendServer is a no-op for client-side socket conn.
+func (cc *ClientSocketConn) SendServer(ctx context.Context, msg ServerMessage) bool {
+	return false
+}
+
+// ClientSendChan returns the channel where client messages are queued.
+func (cc *ClientSocketConn) ClientSendChan() <-chan ClientMessage {
+	return cc.ClientSend
+}
+
+// ServerSendChan returns the channel where server messages arrive.
+func (cc *ClientSocketConn) ServerSendChan() <-chan ServerMessage {
+	return cc.ServerSend
+}
+
+// Close closes the underlying network connection.
+func (cc *ClientSocketConn) Close() error {
+	return cc.conn.Close()
+}
+
+// SocketConn is an alias for ServerSocketConn for backwards compatibility.
+type SocketConn = ServerSocketConn
+
+// NewSocketConn is an alias for NewServerSocketConn.
+func NewSocketConn(conn net.Conn, bufSize int) *SocketConn {
+	return NewServerSocketConn(conn, bufSize)
 }

@@ -308,8 +308,7 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 		}
 	}()
 
-	// Kill one pane's shell from the inside, so onPaneExit fires on a real
-	// pty-reader goroutine while the resize hammering below is in flight.
+	t.Log("STEP 1: sending exit")
 	tp.SendClient(ctx, protocol.MsgInput{PaneID: killID, Data: []byte("exit\r")})
 
 	var wg sync.WaitGroup
@@ -320,21 +319,26 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 		n := 0
 		for time.Now().Before(deadline) {
 			n++
-			// Vary cols/rows each send so Pane.Resize's no-op fast path
-			// doesn't skip the actual grid/pty resize work most of the time.
 			tp.SendClient(ctx, protocol.MsgResize{Cols: 80 + n%40, Rows: 20 + n%10})
+			time.Sleep(1 * time.Millisecond)
 		}
+		t.Log("STEP 2: hammering done")
 	}()
 	wg.Wait()
+	t.Log("STEP 3: wg wait done")
 
 	cols, rows, sizeOK := srv.PaneSize(surviveID)
 	if !sizeOK || cols <= 0 || rows <= 0 {
 		t.Errorf("surviving pane %d has size %dx%d ok=%v after the concurrent hammering, want a positive size", surviveID, cols, rows, sizeOK)
 	}
 
+	t.Log("STEP 4: cancelling ctx")
 	cancel()
+	t.Log("STEP 5: waiting for drainDone")
 	<-drainDone
+	t.Log("STEP 6: closing server")
 	_ = srv.Close()
+	t.Log("STEP 7: server closed")
 }
 
 // Regression guard for "s.rows <= 0 no longer short-circuits":

@@ -27,7 +27,7 @@ type PaneMirror struct {
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
 type Client struct {
 	mu           sync.Mutex
-	transport    *transport.InProcChannel
+	transport    transport.Transport
 	cols         int
 	rows         int
 	strip        *layout.Strip
@@ -44,7 +44,7 @@ type Client struct {
 // display form of the configured prefix key ("C-b"), used in the
 // normal-mode hint -- the client never sees the key itself, only how to
 // name it.
-func NewClient(tp *transport.InProcChannel, cols, rows int, prefixLabel string) *Client {
+func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Client {
 	return &Client{
 		transport:   tp,
 		cols:        cols,
