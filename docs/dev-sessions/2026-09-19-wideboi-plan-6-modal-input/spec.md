@@ -64,6 +64,57 @@ line fights to fit seven verbs into 80 columns and loses — Plan 5 had to drop
 almost nothing and control mode shows the full verb menu with the whole width
 to itself. Structural fix, not a squeeze.
 
+### The mode indicator: the whole bar inverts, and the cursor hides
+
+Decided against three alternatives, mocked as real ANSI at real widths in
+`mockup-mode-indicator.py` in this directory. Run it rather than trusting the
+table.
+
+The full verb menu is **71 cells**, against a usable budget of 79 at an
+80-column terminal. So an indicator's width comes straight out of the verb
+list, and the options price out as:
+
+| Indicator | Cost | Fits at 80 |
+| --- | --- | --- |
+| Whole bar inverts | 0 | every verb |
+| Unlabelled colour cap | 3 | every verb |
+| Reverse-video `COMMAND` badge | 11 | drops `u/d scroll` |
+| `-- COMMAND --` | 15 | drops `u/d scroll` |
+
+The tension the mockup exposed: **the more self-explanatory the indicator, the
+fewer verbs survive 80 columns.** Inverting the whole row is free and keeps
+everything.
+
+The objection to it — an inverted bar does not say *why* it is inverted — is
+answered by the fact that its content becomes a verb menu at the same instant.
+The two cues arrive together and explain each other.
+
+**The cursor hides in control mode**, as a second, independent signal. This is
+not decoration. Keystrokes are not reaching the pane, so the pane's cursor
+should not be blinking as though they are; hiding it is the honest rendering.
+It also costs one `scr.HideCursor()` call, and unlike colour it is observable
+on the wire as a DECTCEM escape — which is what makes mode entry and exit
+assertable in `smoke.py` at all.
+
+Two things this implies for the plan:
+
+- **There is no styled write path in the client today.** `compose.WriteString`
+  builds cells with `uv.NewCell` and no style, so reverse video needs a styled
+  variant. Keep it in `compose` beside the existing one; the card layout will
+  want it for sliver chrome later.
+- **The mode's styling is untestable with today's machinery.** `compose.Text`
+  emits one rune per cell and drops attributes entirely, so a refactor that
+  loses the inversion leaves every test green. The golden snapshot can still
+  tell the modes apart — the menu text only appears in control mode — but the
+  *visual* cue cannot be asserted there. The cursor escape is the thing that
+  can be, which is the other reason it is in scope rather than a nicety.
+
+Also measured: in control mode at 80 columns the `focus: pane N` context and
+the pane status glyphs disappear under **every** option, because the menu alone
+is 71 of 79 cells. There is no keep-the-context variant at that width. They can
+coexist above roughly 95 columns, so whatever the plan does here must degrade
+by width rather than assume both fit.
+
 ## Rejected: preview-and-commit
 
 The original sketch was `prefix → navigate → Enter to commit → exit`. Rejected
@@ -91,7 +142,9 @@ not here.
 In:
 
 - Prefix key handling, configurable, with double-tap literal passthrough.
-- Sticky control mode with `Escape` to exit, and a visible mode indicator.
+- Sticky control mode with `Escape` to exit, the status bar inverted while it
+  is active, and the cursor hidden for its duration.
+- A styled write path in `compose`, since none exists.
 - The v1 verb set rebound to unmodified keys in control mode: focus left/right,
   new column, cycle width, kill pane, smart jump, scroll, quit.
 - Removal of every `alt+*` binding, and of `ctrl+q`/`ctrl+o` as global claims.
@@ -111,10 +164,8 @@ Out:
 1. **Prefix collision when running inside tmux.** Both would claim `ctrl+b`.
    Configurability covers it, but the README should say so explicitly and
    suggest a value.
-2. **What the mode indicator looks like.** It must be unmissable — a mode you
-   cannot tell you are in is worse than no mode. Reverse-video segment, a
-   distinct colour, or a persistent `-- COMMAND --` are all plausible; this is
-   a "show, don't tell" question worth mocking before choosing.
+2. ~~What the mode indicator looks like.~~ **Decided:** the whole bar inverts
+   and the cursor hides. See above.
 3. **Timeout, or Escape only?** tmux's prefix is one-shot with no timeout.
    Sticky mode needs an exit, and `Escape` alone may strand a user who does not
    know it. A short idle timeout as a backstop is worth considering, but it
