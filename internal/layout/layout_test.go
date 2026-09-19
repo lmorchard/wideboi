@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/layout"
+	"pgregory.net/rapid"
 )
 
 func TestStripInitializesWithOneColumn(t *testing.T) {
@@ -110,4 +111,80 @@ func TestStripKillPaneAdjustsFocus(t *testing.T) {
 	if got := s.FocusedPaneID(); got != 1 && got != 3 {
 		t.Fatalf("FocusedPaneID() = %d, want 1 or 3", got)
 	}
+}
+
+func genStrip(t *rapid.T) (*layout.Strip, map[int]int) {
+	numCols := rapid.IntRange(1, 10).Draw(t, "numCols")
+	s := layout.NewStrip()
+	initialWidths := make(map[int]int)
+	for i := 1; i <= numCols; i++ {
+		w := rapid.IntRange(20, 100).Draw(t, "colWidth")
+		h := rapid.IntRange(10, 50).Draw(t, "colHeight")
+		s.AddColumn(i, w, h)
+		initialWidths[i] = w
+	}
+	moves := rapid.IntRange(0, 15).Draw(t, "focusMoves")
+	for i := 0; i < moves; i++ {
+		if rapid.Bool().Draw(t, "focusLeft") {
+			s.FocusLeft()
+		} else {
+			s.FocusRight()
+		}
+	}
+	return s, initialWidths
+}
+
+func TestLayoutPropertyInvariants(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		s, initialWidths := genStrip(t)
+		vw := rapid.IntRange(20, 200).Draw(t, "viewportWidth")
+		vh := rapid.IntRange(5, 60).Draw(t, "viewportHeight")
+
+		placements := s.ComputePlacements(vw, vh)
+		focusedID := s.FocusedPaneID()
+
+		// Invariant 1: Focused pane is fully visible in viewport
+		var focusedPlacement *layout.Placement
+		for i := range placements {
+			if placements[i].PaneID == focusedID {
+				focusedPlacement = &placements[i]
+				break
+			}
+		}
+		if focusedPlacement == nil {
+			t.Fatalf("focused pane %d has no placement in %dx%d viewport", focusedID, vw, vh)
+		}
+		if focusedPlacement.Dst.Min.X < 0 || focusedPlacement.Dst.Max.X > vw {
+			t.Fatalf("focused pane Dst X %v outside viewport [0, %d]", focusedPlacement.Dst, vw)
+		}
+
+		// Invariant 2: Non-overlapping destination rectangles
+		for i := 0; i < len(placements); i++ {
+			for j := i + 1; j < len(placements); j++ {
+				if inter := placements[i].Dst.Intersect(placements[j].Dst); !inter.Empty() {
+					t.Fatalf("placements %d (pane %d) and %d (pane %d) overlap at %v",
+						i, placements[i].PaneID, j, placements[j].PaneID, inter)
+				}
+			}
+		}
+
+		// Invariant 3: Cropping equivalence (Src and Dst size match)
+		for _, p := range placements {
+			if p.Src.Dx() != p.Dst.Dx() || p.Src.Dy() != p.Dst.Dy() {
+				t.Fatalf("pane %d Src size (%d,%d) != Dst size (%d,%d)",
+					p.PaneID, p.Src.Dx(), p.Src.Dy(), p.Dst.Dx(), p.Dst.Dy())
+			}
+		}
+
+		// Invariant 4: Logical column width remains equal to assigned width
+		for _, paneID := range s.PaneIDs() {
+			colW, ok := s.ColumnWidth(paneID)
+			if !ok {
+				t.Fatalf("ColumnWidth(%d) not found", paneID)
+			}
+			if colW != initialWidths[paneID] {
+				t.Fatalf("pane %d ColumnWidth=%d, want assigned width %d", paneID, colW, initialWidths[paneID])
+			}
+		}
+	})
 }
