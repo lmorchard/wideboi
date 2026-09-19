@@ -11,6 +11,22 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
+func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgLayoutSnapshot {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-ch:
+			if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+				return snap
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for MsgLayoutSnapshot")
+			return protocol.MsgLayoutSnapshot{}
+		}
+	}
+}
+
 func TestServerLifecycleAndAttach(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
@@ -25,18 +41,9 @@ func TestServerLifecycleAndAttach(t *testing.T) {
 	// Send Attach
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
 
-	// Expect MsgLayoutSnapshot
-	select {
-	case msg := <-tp.ServerSend:
-		snap, ok := msg.(protocol.MsgLayoutSnapshot)
-		if !ok {
-			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
-		}
-		if len(snap.Placements) != 2 {
-			t.Fatalf("expected 2 initial placements, got %d", len(snap.Placements))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for server MsgLayoutSnapshot")
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Placements) != 2 {
+		t.Fatalf("expected 2 initial placements, got %d", len(snap.Placements))
 	}
 
 	if err := srv.Close(); err != nil {
@@ -56,22 +63,14 @@ func TestServerVerbHandling(t *testing.T) {
 	}()
 
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
-	<-tp.ServerSend // Drain initial snapshot
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	// Request new column
 	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbNewColumn})
 
-	select {
-	case msg := <-tp.ServerSend:
-		snap, ok := msg.(protocol.MsgLayoutSnapshot)
-		if !ok {
-			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
-		}
-		if len(snap.Placements) != 2 {
-			t.Fatalf("expected 2 placements after NewColumn verb, got %d", len(snap.Placements))
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for MsgLayoutSnapshot after VerbNewColumn")
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Placements) != 2 {
+		t.Fatalf("expected 2 placements after NewColumn verb, got %d", len(snap.Placements))
 	}
 
 	_ = srv.Close()
@@ -100,33 +99,25 @@ func TestResizePropagatesToPanes(t *testing.T) {
 	}()
 
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
-	<-tp.ServerSend // Drain initial snapshot
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	tp.SendClient(ctx, protocol.MsgResize{Cols: 100, Rows: 40})
 
-	select {
-	case msg := <-tp.ServerSend:
-		snap, ok := msg.(protocol.MsgLayoutSnapshot)
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Placements) == 0 {
+		t.Fatal("expected placements after resize")
+	}
+	for _, pl := range snap.Placements {
+		cols, rows, ok := srv.PaneSize(pl.PaneID)
 		if !ok {
-			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
+			t.Fatalf("pane %d not found after resize", pl.PaneID)
 		}
-		if len(snap.Placements) == 0 {
-			t.Fatal("expected placements after resize")
+		if cols <= 0 || cols > 100 {
+			t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", pl.PaneID, cols)
 		}
-		for _, pl := range snap.Placements {
-			cols, rows, ok := srv.PaneSize(pl.PaneID)
-			if !ok {
-				t.Fatalf("pane %d not found after resize", pl.PaneID)
-			}
-			if cols <= 0 || cols > 100 {
-				t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", pl.PaneID, cols)
-			}
-			if rows != 38 {
-				t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", pl.PaneID, rows)
-			}
+		if rows != 38 {
+			t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", pl.PaneID, rows)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for MsgLayoutSnapshot after MsgResize")
 	}
 
 	_ = srv.Close()
@@ -156,37 +147,29 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 	}()
 
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
-	<-tp.ServerSend // Drain initial snapshot
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	tp.SendClient(ctx, protocol.MsgResize{Cols: 70, Rows: 20})
 
-	select {
-	case msg := <-tp.ServerSend:
-		snap, ok := msg.(protocol.MsgLayoutSnapshot)
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	sawClippedPlacement := false
+	for _, pl := range snap.Placements {
+		if pl.Dst.Dx() < 59 {
+			sawClippedPlacement = true
+		}
+		cols, rows, ok := srv.PaneSize(pl.PaneID)
 		if !ok {
-			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
+			t.Fatalf("pane %d not found after resize", pl.PaneID)
 		}
-		sawClippedPlacement := false
-		for _, pl := range snap.Placements {
-			if pl.Dst.Dx() < 59 {
-				sawClippedPlacement = true
-			}
-			cols, rows, ok := srv.PaneSize(pl.PaneID)
-			if !ok {
-				t.Fatalf("pane %d not found after resize", pl.PaneID)
-			}
-			if cols != 59 {
-				t.Errorf("pane %d has cols=%d, want 59 (its full column width) regardless of its %d-wide on-screen crop", pl.PaneID, cols, pl.Dst.Dx())
-			}
-			if rows != 18 {
-				t.Errorf("pane %d has rows=%d, want 18 (the 20-row viewport minus header and status line)", pl.PaneID, rows)
-			}
+		if cols != 59 {
+			t.Errorf("pane %d has cols=%d, want 59 (its full column width) regardless of its %d-wide on-screen crop", pl.PaneID, cols, pl.Dst.Dx())
 		}
-		if !sawClippedPlacement {
-			t.Fatal("test setup bug: expected at least one placement clipped narrower than 59 columns")
+		if rows != 18 {
+			t.Errorf("pane %d has rows=%d, want 18 (the 20-row viewport minus header and status line)", pl.PaneID, rows)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for MsgLayoutSnapshot after MsgResize")
+	}
+	if !sawClippedPlacement {
+		t.Fatal("test setup bug: expected at least one placement clipped narrower than 59 columns")
 	}
 
 	_ = srv.Close()
@@ -217,8 +200,8 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 	}()
 
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
-	snap, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot)
-	if !ok || len(snap.Placements) != 2 {
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Placements) != 2 {
 		t.Fatalf("expected 2 initial placements, got %+v", snap)
 	}
 	var paneIDs []int
@@ -228,15 +211,7 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 
 	tp.SendClient(ctx, protocol.MsgResize{Cols: 40, Rows: 20})
 
-	select {
-	case msg := <-tp.ServerSend:
-		snap, ok = msg.(protocol.MsgLayoutSnapshot)
-		if !ok {
-			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for MsgLayoutSnapshot after MsgResize")
-	}
+	snap = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	if len(snap.Placements) != 1 {
 		t.Fatalf("test setup bug: expected exactly 1 placement (the other pane scrolled fully off), got %d", len(snap.Placements))

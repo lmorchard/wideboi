@@ -13,6 +13,9 @@ import (
 
 func init() {
 	gob.Register(protocol.ColumnData{})
+	gob.Register(protocol.CellData{})
+	gob.Register(protocol.LineData{})
+	gob.Register(protocol.MsgPaneUpdate{})
 	gob.Register(protocol.MsgAttach{})
 	gob.Register(protocol.MsgVerb{})
 	gob.Register(protocol.MsgInput{})

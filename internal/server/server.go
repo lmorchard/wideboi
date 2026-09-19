@@ -120,12 +120,17 @@ func (s *Server) Run(ctx context.Context) error {
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	defer ticker.Stop()
 
+	frameTicker := time.NewTicker(33 * time.Millisecond)
+	defer frameTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return s.Close()
 		case <-s.stopCh:
 			return nil
+		case <-frameTicker.C:
+			s.broadcastPaneUpdates(ctx)
 		case <-ticker.C:
 			s.pollDescendants()
 		}
@@ -401,6 +406,23 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 
 	for _, tp := range tps {
 		tp.SendServer(ctx, snapshot)
+	}
+	s.broadcastPaneUpdates(ctx)
+}
+
+func (s *Server) broadcastPaneUpdates(ctx context.Context) {
+	s.mu.Lock()
+	updates := make([]protocol.MsgPaneUpdate, 0, len(s.panes))
+	for _, p := range s.panes {
+		updates = append(updates, p.UpdateMessage())
+	}
+	tps := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+
+	for _, update := range updates {
+		for _, tp := range tps {
+			tp.SendServer(ctx, update)
+		}
 	}
 }
 

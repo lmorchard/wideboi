@@ -24,6 +24,11 @@ type PaneMirror struct {
 	Rows    int
 }
 
+type cursorPos struct {
+	pt      image.Point
+	visible bool
+}
+
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
 type Client struct {
 	mu           sync.Mutex
@@ -35,6 +40,7 @@ type Client struct {
 	focusPaneID  int
 	paneStatuses map[int]string
 	mirrors      map[int]*PaneMirror
+	cursorInfos  map[int]cursorPos
 	prefixLabel  string
 	controlMode  bool
 	activeWipe   *WipeTransition
@@ -52,6 +58,7 @@ func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Clie
 		strip:       layout.NewStrip(),
 		prefixLabel: prefixLabel,
 		mirrors:     make(map[int]*PaneMirror),
+		cursorInfos: make(map[int]cursorPos),
 	}
 }
 
@@ -120,6 +127,38 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 				delete(c.mirrors, id)
 			}
 		}
+
+	case protocol.MsgPaneUpdate:
+		mirror, ok := c.mirrors[m.PaneID]
+		if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {
+			mirror = &PaneMirror{
+				ID:      m.PaneID,
+				Surface: compose.NewSurface(m.Cols, m.Rows),
+				Cols:    m.Cols,
+				Rows:    m.Rows,
+			}
+			c.mirrors[m.PaneID] = mirror
+		}
+		for y, line := range m.Lines {
+			currX := 0
+			for _, cell := range line {
+				uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
+				uvCell.Style = cell.Style
+				mirror.Surface.SetCell(currX, y, uvCell)
+				w := cell.Width
+				if w <= 0 {
+					w = 1
+				}
+				currX += w
+			}
+		}
+		if c.cursorInfos == nil {
+			c.cursorInfos = make(map[int]cursorPos)
+		}
+		c.cursorInfos[m.PaneID] = cursorPos{
+			pt:      image.Pt(m.CursorX, m.CursorY),
+			visible: m.CursorVisible,
+		}
 	}
 }
 
@@ -172,6 +211,8 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 
 		if drawPane != nil {
 			drawPane(p.PaneID, scr, p.Dst)
+		} else if mirror, ok := c.mirrors[p.PaneID]; ok {
+			compose.Blit(scr, mirror.Surface, p.Dst)
 		}
 
 		// Draw column divider on right edge if applicable.
@@ -207,8 +248,14 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 	switch {
 	case c.controlMode:
 		scr.HideCursor()
-	case focusedPlacement != nil && cursorInfo != nil:
-		cp, visible := cursorInfo(c.focusPaneID)
+	case focusedPlacement != nil:
+		var cp image.Point
+		var visible bool
+		if cursorInfo != nil {
+			cp, visible = cursorInfo(c.focusPaneID)
+		} else if info, ok := c.cursorInfos[c.focusPaneID]; ok {
+			cp, visible = info.pt, info.visible
+		}
 		fx := focusedPlacement.Dst.Min.X + cp.X - focusedPlacement.Src.Min.X
 		fy := focusedPlacement.Dst.Min.Y + cp.Y - focusedPlacement.Src.Min.Y
 		if visible && fx >= focusedPlacement.Dst.Min.X && fx <= focusedPlacement.Dst.Max.X &&

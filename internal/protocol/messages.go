@@ -26,6 +26,27 @@ type ColumnData struct {
 	Height int
 }
 
+// CellData carries one cell's text content, width, and style across transport.
+type CellData struct {
+	Content string
+	Width   int
+	Style   uv.Style
+}
+
+// LineData represents a horizontal row of cells.
+type LineData []CellData
+
+// MsgPaneUpdate carries a pane's rendered cell buffer and cursor state.
+type MsgPaneUpdate struct {
+	PaneID        int
+	Cols          int
+	Rows          int
+	Lines         []LineData
+	CursorX       int
+	CursorY       int
+	CursorVisible bool
+}
+
 // PlacementData describes where a pane's content buffer is cropped from (Src)
 // and where on the host screen surface it blits (Dst), plus layer depth Z.
 type PlacementData struct {

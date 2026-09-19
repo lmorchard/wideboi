@@ -12,6 +12,7 @@ import (
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
 	"github.com/lmorchard/wideboi/internal/server/term"
 )
@@ -208,6 +209,53 @@ func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 
 // Status reports the current agent status of the pane.
 func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
+
+// UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport.
+func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
+	p.resizeMu.Lock()
+	cols, rows := p.cols, p.rows
+	p.resizeMu.Unlock()
+
+	buf := uv.NewScreenBuffer(cols, rows)
+	p.Draw(buf, image.Rect(0, 0, cols, rows))
+
+	lines := make([]protocol.LineData, rows)
+	for y := 0; y < rows; y++ {
+		line := make(protocol.LineData, cols)
+		for x := 0; x < cols; x++ {
+			c := buf.CellAt(x, y)
+			if c == nil {
+				line[x] = protocol.CellData{Content: " ", Width: 1}
+				continue
+			}
+			content := c.Content
+			if content == "" {
+				content = " "
+			}
+			w := c.Width
+			if w <= 0 {
+				w = 1
+			}
+			line[x] = protocol.CellData{
+				Content: content,
+				Width:   w,
+				Style:   c.Style,
+			}
+		}
+		lines[y] = line
+	}
+
+	cp := p.CursorPosition()
+	return protocol.MsgPaneUpdate{
+		PaneID:        p.id,
+		Cols:          cols,
+		Rows:          rows,
+		Lines:         lines,
+		CursorX:       cp.X,
+		CursorY:       cp.Y,
+		CursorVisible: p.CursorVisible(),
+	}
+}
 
 func (p *Pane) ScrollbackLen() int         { return p.grid.ScrollbackLen() }
 func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }
