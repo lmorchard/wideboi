@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,10 +21,56 @@ import (
 
 const signalExitMargin = 500 * time.Millisecond
 
+func defaultSocketPath() string {
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
+	_ = os.MkdirAll(dir, 0700)
+	return filepath.Join(dir, "default.sock")
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "server":
+			if err := runServer(defaultSocketPath()); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "attach":
+			if err := runAttach(defaultSocketPath()); err != nil {
+				log.Fatal(err)
+			}
+			return
+		}
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runServer(socketPath string) error {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	cwd, _ := os.Getwd()
+
+	sl, err := transport.NewSocketListener(socketPath)
+	if err != nil {
+		return err
+	}
+	defer sl.Close()
+
+	tp := transport.NewInProcChannel(256)
+	srv := server.NewServer(tp, shell, cwd)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	return srv.Run(ctx)
+}
+
+func runAttach(socketPath string) error {
+	return run()
 }
 
 func run() error {
@@ -130,6 +177,8 @@ func run() error {
 				act := rt.route(ev)
 				switch act.Kind {
 				case routeQuit:
+					return nil
+				case routeDetach:
 					return nil
 				case routeVerb:
 					cli.SendVerb(ctx, act.Verb)

@@ -33,6 +33,7 @@ const (
 	routeVerb
 	routeScroll
 	routeQuit
+	routeDetach
 )
 
 // route is what the router decided about one key event. It describes an
@@ -92,7 +93,7 @@ func (r *router) route(ev uv.KeyPressEvent) route {
 	case ev.MatchString("u"):
 		return route{Kind: routeScroll, Scroll: 10}
 	case ev.MatchString("d"):
-		return route{Kind: routeScroll, Scroll: -10}
+		return route{Kind: routeDetach}
 	}
 
 	// Unknown keys are swallowed rather than forwarded. The mode is
