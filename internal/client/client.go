@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"log/slog"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -74,6 +75,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 
 	switch m := msg.(type) {
 	case protocol.MsgLayoutSnapshot:
+		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", m.FocusPaneID)
 		oldFocus := c.focusPaneID
 		if len(m.Columns) > 0 {
 			c.strip.SyncColumns(m.Columns, m.FocusPaneID)
@@ -129,6 +131,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		}
 
 	case protocol.MsgPaneUpdate:
+		slog.Debug("received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
 		mirror, ok := c.mirrors[m.PaneID]
 		if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {
 			mirror = &PaneMirror{

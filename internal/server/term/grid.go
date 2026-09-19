@@ -79,6 +79,7 @@ type Grid interface {
 	// screen so narrowing does not destroy text.
 	Resize(cols, rows int)
 	Draw(dst uv.Screen, area image.Rectangle)
+	CellAt(x, y int) *uv.Cell
 	Size() (cols, rows int)
 	Close() error
 }
@@ -323,6 +324,8 @@ func (g *vtGrid) Resize(cols, rows int) {
 }
 func (g *vtGrid) Size() (int, int) { return g.em.Width(), g.em.Height() }
 
+func (g *vtGrid) CellAt(x, y int) *uv.Cell { return g.em.CellAt(x, y) }
+
 // CursorPosition reports the emulator's cursor, relative to this Grid's
 // own origin. See the Grid.CursorPosition doc comment for the
 // translation a multi-pane caller still owes it.
@@ -352,36 +355,11 @@ func (g *vtGrid) SetScrollOffset(offset int) {
 // cell pointer past it -- no extra locking needed. The scrollback branch
 // below is different; see the comment where it takes writeResizeMu.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
-	// A zero scroll offset means the fast path no matter what the
-	// scrollback length is, so it can be decided from one atomic load
-	// without taking the lock -- which is the whole point of the fast
-	// path. Everything the scrollback branch reads is sampled below,
-	// inside the lock, so the scrollback/live boundary it walks cannot
-	// be a frame staler than the cells it reads through it.
-	if g.scrollOffset.Load() <= 0 {
-		g.em.Draw(dst, area)
-		return
-	}
-
-	// Serializes against Write via writeResizeMu, for the same reason
-	// Resize does (see that field's doc comment): ScrollbackCellAt and
-	// CellAt both return *uv.Cell aliasing the emulator's live buffer,
-	// with se.mu already released by the time this loop sees the
-	// pointer. dst.SetCell dereferences it on the very next line, but
-	// "the very next line" is not "inside the lock" -- a concurrent
-	// Write mutating the same slot between the two is a real race, the
-	// same shape as Resize's, just with a smaller window. Held for the
-	// whole loop, not per cell, so one scrolled-back frame is drawn from
-	// a single consistent instant rather than racing cell by cell.
 	g.writeResizeMu.Lock()
 	defer g.writeResizeMu.Unlock()
 
 	offset := int(g.scrollOffset.Load())
 	sbLen := g.em.ScrollbackLen()
-	if offset <= 0 || sbLen == 0 {
-		g.em.Draw(dst, area)
-		return
-	}
 	if offset > sbLen {
 		offset = sbLen
 	}
@@ -391,7 +369,7 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 		sbY := (sbLen - offset) + y
 		for x := 0; x < w; x++ {
 			var cell *uv.Cell
-			if sbY < sbLen {
+			if sbY < sbLen && sbY >= 0 {
 				cell = g.em.ScrollbackCellAt(x, sbY)
 			} else {
 				cell = g.em.CellAt(x, sbY-sbLen)
