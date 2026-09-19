@@ -31,8 +31,8 @@ func TestServerLifecycleAndAttach(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
 		}
-		if len(snap.Placements) != 1 {
-			t.Fatalf("expected 1 placement, got %d", len(snap.Placements))
+		if len(snap.Placements) != 2 {
+			t.Fatalf("expected 2 initial placements, got %d", len(snap.Placements))
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for server MsgLayoutSnapshot")
