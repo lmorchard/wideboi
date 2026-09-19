@@ -57,6 +57,12 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			focusedX = max(leftTotal, viewportWidth-focusedW-rightTotal)
 		}
 	}
+	if focusedX+focusedW > viewportWidth {
+		focusedX = max(0, viewportWidth-focusedW)
+	}
+	if focusedX < 0 {
+		focusedX = 0
+	}
 
 	placements := make([]Placement, 0, numCols)
 
