@@ -28,6 +28,7 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 }
 
 // WriteString writes plain unstyled text into s starting at (x, y).
+// Delegates to WriteStyled with a zero style.
 //
 // Caveat: one rune per cell. It does not consult Cell.Width, so it is
 // correct only for single-width glyphs. A double-width rune is written
@@ -42,9 +43,26 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 // Surface exposes WidthMethod — before using it for anything but ASCII
 // chrome.
 func WriteString(s uv.Screen, x, y int, text string) {
+	WriteStyled(s, x, y, text, uv.Style{})
+}
+
+// WriteStyled writes text into s at (x, y) with every cell carrying
+// style. A zero style is exactly what an unstyled write produces, which
+// is why WriteString is one of these.
+//
+// Shares WriteString's one-rune-per-cell caveat; see there.
+//
+// Kept as a separate function rather than a variadic option on
+// WriteString because every existing call site wants the unstyled form
+// and should not have to say so.
+func WriteStyled(s uv.Screen, x, y int, text string, style uv.Style) {
 	currX := x
 	for _, r := range []rune(text) {
+		// NewCell returns a fresh cell in every case -- for " " it
+		// clones the package-level EmptyCell rather than handing it
+		// back -- so assigning Style here is safe.
 		cell := uv.NewCell(s.WidthMethod(), string(r))
+		cell.Style = style
 		s.SetCell(currX, y, cell)
 		w := 1
 		if cell.Width > 1 {

@@ -160,3 +160,29 @@ matching API swallows bad names silently, enumerate the table in a test
 and assert each entry routes somewhere — the assertion is cheap and it
 is the only thing standing between a typo and a feature that does not
 exist.
+
+## A binding that depends on terminal configuration is a broken binding
+
+v1 bound every verb to `alt`. On macOS, terminals do not send Option as
+Meta by default, so on the author's own machine **every shortcut did
+nothing** — and did it silently, with no error and no clue. It survived
+a full plan, twelve reviews and a merge, because every test drove the
+key *bytes* directly and so could never observe that a real terminal
+would not produce them.
+
+Plan 5 treated this by documenting the fix and adding `ctrl+q`/`ctrl+o`
+as an escape hatch. That was the wrong layer: it accepted a dependency
+on per-terminal, per-profile configuration and tried to explain it.
+Plan 6 removed the dependency.
+
+The general form: **prefer input that every terminal produces
+unconditionally over input that most terminals can be configured to
+produce.** A control byte is one of the former; a Meta-modified key is
+one of the latter. When you cannot avoid the latter, the question to ask
+is not "have we documented it" but "what does a user see when their
+terminal does not do this" — and the answer must not be "nothing".
+
+Corollary for tests: a test that synthesises the input bytes is testing
+your decoder, not your binding. Neither the unit tests nor the pty smoke
+suite could have caught this, because both typed the escape sequence an
+already-configured terminal would send.

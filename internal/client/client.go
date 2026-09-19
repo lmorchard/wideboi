@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -32,15 +33,21 @@ type Client struct {
 	focusPaneID  int
 	paneStatuses map[int]string
 	mirrors      map[int]*PaneMirror
+	prefixLabel  string
+	controlMode  bool
 }
 
-// NewClient initializes a Client instance.
-func NewClient(tp *transport.InProcChannel, cols, rows int) *Client {
+// NewClient initializes a Client instance. prefixLabel is the short
+// display form of the configured prefix key ("C-b"), used in the
+// normal-mode hint -- the client never sees the key itself, only how to
+// name it.
+func NewClient(tp *transport.InProcChannel, cols, rows int, prefixLabel string) *Client {
 	return &Client{
-		transport: tp,
-		cols:      cols,
-		rows:      rows,
-		mirrors:   make(map[int]*PaneMirror),
+		transport:   tp,
+		cols:        cols,
+		rows:        rows,
+		prefixLabel: prefixLabel,
+		mirrors:     make(map[int]*PaneMirror),
 	}
 }
 
@@ -120,24 +127,27 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 		}
 	}
 
-	// Status bar on bottom row
-	status := fmt.Sprintf("focus: pane %d", c.focusPaneID)
-	for _, p := range c.placements {
-		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
-			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
-		}
-	}
+	// Status bar on bottom row.
+	//
 	// Leave the final column untouched: ultraviolet's terminal renderer
-	// writes the last cell of a row with autowrap toggled off and back on
-	// around it, which splits whatever glyph lands there across a mode
-	// escape sequence on the wire. Budgeting one cell short of c.cols
-	// keeps the whole help string contiguous in the raw output.
-	status += helpFor(c.cols-1, runeLen(status))
-	status = truncateRunes(status, c.cols-1)
-	compose.WriteString(scr, 0, c.rows-1, status)
+	// writes the last cell of a row with autowrap toggled off and back
+	// on around it, which splits whatever glyph lands there across a
+	// mode escape sequence on the wire. Budgeting one cell short of
+	// c.cols keeps the whole line contiguous in the raw output.
+	statusText, statusStyle := c.statusLineLocked(c.cols - 1)
+	compose.WriteStyled(scr, 0, c.rows-1, statusText, statusStyle)
 
-	// Host cursor position and visibility
-	if focusedPlacement != nil && cursorInfo != nil {
+	// Host cursor position and visibility.
+	//
+	// In control mode the cursor is hidden outright. Keystrokes are not
+	// reaching the pane, so a blinking pane cursor would be claiming
+	// otherwise -- and unlike the bar's inversion, cursor visibility is
+	// a DECTCEM escape on the wire, which is what lets smoke.py assert
+	// that the mode was entered at all.
+	switch {
+	case c.controlMode:
+		scr.HideCursor()
+	case focusedPlacement != nil && cursorInfo != nil:
 		cp, visible := cursorInfo(c.focusPaneID)
 		fx := focusedPlacement.Dst.Min.X + cp.X - focusedPlacement.Src.Min.X
 		fy := focusedPlacement.Dst.Min.Y + cp.Y - focusedPlacement.Src.Min.Y
@@ -150,62 +160,111 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 		} else {
 			scr.HideCursor()
 		}
-	} else {
+	default:
 		scr.HideCursor()
 	}
 }
 
-// Key help. These strings must match cmd/wideboi's binding matrix;
-// scripts/smoke.py asserts they do, so the two cannot drift apart
-// silently. "alt+" rather than a glyph because it has to be legible in a
-// terminal that may not render one, and because it is what a user would
-// type into their terminal's own key configuration.
+// Control-mode verbs, in display order, most essential first. These
+// strings must match cmd/wideboi's router table; scripts/smoke.py
+// asserts they do, so the two cannot drift apart silently.
 //
-// Split into segments because the whole line does not fit an 80-column
-// terminal -- the commonest width there is, and cmd/wideboi's own
-// fallback when the host reports no size. Spelled out in full it is 91
-// cells against a budget of 79 minus the "focus: pane N" prefix, so a
-// single truncation lopped off the one verb a stuck user most needs.
-// Segments are listed in display order, most essential first, and the
-// tail is dropped as the budget shrinks; helpQuit is never a candidate
-// and is accounted for before any segment is admitted. At 80 columns
-// that leaves focus/new/width/kill/quit; jump returns at 89 columns and
-// scroll at 105. A pane status glyph pushes those thresholds up by the
-// width of its "  [N x]" segment.
-var (
-	helpSegments = []string{
-		"  alt+h/l focus",
-		"  alt+n new",
-		"  alt+w width",
-		"  alt+x kill",
-		"  alt+j jump",
-		"  alt+u/d scroll",
-	}
-	helpQuit = "  alt+q quit"
-)
+// Unprefixed letters rather than a modifier because that is the whole
+// point of the mode: the terminal has already told us a prefix arrived,
+// so no modifier needs to survive the trip.
+var controlVerbs = []string{
+	"h/l focus",
+	"n new",
+	"w width",
+	"x kill",
+	"j jump",
+	"u/d scroll",
+}
 
-// helpFor returns as much of the key help as fits in budget cells given
-// that used cells are already spoken for, always including the quit
-// verb. A caller with no room even for that gets it anyway and truncates
-// -- there is nothing better to show, and every wider terminal keeps it.
-func helpFor(budget, used int) string {
-	used += runeLen(helpQuit)
-	var help string
-	for _, seg := range helpSegments {
-		n := runeLen(seg)
-		if used+n > budget {
+// Never dropped. With no unprefixed bindings left, a user who cannot
+// read these two out of the bar has no way forward except a signal.
+var controlTail = []string{"q quit", "esc exit"}
+
+// controlHelp returns as much of the control-mode verb menu as fits in
+// budget cells, always including controlTail.
+//
+// The full menu is 71 cells, against a budget of 79 at an 80-column
+// terminal, so in practice nothing is dropped at any width wideboi is
+// usable at. The dropping exists for narrower terminals and for
+// whatever verbs get added later.
+func controlHelp(budget int) string {
+	tail := strings.Join(controlTail, "  ")
+	used := runeLen(tail)
+	taken := make([]string, 0, len(controlVerbs))
+	for _, v := range controlVerbs {
+		if used+2+runeLen(v) > budget {
 			break
 		}
-		used += n
-		help += seg
+		used += 2 + runeLen(v)
+		taken = append(taken, v)
 	}
-	return help + helpQuit
+	return strings.Join(append(taken, tail), "  ")
+}
+
+// statusLineLocked returns the bottom row's text and the style every one
+// of its cells carries. c.mu must be held.
+//
+// It returns the style rather than drawing, because Draw needs a
+// *uv.TerminalScreen that a unit test cannot cheaply build -- this is
+// what makes the control-mode inversion assertable at all. That the
+// style actually reaches the wire is proved by scripts/smoke.py.
+func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
+	if budget < 0 {
+		budget = 0
+	}
+	if c.controlMode {
+		menu := truncateRunes(controlHelp(budget), budget)
+		// Pad to the full budget: a partly-inverted row reads as a
+		// rendering glitch, not as a mode.
+		menu += strings.Repeat(" ", budget-runeLen(menu))
+		return menu, uv.Style{Attrs: uv.AttrReverse}
+	}
+	return c.normalStatusLocked(budget), uv.Style{}
+}
+
+// normalStatusLocked builds the ordinary status line: what is focused,
+// which panes want attention, and how to reach the verbs. c.mu must be
+// held.
+func (c *Client) normalStatusLocked(budget int) string {
+	status := fmt.Sprintf("focus: pane %d", c.focusPaneID)
+	for _, p := range c.placements {
+		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
+			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
+		}
+	}
+	// The hint is right-aligned and is the first thing to go when the
+	// terminal is too narrow for it: the pane statuses are live
+	// information, the hint is a fixed string a user learns once.
+	hint := c.prefixLabel + " for commands"
+	if pad := budget - runeLen(status) - runeLen(hint); pad >= 2 {
+		status += strings.Repeat(" ", pad) + hint
+	}
+	return truncateRunes(status, budget)
+}
+
+// SetControlMode switches the client between forwarding keys to the
+// focused pane and showing the verb menu. Called by cmd/wideboi after
+// every key event, so the bar can never disagree with the router.
+func (c *Client) SetControlMode(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.controlMode = on
 }
 
 // runeLen counts cells the way compose.WriteString consumes them: one
-// per rune. Byte length is the wrong unit -- the status glyphs (»,  ✓,
-// ✗) are three bytes each and one cell each, so a byte-based budget
-// silently ate three cells of help per glyph.
+// per rune.
+//
+// This is the right unit only because WriteString advances one cell per
+// rune regardless of the glyph. It is not the true display width -- a
+// double-width glyph is one rune and two columns, and WriteString gets
+// that wrong too. The two agree by sharing a bug, so if WriteString is
+// ever widened to grapheme clusters with measured widths, this has to
+// move to Cell.Width in the same change.
 func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
 // truncateRunes cuts s to at most n cells on a rune boundary. Slicing by
