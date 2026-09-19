@@ -106,6 +106,20 @@ func (s *Strip) KillPane(paneID int) {
 	}
 }
 
+// ColumnWidth reports paneID's own column width -- its logical width, per
+// invariant 4 of the layout spec ("a pane's logical width equals its column
+// width, independent of what is visible"). This is NOT the same as a
+// Placement's Dst width, which is the post-clip crop: a column scrolled
+// partly off-screen still has its full column width here.
+func (s *Strip) ColumnWidth(paneID int) (int, bool) {
+	for _, c := range s.columns {
+		if c.PaneID == paneID {
+			return c.Width, true
+		}
+	}
+	return 0, false
+}
+
 // FocusPaneID sets focus to the column containing paneID if it exists.
 func (s *Strip) FocusPaneID(paneID int) {
 	for i, c := range s.columns {

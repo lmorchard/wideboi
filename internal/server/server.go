@@ -2,9 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
-	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -91,11 +91,12 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			_, _ = s.spawnPaneLocked()
 			s.strip.FocusLeft()
 		}
+		_ = s.resizePanesLocked()
 		s.broadcastLayoutLocked(ctx)
 
 	case protocol.MsgResize:
 		s.cols, s.rows = m.Cols, m.Rows
-		s.resizePanesLocked()
+		_ = s.resizePanesLocked()
 		s.broadcastLayoutLocked(ctx)
 
 	case protocol.MsgVerb:
@@ -106,15 +107,15 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			s.strip.FocusRight()
 		case protocol.VerbNewColumn:
 			_, _ = s.spawnPaneLocked()
-			s.resizePanesLocked()
+			_ = s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
 			s.strip.CycleWidth()
-			s.resizePanesLocked()
+			_ = s.resizePanesLocked()
 		case protocol.VerbKillPane:
 			focusedID := s.strip.FocusedPaneID()
 			if focusedID > 0 {
 				s.removePaneLocked(focusedID)
-				s.resizePanesLocked()
+				_ = s.resizePanesLocked()
 			}
 		case protocol.VerbSmartJump:
 			for id, p := range s.panes {
@@ -191,6 +192,7 @@ func (s *Server) onPaneExit(id int) {
 	s.strip.KillPane(id)
 	p := s.panes[id]
 	delete(s.panes, id)
+	_ = s.resizePanesLocked()
 	s.broadcastLayoutLocked(context.Background())
 	s.mu.Unlock()
 
@@ -207,23 +209,69 @@ func (s *Server) removePaneLocked(id int) {
 	go p.Close()
 }
 
-// resizePanesLocked pushes each pane's current placement size down to its
-// emulator and child. Call it after anything that changes geometry: a host
-// resize, a new column, a width cycle, a pane closing.
+// resizePanesLocked pushes each pane's current column width and available
+// height down to its emulator and child. Call it after anything that
+// changes geometry: an attach, a host resize, a new column, a width cycle,
+// or a pane closing.
 //
-// Errors are collected rather than returned: one child failing TIOCSWINSZ
+// Width comes from the column's own logical width (layout.Strip's
+// ColumnWidth), never from a Placement's Dst: Dst is what survives
+// clipping against the viewport and against sibling columns, and the
+// layout spec's invariant 4 is that "a pane's logical width equals its
+// column width, independent of what is visible." A column scrolled
+// partly (or entirely) off-screen keeps its full width, so its child gets
+// no SIGWINCH and never learns it was occluded. Height has no equivalent
+// invariant to protect -- it is uniform across every column and
+// Placement.Dst.Dy() already reports it correctly.
+//
+// Called with s.mu held, per the *Locked convention, but does not hold it
+// across the resize calls themselves: Pane.Resize -> Grid.Resize can block
+// writing into the emulator's own unbuffered pipe, which only the pane's
+// pty-writer pump goroutine drains -- and that goroutine can itself be
+// blocked in Master.Write against a child that has stopped reading its
+// stdin. Blocking here while holding s.mu would park the entire server (no
+// input routing, no quit) on one wedged child. So the geometry is read and
+// the lock released before any pane is actually touched, following
+// DrawPane's precedent, and the lock is reacquired before returning so the
+// caller's held lock is honored on exit. A pane could theoretically be
+// closed by another goroutine in that window; Pane.Resize and Pane.Close
+// racing is a known, narrow residual (same family as the vtGrid.Resize /
+// em.Write ordering note in term/grid.go) left to the -race work already
+// tracked for this branch.
+//
+// Errors are collected into the returned error (via errors.Join) rather
+// than logged: log.Printf writes to stderr, which corrupts the user's
+// screen while the alt screen is active. One child failing TIOCSWINSZ
 // must not stop the others from being resized.
-func (s *Server) resizePanesLocked() {
+func (s *Server) resizePanesLocked() error {
+	type resizeJob struct {
+		pane *Pane
+		w, h int
+	}
+
+	var jobs []resizeJob
 	for _, pl := range s.strip.ComputePlacements(s.cols, s.rows) {
 		p, ok := s.panes[pl.PaneID]
 		if !ok {
 			continue
 		}
-		w, h := pl.Dst.Dx(), pl.Dst.Dy()
-		if err := p.Resize(w, h); err != nil {
-			log.Printf("wideboi: resize pane %d to %dx%d: %v", pl.PaneID, w, h, err)
+		w, ok := s.strip.ColumnWidth(pl.PaneID)
+		if !ok {
+			continue
+		}
+		jobs = append(jobs, resizeJob{pane: p, w: w, h: pl.Dst.Dy()})
+	}
+
+	s.mu.Unlock()
+	defer s.mu.Lock()
+
+	var errs []error
+	for _, j := range jobs {
+		if err := j.pane.Resize(j.w, j.h); err != nil {
+			errs = append(errs, fmt.Errorf("pane %d: %w", j.pane.ID(), err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func (s *Server) broadcastLayoutLocked(ctx context.Context) {

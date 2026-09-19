@@ -267,6 +267,14 @@ def case_shell_control_keys_pass_through(fail):
 def case_host_resize_resizes_panes(fail):
     # A pane's child must learn its new size, or it keeps wrapping at the
     # old width and full-screen apps lay out wrong.
+    #
+    # This only asserts the whole (rows, cols) pair changes, not cols
+    # specifically: for a *fully visible, focused* pane, a plain host
+    # resize is only ever supposed to change rows -- column width is the
+    # column's own property, independent of the host's size (see
+    # case_partly_clipped_pane_keeps_full_width, and the layout spec's
+    # invariant 4). Rows changing is what proves SIGWINCH actually reached
+    # the child at all.
     s = Session(cols=120, rows=30)
     s.type("stty size\r", settle=1.4)
     first = re.findall(rb"(\d+) (\d+)", s.output())
@@ -288,6 +296,48 @@ def case_host_resize_resizes_panes(fail):
     s.quit_and_reap()
 
 
+def case_partly_clipped_pane_keeps_full_width(fail):
+    # Regression guard: a column scrolled mostly off-screen must keep its
+    # own full logical width. Resizing it down to whatever sliver is on
+    # screen -- what an earlier version of this fix actually shipped --
+    # corrupts its line layout and lies to its child about its own width,
+    # even though nothing about the pane itself changed; only a neighbor's
+    # share of the screen did.
+    s = Session(cols=120, rows=30)
+
+    s.type("\x1bl")  # alt+l -> focus right, onto pane 2
+    s.type("stty size\r", settle=1.4)
+    first = re.findall(rb"(\d+) (\d+)", s.output())
+    if not first:
+        fail("could not read pane 2's initial size")
+        s.quit_and_reap()
+        return
+    before_cols = first[-1][1]
+    s.type("\x1bh")  # alt+h -> focus back to pane 1, leaving pane 2 unfocused
+
+    # Narrow enough that two full-width columns no longer both fit: pane 1
+    # (focused) stays fully visible, pane 2 is scrolled down to a sliver.
+    fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
+    time.sleep(1.5)
+
+    s.type("\x1bl")  # alt+l -> focus pane 2, which was just mostly clipped
+    mark = len(s.output())
+    s.type("stty size\r", settle=1.6)
+    after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
+    if not after:
+        fail("pane 2 produced no size output after being focused post-resize")
+        s.quit_and_reap()
+        return
+    after_cols = after[-1][1]
+    if after_cols != before_cols:
+        fail(
+            f"partly-clipped pane's column width changed from "
+            f"{before_cols.decode()} to {after_cols.decode()} -- a "
+            "partly-covered pane must keep its full logical width"
+        )
+    s.quit_and_reap()
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
@@ -301,6 +351,7 @@ CASES = [
     ("status line names real keys", case_status_line_names_real_keys),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),
+    ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),
 ]
 
 
