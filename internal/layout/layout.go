@@ -151,8 +151,21 @@ func (s *Strip) FocusPaneID(paneID int) {
 	}
 }
 
-// ComputePlacements calculates screen destination and source crop rectangles.
+// Strategy calculates screen destination and source crop rectangles for a strip.
+type Strategy interface {
+	ComputePlacements(s *Strip, viewportWidth, viewportHeight int) []Placement
+}
+
+// ScrollStrategy calculates placements for a scrolling horizontal strip of columns.
+type ScrollStrategy struct{}
+
+// ComputePlacements calculates screen destination and source crop rectangles for a scrolling strip.
 func (s *Strip) ComputePlacements(viewportWidth, viewportHeight int) []Placement {
+	return ScrollStrategy{}.ComputePlacements(s, viewportWidth, viewportHeight)
+}
+
+// ComputePlacements calculates screen destination and source crop rectangles.
+func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight int) []Placement {
 	if len(s.columns) == 0 || viewportWidth <= 0 || viewportHeight <= 0 {
 		return nil
 	}
