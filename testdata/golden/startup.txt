@@ -11,16 +11,18 @@ CLEAR_SCREEN: 2
 
 ## words rendered
 2027
-col
-cycle
+alt+h
+alt+j
+alt+n
+alt+q
+alt+u
+alt+w
+alt+x
 focus
-mod+n
-mod+o
-mod+q
-mod+w
+jump
+kill
 new
 pane
-quit
+scroll
 sh-3
-switch
 width

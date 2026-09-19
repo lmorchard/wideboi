@@ -163,6 +163,19 @@ def case_quit_restores_and_reaps(fail):
         fail(f"leaked pane processes: {s.leaked}")
 
 
+def case_status_line_names_real_keys(fail):
+    s = Session()
+    out = s.output()
+    if b"$mod" in out:
+        fail("status line renders the literal placeholder '$mod'")
+    # The bindings the user actually has. If a binding changes, this
+    # fails loudly and someone updates both together.
+    for key in (b"alt+h", b"alt+n", b"alt+w", b"alt+q"):
+        if key not in out:
+            fail(f"status line never mentions {key.decode()}")
+    s.quit_and_reap()
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
@@ -173,6 +186,7 @@ CASES = [
     ("alt mod keybindings route verbs", case_alt_mod_keybindings),
     ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
+    ("status line names real keys", case_status_line_names_real_keys),
 ]
 
 

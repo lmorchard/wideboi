@@ -120,13 +120,27 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 	}
 
 	// Status bar on bottom row
-	status := fmt.Sprintf(" focus: pane %d", c.focusPaneID)
+	status := fmt.Sprintf("focus: pane %d", c.focusPaneID)
 	for _, p := range c.placements {
 		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
 			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
 		}
 	}
-	status += "   $mod+o switch   $mod+n new col   $mod+w cycle width   $mod+q quit "
+	// Key help. These strings must match cmd/wideboi's binding matrix;
+	// scripts/smoke.py asserts they do, so the two cannot drift apart
+	// silently. "alt+" rather than a glyph because it has to be legible
+	// in a terminal that may not render one, and because it is what a
+	// user would type into their terminal's own key configuration.
+	help := "  alt+h/l focus  alt+n new  alt+w width  alt+x kill  alt+j jump  alt+u/d scroll  alt+q quit"
+	status += help
+	// Leave the final column untouched: ultraviolet's terminal renderer
+	// writes the last cell of a row with autowrap toggled off and back on
+	// around it, which splits whatever glyph lands there across a mode
+	// escape sequence on the wire. Truncating one cell short of c.cols
+	// keeps the whole help string contiguous in the raw output.
+	if maxLen := c.cols - 1; len(status) > maxLen {
+		status = status[:maxLen]
+	}
 	compose.WriteString(scr, 0, c.rows-1, status)
 
 	// Host cursor position and visibility
