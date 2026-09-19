@@ -27,7 +27,7 @@ from ptylib import (
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
-DIVIDER = "│".encode()
+DIVIDER = "[│┃]".encode()
 # The renderer diffs cell-by-cell, so a divider redrawn at an unchanged
 # column may ride on the cursor's position left over from the previous
 # write with no cursor move of its own. But whenever a divider's column
@@ -36,18 +36,18 @@ DIVIDER = "│".encode()
 # reliably surfaces *new* divider columns appearing in a byte range,
 # which is exactly the signal a column-width change should produce.
 DIVIDER_CUP = re.compile(rb"\x1b\[(\d+);(\d+)H(?:\x1b\[[0-9;]*m)*" + DIVIDER)
-# The status line's "focus: pane N" prefix is only ever transmitted once
+# The status line's "focus: [pane N ★]" prefix is only ever transmitted once
 # (the first frame). After that the diffing renderer only rewrites the
-# digit itself, addressed by an absolute cursor move to column 13 of the
-# status row (len("focus: pane ") == 12). Combine the one-time literal
+# digit itself, addressed by an absolute cursor move to column 14 of the
+# status row (len("focus: [pane ") == 13). Combine the one-time literal
 # with later positional updates, in stream order, to track the current
 # focused pane ID across a whole session.
-FOCUS_LITERAL = re.compile(rb"focus: pane (\d+)")
+FOCUS_LITERAL = re.compile(rb"focus: (?:pane|\[pane) (\d+)")
 
 
 def _focus_digit_re(status_row: int) -> re.Pattern:
     return re.compile(
-        rb"\x1b\[" + str(status_row).encode() + rb";13H(?:\x1b\[[0-9;]*m)*(\d+)"
+        rb"\x1b\[" + str(status_row).encode() + rb";(?:13|14)H(?:\x1b\[[0-9;]*m)*(\d+)"
     )
 
 

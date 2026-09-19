@@ -8,6 +8,7 @@ CURSOR_SHOW: present
 CURSOR_HIDE: present
 CURSOR_TO(r,c): present
 CLEAR_SCREEN: 2
+SGR_RESET: present
 
 ## words rendered
 2027

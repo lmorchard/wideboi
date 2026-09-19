@@ -32,7 +32,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			{
 				PaneID: col.PaneID,
 				Src:    image.Rect(0, 0, w, availHeight),
-				Dst:    image.Rect(0, 0, w, availHeight),
+				Dst:    image.Rect(0, 1, w, 1+availHeight),
 				Z:      1,
 			},
 		}
@@ -74,7 +74,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			continue
 		}
 		w := min(sliverWidth, c.Width)
-		dst := image.Rect(dstX, 0, min(dstX+w, viewportWidth), availHeight)
+		dst := image.Rect(dstX, 1, min(dstX+w, viewportWidth), 1+availHeight)
 		if dst.Empty() {
 			continue
 		}
@@ -87,7 +87,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	}
 
 	// Focused card (Z = 1)
-	focusedDst := image.Rect(focusedX, 0, min(focusedX+focusedW, viewportWidth), availHeight)
+	focusedDst := image.Rect(focusedX, 1, min(focusedX+focusedW, viewportWidth), 1+availHeight)
 	if !focusedDst.Empty() {
 		placements = append(placements, Placement{
 			PaneID: focusedCol.PaneID,
@@ -107,7 +107,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			continue
 		}
 		w := min(sliverWidth, c.Width)
-		dst := image.Rect(dstX, 0, min(dstX+w, viewportWidth), availHeight)
+		dst := image.Rect(dstX, 1, min(dstX+w, viewportWidth), 1+availHeight)
 		if dst.Empty() {
 			continue
 		}
