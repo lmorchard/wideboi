@@ -123,6 +123,13 @@ Known tension with animation: freeze-during-motion undercuts the point of
 slivers, which is watching peripheral agents. The fix is to exempt chrome from
 the freeze — animate spines live while pane content stays snapshotted.
 
+**Preview-and-commit belongs here, not in focus movement.** Plan 6 considered
+`prefix → navigate → Enter to commit` for switching columns and rejected it:
+preview is meaningless when the thing you are previewing is the viewport
+position itself. Browsing a fan of cards before settling on one *is* a distinct
+action from landing on it, so the commit step earns its keystroke here. See
+`dev-sessions/2026-09-19-wideboi-plan-6-modal-input/spec.md`.
+
 ## 3. Detach, reattach, and remote use
 
 The reason the client/server seam exists. v1 runs both halves in one process over
