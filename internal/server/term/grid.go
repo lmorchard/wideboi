@@ -64,21 +64,8 @@ type Grid interface {
 	// freshly started shell has not hidden it yet.
 	CursorVisible() bool
 
-	// Resize changes the emulator's dimensions. Two properties of the
-	// pinned x/vt make it unsafe to use casually, and both are load
-	// bearing enough that nothing in Plan 1 calls it outside tests:
-	//
-	//   - It does not reflow. Narrowing truncates the tail of every
-	//     wrapped line and widening cannot recover it. This is the
-	//     same defect that forced gwae's ADR-004 emulator swap.
-	//   - Draw paints nothing after a resize until the affected lines
-	//     are touched again, so the pane goes blank rather than
-	//     re-rendering what it still holds.
-	//
-	// Both are covered by reflow_test.go's two cases, which are t.Skip'd
-	// (they document a defect, not a regression this package causes)
-	// but were run un-skipped and confirmed to fail exactly as described
-	// above. Recorded in the v1 spec's open questions.
+	// Resize changes the emulator's dimensions, reflowing the visible
+	// screen so narrowing does not destroy text.
 	Resize(cols, rows int)
 	Draw(dst uv.Screen, area image.Rectangle)
 	Size() (cols, rows int)
@@ -150,9 +137,72 @@ func (g *vtGrid) SendKey(k uv.KeyEvent) {
 	g.em.SendKey(k)
 }
 
-func (g *vtGrid) SendText(text string)  { g.em.SendText(text) }
-func (g *vtGrid) Resize(cols, rows int) { g.em.Resize(cols, rows) }
-func (g *vtGrid) Size() (int, int)      { return g.em.Width(), g.em.Height() }
+func (g *vtGrid) SendText(text string) { g.em.SendText(text) }
+
+// Resize changes the emulator's dimensions, reflowing the visible screen
+// so narrowing does not destroy text.
+//
+// The pinned x/vt truncates on narrow (uv.Buffer.Resize does
+// Lines[i][:width]) and its Draw paints only Touched lines while
+// Screen.Resize clears Touched, so a plain resize both loses text and
+// renders blank. Reading the cells out, reflowing, and writing them back
+// with SetCell fixes both: SetCell re-touches every line it writes.
+//
+// Deliberately NOT handled:
+//
+//   - Scrollback. Measured: Resize leaves it untouched at its original
+//     width, so there is nothing to repair. It will need reflowing for
+//     DISPLAY when scroll-back navigation lands, which is a presentation
+//     concern and non-destructive to defer.
+//   - The alternate screen. A full-screen app repaints itself from its
+//     own model on SIGWINCH, so reflowing it would be wasted work on
+//     data the app is about to overwrite.
+//   - The cursor. x/vt exposes no public setter, so it is left where the
+//     resize put it; SIGWINCH makes most programs reposition themselves.
+func (g *vtGrid) Resize(cols, rows int) {
+	oldCols, oldRows := g.em.Width(), g.em.Height()
+	if cols == oldCols && rows == oldRows {
+		return
+	}
+	if g.em.IsAltScreen() {
+		g.em.Resize(cols, rows)
+		return
+	}
+
+	before := make([]Row, oldRows)
+	for y := 0; y < oldRows; y++ {
+		r := make(Row, oldCols)
+		for x := 0; x < oldCols; x++ {
+			r[x] = g.em.CellAt(x, y)
+		}
+		before[y] = r
+	}
+
+	g.em.Resize(cols, rows)
+
+	after := Reflow(before, oldCols, cols)
+	for y := 0; y < rows && y < len(after); y++ {
+		x := 0
+		for x < cols {
+			c := after[y][x]
+			if c == nil {
+				g.em.SetCell(x, y, nil)
+				x++
+				continue
+			}
+			g.em.SetCell(x, y, c)
+			// Never write a wide glyph's placeholder cell: it trips
+			// uv.Line.Set's partial-overwrite protection and blanks the
+			// whole glyph.
+			if c.Width > 1 {
+				x += c.Width
+			} else {
+				x++
+			}
+		}
+	}
+}
+func (g *vtGrid) Size() (int, int) { return g.em.Width(), g.em.Height() }
 
 // CursorPosition reports the emulator's cursor, relative to this Grid's
 // own origin. See the Grid.CursorPosition doc comment for the
