@@ -49,7 +49,7 @@ sliver, so you see every pane at once and reveal one fully by focusing it.
 The insight that makes it cheap: **cards are clipping plus z-order, not
 resizing.** An occluded card keeps its full *logical* width, so its child never
 learns it is partly covered — no `SIGWINCH`, no reflow, no redraw. `Placement`
-already carries `Dest`, `Src` and `Z`; `ScrollStrategy` emits non-overlapping
+already carries `Dst`, `Src` and `Z`; `ScrollStrategy` emits non-overlapping
 rects with `Z=0` and a `CardStrategy` would emit overlapping full-width rects
 with a z-fan. The compositor, the animator, and mouse hit-testing consume
 `[]Placement` and don't care which produced it.
@@ -137,8 +137,37 @@ Each was found, understood, and deliberately deferred. None is a mystery.
 | `ps -axo` parsing unverified on Linux | No Linux host available | One `make check` run on Linux. The anti-leak guarantee degrades **silently** if `Descendants` returns a short list. |
 | Upstream `x/vt` data race on `e.closed` | Practically inert — single bool, `Close` is its only writer | Give the pump goroutine sole ownership of the emulator lifecycle so `Close` never races `Read` |
 | `compose.Text`/`WriteString` ignore `Cell.Width` | Current chrome is single-width | Real grapheme handling; comes due if status glyphs go wide |
+| `transport.SendServer` is called under `s.mu` | Only reachable behind the wedged-render defect above, which is its real fix | Hoist the broadcast out of `s.mu`, or bound the send. `broadcastLayoutLocked` runs under `s.mu` and `SendServer` blocks once `ServerSend`'s 256-deep buffer fills, bounded only by a context `main` cancels *after* `guard.Stop()`. So the chain "child stops reading stdin → pty-writer parks → reply pipe fills → `vtGrid.Write` parks holding `se.mu` → main loop parks in `Draw` → `ServerSend` stops draining" ends with `srv.Close()` waiting forever. The `*Locked`-release discipline in `resizePanesLocked`/`PaneSize`/`CursorInfo` removes one way to hold `s.mu` forever, not this one. |
+| The width cycle cannot reach a pane's spawn width | Absolute presets are load-bearing (see the v1 spec's layout core); a cycle seeded from the spawn width is a behaviour change, not a bug fix | `CycleWidth` steps `40 → 60 → 80`, but a pane spawns at `max((cols-1)/2, 40)`. On a 200-column terminal a pane spawns 99 cells wide and the *first* `alt+w` **shrinks** it to 80, which it can never exceed again. Either fold the spawn width into the cycle, or make the presets viewport-aware without making the *width* viewport-dependent. |
 
-## 7. Open questions worth answering cheaply
+## 7. Spec-vs-code drifts left standing
+
+The v1 spec is a design document, not a conformance target, and v1 shipped
+against it with three differences that are worth naming rather than quietly
+carrying. None is a defect today; each is a place where a reader who trusts
+the spec will be wrong about the code.
+
+- **Placement is computed server-side, not client-side.** The spec argues at
+  length that `Place()` should run per client so two clients of different
+  sizes are correct by construction, and §3 above still leans on that. In v1
+  the server runs `ComputePlacements` and ships the result. With one in-process
+  client the distinction is invisible; it becomes real the moment detach lands,
+  and moving it then is the work §3 is quietly assuming is already done.
+- **The `Strategy` interface does not exist.** The spec specifies
+  `Strategy.Place(...)` with `ScrollStrategy` as the first implementation, and
+  §2's card layout is written as "add a `CardStrategy`". `internal/layout` has
+  one concrete function instead. Introducing the interface is small, but it is
+  not free, and nothing today exercises the seam it is supposed to create.
+- **The layout core has table tests, not `rapid` property tests.** The spec
+  turns its four invariants into a property-test suite. What exists is
+  hand-picked rows. The gap that matters most: invariant 4 — a pane's logical
+  width equals its column width, independent of what is visible — has **no
+  test at the layout layer at all**. It is covered only end-to-end, by
+  `scripts/smoke.py`'s `case_partly_clipped_pane_keeps_full_width`. That is the
+  invariant this project's no-shrink premise rests on hardest, and it is the
+  one a layout-level refactor could break without a unit test noticing.
+
+## 8. Open questions worth answering cheaply
 
 - **Do the target coding agents use the alternate screen?** Determines how much reflow matters for the actual workload. A full-screen TUI agent repaints itself; an Ink-style agent (Claude Code appears to be one — its transcript stays in your scrollback) commits output upward into terminal-owned scrollback, same split as a shell. One-line check: run each in a pty and look for `ESC[?1049h`.
 - **What should `$mod` be, per platform?** Option-as-Meta works locally but depends on the client terminal over SSH, and it requires terminal configuration users won't guess at.

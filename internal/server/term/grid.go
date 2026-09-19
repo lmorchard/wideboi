@@ -150,10 +150,19 @@ type vtGrid struct {
 	// between vtGrid.Write and the Reflow pass reading a captured cell.
 	// Write is what mutates the buffer; SendKey/SendText/Resize's own
 	// dimension change go through se.mu for each call but never touch
-	// cell content outside the walk this lock protects. Read is
-	// deliberately excluded -- it can block indefinitely (the same
-	// reason SafeEmulator's own Read is unlocked), and Write/Resize both
-	// terminate on their own, so nothing here can wedge against it.
+	// cell content outside the walk this lock protects.
+	//
+	// Three methods hold it: Write, Resize, and Draw's scrollback
+	// branch -- which holds it longest, for a whole frame's worth of
+	// ScrollbackCellAt/CellAt pointers handed to dst.SetCell, plus the
+	// scrollback-length and offset samples that decide where the
+	// history/live boundary falls. Draw's fast path (offset 0) is
+	// deliberately outside it.
+	//
+	// Read is deliberately excluded -- it can block indefinitely (the
+	// same reason SafeEmulator's own Read is unlocked), and
+	// Write/Resize/Draw all terminate on their own, so nothing here can
+	// wedge against it.
 	writeResizeMu sync.Mutex
 }
 
@@ -266,11 +275,24 @@ func (g *vtGrid) Resize(cols, rows int) {
 		return
 	}
 
+	// Clone every captured cell. CellAt returns *uv.Cell aliasing the
+	// emulator's live backing array (uv.Line.At is literally &l[x]), and
+	// uv.Buffer.Resize narrows by reslicing in place
+	// (Lines[i] = Lines[i][:width]), so those arrays outlive the resize
+	// with the captured pointers still aliasing them. On a narrowing
+	// reflow pushes content DOWN -- output row y is written from a
+	// source row <= y -- so writing back through live pointers clobbers
+	// rows that later output rows have yet to read, smearing the first
+	// line over everything below it. Copying makes the capture a real
+	// snapshot.
 	before := make([]Row, oldRows)
 	for y := 0; y < oldRows; y++ {
 		r := make(Row, oldCols)
 		for x := 0; x < oldCols; x++ {
-			r[x] = g.em.CellAt(x, y)
+			if c := g.em.CellAt(x, y); c != nil {
+				cc := *c
+				r[x] = &cc
+			}
 		}
 		before[y] = r
 	}
@@ -330,15 +352,15 @@ func (g *vtGrid) SetScrollOffset(offset int) {
 // cell pointer past it -- no extra locking needed. The scrollback branch
 // below is different; see the comment where it takes writeResizeMu.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
-	offset := int(g.scrollOffset.Load())
-	sbLen := g.em.ScrollbackLen()
-	if offset <= 0 || sbLen == 0 {
+	// A zero scroll offset means the fast path no matter what the
+	// scrollback length is, so it can be decided from one atomic load
+	// without taking the lock -- which is the whole point of the fast
+	// path. Everything the scrollback branch reads is sampled below,
+	// inside the lock, so the scrollback/live boundary it walks cannot
+	// be a frame staler than the cells it reads through it.
+	if g.scrollOffset.Load() <= 0 {
 		g.em.Draw(dst, area)
 		return
-	}
-
-	if offset > sbLen {
-		offset = sbLen
 	}
 
 	// Serializes against Write via writeResizeMu, for the same reason
@@ -353,6 +375,16 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	// a single consistent instant rather than racing cell by cell.
 	g.writeResizeMu.Lock()
 	defer g.writeResizeMu.Unlock()
+
+	offset := int(g.scrollOffset.Load())
+	sbLen := g.em.ScrollbackLen()
+	if offset <= 0 || sbLen == 0 {
+		g.em.Draw(dst, area)
+		return
+	}
+	if offset > sbLen {
+		offset = sbLen
+	}
 
 	w, h := area.Dx(), area.Dy()
 	for y := 0; y < h; y++ {

@@ -26,6 +26,11 @@ ignore every shortcut** until you change that.
 
 To check: press `alt+n`. A new column should open.
 
+If you cannot change the setting, two bindings work without Meta and are your
+way out: **`ctrl+q` quits** and **`ctrl+o` focuses the next pane to the right**.
+They are the deliberate escape hatch, so a terminal that swallows Option is
+never a terminal you are stuck in.
+
 ## Keys
 
 | Key | Action |
@@ -37,8 +42,12 @@ To check: press `alt+n`. A new column should open.
 | `alt+j` | jump to the pane that wants attention |
 | `alt+u` / `alt+d` | scroll the focused pane's history |
 | `alt+q` | quit |
+| `ctrl+q` | quit — escape hatch, works without Option-as-Meta |
+| `ctrl+o` | focus right — escape hatch, works without Option-as-Meta |
 
-Everything else goes to the focused pane, including `ctrl+w`, `ctrl+l` and `ctrl+c`.
+`ctrl+q` and `ctrl+o` are the only two control keys wideboi keeps for itself.
+Everything else goes to the focused pane, including `ctrl+w`, `ctrl+l` and
+`ctrl+c`.
 
 ## Development
 

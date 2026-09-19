@@ -237,13 +237,28 @@ func (s *Server) removePaneLocked(id int) {
 // pty-writer pump goroutine drains -- and that goroutine can itself be
 // blocked in Master.Write against a child that has stopped reading its
 // stdin. Blocking here while holding s.mu would park every other goroutine
-// that needs s.mu on one wedged child -- notably srv.Close() from the
-// client goroutine, i.e. the user could no longer quit. It does NOT rescue
-// the Run loop itself, which still blocks inside the wedged Resize call;
-// only other goroutines gain anything from the lock being released. So the
+// that needs s.mu on one wedged child, srv.Close() among them. So the
 // geometry is read and the lock released before any pane is actually
 // touched, following DrawPane's precedent, and the lock is reacquired
 // before returning so the caller's held lock is honored on exit.
+//
+// Be precise about what that buys, because it is less than it looks.
+// It stops THIS call from being the thing that holds s.mu forever. It
+// does NOT rescue the Run loop, which still blocks inside the wedged
+// Resize; only other goroutines gain from the release. And it does not
+// make srv.Close() unblockable in general: broadcastLayoutLocked runs on
+// the very next line still under s.mu, and transport.SendServer is a
+// buffered channel send that blocks once the client stops draining
+// ServerSend and the 256-deep buffer fills, bounded only by a context
+// main cancels AFTER guard.Stop() -- which is where srv.Close() itself
+// lives. Reachable path: a child stops reading stdin -> the pty-writer
+// parks -> the reply pipe fills -> vtGrid.Write parks holding se.mu ->
+// the main loop parks in Draw -> ServerSend stops being drained -> the
+// Run loop blocks in SendServer holding s.mu -> srv.Close() waits
+// forever. Hard to reach and pre-existing. Hoisting SendServer out of
+// s.mu would be a behaviour change, so the residual is recorded in
+// docs/BEYOND-V1.md alongside the parked bounded-write item, which is
+// its real fix.
 //
 // That release also means two resizePanesLocked calls can now overlap --
 // this one and, e.g., the one onPaneExit runs for a different pane's
@@ -323,8 +338,11 @@ func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 // s.mu guards the map lookup only, released before Pane.Size, matching
 // DrawPane's precedent: Size takes p.resizeMu internally, and Resize can
 // hold that lock for an unbounded time (see Pane.Close's doc comment).
-// Holding s.mu across the call would park it, and with it the Run loop and
-// srv.Close(), on the same wedge this pattern exists to avoid elsewhere.
+// Holding s.mu across the call would park it, and with it the Run loop
+// and srv.Close(), on the same wedge this pattern exists to avoid
+// elsewhere. It removes one way to hold s.mu forever, not every way --
+// see resizePanesLocked for the SendServer-under-s.mu residual that
+// survives this discipline.
 func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	s.mu.Lock()
 	p, ok := s.panes[id]
@@ -353,7 +371,9 @@ func (s *Server) DrawPane(id int, dst uv.Screen, area image.Rectangle) {
 // SafeEmulator's se.mu.RLock, which a blocked Emulator.Write can hold
 // against a child that has stopped reading its stdin. Holding s.mu across
 // the call would park it, and with it the Run loop and srv.Close(), on
-// the same wedge this pattern exists to avoid elsewhere.
+// the same wedge this pattern exists to avoid elsewhere. As with
+// PaneSize, this removes one way to hold s.mu forever, not every way;
+// resizePanesLocked names the residual.
 func (s *Server) CursorInfo(id int) (image.Point, bool) {
 	s.mu.Lock()
 	p, ok := s.panes[id]

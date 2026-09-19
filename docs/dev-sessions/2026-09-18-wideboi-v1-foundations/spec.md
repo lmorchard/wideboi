@@ -141,8 +141,19 @@ writes to.
 ### Layout core
 
 A single infinite horizontal strip. One pane per column. Column widths are
-preset fractions of the viewport (`1/4` default, cycling `1/4 → 1/3 → 1/2`).
-Adding, removing, or moving a column never changes another column's width.
+absolute cell counts drawn from a fixed set of presets, cycling
+`40 → 60 → 80 → 40`. A pane spawns at `max((viewport_cols-1)/2, 40)` cells,
+which seeds the cycle but is not itself one of its stops. Adding, removing,
+or moving a column never changes another column's width.
+
+Absolute cells, not fractions of the viewport, and deliberately so: the
+no-shrink scrolling model is the whole premise, and a width that tracks the
+viewport shrinks every pane whenever the host window narrows — which is
+exactly the squeezing this design exists to avoid. It also makes a column's
+width independent of which client is looking at it, so two clients of
+different sizes see the same logical pane. (Corrected after v1: the spec
+originally described preset fractions. The code has always used absolute
+cells; the spec moved.)
 
 Semantics follow gwae's `docs/LAYOUT-SPEC.md`, reduced to one dimension. Its
 invariants become the property-test suite:
@@ -165,9 +176,9 @@ The layout core does not expose a scroll offset. It emits placements:
 
 ```go
 type Placement struct {
-    PaneID PaneID
-    Dest   image.Rectangle // where on screen
-    Src    image.Point     // offset into the pane's grid (panning / clipping)
+    PaneID int
+    Src    image.Rectangle // crop rectangle within the pane's grid
+    Dst    image.Rectangle // where on screen
     Z      int             // paint order; 0 = bottom
 }
 
@@ -197,7 +208,8 @@ rather than session state.
 
 The server still needs `internal/layout` for **logical** pane sizes, which is
 what it reports to each PTY via `TIOCSWINSZ`. Logical width is the column's
-preset fraction of the viewport and does not depend on the placement strategy.
+absolute cell preset. It does not depend on the placement strategy, and it
+does not depend on the viewport either.
 This is the same split as the crop rule above: logical size is authoritative and
 server-owned; where those cells land on a screen is a client concern.
 
@@ -331,7 +343,7 @@ failed. One key jumps focus to the pane that needs attention.
 ### Scrollback
 
 Per pane, backed by `x/vt`'s scrollback at the default 10,000 lines. A pane in
-scrollback renders from `ScrollbackCellAt` with a negative `Placement.Src.Y`,
+scrollback renders from `ScrollbackCellAt` with a negative `Placement.Src.Min.Y`,
 which means the compositor needs no special case. Mouse wheel and keys scroll the
 focused pane; focus changes do not reset scroll position.
 

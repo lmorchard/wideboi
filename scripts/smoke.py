@@ -240,6 +240,26 @@ def case_status_line_names_real_keys(fail):
     s.quit_and_reap()
 
 
+def case_status_line_names_quit_at_80_columns(fail):
+    # 80 columns is the commonest terminal width and cmd/wideboi's own
+    # fallback when the host reports no size. The full help is 91 cells
+    # and the "focus: pane N" prefix is 13, so against a budget of 79 a
+    # single truncation used to cut the line mid-verb and never mention
+    # alt+q at all -- the same "the user is not told how to quit" defect
+    # this plan opened with, reappearing at a different width.
+    #
+    # case_status_line_names_real_keys runs at 100, the one width where
+    # alt+q happened to survive, so it could not have caught this.
+    s = Session(cols=80, rows=24)
+    out = s.output()
+    if b"alt+q" not in out:
+        fail("at 80 columns the status line never mentions alt+q -- the user is not told how to quit")
+    for key in (b"alt+h", b"alt+n", b"alt+w"):
+        if key not in out:
+            fail(f"at 80 columns the status line never mentions {key.decode()}")
+    s.quit_and_reap()
+
+
 def case_shell_control_keys_pass_through(fail):
     # cat -v echoes control bytes visibly as ^X, so we can see exactly
     # which ones survive the multiplexer's binding matrix. Plain "cat -v"
@@ -349,6 +369,7 @@ CASES = [
     ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names real keys", case_status_line_names_real_keys),
+    ("status line names quit at 80 columns", case_status_line_names_quit_at_80_columns),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),
     ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),

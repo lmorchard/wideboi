@@ -15,7 +15,6 @@ alt+h
 alt+j
 alt+n
 alt+q
-alt+u
 alt+w
 alt+x
 focus
@@ -23,6 +22,6 @@ jump
 kill
 new
 pane
-scroll
+quit
 sh-3
 width
