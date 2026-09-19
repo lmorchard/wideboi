@@ -77,7 +77,9 @@ func (s *Strip) FocusRight() {
 	}
 }
 
-// CycleWidth cycles the focused column's width preset.
+// CycleWidth cycles the focused column's width preset (40 -> 60 -> 80 -> 40).
+// Custom spawn widths transition to the next higher preset (e.g. 50 -> 80)
+// or cycle back to 40 (e.g. 99 -> 40).
 func (s *Strip) CycleWidth() {
 	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) {
 		return
@@ -151,8 +153,21 @@ func (s *Strip) FocusPaneID(paneID int) {
 	}
 }
 
-// ComputePlacements calculates screen destination and source crop rectangles.
+// Strategy calculates screen destination and source crop rectangles for a strip.
+type Strategy interface {
+	ComputePlacements(s *Strip, viewportWidth, viewportHeight int) []Placement
+}
+
+// ScrollStrategy calculates placements for a scrolling horizontal strip of columns.
+type ScrollStrategy struct{}
+
+// ComputePlacements calculates screen destination and source crop rectangles for a scrolling strip.
 func (s *Strip) ComputePlacements(viewportWidth, viewportHeight int) []Placement {
+	return ScrollStrategy{}.ComputePlacements(s, viewportWidth, viewportHeight)
+}
+
+// ComputePlacements calculates screen destination and source crop rectangles.
+func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight int) []Placement {
 	if len(s.columns) == 0 || viewportWidth <= 0 || viewportHeight <= 0 {
 		return nil
 	}
