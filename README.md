@@ -42,7 +42,8 @@ Everything else goes to the focused pane, including `ctrl+w`, `ctrl+l` and `ctrl
 
 ## Development
 
-    make check    # fmt, vet, seam boundary, unit tests, exit contract, smoke
+    make check    # fmt, vet, seam boundary, unit tests, race detector, exit contract, smoke
+    make race     # go test -race -count=1 ./..., on its own (~3x the cost of `test`)
     make smoke    # scripted acceptance cases, asserted on the pty wire
 
 `docs/LESSONS.md` is worth reading before changing anything.

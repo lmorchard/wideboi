@@ -44,6 +44,7 @@ type Pane struct {
 
 	closed    chan struct{}
 	closeOnce sync.Once
+	closeErr  error
 
 	dead atomic.Bool
 
@@ -227,41 +228,58 @@ func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 // ever release that Resize -- an unrecoverable hang on quit, not a race.
 //
 // This does reopen a window: Kill/grid.Close can now run concurrently with
-// a Resize that is not wedged, merely still in flight -- confirmed under
-// -race as a real race on the underlying pty fd (ptyx.Pane.Kill's
-// Master.Close vs. ptyx.Pane.Resize's Setsize ioctl), not merely a
-// contained Go-level data race. Accepted anyway: removing resizeMu
-// entirely (the fallback considered for this fix) does not avoid this
-// specific race either, since Close still would not wait for Resize, and
-// it would also reopen Resize-vs-Resize, which this lock still closes. No
-// design with a single pane-level mutex can give both "Close never blocks
-// on a wedged Resize" and "Close never races an in-flight one" at once --
-// the pipe an unwedge depends on is exactly what a concurrently-running
-// Resize is also touching. resizeMu is still taken for the bookkeeping
-// that follows, once any wedge still in progress has had its chance to
-// break.
+// a Resize that is not wedged, merely still in flight. That used to be a
+// real race on the underlying pty fd -- ptyx.Pane.Kill's Master.Close vs.
+// ptyx.Pane.Resize's Setsize ioctl, confirmed under -race -- because
+// pty.Setsize calls f.Fd() and hands the raw descriptor to the ioctl
+// syscall with no reference held on the underlying poll.FD, so a
+// concurrent Close could leave it pointed at a stale, reused descriptor.
+// ptyx.Pane.Resize now issues that ioctl through the master's
+// SyscallConn instead (see ptyx/ioctl.go's setsize), which increfs the
+// poll.FD for the call and errors once the file is closed rather than
+// racing it, so this window is merely concurrent, not racy: accepted,
+// because no design with a single pane-level mutex can give both "Close
+// never blocks on a wedged Resize" and "Close never overlaps an
+// in-flight one" at once -- the pipe an unwedge depends on is exactly
+// what a concurrently-running Resize is also touching. resizeMu is still
+// taken for the bookkeeping that follows, once any wedge still in
+// progress has had its chance to break.
+//
+// The whole body runs inside closeOnce, caching its result in closeErr:
+// ptyx.Kill's own doc comment states it "has no mutual exclusion and
+// must not be called concurrently for the same Pane." Only wrapping the
+// `close(p.closed)` line, as this used to, left Kill and grid.Close
+// unprotected against a second concurrent Close call reaching them at
+// the same time. Unreachable today -- every caller removes the pane from
+// s.panes under s.mu before closing it -- but Close is public API this
+// package cannot fully control, and enforcing the precondition here
+// costs nothing: a second concurrent caller now simply waits for the
+// first's teardown and gets the same cached result.
 func (p *Pane) Close() error {
-	p.closeOnce.Do(func() { close(p.closed) })
+	p.closeOnce.Do(func() {
+		close(p.closed)
 
-	killErr := p.pty.Kill(CloseGrace)
-	gridErr := p.grid.Close()
+		killErr := p.pty.Kill(CloseGrace)
+		gridErr := p.grid.Close()
 
-	p.resizeMu.Lock()
-	defer p.resizeMu.Unlock()
+		p.resizeMu.Lock()
+		defer p.resizeMu.Unlock()
 
-	errs := []error{killErr}
-	if gridErr != nil {
-		errs = append(errs, fmt.Errorf("close emulator: %w", gridErr))
-	}
-	if n := p.dropped.Load(); n > 0 {
-		errs = append(errs, fmt.Errorf("dropped %d keystroke(s): the child stopped reading its stdin", n))
-	}
+		errs := []error{killErr}
+		if gridErr != nil {
+			errs = append(errs, fmt.Errorf("close emulator: %w", gridErr))
+		}
+		if n := p.dropped.Load(); n > 0 {
+			errs = append(errs, fmt.Errorf("dropped %d keystroke(s): the child stopped reading its stdin", n))
+		}
 
-	p.failMu.Lock()
-	errs = append(errs, p.failures...)
-	p.failMu.Unlock()
+		p.failMu.Lock()
+		errs = append(errs, p.failures...)
+		p.failMu.Unlock()
 
-	return errors.Join(errs...)
+		p.closeErr = errors.Join(errs...)
+	})
+	return p.closeErr
 }
 
 func (p *Pane) panicked(where string, r any) {

@@ -347,13 +347,21 @@ func (s *Server) DrawPane(id int, dst uv.Screen, area image.Rectangle) {
 }
 
 // CursorInfo returns the cursor position and visibility for pane id.
+//
+// s.mu guards the map lookup only, released before CursorPosition and
+// CursorVisible, matching PaneSize and DrawPane's precedent: both reach
+// SafeEmulator's se.mu.RLock, which a blocked Emulator.Write can hold
+// against a child that has stopped reading its stdin. Holding s.mu across
+// the call would park it, and with it the Run loop and srv.Close(), on
+// the same wedge this pattern exists to avoid elsewhere.
 func (s *Server) CursorInfo(id int) (image.Point, bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if p, ok := s.panes[id]; ok && p != nil {
-		return p.CursorPosition(), p.CursorVisible()
+	p, ok := s.panes[id]
+	s.mu.Unlock()
+	if !ok || p == nil {
+		return image.Point{}, false
 	}
-	return image.Point{}, false
+	return p.CursorPosition(), p.CursorVisible()
 }
 
 // pollDescendantsLocked walks ps to maintain a list of active descendant PIDs.
