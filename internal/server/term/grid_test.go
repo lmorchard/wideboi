@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,102 @@ func TestGridHonoursResize(t *testing.T) {
 	cols, rows := g.Size()
 	if cols != 20 || rows != 4 {
 		t.Fatalf("Size() after resize = %d,%d want 20,4", cols, rows)
+	}
+}
+
+// TestDrawScrollbackDoesNotRaceWrite pins Draw's scrollback branch
+// against a concurrent Write: ScrollbackCellAt and CellAt both return
+// *uv.Cell aliasing the emulator's live buffer, and Draw hands that
+// pointer straight to dst.SetCell with no lock of its own held. No other
+// test in this package scrolls a pane while output keeps arriving, so
+// this is the only coverage that can make `go test -race` see this
+// hazard at all; it caught a real, -race-confirmed race in review that
+// no test in the server package's own concurrent-resize suite touched,
+// because none of them scroll. The assertion is nominal (both goroutines
+// simply run to their deadline without panicking); the point of this
+// test is what `-race` says about it, not what it returns.
+//
+// The scroll offset is deliberately small, not the full scrollback
+// length: Draw's scrollback branch reads from two different sources
+// depending on whether a row's index has scrolled off (ScrollbackCellAt,
+// a separate, already-settled buffer) or is still part of the live
+// screen (CellAt, the same buffer Write mutates). Only the latter can
+// race a concurrent Write, and only a *partial* scroll -- offset less
+// than the viewport height -- puts any row of the drawn area on that
+// live-screen side of the boundary. Confirmed by hand: reverting the
+// writeResizeMu take in Draw's scrollback branch makes this test fail
+// under -race; restoring it makes this test pass.
+func TestDrawScrollbackDoesNotRaceWrite(t *testing.T) {
+	g := term.NewVT(10, 5)
+
+	// Push enough lines through to build real scrollback, then scroll
+	// back only partway so the drawn viewport straddles the boundary
+	// between scrollback and the still-live screen below it.
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(g, "line %d\r\n", i)
+	}
+	if g.ScrollbackLen() == 0 {
+		t.Fatal("expected scrollback to be non-empty after writing 20 lines to a 5-row grid")
+	}
+	g.SetScrollOffset(2)
+
+	s := compose.NewSurface(10, 5)
+	deadline := time.Now().Add(200 * time.Millisecond)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		n := 0
+		for time.Now().Before(deadline) {
+			fmt.Fprintf(g, "more %d\r\n", n)
+			n++
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for time.Now().Before(deadline) {
+			g.Draw(s, s.Bounds())
+		}
+	}()
+	wg.Wait()
+}
+
+// TestCloseUnblocksRead pins the one behaviour vtGrid.Close's bypass of
+// (*vt.Emulator).Close rests on: a pending Read must still return io.EOF
+// once Close runs, exactly as (*vt.Emulator).Close would have produced
+// via CloseWithError(io.EOF). Nothing else exercises this through the
+// real InputPipe path -- the server package's own
+// TestCloseDoesNotHangOnWedgedResize uses a fake Grid -- so this is what
+// would fail loudly if a future x/vt bump changed InputPipe's concrete
+// type out from under the type assertion Close relies on, silently
+// falling back to the racy path instead.
+func TestCloseUnblocksRead(t *testing.T) {
+	g := term.NewVT(10, 2)
+
+	done := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 16)
+		_, err := g.Read(buf)
+		done <- err
+	}()
+
+	// Give the goroutine a moment to actually park inside Read before
+	// closing, so a passing test means Close unblocked it rather than
+	// there having been nothing to unblock.
+	time.Sleep(10 * time.Millisecond)
+
+	if err := g.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != io.EOF {
+			t.Fatalf("Read after Close = %v, want io.EOF", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read did not unblock within 2s of Close")
 	}
 }
 

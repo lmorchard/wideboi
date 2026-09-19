@@ -325,6 +325,10 @@ func (g *vtGrid) SetScrollOffset(offset int) {
 	g.scrollOffset.Store(int32(offset))
 }
 
+// Draw's fast path (no scrollback in view) delegates to g.em.Draw, which
+// runs entirely inside SafeEmulator's own se.mu.RLock and never leaks a
+// cell pointer past it -- no extra locking needed. The scrollback branch
+// below is different; see the comment where it takes writeResizeMu.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	offset := int(g.scrollOffset.Load())
 	sbLen := g.em.ScrollbackLen()
@@ -336,6 +340,19 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	if offset > sbLen {
 		offset = sbLen
 	}
+
+	// Serializes against Write via writeResizeMu, for the same reason
+	// Resize does (see that field's doc comment): ScrollbackCellAt and
+	// CellAt both return *uv.Cell aliasing the emulator's live buffer,
+	// with se.mu already released by the time this loop sees the
+	// pointer. dst.SetCell dereferences it on the very next line, but
+	// "the very next line" is not "inside the lock" -- a concurrent
+	// Write mutating the same slot between the two is a real race, the
+	// same shape as Resize's, just with a smaller window. Held for the
+	// whole loop, not per cell, so one scrolled-back frame is drawn from
+	// a single consistent instant rather than racing cell by cell.
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
 
 	w, h := area.Dx(), area.Dy()
 	for y := 0; y < h; y++ {
@@ -371,17 +388,28 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 // write) vs. :251 (Read's read) -- not merely the Close-vs-Write pairing
 // this comment used to describe.
 //
-// This call deliberately never reaches (*vt.Emulator).Close. All that
-// method does is e.pw.CloseWithError(io.EOF): close the *io.PipeWriter
-// backing the same pipe Read drains, which is documented safe for
+// This call deliberately never reaches (*vt.Emulator).Close. Closing
+// e.pw is one of two things that method does; the other is the e.closed
+// write itself, which is what makes a subsequent Write short-circuit to
+// (0, io.ErrClosedPipe) at emulator.go:269-271 instead of parsing the
+// bytes. Bypassing Close preserves the first effect -- e.pw.Close()
+// closes the same *io.PipeWriter Read drains from, documented safe for
 // concurrent Read/Close (unlike Emulator's redundant e.closed flag on
-// top of it). InputPipe exposes that writer as an io.Writer; closing it
-// directly through the io.Closer it happens to satisfy reproduces
-// Close's only externally visible effect -- Read returns io.EOF -- without
-// ever touching e.closed. e.closed is left false, which is inert here:
-// Pane.Close stops every goroutine that could reach Write, SendKey, or
-// SendText on this emulator again before or immediately after calling
-// this, so nothing depends on the flag switching.
+// top of it), reached via InputPipe's io.Writer through the io.Closer it
+// happens to satisfy, so Read still returns io.EOF exactly as it would
+// have -- but not the second: e.closed stays false, so a Write arriving
+// after this runs is no longer rejected early and instead parses its
+// bytes as usual, potentially trying to reply into the now-closed pipe.
+//
+// That gap is inert for the one real caller. The pty-reader pump is the
+// only thing that ever calls Write, and Pane.Close's pty.Kill runs
+// before this, closing Master; the pump's blocking call is Master.Read,
+// not Write, so it observes the read error and exits without ever
+// reaching Write again. Even if some future caller managed one more
+// Write here, a write into an already-closed io.Pipe returns
+// io.ErrClosedPipe immediately rather than blocking, so it cannot wedge
+// anything -- it would just be wasted parsing work on bytes nobody
+// reads.
 //
 // Calling Grid.Close from anywhere the pump could still be mid-Read
 // concurrently with something other than this bypass would reintroduce
