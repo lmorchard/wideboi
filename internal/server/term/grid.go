@@ -187,7 +187,7 @@ func (g *vtGrid) Status() PaneStatus {
 	}
 	return st
 }
-func (g *vtGrid) Read(p []byte) (int, error)  { return g.em.Read(p) }
+func (g *vtGrid) Read(p []byte) (int, error) { return g.em.Read(p) }
 
 // SendKey routes a shifted printable key through SendText instead of
 // x/vt's own SendKey, which drops it. See the Grid.SendKey doc comment

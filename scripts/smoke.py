@@ -123,6 +123,31 @@ def case_cycle_width(fail):
     s.quit_and_reap()
 
 
+def case_alt_mod_keybindings(fail):
+    s = Session()
+    s.type("\x1bn")  # alt+n -> new column
+    s.type("echo alt-mod-pane3\r")
+    if b"alt-mod-pane3" not in s.output():
+        fail("alt+n failed to create new column and accept input")
+    s.type("\x1bh")  # alt+h -> focus left
+    s.type("echo back-in-pane2\r")
+    if b"back-in-pane2" not in s.output():
+        fail("alt+h failed to move focus left")
+    s.quit_and_reap()
+
+
+def case_osc133_status_and_smart_jump(fail):
+    s = Session()
+    s.type("printf '\\033]133;A\\007'\r")
+    time.sleep(0.5)
+    s.type("\x1bl")  # alt+l -> focus right
+    s.type("\x1bj")  # alt+j -> smart jump back
+    s.type("echo smart-jumped\r")
+    if b"smart-jumped" not in s.output():
+        fail("smart jump failed to focus pane requiring attention")
+    s.quit_and_reap()
+
+
 def case_quit_restores_and_reaps(fail):
     s = Session()
     s.type("echo before-quit\r")
@@ -145,6 +170,8 @@ CASES = [
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
     ("new column opens pane", case_new_column_opens_pane),
     ("cycle width adjusts column", case_cycle_width),
+    ("alt mod keybindings route verbs", case_alt_mod_keybindings),
+    ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
 ]
 
