@@ -84,3 +84,60 @@ what cheaper reviews did not.
 
 But no review tier substitutes for running the binary. When the same author writes
 the plan and the code, the review inherits both blind spots.
+
+## `CellAt` returns a live pointer. Clone before you keep it.
+
+This bug shape has now appeared **three times** in this repo, which makes it a
+hazard of the API rather than three coincidences.
+
+`uv.Line` is `[]Cell` and `Line.At` is `return &l[x]`. So `CellAt`,
+`ScrollbackCellAt` and friends hand you a pointer **into the emulator's live
+backing array** — and `SafeEmulator` releases its read lock before you get it.
+Two consequences, both of which bit us:
+
+1. **Hold it past the lock and it is a data race.** `Draw`'s scrollback branch
+   dereferenced one while a pump goroutine mutated the same slot.
+2. **Hold it across a `Resize` and it is silent data loss.** `uv.Buffer.Resize`
+   narrows by reslicing in place, so the arrays survive. A capture-then-reflow-
+   then-write-back loop therefore clobbers source rows that later output rows
+   still need, and the first line smears over everything below it.
+
+The second one destroyed pane content on every narrowing, survived an entire
+plan plus twelve reviews, and was found only by driving the real binary.
+
+The rule: **if a cell pointer outlives the call that produced it, copy the
+cell.** `cc := *c` is enough — `Line.Set` copies by value, and the emulator
+replaces whole cells rather than mutating their fields.
+
+## Never write the terminal's last column
+
+Ultraviolet brackets a write to the final column with autowrap-toggle escapes
+(`ESC[?7l` … `ESC[?7h`). On screen this is invisible. On the wire it splits your
+text across escape sequences, so a raw-byte assertion sees `alt+` and `q` rather
+than `alt+q`. Truncate to `cols - 1` and leave the last cell alone.
+
+Related: measure truncation in **cells**, not bytes or runes.
+`compose.WriteString` advances by `Cell.Width`, so a double-width glyph consumes
+two columns while `len()` counts three bytes and a rune count counts one. All
+three disagree, and only `Cell.Width` is right.
+
+## `go test` caches, and a cached pass looks exactly like a real one
+
+An implementer here re-ran a concurrency test after a change, saw 20/20 clean,
+and nearly reported it. It was the result cache. With `-count=1` the true rate
+was 14 failures in 15 runs.
+
+**Always pass `-count=1`** when a test's outcome depends on code you just
+changed, on scheduling, or on the race detector. `make race` does this; ad-hoc
+runs must too.
+
+## The shape of your test fixture is part of your coverage
+
+Every reflow test in this repo wrote exactly **one line** of content. With one
+line, the aliasing bug above is benign — the destination row was blank, so
+nobody's source got clobbered. That single-line fixture shape is the entire
+reason a content-destroying bug survived a plan and twelve reviews.
+
+When a bug class depends on interaction *between* rows, columns, panes or
+messages, a fixture with one of the thing cannot see it. Ask what the fixture's
+shape makes structurally invisible, not just whether the assertion is right.
