@@ -238,7 +238,8 @@ var controlVerbs = []string{
 	"w width",
 	"x kill",
 	"j jump",
-	"u/d scroll",
+	"u scroll",
+	"d detach",
 }
 
 // Never dropped. With no unprefixed bindings left, a user who cannot

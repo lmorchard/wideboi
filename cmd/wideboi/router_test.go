@@ -86,7 +86,7 @@ func TestControlModeVerbTable(t *testing.T) {
 		{key('x'), route{Kind: routeVerb, Verb: protocol.VerbKillPane}},
 		{key('j'), route{Kind: routeVerb, Verb: protocol.VerbSmartJump}},
 		{key('u'), route{Kind: routeScroll, Scroll: 10}},
-		{key('d'), route{Kind: routeScroll, Scroll: -10}},
+		{key('d'), route{Kind: routeDetach}},
 		{key('q'), route{Kind: routeQuit}},
 	}
 	for _, tc := range cases {
