@@ -11,17 +11,9 @@ CLEAR_SCREEN: 2
 
 ## words rendered
 2027
-alt+h
-alt+j
-alt+n
-alt+q
-alt+w
-alt+x
+C-b
+commands
 focus
-jump
-kill
-new
+for
 pane
-quit
 sh-3
-width
