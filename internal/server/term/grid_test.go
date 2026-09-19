@@ -1,6 +1,7 @@
 package term_test
 
 import (
+	"fmt"
 	"image"
 	"io"
 	"testing"
@@ -171,5 +172,71 @@ func TestGridEncodesKeysForTheChild(t *testing.T) {
 				t.Fatalf("SendKey(%s) produced no bytes — is the drain running?", tc.name)
 			}
 		})
+	}
+}
+
+// drainOne starts a reader and returns the first chunk SendKey produces,
+// or "" if nothing arrives. SendKey blocks on an io.Pipe until something
+// reads, so the reader must exist before the send.
+func drainOne(t *testing.T, g term.Grid, send func()) string {
+	t.Helper()
+	out := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 64)
+		n, err := g.Read(buf)
+		if n > 0 {
+			out <- string(buf[:n])
+			return
+		}
+		if err != nil {
+			out <- ""
+		}
+	}()
+	send()
+	select {
+	case got := <-out:
+		return got
+	case <-time.After(2 * time.Second):
+		return ""
+	}
+}
+
+// Every printable character must reach the child, with or without shift.
+// This is an exhaustive sweep of a small finite space, not a sample: the
+// defect that shipped in Plan 1 was that ModShift produced no bytes at
+// all, and a seven-row table missed it.
+func TestEveryPrintableKeyProducesBytes(t *testing.T) {
+	for r := rune(0x20); r <= rune(0x7e); r++ {
+		for _, mod := range []uv.KeyMod{0, uv.ModShift} {
+			name := fmt.Sprintf("%q_mod%d", r, mod)
+			t.Run(name, func(t *testing.T) {
+				g := term.NewVT(20, 3)
+				defer g.Close()
+				k := uv.KeyPressEvent{Code: r, Text: string(r), Mod: mod}
+				got := drainOne(t, g, func() { g.SendKey(uv.KeyEvent(k)) })
+				if got == "" {
+					t.Fatalf("no bytes produced for %q with mod %d", r, mod)
+				}
+				if got != string(r) {
+					t.Errorf("got %q, want %q", got, string(r))
+				}
+			})
+		}
+	}
+}
+
+// For printable input the encode path must be the identity function.
+// This needs no enumeration of cases and catches future encoding gaps
+// that no hand-written table would anticipate.
+func TestPrintableInputRoundTrips(t *testing.T) {
+	const sample = "The Quick Brown Fox! @#$%^&*() 0123456789 {}[]|\\;:'\",.<>/?"
+	for _, r := range sample {
+		g := term.NewVT(20, 3)
+		k := uv.KeyPressEvent{Code: r, Text: string(r)}
+		got := drainOne(t, g, func() { g.SendKey(uv.KeyEvent(k)) })
+		if got != string(r) {
+			t.Errorf("round trip failed for %q: got %q", r, got)
+		}
+		g.Close()
 	}
 }
