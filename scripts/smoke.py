@@ -11,10 +11,13 @@ Cases derive from the spec's user-journey list. Add one per feature.
 """
 
 import argparse
+import fcntl
 import os
 import re
 import signal
+import struct
 import sys
+import termios
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -261,6 +264,30 @@ def case_shell_control_keys_pass_through(fail):
     s.quit_and_reap()
 
 
+def case_host_resize_resizes_panes(fail):
+    # A pane's child must learn its new size, or it keeps wrapping at the
+    # old width and full-screen apps lay out wrong.
+    s = Session(cols=120, rows=30)
+    s.type("stty size\r", settle=1.4)
+    first = re.findall(rb"(\d+) (\d+)", s.output())
+    if not first:
+        fail("could not read the pane's initial size")
+        s.quit_and_reap()
+        return
+    before = first[-1]
+
+    fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
+    time.sleep(1.5)
+    mark = len(s.output())
+    s.type("stty size\r", settle=1.6)
+    after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
+    if not after:
+        fail("pane produced no size output after the host resized")
+    elif after[-1] == before:
+        fail(f"pane size unchanged after host resize: {before} -- SIGWINCH never reached the child")
+    s.quit_and_reap()
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
@@ -273,6 +300,7 @@ CASES = [
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names real keys", case_status_line_names_real_keys),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
+    ("host resize resizes panes", case_host_resize_resizes_panes),
 ]
 
 

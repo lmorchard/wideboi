@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"log"
 	"os"
 	"os/exec"
 	"strconv"
@@ -94,6 +95,7 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 
 	case protocol.MsgResize:
 		s.cols, s.rows = m.Cols, m.Rows
+		s.resizePanesLocked()
 		s.broadcastLayoutLocked(ctx)
 
 	case protocol.MsgVerb:
@@ -104,12 +106,15 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			s.strip.FocusRight()
 		case protocol.VerbNewColumn:
 			_, _ = s.spawnPaneLocked()
+			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
 			s.strip.CycleWidth()
+			s.resizePanesLocked()
 		case protocol.VerbKillPane:
 			focusedID := s.strip.FocusedPaneID()
 			if focusedID > 0 {
 				s.removePaneLocked(focusedID)
+				s.resizePanesLocked()
 			}
 		case protocol.VerbSmartJump:
 			for id, p := range s.panes {
@@ -202,6 +207,25 @@ func (s *Server) removePaneLocked(id int) {
 	go p.Close()
 }
 
+// resizePanesLocked pushes each pane's current placement size down to its
+// emulator and child. Call it after anything that changes geometry: a host
+// resize, a new column, a width cycle, a pane closing.
+//
+// Errors are collected rather than returned: one child failing TIOCSWINSZ
+// must not stop the others from being resized.
+func (s *Server) resizePanesLocked() {
+	for _, pl := range s.strip.ComputePlacements(s.cols, s.rows) {
+		p, ok := s.panes[pl.PaneID]
+		if !ok {
+			continue
+		}
+		w, h := pl.Dst.Dx(), pl.Dst.Dy()
+		if err := p.Resize(w, h); err != nil {
+			log.Printf("wideboi: resize pane %d to %dx%d: %v", pl.PaneID, w, h, err)
+		}
+	}
+}
+
 func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
 	statuses := make(map[int]string)
@@ -214,6 +238,20 @@ func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 		PaneStatuses: statuses,
 	}
 	s.transport.SendServer(ctx, snapshot)
+}
+
+// PaneSize reports pane id's current logical dimensions, as last set by
+// resizePanesLocked. Exposed for observability and tests, which otherwise
+// have no way to see across the package boundary that a resize landed.
+func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.panes[id]
+	if !ok {
+		return 0, 0, false
+	}
+	cols, rows = p.Size()
+	return cols, rows, true
 }
 
 // DrawPane draws pane id's cell buffer onto dst within area.

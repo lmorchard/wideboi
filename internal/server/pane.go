@@ -144,10 +144,24 @@ func (p *Pane) Draw(dst uv.Screen, area image.Rectangle) {
 	p.grid.Draw(dst, area)
 }
 
-// Resize resizes the emulator's dimensions.
-func (p *Pane) Resize(cols, rows int) {
+// Resize changes the pane's logical size: the emulator's grid and the
+// child's PTY window, in that order.
+//
+// The emulator first because term.Reflow reads its cells out, reflows
+// them and writes them back, so the grid must be consistent before the
+// child is told to redraw against it. The child second because
+// TIOCSWINSZ raises SIGWINCH, and a well-behaved full-screen app repaints
+// immediately.
+func (p *Pane) Resize(cols, rows int) error {
+	if cols <= 0 || rows <= 0 {
+		return fmt.Errorf("pane %d: refusing resize to %dx%d", p.id, cols, rows)
+	}
+	if cols == p.cols && rows == p.rows {
+		return nil
+	}
 	p.cols, p.rows = cols, rows
 	p.grid.Resize(cols, rows)
+	return p.pty.Resize(cols, rows)
 }
 
 // Write forwards raw bytes to the child process.
