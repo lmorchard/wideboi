@@ -151,11 +151,10 @@ func (s *Strip) PaneIDs() []int {
 }
 
 // AvailHeight is the row count available to every pane in a viewport of
-// the given height: the viewport minus the one row the status line always
-// consumes. It is uniform across every column, visible or not, which is
-// what lets a caller size an off-screen pane without a Placement for it.
+// the given height: the viewport minus 2 rows (1 row header bar + 1 row bottom
+// status bar).
 func AvailHeight(viewportHeight int) int {
-	return max(viewportHeight-1, 1)
+	return max(viewportHeight-2, 1)
 }
 
 // FocusPaneID sets focus to the column containing paneID if it exists.
@@ -206,11 +205,11 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 	}
 
 	placements := make([]Placement, 0, len(s.columns))
-	viewportRect := image.Rect(0, 0, viewportWidth, availHeight)
+	viewportRect := image.Rect(0, 1, viewportWidth, 1+availHeight)
 
 	for i, c := range s.columns {
 		screenX := colX[i] - s.scrollX
-		screenRect := image.Rect(screenX, 0, screenX+c.Width, availHeight)
+		screenRect := image.Rect(screenX, 1, screenX+c.Width, 1+availHeight)
 
 		dst := screenRect.Intersect(viewportRect)
 		if dst.Empty() {
@@ -218,7 +217,7 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 		}
 
 		srcX := dst.Min.X - screenX
-		srcY := dst.Min.Y
+		srcY := dst.Min.Y - 1
 		src := image.Rect(srcX, srcY, srcX+dst.Dx(), srcY+dst.Dy())
 
 		placements = append(placements, Placement{

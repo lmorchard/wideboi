@@ -61,13 +61,13 @@ func TestStripComputesPlacements(t *testing.T) {
 
 	// Two columns filling 80x24 viewport
 	p1 := placements[0]
-	if p1.PaneID != 1 || p1.Dst != image.Rect(0, 0, 40, 23) {
-		t.Errorf("p1 = %+v, want Dst (0,0,40,23)", p1)
+	if p1.PaneID != 1 || p1.Dst != image.Rect(0, 1, 40, 23) {
+		t.Errorf("p1 = %+v, want Dst (0,1,40,23)", p1)
 	}
 
 	p2 := placements[1]
-	if p2.PaneID != 2 || p2.Dst != image.Rect(41, 0, 80, 23) {
-		t.Errorf("p2 = %+v, want Dst (41,0,80,23)", p2)
+	if p2.PaneID != 2 || p2.Dst != image.Rect(41, 1, 80, 23) {
+		t.Errorf("p2 = %+v, want Dst (41,1,80,23)", p2)
 	}
 }
 

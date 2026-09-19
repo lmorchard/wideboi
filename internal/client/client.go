@@ -136,14 +136,45 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 		if p.PaneID == c.focusPaneID {
 			focusedPlacement = p
 		}
+
+		// Draw 1-row pane header bar at Y = 0
+		headerW := p.Dst.Dx()
+		if headerW > 0 {
+			glyph := c.paneStatuses[p.PaneID]
+			var header string
+			if glyph != "" && glyph != " " {
+				header = fmt.Sprintf(" [%d] %s", p.PaneID, glyph)
+			} else {
+				header = fmt.Sprintf(" [%d]", p.PaneID)
+			}
+			if p.PaneID == c.focusPaneID {
+				header += " ★"
+			}
+			if runeLen(header) < headerW {
+				header += strings.Repeat(" ", headerW-runeLen(header))
+			}
+			header = truncateRunes(header, headerW)
+
+			if p.PaneID == c.focusPaneID {
+				compose.WriteStyled(scr, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
+			} else {
+				compose.WriteString(scr, p.Dst.Min.X, 0, header)
+			}
+		}
+
 		if drawPane != nil {
 			drawPane(p.PaneID, scr, p.Dst)
 		}
 
-		// Draw column divider on right edge if applicable
+		// Draw column divider on right edge if applicable.
+		// Bold ┃ if adjacent to focused pane, otherwise │.
 		if p.Dst.Max.X < c.cols {
+			divider := "│"
+			if p.PaneID == c.focusPaneID || (i+1 < len(c.placements) && c.placements[i+1].PaneID == c.focusPaneID) {
+				divider = "┃"
+			}
 			for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-				compose.WriteString(scr, p.Dst.Max.X, y, "│")
+				compose.WriteString(scr, p.Dst.Max.X, y, divider)
 			}
 		}
 	}
@@ -252,7 +283,7 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 // which panes want attention, and how to reach the verbs. c.mu must be
 // held.
 func (c *Client) normalStatusLocked(budget int) string {
-	status := fmt.Sprintf("focus: pane %d", c.focusPaneID)
+	status := fmt.Sprintf("focus: [pane %d ★]", c.focusPaneID)
 	for _, p := range c.placements {
 		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
 			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)

@@ -121,8 +121,8 @@ func TestResizePropagatesToPanes(t *testing.T) {
 			if cols <= 0 || cols > 100 {
 				t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", pl.PaneID, cols)
 			}
-			if rows != 39 {
-				t.Errorf("pane %d has rows=%d, want 39 (the new 40-row viewport minus the status line)", pl.PaneID, rows)
+			if rows != 38 {
+				t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", pl.PaneID, rows)
 			}
 		}
 	case <-time.After(2 * time.Second):
@@ -178,8 +178,8 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 			if cols != 59 {
 				t.Errorf("pane %d has cols=%d, want 59 (its full column width) regardless of its %d-wide on-screen crop", pl.PaneID, cols, pl.Dst.Dx())
 			}
-			if rows != 19 {
-				t.Errorf("pane %d has rows=%d, want 19 (the 20-row viewport minus the status line)", pl.PaneID, rows)
+			if rows != 18 {
+				t.Errorf("pane %d has rows=%d, want 18 (the 20-row viewport minus header and status line)", pl.PaneID, rows)
 			}
 		}
 		if !sawClippedPlacement {
@@ -250,8 +250,8 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 		if cols != 59 {
 			t.Errorf("pane %d has cols=%d, want 59 (its full column width)", id, cols)
 		}
-		if rows != 19 {
-			t.Errorf("pane %d has rows=%d, want 19 (the 20-row viewport minus the status line) -- even a pane with no Placement must track the current viewport height", id, rows)
+		if rows != 18 {
+			t.Errorf("pane %d has rows=%d, want 18 (the 20-row viewport minus header and status line) -- even a pane with no Placement must track the current viewport height", id, rows)
 		}
 	}
 
