@@ -22,11 +22,11 @@ const keyQueueDepth = 256
 
 // Pane is the server-side owner of a PTY-backed process and VT emulator.
 type Pane struct {
-	id      int
-	pty     *ptyx.Pane
-	grid    term.Grid
-	cols    int
-	rows    int
+	id   int
+	pty  *ptyx.Pane
+	grid term.Grid
+	cols int
+	rows int
 
 	keys    chan uv.KeyEvent
 	dropped atomic.Uint64

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"image"
 	"os"
 	"os/exec"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -17,18 +19,18 @@ import (
 
 // Server manages multiplexer layout, PTY sessions, and client protocol messages.
 type Server struct {
-	mu          sync.Mutex
-	strip       *layout.Strip
-	panes       map[int]*Pane
-	nextPaneID  int
-	cols        int
-	rows        int
-	shell       string
-	cwd         string
-	transport   *transport.InProcChannel
-	escapees    map[int]struct{} // Tracked descendant PIDs for teardown
-	stopCh      chan struct{}
-	closeOnce   sync.Once
+	mu         sync.Mutex
+	strip      *layout.Strip
+	panes      map[int]*Pane
+	nextPaneID int
+	cols       int
+	rows       int
+	shell      string
+	cwd        string
+	transport  *transport.InProcChannel
+	escapees   map[int]struct{} // Tracked descendant PIDs for teardown
+	stopCh     chan struct{}
+	closeOnce  sync.Once
 }
 
 // NewServer initializes a Server instance connected via transport.
@@ -84,6 +86,8 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		s.cols, s.rows = m.Cols, m.Rows
 		if len(s.panes) == 0 {
 			_, _ = s.spawnPaneLocked()
+			_, _ = s.spawnPaneLocked()
+			s.strip.FocusLeft()
 		}
 		s.broadcastLayoutLocked(ctx)
 
@@ -111,7 +115,11 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 
 	case protocol.MsgInput:
 		if p, ok := s.panes[m.PaneID]; ok {
-			_, _ = p.Write(m.Data)
+			if len(m.Data) > 0 {
+				_, _ = p.Write(m.Data)
+			} else {
+				p.SendKey(m.Key)
+			}
 		}
 	}
 }
@@ -187,6 +195,26 @@ func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 		FocusPaneID: s.strip.FocusedPaneID(),
 	}
 	s.transport.SendServer(ctx, snapshot)
+}
+
+// DrawPane draws pane id's cell buffer onto dst within area.
+func (s *Server) DrawPane(id int, dst uv.Screen, area image.Rectangle) {
+	s.mu.Lock()
+	p, ok := s.panes[id]
+	s.mu.Unlock()
+	if ok && p != nil {
+		p.Draw(dst, area)
+	}
+}
+
+// CursorInfo returns the cursor position and visibility for pane id.
+func (s *Server) CursorInfo(id int) (image.Point, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.panes[id]; ok && p != nil {
+		return p.CursorPosition(), p.CursorVisible()
+	}
+	return image.Point{}, false
 }
 
 // pollDescendantsLocked walks ps to maintain a list of active descendant PIDs.

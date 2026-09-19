@@ -4,6 +4,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"image"
 	"sync"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -92,18 +93,21 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	}
 }
 
-// Draw composites active pane surfaces, dividers, and status bar onto host screen scr.
-func (c *Client) Draw(scr uv.Screen) {
+// Draw composites active pane surfaces, dividers, host cursor, and status bar onto host screen scr.
+func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for _, p := range c.placements {
-		m, ok := c.mirrors[p.PaneID]
-		if !ok || m == nil {
-			continue
+	var focusedPlacement *protocol.PlacementData
+
+	for i := range c.placements {
+		p := &c.placements[i]
+		if p.PaneID == c.focusPaneID {
+			focusedPlacement = p
 		}
-		// Blit pane surface onto host screen destination rect
-		compose.Blit(scr, m.Surface, p.Dst)
+		if drawPane != nil {
+			drawPane(p.PaneID, scr, p.Dst)
+		}
 
 		// Draw column divider on right edge if applicable
 		if p.Dst.Max.X < c.cols {
@@ -116,6 +120,24 @@ func (c *Client) Draw(scr uv.Screen) {
 	// Status bar on bottom row
 	status := fmt.Sprintf(" focus: pane %d   ctrl+o switch   ctrl+n new col   ctrl+w cycle width   ctrl+q quit ", c.focusPaneID)
 	compose.WriteString(scr, 0, c.rows-1, status)
+
+	// Host cursor position and visibility
+	if focusedPlacement != nil && cursorInfo != nil {
+		cp, visible := cursorInfo(c.focusPaneID)
+		fx := focusedPlacement.Dst.Min.X + cp.X - focusedPlacement.Src.Min.X
+		fy := focusedPlacement.Dst.Min.Y + cp.Y - focusedPlacement.Src.Min.Y
+		if visible && fx >= focusedPlacement.Dst.Min.X && fx <= focusedPlacement.Dst.Max.X &&
+			fy >= focusedPlacement.Dst.Min.Y && fy <= focusedPlacement.Dst.Max.Y {
+			fx = min(fx, max(focusedPlacement.Dst.Max.X-1, 0))
+			fy = min(fy, max(focusedPlacement.Dst.Max.Y-1, 0))
+			scr.SetCursorPosition(fx, fy)
+			scr.ShowCursor()
+		} else {
+			scr.HideCursor()
+		}
+	} else {
+		scr.HideCursor()
+	}
 }
 
 // SendVerb forwards a layout action request to the server.

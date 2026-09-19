@@ -2,7 +2,11 @@
 // between client and server across the transport boundary.
 package protocol
 
-import "image"
+import (
+	"image"
+
+	uv "github.com/charmbracelet/ultraviolet"
+)
 
 type VerbType int
 
@@ -34,9 +38,10 @@ type MsgVerb struct {
 	Verb VerbType
 }
 
-// MsgInput carries raw keystrokes/data destined for a specific pane's PTY.
+// MsgInput carries decoded key events or pasted text destined for a specific pane's PTY.
 type MsgInput struct {
 	PaneID int
+	Key    uv.KeyEvent
 	Data   []byte
 }
 

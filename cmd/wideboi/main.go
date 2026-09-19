@@ -139,7 +139,7 @@ func run() error {
 		case <-frame.C:
 			screenLock.Lock()
 			if !stopped.Load() {
-				cli.Draw(scr)
+				cli.Draw(scr, srv.DrawPane, srv.CursorInfo)
 				scr.Render()
 				_ = scr.Flush()
 			}

@@ -78,7 +78,7 @@ func TestStripScrollsToKeepFocusVisible(t *testing.T) {
 
 	// Focused on column 3 (rightmost)
 	placements := s.ComputePlacements(80, 24)
-	
+
 	// Column 3 must be visible on screen
 	var p3 *layout.Placement
 	for i := range placements {
