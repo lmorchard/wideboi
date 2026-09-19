@@ -1,0 +1,20 @@
+# wideboi startup wire snapshot
+# Regenerate: make golden. Review diffs; do not blind-accept.
+
+## escape sequences
+ALT_SCREEN_ENTER: 2
+ALT_SCREEN_EXIT: 1
+CURSOR_SHOW: present
+CURSOR_HIDE: present
+CURSOR_TO(r,c): present
+CLEAR_SCREEN: 2
+
+## words rendered
+2027
+ctrl+o
+ctrl+q
+focus
+pane
+quit
+sh-3
+switch
