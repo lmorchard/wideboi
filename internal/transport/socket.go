@@ -13,6 +13,7 @@ import (
 )
 
 func init() {
+	gob.Register(protocol.ColumnData{})
 	gob.Register(protocol.MsgAttach{})
 	gob.Register(protocol.MsgVerb{})
 	gob.Register(protocol.MsgInput{})

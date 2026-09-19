@@ -11,6 +11,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/client/compose"
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -29,6 +30,7 @@ type Client struct {
 	transport    *transport.InProcChannel
 	cols         int
 	rows         int
+	strip        *layout.Strip
 	placements   []protocol.PlacementData
 	focusPaneID  int
 	paneStatuses map[int]string
@@ -47,6 +49,7 @@ func NewClient(tp *transport.InProcChannel, cols, rows int, prefixLabel string) 
 		transport:   tp,
 		cols:        cols,
 		rows:        rows,
+		strip:       layout.NewStrip(),
 		prefixLabel: prefixLabel,
 		mirrors:     make(map[int]*PaneMirror),
 	}
@@ -65,7 +68,12 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	switch m := msg.(type) {
 	case protocol.MsgLayoutSnapshot:
 		oldFocus := c.focusPaneID
-		c.placements = m.Placements
+		if len(m.Columns) > 0 {
+			c.strip.SyncColumns(m.Columns, m.FocusPaneID)
+			c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+		} else {
+			c.placements = m.Placements
+		}
 		c.focusPaneID = m.FocusPaneID
 		c.paneStatuses = m.PaneStatuses
 
@@ -376,6 +384,9 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	c.mu.Lock()
 	c.cols = cols
 	c.rows = rows
+	if c.strip != nil && c.strip.ColCount() > 0 {
+		c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+	}
 	c.mu.Unlock()
 
 	c.transport.SendClient(ctx, protocol.MsgResize{Cols: cols, Rows: rows})
