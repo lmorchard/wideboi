@@ -27,6 +27,7 @@ type Strip struct {
 	columns    []Column
 	focusIndex int
 	scrollX    int
+	strategy   Strategy
 }
 
 // NewStrip creates an empty column strip.
@@ -34,7 +35,21 @@ func NewStrip() *Strip {
 	return &Strip{
 		columns:    make([]Column, 0),
 		focusIndex: 0,
+		strategy:   ScrollStrategy{},
 	}
+}
+
+// SetStrategy updates the layout strategy used by ComputePlacements.
+func (s *Strip) SetStrategy(st Strategy) {
+	s.strategy = st
+}
+
+// Strategy returns the current layout strategy.
+func (s *Strip) Strategy() Strategy {
+	if s.strategy == nil {
+		return ScrollStrategy{}
+	}
+	return s.strategy
 }
 
 // ColCount returns the number of columns.
@@ -161,9 +176,9 @@ type Strategy interface {
 // ScrollStrategy calculates placements for a scrolling horizontal strip of columns.
 type ScrollStrategy struct{}
 
-// ComputePlacements calculates screen destination and source crop rectangles for a scrolling strip.
+// ComputePlacements calculates screen destination and source crop rectangles.
 func (s *Strip) ComputePlacements(viewportWidth, viewportHeight int) []Placement {
-	return ScrollStrategy{}.ComputePlacements(s, viewportWidth, viewportHeight)
+	return s.Strategy().ComputePlacements(s, viewportWidth, viewportHeight)
 }
 
 // ComputePlacements calculates screen destination and source crop rectangles.
