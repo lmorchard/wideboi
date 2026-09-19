@@ -176,6 +176,30 @@ def case_status_line_names_real_keys(fail):
     s.quit_and_reap()
 
 
+def case_shell_control_keys_pass_through(fail):
+    # cat -v echoes control bytes visibly as ^X, so we can see exactly
+    # which ones survive the multiplexer's binding matrix. Plain "cat -v"
+    # is not enough: on a canonical-mode pty (the pane's default), the
+    # kernel's own line discipline treats ctrl+w as WERASE and silently
+    # eats it before cat ever reads it -- a false negative that exists
+    # even with wideboi entirely out of the picture. Disabling icanon
+    # and iexten first removes that kernel-level interception so this
+    # only measures what the multiplexer itself does with the byte.
+    s = Session()
+    s.type("stty -icanon -iexten -echo; cat -v\r", settle=1.3)
+    before = len(s.output())
+    for byte in (b"\x17", b"\x0c", b"\x0e", b"\x08"):  # ctrl+w l n h
+        os.write(s.fd, byte)
+        time.sleep(0.5)
+    s.type("\r", settle=1.2)
+    seen = s.output()[before:]
+    for name, mark in (("ctrl+w", b"^W"), ("ctrl+l", b"^L"),
+                       ("ctrl+n", b"^N"), ("ctrl+h", b"^H")):
+        if mark not in seen:
+            fail(f"{name} was swallowed by the multiplexer; the shell needs it")
+    s.quit_and_reap()
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
@@ -187,6 +211,7 @@ CASES = [
     ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names real keys", case_status_line_names_real_keys),
+    ("shell control keys pass through", case_shell_control_keys_pass_through),
 ]
 
 

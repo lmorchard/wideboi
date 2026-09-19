@@ -38,7 +38,7 @@ To check: press `alt+n`. A new column should open.
 | `alt+u` / `alt+d` | scroll the focused pane's history |
 | `alt+q` | quit |
 
-Everything else goes to the focused pane.
+Everything else goes to the focused pane, including `ctrl+w`, `ctrl+l` and `ctrl+c`.
 
 ## Development
 

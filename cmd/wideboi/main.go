@@ -119,15 +119,21 @@ func run() error {
 
 			case uv.KeyPressEvent:
 				switch {
+				// ctrl fallbacks are deliberately minimal. ctrl+w, ctrl+l,
+				// ctrl+n and ctrl+h are delete-word, clear-screen,
+				// next-history and backspace: claiming them makes every
+				// shell in every pane worse. ctrl+q and ctrl+o survive as
+				// the escape hatch for a terminal that is not sending
+				// Option as Meta.
 				case ev.MatchString("alt+q") || ev.MatchString("ctrl+q"):
 					return nil
-				case ev.MatchString("alt+h") || ev.MatchString("alt+left") || ev.MatchString("ctrl+h"):
+				case ev.MatchString("alt+h") || ev.MatchString("alt+left"):
 					cli.SendVerb(ctx, protocol.VerbFocusLeft)
-				case ev.MatchString("alt+l") || ev.MatchString("alt+right") || ev.MatchString("ctrl+l") || ev.MatchString("ctrl+o"):
+				case ev.MatchString("alt+l") || ev.MatchString("alt+right") || ev.MatchString("ctrl+o"):
 					cli.SendVerb(ctx, protocol.VerbFocusRight)
-				case ev.MatchString("alt+n") || ev.MatchString("ctrl+n"):
+				case ev.MatchString("alt+n"):
 					cli.SendVerb(ctx, protocol.VerbNewColumn)
-				case ev.MatchString("alt+w") || ev.MatchString("ctrl+w"):
+				case ev.MatchString("alt+w"):
 					cli.SendVerb(ctx, protocol.VerbCycleWidth)
 				case ev.MatchString("alt+x"):
 					cli.SendVerb(ctx, protocol.VerbKillPane)
