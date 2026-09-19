@@ -70,6 +70,10 @@ type Grid interface {
 	// sequences or output heuristics.
 	Status() PaneStatus
 
+	ScrollbackLen() int
+	ScrollOffset() int
+	SetScrollOffset(offset int)
+
 	// Resize changes the emulator's dimensions, reflowing the visible
 	// screen so narrowing does not destroy text.
 	Resize(cols, rows int)
@@ -131,6 +135,7 @@ type vtGrid struct {
 	status        atomic.Int32
 	lastWriteTime atomic.Pointer[time.Time]
 	sawOSC133     atomic.Bool
+	scrollOffset  atomic.Int32
 }
 
 // NewVT returns a Grid backed by charmbracelet/x/vt.
@@ -273,8 +278,47 @@ func (g *vtGrid) CursorPosition() image.Point {
 
 func (g *vtGrid) CursorVisible() bool { return g.cursorVisible.Load() }
 
+func (g *vtGrid) ScrollbackLen() int { return g.em.ScrollbackLen() }
+func (g *vtGrid) ScrollOffset() int  { return int(g.scrollOffset.Load()) }
+
+func (g *vtGrid) SetScrollOffset(offset int) {
+	maxOffset := g.em.ScrollbackLen()
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	g.scrollOffset.Store(int32(offset))
+}
+
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
-	g.em.Draw(dst, area)
+	offset := int(g.scrollOffset.Load())
+	sbLen := g.em.ScrollbackLen()
+	if offset <= 0 || sbLen == 0 {
+		g.em.Draw(dst, area)
+		return
+	}
+
+	if offset > sbLen {
+		offset = sbLen
+	}
+
+	w, h := area.Dx(), area.Dy()
+	for y := 0; y < h; y++ {
+		sbY := (sbLen - offset) + y
+		for x := 0; x < w; x++ {
+			var cell *uv.Cell
+			if sbY < sbLen {
+				cell = g.em.ScrollbackCellAt(x, sbY)
+			} else {
+				cell = g.em.CellAt(x, sbY-sbLen)
+			}
+			if cell != nil {
+				dst.SetCell(area.Min.X+x, area.Min.Y+y, cell)
+			}
+		}
+	}
 }
 
 // Close closes the underlying emulator, which unblocks any goroutine

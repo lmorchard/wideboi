@@ -133,6 +133,10 @@ func run() error {
 					cli.SendVerb(ctx, protocol.VerbKillPane)
 				case ev.MatchString("alt+j"):
 					cli.SendVerb(ctx, protocol.VerbSmartJump)
+				case ev.MatchString("alt+u") || ev.MatchString("pgup"):
+					cli.SendScroll(ctx, 10)
+				case ev.MatchString("alt+d") || ev.MatchString("pgdn"):
+					cli.SendScroll(ctx, -10)
 				default:
 					cli.SendKey(ctx, uv.KeyEvent(ev))
 				}

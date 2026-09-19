@@ -52,6 +52,12 @@ type MsgResize struct {
 	Rows int
 }
 
+// MsgScroll requests a change in scrollback offset for a pane.
+type MsgScroll struct {
+	PaneID int
+	Delta  int
+}
+
 // MsgLayoutSnapshot is sent by the server to update the client on placements, focus, and statuses.
 type MsgLayoutSnapshot struct {
 	Placements   []PlacementData

@@ -175,6 +175,17 @@ func (c *Client) SendInput(ctx context.Context, data []byte) {
 	}
 }
 
+// SendScroll requests a scrollback offset delta for the focused pane.
+func (c *Client) SendScroll(ctx context.Context, delta int) {
+	c.mu.Lock()
+	focusedID := c.focusPaneID
+	c.mu.Unlock()
+
+	if focusedID > 0 {
+		c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: focusedID, Delta: delta})
+	}
+}
+
 // SendResize notifies the server of host window geometry changes.
 func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	c.mu.Lock()
