@@ -113,6 +113,31 @@ func TestStripKillPaneAdjustsFocus(t *testing.T) {
 	}
 }
 
+func TestCycleWidthTransitionsPresets(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 99, 20) // Custom initial width
+
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 40 {
+		t.Errorf("after 1st cycle from 99: width = %d, want 40", w)
+	}
+
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 60 {
+		t.Errorf("after 2nd cycle: width = %d, want 60", w)
+	}
+
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 80 {
+		t.Errorf("after 3rd cycle: width = %d, want 80", w)
+	}
+
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 40 {
+		t.Errorf("after 4th cycle: width = %d, want 40", w)
+	}
+}
+
 func genStrip(t *rapid.T) (*layout.Strip, map[int]int) {
 	numCols := rapid.IntRange(1, 10).Draw(t, "numCols")
 	s := layout.NewStrip()

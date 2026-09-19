@@ -77,16 +77,17 @@ func (s *Strip) FocusRight() {
 	}
 }
 
-// CycleWidth cycles the focused column's width preset.
+// CycleWidth cycles the focused column's width preset (40 -> 60 -> 80 -> 40).
+// Any custom width (e.g. a spawn width of 99) cycles to 40 first.
 func (s *Strip) CycleWidth() {
 	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) {
 		return
 	}
 	cur := s.columns[s.focusIndex].Width
 	switch {
-	case cur <= 40:
+	case cur < 60:
 		s.columns[s.focusIndex].Width = 60
-	case cur <= 60:
+	case cur < 80:
 		s.columns[s.focusIndex].Width = 80
 	default:
 		s.columns[s.focusIndex].Width = 40
