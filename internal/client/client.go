@@ -23,13 +23,14 @@ type PaneMirror struct {
 
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
 type Client struct {
-	mu          sync.Mutex
-	transport   *transport.InProcChannel
-	cols        int
-	rows        int
-	placements  []protocol.PlacementData
-	focusPaneID int
-	mirrors     map[int]*PaneMirror
+	mu           sync.Mutex
+	transport    *transport.InProcChannel
+	cols         int
+	rows         int
+	placements   []protocol.PlacementData
+	focusPaneID  int
+	paneStatuses map[int]string
+	mirrors      map[int]*PaneMirror
 }
 
 // NewClient initializes a Client instance.
@@ -56,6 +57,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	case protocol.MsgLayoutSnapshot:
 		c.placements = m.Placements
 		c.focusPaneID = m.FocusPaneID
+		c.paneStatuses = m.PaneStatuses
 
 		activeIDs := make(map[int]bool)
 		for _, p := range c.placements {
@@ -118,7 +120,13 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 	}
 
 	// Status bar on bottom row
-	status := fmt.Sprintf(" focus: pane %d   ctrl+o switch   ctrl+n new col   ctrl+w cycle width   ctrl+q quit ", c.focusPaneID)
+	status := fmt.Sprintf(" focus: pane %d", c.focusPaneID)
+	for _, p := range c.placements {
+		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
+			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
+		}
+	}
+	status += "   $mod+o switch   $mod+n new col   $mod+w cycle width   $mod+q quit "
 	compose.WriteString(scr, 0, c.rows-1, status)
 
 	// Host cursor position and visibility
@@ -164,6 +172,17 @@ func (c *Client) SendInput(ctx context.Context, data []byte) {
 
 	if focusedID > 0 {
 		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Data: data})
+	}
+}
+
+// SendScroll requests a scrollback offset delta for the focused pane.
+func (c *Client) SendScroll(ctx context.Context, delta int) {
+	c.mu.Lock()
+	focusedID := c.focusPaneID
+	c.mu.Unlock()
+
+	if focusedID > 0 {
+		c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: focusedID, Delta: delta})
 	}
 }
 

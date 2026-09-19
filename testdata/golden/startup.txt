@@ -12,12 +12,12 @@ CLEAR_SCREEN: 2
 ## words rendered
 2027
 col
-ctrl+n
-ctrl+o
-ctrl+q
-ctrl+w
 cycle
 focus
+mod+n
+mod+o
+mod+q
+mod+w
 new
 pane
 quit

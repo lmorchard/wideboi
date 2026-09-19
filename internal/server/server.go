@@ -14,6 +14,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -110,6 +111,14 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			if focusedID > 0 {
 				s.removePaneLocked(focusedID)
 			}
+		case protocol.VerbSmartJump:
+			for id, p := range s.panes {
+				st := p.Status()
+				if st == term.StatusNeedsInput || st == term.StatusFailed {
+					s.strip.FocusPaneID(id)
+					break
+				}
+			}
 		}
 		s.broadcastLayoutLocked(ctx)
 
@@ -120,6 +129,11 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			} else {
 				p.SendKey(m.Key)
 			}
+		}
+
+	case protocol.MsgScroll:
+		if p, ok := s.panes[m.PaneID]; ok {
+			p.SetScrollOffset(p.ScrollOffset() + m.Delta)
 		}
 	}
 }
@@ -190,9 +204,14 @@ func (s *Server) removePaneLocked(id int) {
 
 func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
+	statuses := make(map[int]string)
+	for id, p := range s.panes {
+		statuses[id] = p.Status().Glyph()
+	}
 	snapshot := protocol.MsgLayoutSnapshot{
-		Placements:  layout.ToProtocol(placements),
-		FocusPaneID: s.strip.FocusedPaneID(),
+		Placements:   layout.ToProtocol(placements),
+		FocusPaneID:  s.strip.FocusedPaneID(),
+		PaneStatuses: statuses,
 	}
 	s.transport.SendServer(ctx, snapshot)
 }

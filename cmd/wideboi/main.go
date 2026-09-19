@@ -119,18 +119,24 @@ func run() error {
 
 			case uv.KeyPressEvent:
 				switch {
-				case ev.MatchString("ctrl+q"):
+				case ev.MatchString("alt+q") || ev.MatchString("ctrl+q"):
 					return nil
-				case ev.MatchString("ctrl+o"):
-					cli.SendVerb(ctx, protocol.VerbFocusRight)
-				case ev.MatchString("ctrl+h"):
+				case ev.MatchString("alt+h") || ev.MatchString("alt+left") || ev.MatchString("ctrl+h"):
 					cli.SendVerb(ctx, protocol.VerbFocusLeft)
-				case ev.MatchString("ctrl+l"):
+				case ev.MatchString("alt+l") || ev.MatchString("alt+right") || ev.MatchString("ctrl+l") || ev.MatchString("ctrl+o"):
 					cli.SendVerb(ctx, protocol.VerbFocusRight)
-				case ev.MatchString("ctrl+n"):
+				case ev.MatchString("alt+n") || ev.MatchString("ctrl+n"):
 					cli.SendVerb(ctx, protocol.VerbNewColumn)
-				case ev.MatchString("ctrl+w"):
+				case ev.MatchString("alt+w") || ev.MatchString("ctrl+w"):
 					cli.SendVerb(ctx, protocol.VerbCycleWidth)
+				case ev.MatchString("alt+x"):
+					cli.SendVerb(ctx, protocol.VerbKillPane)
+				case ev.MatchString("alt+j"):
+					cli.SendVerb(ctx, protocol.VerbSmartJump)
+				case ev.MatchString("alt+u") || ev.MatchString("pgup"):
+					cli.SendScroll(ctx, 10)
+				case ev.MatchString("alt+d") || ev.MatchString("pgdn"):
+					cli.SendScroll(ctx, -10)
 				default:
 					cli.SendKey(ctx, uv.KeyEvent(ev))
 				}

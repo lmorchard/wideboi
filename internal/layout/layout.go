@@ -106,6 +106,16 @@ func (s *Strip) KillPane(paneID int) {
 	}
 }
 
+// FocusPaneID sets focus to the column containing paneID if it exists.
+func (s *Strip) FocusPaneID(paneID int) {
+	for i, c := range s.columns {
+		if c.PaneID == paneID {
+			s.focusIndex = i
+			return
+		}
+	}
+}
+
 // ComputePlacements calculates screen destination and source crop rectangles.
 func (s *Strip) ComputePlacements(viewportWidth, viewportHeight int) []Placement {
 	if len(s.columns) == 0 || viewportWidth <= 0 || viewportHeight <= 0 {
