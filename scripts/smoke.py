@@ -24,6 +24,42 @@ from ptylib import (
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
+DIVIDER = "│".encode()
+# The renderer diffs cell-by-cell, so a divider redrawn at an unchanged
+# column may ride on the cursor's position left over from the previous
+# write with no cursor move of its own. But whenever a divider's column
+# actually changes, that new position requires an absolute cursor move
+# (optionally followed by an SGR reset) right before the glyph -- so this
+# reliably surfaces *new* divider columns appearing in a byte range,
+# which is exactly the signal a column-width change should produce.
+DIVIDER_CUP = re.compile(rb"\x1b\[(\d+);(\d+)H(?:\x1b\[[0-9;]*m)*" + DIVIDER)
+# The status line's "focus: pane N" prefix is only ever transmitted once
+# (the first frame). After that the diffing renderer only rewrites the
+# digit itself, addressed by an absolute cursor move to column 13 of the
+# status row (len("focus: pane ") == 12). Combine the one-time literal
+# with later positional updates, in stream order, to track the current
+# focused pane ID across a whole session.
+FOCUS_LITERAL = re.compile(rb"focus: pane (\d+)")
+
+
+def _focus_digit_re(status_row: int) -> re.Pattern:
+    return re.compile(
+        rb"\x1b\[" + str(status_row).encode() + rb";13H(?:\x1b\[[0-9;]*m)*(\d+)"
+    )
+
+
+def focus_pane_id(out: bytes, status_row: int) -> int | None:
+    """The most recently reported focused pane ID, or None if never seen."""
+    matches = [(m.start(), int(m.group(1))) for m in FOCUS_LITERAL.finditer(out)]
+    matches += [(m.start(), int(m.group(1))) for m in _focus_digit_re(status_row).finditer(out)]
+    if not matches:
+        return None
+    return max(matches, key=lambda t: t[0])[1]
+
+
+def divider_columns(out: bytes) -> set[int]:
+    """Columns where a divider glyph was drawn via an absolute cursor move."""
+    return {int(c) for _, c in DIVIDER_CUP.findall(out)}
 
 
 class Session:
@@ -31,6 +67,7 @@ class Session:
 
     def __init__(self, cols=100, rows=30, startup=1.2):
         self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True)
+        self.rows = rows
         self.drainer = Drainer(self.fd)
         self.drainer.start()
         time.sleep(startup)
@@ -106,17 +143,41 @@ def case_focus_switch_moves_the_cursor(fail):
 
 
 def case_new_column_opens_pane(fail):
+    # "Typing reaches a pane" is true whether or not a column ever opened
+    # -- ctrl+n used to be routed to VerbNewColumn and to the pane itself
+    # equally well as far as that assertion could tell. Pin down the
+    # verb's actual effect instead: the focused pane ID must change, and
+    # the next input must land in that new, distinct pane.
     s = Session()
-    s.type("\x0e")  # ctrl+n
+    before_focus = focus_pane_id(s.output(), s.rows)
+    before_len = len(s.output())
+    s.type("\x1bn")  # alt+n -> new column
+    after_focus = focus_pane_id(s.output(), s.rows)
+    if before_focus is None or after_focus is None:
+        fail("no focus-pane-id observed around alt+n")
+        return
+    if after_focus == before_focus:
+        fail(f"alt+n did not change the focused pane: still pane {after_focus}")
     s.type("echo pane-three\r")
-    if b"pane-three" not in s.output():
-        fail("input did not reach newly opened column pane")
+    landed = s.output()[before_len:]
+    if b"pane-three" not in landed:
+        fail("input did not reach the newly opened column pane")
     s.quit_and_reap()
 
 
 def case_cycle_width(fail):
+    # As with new-column, "typing reaches a pane" cannot distinguish a
+    # cycled width from a no-op -- the same pane keeps taking input
+    # either way. The client draws a "│" divider at the right edge of
+    # every column short of the far edge, so a genuine width change must
+    # move that divider to a column it was not at before.
     s = Session()
-    s.type("\x17")  # ctrl+w
+    before_cols = divider_columns(s.output())
+    before_len = len(s.output())
+    s.type("\x1bw")  # alt+w -> cycle focused column's width
+    moved_to = divider_columns(s.output()[before_len:]) - before_cols
+    if not moved_to:
+        fail(f"alt+w did not move any column divider off of {sorted(before_cols)}")
     s.type("echo cycled-width\r")
     if b"cycled-width" not in s.output():
         fail("input failed to reach pane after cycling column width")
