@@ -65,11 +65,25 @@ def divider_columns(out: bytes) -> set[int]:
     return {int(c) for _, c in DIVIDER_CUP.findall(out)}
 
 
+# Cursor visibility is the one part of control mode that is assertable
+# on the wire. The bar's inversion is an SGR attribute, which survives
+# a test only if someone looks for the exact byte; the cursor is a mode
+# escape the renderer emits on change. Taking the last one in stream
+# order gives the state as of the end of the capture.
+CURSOR_VIS = re.compile(rb"\x1b\[\?25(h|l)")
+
+
+def cursor_visible(out: bytes) -> bool | None:
+    """Whether the cursor was last shown or hidden, in stream order."""
+    found = CURSOR_VIS.findall(out)
+    return None if not found else found[-1] == b"h"
+
+
 class Session:
     """A running wideboi in a pty, with helpers to type and observe."""
 
-    def __init__(self, cols=100, rows=30, startup=1.2):
-        self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True)
+    def __init__(self, cols=100, rows=30, startup=1.2, env=None):
+        self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True, env)
         self.rows = rows
         self.drainer = Drainer(self.fd)
         self.drainer.start()
@@ -132,7 +146,7 @@ def case_focus_switch_moves_the_cursor(fail):
     s = Session()
     s.type("echo pane-zero\r")
     before = s.cursor_positions()[-1] if s.cursor_positions() else None
-    s.type("\x0f")  # ctrl+o
+    s.type("\x02l\x1b")  # C-b l -> focus right, esc -> leave control mode
     s.type("echo pane-one\r")
     after = s.cursor_positions()[-1] if s.cursor_positions() else None
     if before is None or after is None:
@@ -154,13 +168,13 @@ def case_new_column_opens_pane(fail):
     s = Session()
     before_focus = focus_pane_id(s.output(), s.rows)
     before_len = len(s.output())
-    s.type("\x1bn")  # alt+n -> new column
+    s.type("\x02n\x1b")  # C-b n -> new column, esc -> leave control mode
     after_focus = focus_pane_id(s.output(), s.rows)
     if before_focus is None or after_focus is None:
-        fail("no focus-pane-id observed around alt+n")
+        fail("no focus-pane-id observed around C-b n")
         return
     if after_focus == before_focus:
-        fail(f"alt+n did not change the focused pane: still pane {after_focus}")
+        fail(f"C-b n did not change the focused pane: still pane {after_focus}")
     s.type("echo pane-three\r")
     landed = s.output()[before_len:]
     if b"pane-three" not in landed:
@@ -177,26 +191,128 @@ def case_cycle_width(fail):
     s = Session()
     before_cols = divider_columns(s.output())
     before_len = len(s.output())
-    s.type("\x1bw")  # alt+w -> cycle focused column's width
+    s.type("\x02w\x1b")  # C-b w -> cycle width, esc -> leave control mode
     moved_to = divider_columns(s.output()[before_len:]) - before_cols
     if not moved_to:
-        fail(f"alt+w did not move any column divider off of {sorted(before_cols)}")
+        fail(f"C-b w did not move any column divider off of {sorted(before_cols)}")
     s.type("echo cycled-width\r")
     if b"cycled-width" not in s.output():
         fail("input failed to reach pane after cycling column width")
     s.quit_and_reap()
 
 
-def case_alt_mod_keybindings(fail):
+def case_prefix_routes_verbs(fail):
+    # The whole point of the plan: verbs reachable without the terminal
+    # being configured to send Option as Meta.
     s = Session()
-    s.type("\x1bn")  # alt+n -> new column
-    s.type("echo alt-mod-pane3\r")
-    if b"alt-mod-pane3" not in s.output():
-        fail("alt+n failed to create new column and accept input")
-    s.type("\x1bh")  # alt+h -> focus left
+    s.type("\x02n\x1b")  # C-b n -> new column, esc -> leave control mode
+    s.type("echo prefix-pane3\r")
+    if b"prefix-pane3" not in s.output():
+        fail("C-b n failed to create a new column and accept input")
+    s.type("\x02h\x1b")  # C-b h -> focus left, esc -> leave control mode
     s.type("echo back-in-pane2\r")
     if b"back-in-pane2" not in s.output():
-        fail("alt+h failed to move focus left")
+        fail("C-b h failed to move focus left")
+    s.quit_and_reap()
+
+
+def case_control_mode_is_visible_and_escapable(fail):
+    # A mode you cannot tell you are in is worse than no mode. The bar
+    # inverts (SGR 7) and the cursor hides (DECTCEM), and both have to
+    # come back on the way out.
+    s = Session()
+    s.type("echo before-mode\r")
+    if cursor_visible(s.output()) is not True:
+        fail("cursor was not visible before entering control mode")
+    before = len(s.output())
+
+    s.type("\x02")  # C-b, and stay there
+    entered = s.output()[before:]
+    if b"\x1b[7m" not in entered:
+        fail("entering control mode did not invert the status bar (no SGR 7 on the wire)")
+    if cursor_visible(s.output()) is not False:
+        fail("entering control mode did not hide the cursor")
+    if b"q quit" not in entered:
+        fail("control mode did not show the verb menu")
+    mid = len(s.output())
+
+    s.type("\x1b")  # escape
+    if cursor_visible(s.output()) is not False and cursor_visible(s.output()) is None:
+        fail("no cursor state observed after leaving control mode")
+    if cursor_visible(s.output()) is not True:
+        fail("leaving control mode did not restore the cursor")
+    if b"for commands" not in s.output()[mid:]:
+        fail("leaving control mode did not restore the normal status line")
+
+    s.type("echo after-mode\r")
+    if b"after-mode" not in s.output():
+        fail("input did not reach the pane after leaving control mode")
+    s.quit_and_reap()
+
+
+def case_control_mode_is_sticky(fail):
+    # C-b h h must move two columns on one prefix. If the mode were
+    # one-shot the second h would land in a pane as a literal letter.
+    s = Session()
+    s.type("\x02n\x1b")  # a third column (pane 3), so there is somewhere to go
+    s.type("\x02hh\x1b")  # C-b h h -> move focus 3 -> 2 -> 1, then esc
+    s.type("echo sticky-mode-pane1\r")
+    if focus_pane_id(s.output(), s.rows) != 1:
+        fail(f"focus did not reach pane 1 after C-b h h: got pane {focus_pane_id(s.output(), s.rows)}")
+    if b"sticky-mode-pane1" not in s.output():
+        fail("input after C-b h h failed to reach pane 1")
+    s.quit_and_reap()
+
+
+def case_doubled_prefix_reaches_the_pane(fail):
+    # Without this there is no way to type the prefix byte at all, and
+    # readline's backward-char becomes unreachable in every pane.
+    #
+    # stty first for the same reason case_reclaimed_control_keys_pass_through
+    # needs it: on a canonical-mode pty the kernel's line discipline eats
+    # some control bytes before cat ever reads them.
+    s = Session()
+    s.type("stty -icanon -iexten -echo; cat -v\r", settle=1.3)
+    before = len(s.output())
+    os.write(s.fd, b"\x02\x02")
+    time.sleep(0.6)
+    s.type("\r", settle=1.2)
+    if b"^B" not in s.output()[before:]:
+        fail("a doubled prefix did not put a literal ctrl+b into the pane")
+    s.quit_and_reap()
+
+
+def case_reclaimed_control_keys_pass_through(fail):
+    # ctrl+q and ctrl+o existed only as the escape hatch for a terminal
+    # that would not send Option as Meta. The prefix is that hatch now,
+    # so these belong to the pane again -- ctrl+q is XON/XOFF resume and
+    # ctrl+o is readline's operate-and-get-next.
+    s = Session()
+    s.type("stty -icanon -iexten -ixon -echo; cat -v\r", settle=1.3)
+    before = len(s.output())
+    for byte in (b"\x11", b"\x0f"):  # ctrl+q, ctrl+o
+        os.write(s.fd, byte)
+        time.sleep(0.5)
+    s.type("\r", settle=1.2)
+    seen = s.output()[before:]
+    for name, mark in (("ctrl+q", b"^Q"), ("ctrl+o", b"^O")):
+        if mark not in seen:
+            fail(f"{name} is still claimed by the multiplexer; the pane should have it now")
+    s.quit_and_reap()
+
+
+def case_custom_prefix_from_env(fail):
+    # Configurability is not a later nicety: running wideboi inside tmux
+    # collides on ctrl+b, and the whole justification for claiming a
+    # shell key is that the user can move it.
+    s = Session(env={"WIDEBOI_PREFIX": "ctrl+a"})
+    out = s.output()
+    if b"C-a for commands" not in out:
+        fail("status line does not name the configured prefix")
+    s.type("\x01n\x1b")  # C-a n -> new column, esc -> leave control mode
+    s.type("echo custom-prefix-pane\r")
+    if b"custom-prefix-pane" not in s.output():
+        fail("the configured prefix did not route a verb")
     s.quit_and_reap()
 
 
@@ -204,8 +320,8 @@ def case_osc133_status_and_smart_jump(fail):
     s = Session()
     s.type("printf '\\033]133;A\\007'\r")
     time.sleep(0.5)
-    s.type("\x1bl")  # alt+l -> focus right
-    s.type("\x1bj")  # alt+j -> smart jump back
+    s.type("\x02l")  # C-b l -> focus right
+    s.type("j\x1b")  # sticky mode: j smart jumps back, esc -> leave control mode
     s.type("echo smart-jumped\r")
     if b"smart-jumped" not in s.output():
         fail("smart jump failed to focus pane requiring attention")
@@ -227,36 +343,34 @@ def case_quit_restores_and_reaps(fail):
         fail(f"leaked pane processes: {s.leaked}")
 
 
-def case_status_line_names_real_keys(fail):
+def case_status_line_names_the_prefix(fail):
+    # Normal mode's only affordance is the hint. If it goes missing, a
+    # new user has no way to discover that any verbs exist.
     s = Session()
     out = s.output()
     if b"$mod" in out:
         fail("status line renders the literal placeholder '$mod'")
-    # The bindings the user actually has. If a binding changes, this
-    # fails loudly and someone updates both together.
-    for key in (b"alt+h", b"alt+n", b"alt+w", b"alt+q"):
-        if key not in out:
-            fail(f"status line never mentions {key.decode()}")
+    if b"C-b for commands" not in out:
+        fail("status line never tells the user how to reach the verbs")
+    if b"alt+" in out:
+        fail("status line still advertises the removed alt bindings")
     s.quit_and_reap()
 
 
-def case_status_line_names_quit_at_80_columns(fail):
-    # 80 columns is the commonest terminal width and cmd/wideboi's own
-    # fallback when the host reports no size. The full help is 91 cells
-    # and the "focus: pane N" prefix is 13, so against a budget of 79 a
-    # single truncation used to cut the line mid-verb and never mention
-    # alt+q at all -- the same "the user is not told how to quit" defect
-    # this plan opened with, reappearing at a different width.
-    #
-    # case_status_line_names_real_keys runs at 100, the one width where
-    # alt+q happened to survive, so it could not have caught this.
+def case_control_mode_names_every_verb_at_80_columns(fail):
+    # 80 is the commonest terminal width and cmd/wideboi's own fallback
+    # when the host reports no size. Inverting the bar rather than
+    # spending cells on a badge is what makes the whole menu fit here;
+    # the spec's measurement is 71 cells against a budget of 79. If a
+    # verb ever falls off, that argument needs revisiting.
     s = Session(cols=80, rows=24)
+    s.type("\x02")
     out = s.output()
-    if b"alt+q" not in out:
-        fail("at 80 columns the status line never mentions alt+q -- the user is not told how to quit")
-    for key in (b"alt+h", b"alt+n", b"alt+w"):
-        if key not in out:
-            fail(f"at 80 columns the status line never mentions {key.decode()}")
+    for verb in (b"h/l focus", b"n new", b"w width", b"x kill",
+                 b"j jump", b"u/d scroll", b"q quit", b"esc exit"):
+        if verb not in out:
+            fail(f"at 80 columns control mode never shows {verb.decode()!r}")
+    s.type("\x1b")
     s.quit_and_reap()
 
 
@@ -325,7 +439,7 @@ def case_partly_clipped_pane_keeps_full_width(fail):
     # share of the screen did.
     s = Session(cols=120, rows=30)
 
-    s.type("\x1bl")  # alt+l -> focus right, onto pane 2
+    s.type("\x02l\x1b")  # C-b l -> focus right, onto pane 2, esc -> exit
     s.type("stty size\r", settle=1.4)
     first = re.findall(rb"(\d+) (\d+)", s.output())
     if not first:
@@ -333,14 +447,14 @@ def case_partly_clipped_pane_keeps_full_width(fail):
         s.quit_and_reap()
         return
     before_cols = first[-1][1]
-    s.type("\x1bh")  # alt+h -> focus back to pane 1, leaving pane 2 unfocused
+    s.type("\x02h\x1b")  # C-b h -> focus back to pane 1, leaving pane 2 unfocused, esc -> exit
 
     # Narrow enough that two full-width columns no longer both fit: pane 1
     # (focused) stays fully visible, pane 2 is scrolled down to a sliver.
     fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
     time.sleep(1.5)
 
-    s.type("\x1bl")  # alt+l -> focus pane 2, which was just mostly clipped
+    s.type("\x02l\x1b")  # C-b l -> focus pane 2, esc -> exit
     mark = len(s.output())
     s.type("stty size\r", settle=1.6)
     after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
@@ -365,11 +479,16 @@ CASES = [
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
     ("new column opens pane", case_new_column_opens_pane),
     ("cycle width adjusts column", case_cycle_width),
-    ("alt mod keybindings route verbs", case_alt_mod_keybindings),
+    ("prefix routes verbs", case_prefix_routes_verbs),
+    ("control mode is visible and escapable", case_control_mode_is_visible_and_escapable),
+    ("control mode is sticky", case_control_mode_is_sticky),
+    ("doubled prefix reaches the pane", case_doubled_prefix_reaches_the_pane),
+    ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
+    ("custom prefix from env", case_custom_prefix_from_env),
     ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
-    ("status line names real keys", case_status_line_names_real_keys),
-    ("status line names quit at 80 columns", case_status_line_names_quit_at_80_columns),
+    ("status line names the prefix", case_status_line_names_the_prefix),
+    ("control mode names every verb at 80 columns", case_control_mode_names_every_verb_at_80_columns),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),
     ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),

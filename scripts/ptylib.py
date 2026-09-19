@@ -91,13 +91,16 @@ def parse_signal(text: str) -> int:
         raise argparse.ArgumentTypeError(f"unrecognized signal {text!r}")
 
 
-def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool) -> tuple[int, int]:
+def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
+                 env: dict[str, str] | None = None) -> tuple[int, int]:
     """Forks argv onto a fresh pty, as the session leader with that pty as
     its controlling terminal. Winsize (if any) is applied to the pty
     before the fork, so the child can never observe an unset-then-set
     race -- it either sees the size from the moment it can ask, or (when
     set_winsize is False) never sees one at all, matching a pty that
     genuinely never had TIOCSWINSZ called on it.
+
+    env, if given, overlays the inherited environment in the child.
 
     Returns (child_pid, master_fd) in the calling (parent) process.
     """
@@ -118,9 +121,11 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool) -> tu
             os.dup2(slave_fd, 2)
             if slave_fd > 2:
                 os.close(slave_fd)
-            env = dict(os.environ)
-            env["SHELL"] = "/bin/sh"
-            os.execvpe(argv[0], argv, env)
+            child_env = dict(os.environ)
+            child_env["SHELL"] = "/bin/sh"
+            if env:
+                child_env.update(env)
+            os.execvpe(argv[0], argv, child_env)
         except Exception:
             pass
         os._exit(127)
