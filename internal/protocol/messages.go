@@ -16,6 +16,7 @@ const (
 	VerbNewColumn
 	VerbCycleWidth
 	VerbKillPane
+	VerbSmartJump
 )
 
 // PlacementData describes where a pane's content buffer is cropped from (Src)
