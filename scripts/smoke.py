@@ -367,9 +367,15 @@ def case_control_mode_names_every_verb_at_80_columns(fail):
     s.type("\x02")
     out = s.output()
     for verb in (b"h/l focus", b"n new", b"w width", b"x kill",
-                 b"j jump", b"u scroll", b"d detach", b"q quit", b"esc exit"):
+                 b"j jump", b"u scroll", b"q quit", b"esc exit"):
         if verb not in out:
             fail(f"at 80 columns control mode never shows {verb.decode()!r}")
+    # "d detach" is deliberately absent here. This Session is the
+    # in-process binary, which owns its panes directly: detaching would
+    # kill them, so the verb is offered only to a client attached over a
+    # socket. scripts/attachcheck.py asserts the other half.
+    if b"d detach" in out:
+        fail("in-process control mode offers 'd detach', which would kill the panes")
     s.type("\x1b")
     s.quit_and_reap()
 

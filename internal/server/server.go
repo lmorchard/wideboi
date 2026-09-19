@@ -194,8 +194,8 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		if p, ok := s.panes[m.PaneID]; ok {
 			if len(m.Data) > 0 {
 				_, _ = p.Write(m.Data)
-			} else {
-				p.SendKey(m.Key)
+			} else if !m.Key.IsZero() {
+				p.SendKey(m.Key.Decode())
 			}
 		}
 

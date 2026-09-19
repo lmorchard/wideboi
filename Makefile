@@ -1,4 +1,4 @@
-.PHONY: check test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden
+.PHONY: check test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check
 
 # check is the pre-merge / CI gate, so every target it depends on must be
 # read-only. fmt is deliberately NOT one of them: it rewrites files, and a
@@ -11,7 +11,7 @@
 # the exit-status/teardown contract that the other tests only exercise in
 # isolation. build's output (bin/wideboi) is gitignored, so verify-exit is
 # still read-only with respect to the tree check is judging.
-check: fmt-check lint seam-check test race verify-exit smoke
+check: fmt-check lint seam-check test race verify-exit smoke attach-check
 
 test:
 	go test ./...
@@ -94,3 +94,21 @@ golden: build
 smoke: build
 	python3 scripts/smoke.py
 	python3 scripts/golden.py
+
+# attach-check drives the client/server pair over a real Unix socket:
+# `wideboi server` in the background, `wideboi attach` on a pty, and the
+# detach/reattach cycle between them.
+#
+# smoke is structurally blind to this seam. It only ever runs the
+# in-process binary, so no message it exercises is ever serialised, and
+# a wire format that cannot encode a coloured cell passes every case in
+# it. That is not hypothetical: protocol.CellData.Style carried a
+# uv.Style, whose colour fields are interfaces gob refuses to encode,
+# and `attach` died on the first coloured prompt with the whole unit
+# suite green.
+#
+# Costs ~60s, dominated by waiting for real login shells to print real
+# prompts. It earns that by being the only target that proves the
+# feature works at all.
+attach-check: build
+	python3 scripts/attachcheck.py

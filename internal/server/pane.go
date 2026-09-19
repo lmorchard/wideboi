@@ -239,7 +239,7 @@ func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 			line[x] = protocol.CellData{
 				Content: content,
 				Width:   w,
-				Style:   c.Style,
+				Style:   protocol.EncodeStyle(c.Style),
 			}
 		}
 		lines[y] = line

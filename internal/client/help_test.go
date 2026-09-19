@@ -12,7 +12,7 @@ import (
 // more, by design. Both verbs survive every plausible width.
 func TestControlHelpAlwaysNamesQuitAndExit(t *testing.T) {
 	for cols := 40; cols <= 200; cols++ {
-		line := truncateRunes(controlHelp(cols-1), cols-1)
+		line := truncateRunes(controlHelp(cols-1, true), cols-1)
 		for _, want := range []string{"q quit", "esc exit"} {
 			if !strings.Contains(line, want) {
 				t.Errorf("cols=%d: control help omits %q: %q", cols, want, line)
@@ -30,8 +30,8 @@ func TestControlHelpAlwaysNamesQuitAndExit(t *testing.T) {
 // that breaks this, the spec's argument needs revisiting, so fail loudly
 // rather than silently dropping one.
 func TestControlHelpFitsEveryVerbAt80Columns(t *testing.T) {
-	at80 := controlHelp(79)
-	for _, want := range append(append([]string{}, controlVerbs...), controlTail...) {
+	at80 := controlHelp(79, true)
+	for _, want := range append(append(append([]string{}, controlVerbs...), detachVerb), controlTail...) {
 		if !strings.Contains(at80, want) {
 			t.Errorf("80 columns: control help omits %q: %q", want, at80)
 		}
@@ -99,5 +99,37 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 		if !strings.HasPrefix(s, got) {
 			t.Errorf("truncateRunes(%q, %d) = %q is not a prefix", s, n, got)
 		}
+	}
+}
+
+// The detach verb is the only entry whose presence is conditional, so
+// it gets its own assertion in both directions. An in-process wideboi
+// owns its panes: "detaching" there would kill them, so offering the
+// verb would be advertising data loss.
+func TestControlHelpOffersDetachOnlyWhenDetachable(t *testing.T) {
+	if got := controlHelp(79, false); strings.Contains(got, detachVerb) {
+		t.Errorf("in-process control help offers %q: %q", detachVerb, got)
+	}
+	if got := controlHelp(79, true); !strings.Contains(got, detachVerb) {
+		t.Errorf("attached control help omits %q: %q", detachVerb, got)
+	}
+}
+
+// The status line is what a user actually reads, so assert through it
+// as well as through controlHelp: a Client that never passed its own
+// detachable flag down would pass the test above and still show the
+// wrong menu.
+func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
+	local := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
+	got, _ := local.statusLineLocked(99)
+	if strings.Contains(got, detachVerb) {
+		t.Errorf("in-process status line offers %q: %q", detachVerb, got)
+	}
+
+	attached := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
+	attached.SetDetachable(true)
+	got, _ = attached.statusLineLocked(99)
+	if !strings.Contains(got, detachVerb) {
+		t.Errorf("attached status line omits %q: %q", detachVerb, got)
 	}
 }
