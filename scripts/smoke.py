@@ -11,10 +11,13 @@ Cases derive from the spec's user-journey list. Add one per feature.
 """
 
 import argparse
+import fcntl
 import os
 import re
 import signal
+import struct
 import sys
+import termios
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,6 +27,42 @@ from ptylib import (
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
+DIVIDER = "│".encode()
+# The renderer diffs cell-by-cell, so a divider redrawn at an unchanged
+# column may ride on the cursor's position left over from the previous
+# write with no cursor move of its own. But whenever a divider's column
+# actually changes, that new position requires an absolute cursor move
+# (optionally followed by an SGR reset) right before the glyph -- so this
+# reliably surfaces *new* divider columns appearing in a byte range,
+# which is exactly the signal a column-width change should produce.
+DIVIDER_CUP = re.compile(rb"\x1b\[(\d+);(\d+)H(?:\x1b\[[0-9;]*m)*" + DIVIDER)
+# The status line's "focus: pane N" prefix is only ever transmitted once
+# (the first frame). After that the diffing renderer only rewrites the
+# digit itself, addressed by an absolute cursor move to column 13 of the
+# status row (len("focus: pane ") == 12). Combine the one-time literal
+# with later positional updates, in stream order, to track the current
+# focused pane ID across a whole session.
+FOCUS_LITERAL = re.compile(rb"focus: pane (\d+)")
+
+
+def _focus_digit_re(status_row: int) -> re.Pattern:
+    return re.compile(
+        rb"\x1b\[" + str(status_row).encode() + rb";13H(?:\x1b\[[0-9;]*m)*(\d+)"
+    )
+
+
+def focus_pane_id(out: bytes, status_row: int) -> int | None:
+    """The most recently reported focused pane ID, or None if never seen."""
+    matches = [(m.start(), int(m.group(1))) for m in FOCUS_LITERAL.finditer(out)]
+    matches += [(m.start(), int(m.group(1))) for m in _focus_digit_re(status_row).finditer(out)]
+    if not matches:
+        return None
+    return max(matches, key=lambda t: t[0])[1]
+
+
+def divider_columns(out: bytes) -> set[int]:
+    """Columns where a divider glyph was drawn via an absolute cursor move."""
+    return {int(c) for _, c in DIVIDER_CUP.findall(out)}
 
 
 class Session:
@@ -31,6 +70,7 @@ class Session:
 
     def __init__(self, cols=100, rows=30, startup=1.2):
         self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True)
+        self.rows = rows
         self.drainer = Drainer(self.fd)
         self.drainer.start()
         time.sleep(startup)
@@ -106,17 +146,41 @@ def case_focus_switch_moves_the_cursor(fail):
 
 
 def case_new_column_opens_pane(fail):
+    # "Typing reaches a pane" is true whether or not a column ever opened
+    # -- ctrl+n used to be routed to VerbNewColumn and to the pane itself
+    # equally well as far as that assertion could tell. Pin down the
+    # verb's actual effect instead: the focused pane ID must change, and
+    # the next input must land in that new, distinct pane.
     s = Session()
-    s.type("\x0e")  # ctrl+n
+    before_focus = focus_pane_id(s.output(), s.rows)
+    before_len = len(s.output())
+    s.type("\x1bn")  # alt+n -> new column
+    after_focus = focus_pane_id(s.output(), s.rows)
+    if before_focus is None or after_focus is None:
+        fail("no focus-pane-id observed around alt+n")
+        return
+    if after_focus == before_focus:
+        fail(f"alt+n did not change the focused pane: still pane {after_focus}")
     s.type("echo pane-three\r")
-    if b"pane-three" not in s.output():
-        fail("input did not reach newly opened column pane")
+    landed = s.output()[before_len:]
+    if b"pane-three" not in landed:
+        fail("input did not reach the newly opened column pane")
     s.quit_and_reap()
 
 
 def case_cycle_width(fail):
+    # As with new-column, "typing reaches a pane" cannot distinguish a
+    # cycled width from a no-op -- the same pane keeps taking input
+    # either way. The client draws a "│" divider at the right edge of
+    # every column short of the far edge, so a genuine width change must
+    # move that divider to a column it was not at before.
     s = Session()
-    s.type("\x17")  # ctrl+w
+    before_cols = divider_columns(s.output())
+    before_len = len(s.output())
+    s.type("\x1bw")  # alt+w -> cycle focused column's width
+    moved_to = divider_columns(s.output()[before_len:]) - before_cols
+    if not moved_to:
+        fail(f"alt+w did not move any column divider off of {sorted(before_cols)}")
     s.type("echo cycled-width\r")
     if b"cycled-width" not in s.output():
         fail("input failed to reach pane after cycling column width")
@@ -163,6 +227,137 @@ def case_quit_restores_and_reaps(fail):
         fail(f"leaked pane processes: {s.leaked}")
 
 
+def case_status_line_names_real_keys(fail):
+    s = Session()
+    out = s.output()
+    if b"$mod" in out:
+        fail("status line renders the literal placeholder '$mod'")
+    # The bindings the user actually has. If a binding changes, this
+    # fails loudly and someone updates both together.
+    for key in (b"alt+h", b"alt+n", b"alt+w", b"alt+q"):
+        if key not in out:
+            fail(f"status line never mentions {key.decode()}")
+    s.quit_and_reap()
+
+
+def case_status_line_names_quit_at_80_columns(fail):
+    # 80 columns is the commonest terminal width and cmd/wideboi's own
+    # fallback when the host reports no size. The full help is 91 cells
+    # and the "focus: pane N" prefix is 13, so against a budget of 79 a
+    # single truncation used to cut the line mid-verb and never mention
+    # alt+q at all -- the same "the user is not told how to quit" defect
+    # this plan opened with, reappearing at a different width.
+    #
+    # case_status_line_names_real_keys runs at 100, the one width where
+    # alt+q happened to survive, so it could not have caught this.
+    s = Session(cols=80, rows=24)
+    out = s.output()
+    if b"alt+q" not in out:
+        fail("at 80 columns the status line never mentions alt+q -- the user is not told how to quit")
+    for key in (b"alt+h", b"alt+n", b"alt+w"):
+        if key not in out:
+            fail(f"at 80 columns the status line never mentions {key.decode()}")
+    s.quit_and_reap()
+
+
+def case_shell_control_keys_pass_through(fail):
+    # cat -v echoes control bytes visibly as ^X, so we can see exactly
+    # which ones survive the multiplexer's binding matrix. Plain "cat -v"
+    # is not enough: on a canonical-mode pty (the pane's default), the
+    # kernel's own line discipline treats ctrl+w as WERASE and silently
+    # eats it before cat ever reads it -- a false negative that exists
+    # even with wideboi entirely out of the picture. Disabling icanon
+    # and iexten first removes that kernel-level interception so this
+    # only measures what the multiplexer itself does with the byte.
+    s = Session()
+    s.type("stty -icanon -iexten -echo; cat -v\r", settle=1.3)
+    before = len(s.output())
+    for byte in (b"\x17", b"\x0c", b"\x0e", b"\x08"):  # ctrl+w l n h
+        os.write(s.fd, byte)
+        time.sleep(0.5)
+    s.type("\r", settle=1.2)
+    seen = s.output()[before:]
+    for name, mark in (("ctrl+w", b"^W"), ("ctrl+l", b"^L"),
+                       ("ctrl+n", b"^N"), ("ctrl+h", b"^H")):
+        if mark not in seen:
+            fail(f"{name} was swallowed by the multiplexer; the shell needs it")
+    s.quit_and_reap()
+
+
+def case_host_resize_resizes_panes(fail):
+    # A pane's child must learn its new size, or it keeps wrapping at the
+    # old width and full-screen apps lay out wrong.
+    #
+    # This only asserts the whole (rows, cols) pair changes, not cols
+    # specifically: for a *fully visible, focused* pane, a plain host
+    # resize is only ever supposed to change rows -- column width is the
+    # column's own property, independent of the host's size (see
+    # case_partly_clipped_pane_keeps_full_width, and the layout spec's
+    # invariant 4). Rows changing is what proves SIGWINCH actually reached
+    # the child at all.
+    s = Session(cols=120, rows=30)
+    s.type("stty size\r", settle=1.4)
+    first = re.findall(rb"(\d+) (\d+)", s.output())
+    if not first:
+        fail("could not read the pane's initial size")
+        s.quit_and_reap()
+        return
+    before = first[-1]
+
+    fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
+    time.sleep(1.5)
+    mark = len(s.output())
+    s.type("stty size\r", settle=1.6)
+    after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
+    if not after:
+        fail("pane produced no size output after the host resized")
+    elif after[-1] == before:
+        fail(f"pane size unchanged after host resize: {before} -- SIGWINCH never reached the child")
+    s.quit_and_reap()
+
+
+def case_partly_clipped_pane_keeps_full_width(fail):
+    # Regression guard: a column scrolled mostly off-screen must keep its
+    # own full logical width. Resizing it down to whatever sliver is on
+    # screen -- what an earlier version of this fix actually shipped --
+    # corrupts its line layout and lies to its child about its own width,
+    # even though nothing about the pane itself changed; only a neighbor's
+    # share of the screen did.
+    s = Session(cols=120, rows=30)
+
+    s.type("\x1bl")  # alt+l -> focus right, onto pane 2
+    s.type("stty size\r", settle=1.4)
+    first = re.findall(rb"(\d+) (\d+)", s.output())
+    if not first:
+        fail("could not read pane 2's initial size")
+        s.quit_and_reap()
+        return
+    before_cols = first[-1][1]
+    s.type("\x1bh")  # alt+h -> focus back to pane 1, leaving pane 2 unfocused
+
+    # Narrow enough that two full-width columns no longer both fit: pane 1
+    # (focused) stays fully visible, pane 2 is scrolled down to a sliver.
+    fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
+    time.sleep(1.5)
+
+    s.type("\x1bl")  # alt+l -> focus pane 2, which was just mostly clipped
+    mark = len(s.output())
+    s.type("stty size\r", settle=1.6)
+    after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
+    if not after:
+        fail("pane 2 produced no size output after being focused post-resize")
+        s.quit_and_reap()
+        return
+    after_cols = after[-1][1]
+    if after_cols != before_cols:
+        fail(
+            f"partly-clipped pane's column width changed from "
+            f"{before_cols.decode()} to {after_cols.decode()} -- a "
+            "partly-covered pane must keep its full logical width"
+        )
+    s.quit_and_reap()
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
@@ -173,6 +368,11 @@ CASES = [
     ("alt mod keybindings route verbs", case_alt_mod_keybindings),
     ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
+    ("status line names real keys", case_status_line_names_real_keys),
+    ("status line names quit at 80 columns", case_status_line_names_quit_at_80_columns),
+    ("shell control keys pass through", case_shell_control_keys_pass_through),
+    ("host resize resizes panes", case_host_resize_resizes_panes),
+    ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),
 ]
 
 

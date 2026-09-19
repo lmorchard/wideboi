@@ -1,4 +1,4 @@
-.PHONY: check test lint fmt fmt-check seam-check build run tidy verify-exit smoke golden
+.PHONY: check test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden
 
 # check is the pre-merge / CI gate, so every target it depends on must be
 # read-only. fmt is deliberately NOT one of them: it rewrites files, and a
@@ -11,10 +11,19 @@
 # the exit-status/teardown contract that the other tests only exercise in
 # isolation. build's output (bin/wideboi) is gitignored, so verify-exit is
 # still read-only with respect to the tree check is judging.
-check: fmt-check lint seam-check test verify-exit smoke
+check: fmt-check lint seam-check test race verify-exit smoke
 
 test:
 	go test ./...
+
+# The race detector belongs in the gate: a data race that only appears
+# under load is exactly what a green suite hides. -count=1 defeats `go
+# test`'s result cache, which otherwise reports stale "ok" on a rerun of
+# an already-cached package -- silently skipping the very detector this
+# target exists to run. Roughly 3x slower than plain `test`, which is
+# worth it here.
+race:
+	go test -race -count=1 ./...
 
 lint:
 	go vet ./...

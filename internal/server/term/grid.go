@@ -9,6 +9,7 @@ import (
 	"image"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -136,6 +137,33 @@ type vtGrid struct {
 	lastWriteTime atomic.Pointer[time.Time]
 	sawOSC133     atomic.Bool
 	scrollOffset  atomic.Int32
+
+	// writeResizeMu serializes Write against Resize. SafeEmulator's
+	// CellAt returns *uv.Cell aliasing its live buffer slot (uv.Line.At
+	// is literally &l[x]), not a copy, and its own se.mu.RLock is
+	// released the instant CellAt returns -- before Resize's caller ever
+	// gets to read the pointer. Resize's read-out/reflow/write-back
+	// walks a whole grid of these pointers across many such calls, so a
+	// concurrent Write mutating a cell mid-walk (each individual SetCell
+	// is itself locked, but the walk as a whole is not) is a real,
+	// -race-confirmed data race, not just a theoretical one: reproduced
+	// between vtGrid.Write and the Reflow pass reading a captured cell.
+	// Write is what mutates the buffer; SendKey/SendText/Resize's own
+	// dimension change go through se.mu for each call but never touch
+	// cell content outside the walk this lock protects.
+	//
+	// Three methods hold it: Write, Resize, and Draw's scrollback
+	// branch -- which holds it longest, for a whole frame's worth of
+	// ScrollbackCellAt/CellAt pointers handed to dst.SetCell, plus the
+	// scrollback-length and offset samples that decide where the
+	// history/live boundary falls. Draw's fast path (offset 0) is
+	// deliberately outside it.
+	//
+	// Read is deliberately excluded -- it can block indefinitely (the
+	// same reason SafeEmulator's own Read is unlocked), and
+	// Write/Resize/Draw all terminate on their own, so nothing here can
+	// wedge against it.
+	writeResizeMu sync.Mutex
 }
 
 // NewVT returns a Grid backed by charmbracelet/x/vt.
@@ -169,7 +197,11 @@ func NewVT(cols, rows int) Grid {
 	return g
 }
 
+// Write serializes against Resize via writeResizeMu; see that field's
+// doc comment.
 func (g *vtGrid) Write(p []byte) (int, error) {
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
 	now := time.Now()
 	g.lastWriteTime.Store(&now)
 	if !g.sawOSC133.Load() {
@@ -223,7 +255,17 @@ func (g *vtGrid) SendText(text string) { g.em.SendText(text) }
 //     data the app is about to overwrite.
 //   - The cursor. x/vt exposes no public setter, so it is left where the
 //     resize put it; SIGWINCH makes most programs reposition themselves.
+//
+// Serializes against Write via writeResizeMu; see that field's doc
+// comment. Not against Read: g.em.Resize can itself block writing an
+// in-band resize notification into the emulator's own reply pipe, and
+// only a concurrent, unlocked Read drains that pipe. Locking Read here
+// too would make that drain wait on the very lock this call holds while
+// blocked -- an unrecoverable deadlock, not a race.
 func (g *vtGrid) Resize(cols, rows int) {
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
+
 	oldCols, oldRows := g.em.Width(), g.em.Height()
 	if cols == oldCols && rows == oldRows {
 		return
@@ -233,11 +275,24 @@ func (g *vtGrid) Resize(cols, rows int) {
 		return
 	}
 
+	// Clone every captured cell. CellAt returns *uv.Cell aliasing the
+	// emulator's live backing array (uv.Line.At is literally &l[x]), and
+	// uv.Buffer.Resize narrows by reslicing in place
+	// (Lines[i] = Lines[i][:width]), so those arrays outlive the resize
+	// with the captured pointers still aliasing them. On a narrowing
+	// reflow pushes content DOWN -- output row y is written from a
+	// source row <= y -- so writing back through live pointers clobbers
+	// rows that later output rows have yet to read, smearing the first
+	// line over everything below it. Copying makes the capture a real
+	// snapshot.
 	before := make([]Row, oldRows)
 	for y := 0; y < oldRows; y++ {
 		r := make(Row, oldCols)
 		for x := 0; x < oldCols; x++ {
-			r[x] = g.em.CellAt(x, y)
+			if c := g.em.CellAt(x, y); c != nil {
+				cc := *c
+				r[x] = &cc
+			}
 		}
 		before[y] = r
 	}
@@ -292,14 +347,41 @@ func (g *vtGrid) SetScrollOffset(offset int) {
 	g.scrollOffset.Store(int32(offset))
 }
 
+// Draw's fast path (no scrollback in view) delegates to g.em.Draw, which
+// runs entirely inside SafeEmulator's own se.mu.RLock and never leaks a
+// cell pointer past it -- no extra locking needed. The scrollback branch
+// below is different; see the comment where it takes writeResizeMu.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
+	// A zero scroll offset means the fast path no matter what the
+	// scrollback length is, so it can be decided from one atomic load
+	// without taking the lock -- which is the whole point of the fast
+	// path. Everything the scrollback branch reads is sampled below,
+	// inside the lock, so the scrollback/live boundary it walks cannot
+	// be a frame staler than the cells it reads through it.
+	if g.scrollOffset.Load() <= 0 {
+		g.em.Draw(dst, area)
+		return
+	}
+
+	// Serializes against Write via writeResizeMu, for the same reason
+	// Resize does (see that field's doc comment): ScrollbackCellAt and
+	// CellAt both return *uv.Cell aliasing the emulator's live buffer,
+	// with se.mu already released by the time this loop sees the
+	// pointer. dst.SetCell dereferences it on the very next line, but
+	// "the very next line" is not "inside the lock" -- a concurrent
+	// Write mutating the same slot between the two is a real race, the
+	// same shape as Resize's, just with a smaller window. Held for the
+	// whole loop, not per cell, so one scrolled-back frame is drawn from
+	// a single consistent instant rather than racing cell by cell.
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
+
 	offset := int(g.scrollOffset.Load())
 	sbLen := g.em.ScrollbackLen()
 	if offset <= 0 || sbLen == 0 {
 		g.em.Draw(dst, area)
 		return
 	}
-
 	if offset > sbLen {
 		offset = sbLen
 	}
@@ -322,18 +404,54 @@ func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 }
 
 // Close closes the underlying emulator, which unblocks any goroutine
-// parked in Read: SafeEmulator embeds *vt.Emulator, whose Close calls
-// CloseWithError(io.EOF) on the pipe writer Read's pipe reader drains
-// from, so the pending Read returns (0, io.EOF) rather than blocking
-// forever.
+// parked in Read.
 //
-// Known upstream data race, not ours to fix: SafeEmulator does not
-// override Close, so this call reaches the promoted (*Emulator).Close
-// directly, which writes e.closed with no se.mu held — while
-// SafeEmulator.Write reads e.closed under that same lock. Reproduced
-// under -race at x/vt's emulator.go:264 (Close's write) vs. :270
-// (Write's read). Practically inert here: e.closed is a single bool,
-// Close is its only writer, and a Write losing the race just sees
-// io.ErrClosedPipe a moment later than it "should" — but -race will
-// flag it for anyone who runs this path with the race detector.
-func (g *vtGrid) Close() error { return g.em.Close() }
+// The upstream defect this works around is unchanged: SafeEmulator does
+// not override (*vt.Emulator).Close, so calling it directly reaches the
+// promoted method, which writes e.closed with no lock at all -- not even
+// se.mu, which Write takes but Close never does. SafeEmulator.Read is
+// unsynchronized too, and deliberately so: unlike every other method,
+// it does not take se.mu, because Read can block indefinitely and a
+// blocked holder of se.mu would freeze every other emulator call this
+// pane needs. So Close's unsynchronized write and Read's unsynchronized
+// read of the same field race by construction whenever Close runs in a
+// different goroutine than the reader pump, which is every real call
+// site here. Confirmed under -race at x/vt's emulator.go:264 (Close's
+// write) vs. :251 (Read's read) -- not merely the Close-vs-Write pairing
+// this comment used to describe.
+//
+// This call deliberately never reaches (*vt.Emulator).Close. Closing
+// e.pw is one of two things that method does; the other is the e.closed
+// write itself, which is what makes a subsequent Write short-circuit to
+// (0, io.ErrClosedPipe) at emulator.go:269-271 instead of parsing the
+// bytes. Bypassing Close preserves the first effect -- e.pw.Close()
+// closes the same *io.PipeWriter Read drains from, documented safe for
+// concurrent Read/Close (unlike Emulator's redundant e.closed flag on
+// top of it), reached via InputPipe's io.Writer through the io.Closer it
+// happens to satisfy, so Read still returns io.EOF exactly as it would
+// have -- but not the second: e.closed stays false, so a Write arriving
+// after this runs is no longer rejected early and instead parses its
+// bytes as usual, potentially trying to reply into the now-closed pipe.
+//
+// That gap is inert for the one real caller. The pty-reader pump is the
+// only thing that ever calls Write, and Pane.Close's pty.Kill runs
+// before this, closing Master; the pump's blocking call is Master.Read,
+// not Write, so it observes the read error and exits without ever
+// reaching Write again. Even if some future caller managed one more
+// Write here, a write into an already-closed io.Pipe returns
+// io.ErrClosedPipe immediately rather than blocking, so it cannot wedge
+// anything -- it would just be wasted parsing work on bytes nobody
+// reads.
+//
+// Calling Grid.Close from anywhere the pump could still be mid-Read
+// concurrently with something other than this bypass would reintroduce
+// the race; this is the one caller, and it must stay that way.
+func (g *vtGrid) Close() error {
+	if closer, ok := g.em.InputPipe().(io.Closer); ok {
+		return closer.Close()
+	}
+	// Fallback if InputPipe's concrete type ever stops being
+	// *io.PipeWriter: not exercised today, and knowingly reintroduces
+	// the race above rather than silently doing nothing.
+	return g.em.Close()
+}

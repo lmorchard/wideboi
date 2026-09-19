@@ -80,8 +80,11 @@ func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
 }
 
 // Resize reports a new logical size to the child.
+//
+// Goes through setsize rather than pty.Setsize directly; see setsize's
+// doc comment in ioctl.go for why.
 func (p *Pane) Resize(cols, rows int) error {
-	return pty.Setsize(p.Master, &pty.Winsize{
+	return setsize(p.Master, &pty.Winsize{
 		Rows: uint16(rows),
 		Cols: uint16(cols),
 	})
