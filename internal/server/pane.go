@@ -162,6 +162,9 @@ func (p *Pane) CursorPosition() image.Point { return p.grid.CursorPosition() }
 // CursorVisible reports whether DECTCEM cursor visibility is enabled.
 func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 
+// Status reports the current agent status of the pane.
+func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
+
 // Close tears down the process tree and emulator.
 func (p *Pane) Close() error {
 	p.closeOnce.Do(func() { close(p.closed) })

@@ -8,7 +8,9 @@ package term
 import (
 	"image"
 	"io"
+	"strings"
 	"sync/atomic"
+	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/vt"
@@ -64,6 +66,10 @@ type Grid interface {
 	// freshly started shell has not hidden it yet.
 	CursorVisible() bool
 
+	// Status reports the current agent/command status derived from OSC 133
+	// sequences or output heuristics.
+	Status() PaneStatus
+
 	// Resize changes the emulator's dimensions, reflowing the visible
 	// screen so narrowing does not destroy text.
 	Resize(cols, rows int)
@@ -91,38 +97,91 @@ type Grid interface {
 // here is guessed.
 const encodingMods = uv.ModCtrl | uv.ModAlt | uv.ModMeta | uv.ModSuper | uv.ModHyper
 
+type PaneStatus int
+
+const (
+	StatusIdle PaneStatus = iota
+	StatusWorking
+	StatusNeedsInput
+	StatusDone
+	StatusFailed
+)
+
+func (s PaneStatus) Glyph() string {
+	switch s {
+	case StatusWorking:
+		return "»"
+	case StatusNeedsInput:
+		return "!"
+	case StatusDone:
+		return "✓"
+	case StatusFailed:
+		return "✗"
+	default:
+		return " "
+	}
+}
+
 // vtGrid adapts x/vt's SafeEmulator to Grid. SafeEmulator rather than
 // Emulator because a pane's PTY reader goroutine writes to it while the
 // compositor reads from it.
 type vtGrid struct {
-	em *vt.SafeEmulator
-
-	// cursorVisible mirrors the emulator's DECTCEM state. It starts true
-	// because a freshly spawned shell has not yet hidden its cursor, and
-	// x/vt only calls the CursorVisibility callback on a change — there
-	// is no query to poll instead. It is an atomic.Bool, not a field
-	// guarded by some other lock, because the callback fires from inside
-	// SafeEmulator.Write's critical section while CursorVisible is
-	// called from the compositor's goroutine; an atomic needs no lock of
-	// its own to be safe against that.
+	em            *vt.SafeEmulator
 	cursorVisible atomic.Bool
+	status        atomic.Int32
+	lastWriteTime atomic.Pointer[time.Time]
+	sawOSC133     atomic.Bool
 }
 
 // NewVT returns a Grid backed by charmbracelet/x/vt.
 func NewVT(cols, rows int) Grid {
 	g := &vtGrid{em: vt.NewSafeEmulator(cols, rows)}
 	g.cursorVisible.Store(true)
-	// SetCallbacks is called once here, before Start's goroutines exist
-	// and before this Grid is handed to a caller, so there is no
-	// concurrent access to race against — unlike every other vtGrid
-	// method, which must go through the SafeEmulator's own locking.
+	g.status.Store(int32(StatusIdle))
+
 	g.em.SetCallbacks(vt.Callbacks{
 		CursorVisibility: func(visible bool) { g.cursorVisible.Store(visible) },
 	})
+
+	g.em.RegisterOscHandler(133, func(data []byte) bool {
+		g.sawOSC133.Store(true)
+		s := string(data)
+		switch {
+		case strings.HasPrefix(s, "A"):
+			g.status.Store(int32(StatusNeedsInput))
+		case strings.HasPrefix(s, "B") || strings.HasPrefix(s, "C"):
+			g.status.Store(int32(StatusWorking))
+		case strings.HasPrefix(s, "D"):
+			if strings.Contains(s, ";") && !strings.HasSuffix(s, ";0") {
+				g.status.Store(int32(StatusFailed))
+			} else {
+				g.status.Store(int32(StatusDone))
+			}
+		}
+		return true
+	})
+
 	return g
 }
 
-func (g *vtGrid) Write(p []byte) (int, error) { return g.em.Write(p) }
+func (g *vtGrid) Write(p []byte) (int, error) {
+	now := time.Now()
+	g.lastWriteTime.Store(&now)
+	if !g.sawOSC133.Load() {
+		g.status.Store(int32(StatusWorking))
+	}
+	return g.em.Write(p)
+}
+
+func (g *vtGrid) Status() PaneStatus {
+	st := PaneStatus(g.status.Load())
+	if !g.sawOSC133.Load() && st == StatusWorking {
+		if t := g.lastWriteTime.Load(); t != nil && time.Since(*t) > 3*time.Second {
+			return StatusIdle
+		}
+	}
+	return st
+}
 func (g *vtGrid) Read(p []byte) (int, error)  { return g.em.Read(p) }
 
 // SendKey routes a shifted printable key through SendText instead of

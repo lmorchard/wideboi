@@ -42,8 +42,15 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 // Surface exposes WidthMethod — before using it for anything but ASCII
 // chrome.
 func WriteString(s uv.Screen, x, y int, text string) {
-	for i, r := range []rune(text) {
-		s.SetCell(x+i, y, uv.NewCell(s.WidthMethod(), string(r)))
+	currX := x
+	for _, r := range []rune(text) {
+		cell := uv.NewCell(s.WidthMethod(), string(r))
+		s.SetCell(currX, y, cell)
+		w := 1
+		if cell.Width > 1 {
+			w = cell.Width
+		}
+		currX += w
 	}
 }
 

@@ -52,10 +52,11 @@ type MsgResize struct {
 	Rows int
 }
 
-// MsgLayoutSnapshot is sent by the server to update the client on placements and focus.
+// MsgLayoutSnapshot is sent by the server to update the client on placements, focus, and statuses.
 type MsgLayoutSnapshot struct {
-	Placements  []PlacementData
-	FocusPaneID int
+	Placements   []PlacementData
+	FocusPaneID  int
+	PaneStatuses map[int]string
 }
 
 // MsgPaneClosed notifies the client that a pane's process died or was reaped.

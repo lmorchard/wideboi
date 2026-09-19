@@ -190,9 +190,14 @@ func (s *Server) removePaneLocked(id int) {
 
 func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
+	statuses := make(map[int]string)
+	for id, p := range s.panes {
+		statuses[id] = p.Status().Glyph()
+	}
 	snapshot := protocol.MsgLayoutSnapshot{
-		Placements:  layout.ToProtocol(placements),
-		FocusPaneID: s.strip.FocusedPaneID(),
+		Placements:   layout.ToProtocol(placements),
+		FocusPaneID:  s.strip.FocusedPaneID(),
+		PaneStatuses: statuses,
 	}
 	s.transport.SendServer(ctx, snapshot)
 }
