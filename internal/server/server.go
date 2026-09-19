@@ -28,14 +28,14 @@ type Server struct {
 	rows       int
 	shell      string
 	cwd        string
-	transport  *transport.InProcChannel
+	transports []transport.Transport
 	escapees   map[int]struct{} // Tracked descendant PIDs for teardown
 	stopCh     chan struct{}
 	closeOnce  sync.Once
 }
 
 // NewServer initializes a Server instance connected via transport.
-func NewServer(tp *transport.InProcChannel, shell, cwd string) *Server {
+func NewServer(tp transport.Transport, shell, cwd string) *Server {
 	if shell == "" {
 		shell = os.Getenv("SHELL")
 		if shell == "" {
@@ -45,19 +45,78 @@ func NewServer(tp *transport.InProcChannel, shell, cwd string) *Server {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	return &Server{
-		strip:     layout.NewStrip(),
-		panes:     make(map[int]*Pane),
-		shell:     shell,
-		cwd:       cwd,
-		transport: tp,
-		escapees:  make(map[int]struct{}),
-		stopCh:    make(chan struct{}),
+	srv := &Server{
+		strip:      layout.NewStrip(),
+		panes:      make(map[int]*Pane),
+		shell:      shell,
+		cwd:        cwd,
+		transports: make([]transport.Transport, 0),
+		escapees:   make(map[int]struct{}),
+		stopCh:     make(chan struct{}),
 	}
+	if tp != nil {
+		srv.transports = append(srv.transports, tp)
+	}
+	return srv
+}
+
+// ListenSocket starts accepting socket connections on sl.
+func (s *Server) ListenSocket(ctx context.Context, sl *transport.SocketListener) {
+	go func() {
+		for {
+			conn, err := sl.Accept()
+			if err != nil {
+				return
+			}
+			sConn := transport.NewServerSocketConn(conn, 256)
+			sConn.RunPumps(ctx)
+
+			s.mu.Lock()
+			s.transports = append(s.transports, sConn)
+			s.mu.Unlock()
+
+			go s.handleClientConnLoop(ctx, sConn)
+		}
+	}()
+}
+
+func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transport) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-tp.ClientSendChan():
+			if !ok {
+				s.mu.Lock()
+				s.removeTransportLocked(tp)
+				s.mu.Unlock()
+				return
+			}
+			s.handleClientMsg(ctx, msg)
+		}
+	}
+}
+
+func (s *Server) removeTransportLocked(tp transport.Transport) {
+	out := make([]transport.Transport, 0, len(s.transports))
+	for _, t := range s.transports {
+		if t != tp {
+			out = append(out, t)
+		}
+	}
+	s.transports = out
 }
 
 // Run executes the main server event loop, processing client messages and polling descendants.
 func (s *Server) Run(ctx context.Context) error {
+	s.mu.Lock()
+	initialTransports := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+
+	for _, tp := range initialTransports {
+		go s.handleClientConnLoop(ctx, tp)
+	}
+
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -67,11 +126,6 @@ func (s *Server) Run(ctx context.Context) error {
 			return s.Close()
 		case <-s.stopCh:
 			return nil
-		case msg, ok := <-s.transport.ClientSend:
-			if !ok {
-				return s.Close()
-			}
-			s.handleClientMsg(ctx, msg)
 		case <-ticker.C:
 			s.pollDescendants()
 		}
@@ -80,23 +134,27 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessage) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	needBroadcast := false
 
 	switch m := msg.(type) {
 	case protocol.MsgAttach:
-		s.cols, s.rows = m.Cols, m.Rows
+		if m.Cols > 0 && m.Rows > 0 {
+			s.cols, s.rows = m.Cols, m.Rows
+		}
 		if len(s.panes) == 0 {
 			_, _ = s.spawnPaneLocked()
 			_, _ = s.spawnPaneLocked()
 			s.strip.FocusLeft()
 		}
 		s.resizePanesLocked()
-		s.broadcastLayoutLocked(ctx)
+		needBroadcast = true
 
 	case protocol.MsgResize:
-		s.cols, s.rows = m.Cols, m.Rows
+		if m.Cols > 0 && m.Rows > 0 {
+			s.cols, s.rows = m.Cols, m.Rows
+		}
 		s.resizePanesLocked()
-		s.broadcastLayoutLocked(ctx)
+		needBroadcast = true
 
 	case protocol.MsgVerb:
 		switch m.Verb {
@@ -125,7 +183,7 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 				}
 			}
 		}
-		s.broadcastLayoutLocked(ctx)
+		needBroadcast = true
 
 	case protocol.MsgInput:
 		if p, ok := s.panes[m.PaneID]; ok {
@@ -141,18 +199,26 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			p.SetScrollOffset(p.ScrollOffset() + m.Delta)
 		}
 	}
+
+	s.mu.Unlock()
+
+	if needBroadcast {
+		s.broadcastLayout(ctx)
+	}
 }
 
 // SpawnPane adds a new pane and column to the layout strip.
 func (s *Server) SpawnPane() (int, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	p, err := s.spawnPaneLocked()
 	if err != nil {
+		s.mu.Unlock()
 		return 0, err
 	}
-	s.broadcastLayoutLocked(context.Background())
+	s.mu.Unlock()
+
+	s.broadcastLayout(context.Background())
 	return p.ID(), nil
 }
 
@@ -163,7 +229,7 @@ func (s *Server) spawnPaneLocked() (*Pane, error) {
 	if paneCols > s.cols && s.cols > 0 {
 		paneCols = s.cols
 	}
-	paneRows := max(s.rows-1, 20)
+	paneRows := max(s.rows-2, 20)
 
 	p, err := NewPane(id, []string{s.shell}, paneCols, paneRows, s.cwd)
 	if err != nil {
@@ -192,9 +258,9 @@ func (s *Server) onPaneExit(id int) {
 	p := s.panes[id]
 	delete(s.panes, id)
 	s.resizePanesLocked()
-	s.broadcastLayoutLocked(context.Background())
 	s.mu.Unlock()
 
+	s.broadcastLayout(context.Background())
 	_ = p.Close()
 }
 
@@ -317,7 +383,8 @@ func (s *Server) resizePanesLocked() {
 	}
 }
 
-func (s *Server) broadcastLayoutLocked(ctx context.Context) {
+func (s *Server) broadcastLayout(ctx context.Context) {
+	s.mu.Lock()
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
 	statuses := make(map[int]string)
 	for id, p := range s.panes {
@@ -329,7 +396,12 @@ func (s *Server) broadcastLayoutLocked(ctx context.Context) {
 		FocusPaneID:  s.strip.FocusedPaneID(),
 		PaneStatuses: statuses,
 	}
-	s.transport.SendServer(ctx, snapshot)
+	tps := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+
+	for _, tp := range tps {
+		tp.SendServer(ctx, snapshot)
+	}
 }
 
 // PaneSize reports pane id's current logical dimensions, as last set by

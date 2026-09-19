@@ -11,10 +11,28 @@ type ClientMessage interface{}
 // ServerMessage wraps any message sent from server to client.
 type ServerMessage interface{}
 
+// Transport represents a bi-directional communication channel between client and server.
+type Transport interface {
+	SendClient(ctx context.Context, msg ClientMessage) bool
+	SendServer(ctx context.Context, msg ServerMessage) bool
+	ClientSendChan() <-chan ClientMessage
+	ServerSendChan() <-chan ServerMessage
+}
+
 // InProcChannel connects a client and server running in the same process.
 type InProcChannel struct {
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
+}
+
+// ClientSendChan returns the channel where client messages arrive.
+func (ch *InProcChannel) ClientSendChan() <-chan ClientMessage {
+	return ch.ClientSend
+}
+
+// ServerSendChan returns the channel where server messages arrive.
+func (ch *InProcChannel) ServerSendChan() <-chan ServerMessage {
+	return ch.ServerSend
 }
 
 // NewInProcChannel returns a buffered in-process transport pair.
@@ -38,12 +56,12 @@ func (ch *InProcChannel) SendClient(ctx context.Context, msg ClientMessage) bool
 	}
 }
 
-// SendServer sends a server message to the client, bounded by context.
+// SendServer sends a server message to the client, non-blocking if channel is full.
 func (ch *InProcChannel) SendServer(ctx context.Context, msg ServerMessage) bool {
 	select {
 	case ch.ServerSend <- msg:
 		return true
-	case <-ctx.Done():
+	default:
 		return false
 	}
 }
