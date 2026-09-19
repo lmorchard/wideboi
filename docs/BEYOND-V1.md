@@ -40,6 +40,66 @@ blit horizontally — so every animation frame redraws everything. gwae budgets
 under 4 ms for a 300×80 viewport and gates its scroll animation on synchronized
 updates plus frame budget. Ours should measure before committing to 60 fps.
 
+### A cheaper first cut: wipes instead of motion
+
+Motion is expensive for a structural reason. Terminals cannot blit
+horizontally, so every frame of a scroll animation is a **full repaint** — an
+N-frame spring costs N screen redraws, which is what gwae gates its own scroll
+animation on and what makes motion painful over SSH.
+
+A **wipe** inverts that. Reveal the destination frame progressively, cell by
+cell, and each frame only writes the cells that change *in that frame*. The
+total across the whole transition is roughly one repaint's worth of bytes,
+spread over time — you pay about what snapping already costs.
+
+Measured against the pinned renderer, 100x30 screen, full-screen change:
+
+| transition | frames | bytes | vs. snapping |
+| --- | --- | --- | --- |
+| snap (today's behaviour) | 1 | 3,064 | 1.0x |
+| **row wipe** | 20 | **3,064** | **1.0x — free** |
+| column wipe (directional) | 20 | 5,972 | 1.9x |
+| column wipe | 8 | 4,350 | 1.4x |
+| random scatter | 20 | 41,341 | 13.5x |
+| *spring / motion, for comparison* | 20 | *~61,000* | *~20x* |
+
+**The reveal pattern is the entire design — the spread is 13x.** A row wipe is
+free because rows are contiguous: the diffing renderer emits each revealed row
+as one run behind one cursor move, exactly as it would inside a snap. A random
+scatter is catastrophic for the mirror-image reason — one `CUP` sequence per
+cell. "Cell-by-cell dissolve" in the naive sense is the shape to avoid.
+
+**Recommendation: a directional column wipe.** Reveal left-to-right when focus
+moves right, right-to-left when it moves left. That buys back the one thing a
+wipe otherwise loses — motion tells you *which way you went*, and scrolling
+tiling is a spatial model — at roughly 2x a snap, still an order of magnitude
+under real motion. Fewer frames is cheaper (8 frames costs less than 20,
+because each frame repeats the per-row cursor moves), so frame count trades
+smoothness against bytes with plenty of headroom either way.
+
+**It is also markedly simpler to build than springs.** No per-pane placement
+springs, no retarget arithmetic, and the freeze-during-motion decision falls
+out for free:
+
+1. On transition start, compose frame A (current) and frame B (target) once.
+2. Compute the set of cells where they differ.
+3. Order that set by the wipe pattern.
+4. Each frame, write the next slice into the live screen and let the renderer
+   diff it.
+
+Total writes equal the size of the change set. Retargeting mid-wipe is just
+"snapshot the live screen as the new A and recompose B".
+
+Two hazards:
+
+- **Wide glyphs must be atomic in the change set.** A cell-level mask can reveal the left half of a double-width glyph from B beside its right half from A. This codebase has been bitten by that class twice already — see `docs/LESSONS.md`.
+- **Hide the cursor for the duration.** Its position is meaningless mid-wipe.
+
+**What a wipe does not replace.** Cards need genuine motion — slivers sliding
+and re-dealing — so the spring design above stays the answer there. A wipe is
+for focus switches, column open and column close. If cards ever land, both
+mechanisms coexist: springs for placement changes, wipes for focus.
+
 ## 2. Card layout — panes that slip under each other
 
 Deferred from v1 with the hook already paid for. Instead of columns scrolling out
