@@ -35,6 +35,7 @@ type Client struct {
 	mirrors      map[int]*PaneMirror
 	prefixLabel  string
 	controlMode  bool
+	activeWipe   *WipeTransition
 }
 
 // NewClient initializes a Client instance. prefixLabel is the short
@@ -63,9 +64,20 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 
 	switch m := msg.(type) {
 	case protocol.MsgLayoutSnapshot:
+		oldFocus := c.focusPaneID
 		c.placements = m.Placements
 		c.focusPaneID = m.FocusPaneID
 		c.paneStatuses = m.PaneStatuses
+
+		if oldFocus != 0 && c.focusPaneID != oldFocus {
+			dir := WipeLeftToRight
+			if c.focusPaneID < oldFocus {
+				dir = WipeRightToLeft
+			}
+			fA := compose.NewSurface(c.cols, c.rows)
+			fB := compose.NewSurface(c.cols, c.rows)
+			c.activeWipe = NewWipeTransition(fA, fB, c.cols, c.rows, dir, 8)
+		}
 
 		activeIDs := make(map[int]bool)
 		for _, p := range c.placements {
@@ -107,6 +119,15 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.activeWipe != nil && c.activeWipe.Active() {
+		c.activeWipe.Draw(scr)
+		scr.HideCursor()
+		if c.activeWipe.Step() {
+			c.activeWipe = nil
+		}
+		return
+	}
 
 	var focusedPlacement *protocol.PlacementData
 
