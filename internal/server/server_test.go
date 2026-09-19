@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -188,5 +189,150 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 		t.Fatal("timeout waiting for MsgLayoutSnapshot after MsgResize")
 	}
 
+	_ = srv.Close()
+}
+
+// Regression guard for the "off-screen panes are never resized at all"
+// finding: a column scrolled fully out of view has no Placement whatsoever
+// (ComputePlacements drops it once its Dst is empty), so a resizePanesLocked
+// that only walks Placements silently skips it -- it keeps whatever height
+// it had before the resize forever, mismatched against every visible pane,
+// until it happens to scroll back into view.
+//
+// Reproduces the exact numbers measured against the real server: at
+// 120x30, both 59-wide columns are visible. Resizing to 40x20 with pane 1
+// focused scrolls pane 2 completely out of the 40-wide viewport -- it gets
+// no Placement in the resulting snapshot at all. Its own logical size must
+// still track the new viewport height (19 rows), not the stale 29 rows
+// from before the resize.
+func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
+	snap, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot)
+	if !ok || len(snap.Placements) != 2 {
+		t.Fatalf("expected 2 initial placements, got %+v", snap)
+	}
+	var paneIDs []int
+	for _, pl := range snap.Placements {
+		paneIDs = append(paneIDs, pl.PaneID)
+	}
+
+	tp.SendClient(ctx, protocol.MsgResize{Cols: 40, Rows: 20})
+
+	select {
+	case msg := <-tp.ServerSend:
+		snap, ok = msg.(protocol.MsgLayoutSnapshot)
+		if !ok {
+			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for MsgLayoutSnapshot after MsgResize")
+	}
+
+	if len(snap.Placements) != 1 {
+		t.Fatalf("test setup bug: expected exactly 1 placement (the other pane scrolled fully off), got %d", len(snap.Placements))
+	}
+
+	for _, id := range paneIDs {
+		cols, rows, ok := srv.PaneSize(id)
+		if !ok {
+			t.Fatalf("pane %d not found after resize", id)
+		}
+		if cols != 59 {
+			t.Errorf("pane %d has cols=%d, want 59 (its full column width)", id, cols)
+		}
+		if rows != 19 {
+			t.Errorf("pane %d has rows=%d, want 19 (the 20-row viewport minus the status line) -- even a pane with no Placement must track the current viewport height", id, rows)
+		}
+	}
+
+	_ = srv.Close()
+}
+
+// Regression guard for the "Pane.Resize lost its mutual exclusion" finding.
+// s.mu used to serialize every Pane.Resize call for free; once
+// resizePanesLocked releases it around the actual resize calls, two
+// invocations can be mid-flight at once -- the Run loop handling a
+// MsgResize, and a pty-reader goroutine calling onPaneExit for a different
+// pane's death -- and both can reach the very same surviving pane's Resize
+// concurrently. p.cols/p.rows are plain ints and term.Grid.Resize does an
+// unlocked read-out/reflow/write-back of the cell buffer, so this is a real
+// data race, not a theoretical one.
+//
+// This test's only real assertion is made by `go test -race`: it drives
+// exactly the interleaving described above (one goroutine hammers
+// MsgResize while a different pane's own shell exits from underneath it,
+// on a real pty-reader goroutine) and leaves the race detector to find the
+// unsynchronized access. The size check at the end is a basic sanity
+// check, not the point of the test.
+func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
+	tp := transport.NewInProcChannel(256)
+	srv := server.NewServer(tp, "/bin/sh", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
+	snap, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot)
+	if !ok || len(snap.Placements) != 2 {
+		t.Fatalf("expected 2 initial placements, got %+v", snap)
+	}
+	killID := snap.Placements[0].PaneID
+	surviveID := snap.Placements[1].PaneID
+
+	// Drain every further server->client message for the rest of the test.
+	// broadcastLayoutLocked runs under s.mu, so an unread, full ServerSend
+	// would park the Run loop and prevent the very overlap this test needs.
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for {
+			select {
+			case <-tp.ServerSend:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Kill one pane's shell from the inside, so onPaneExit fires on a real
+	// pty-reader goroutine while the resize hammering below is in flight.
+	tp.SendClient(ctx, protocol.MsgInput{PaneID: killID, Data: []byte("exit\r")})
+
+	var wg sync.WaitGroup
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n := 0
+		for time.Now().Before(deadline) {
+			n++
+			// Vary cols/rows each send so Pane.Resize's no-op fast path
+			// doesn't skip the actual grid/pty resize work most of the time.
+			tp.SendClient(ctx, protocol.MsgResize{Cols: 80 + n%40, Rows: 20 + n%10})
+		}
+	}()
+	wg.Wait()
+
+	cols, rows, sizeOK := srv.PaneSize(surviveID)
+	if !sizeOK || cols <= 0 || rows <= 0 {
+		t.Errorf("surviving pane %d has size %dx%d ok=%v after the concurrent hammering, want a positive size", surviveID, cols, rows, sizeOK)
+	}
+
+	cancel()
+	<-drainDone
 	_ = srv.Close()
 }

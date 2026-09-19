@@ -28,6 +28,17 @@ type Pane struct {
 	cols int
 	rows int
 
+	// resizeMu serializes Resize against itself and against Close. Before
+	// resizePanesLocked released s.mu around its resize calls, s.mu did
+	// this job for free. Now two goroutines can be in that unlocked window
+	// at once -- the Run loop handling a MsgResize/verb, and a pty-reader
+	// goroutine calling onPaneExit for a *different* pane that also
+	// resizes every survivor -- and both can reach the same pane's Resize
+	// concurrently. p.cols/p.rows are plain ints and term.Grid.Resize does
+	// an unlocked read-out/reflow/write-back of the cell buffer, so that
+	// race is real, not theoretical.
+	resizeMu sync.Mutex
+
 	keys    chan uv.KeyEvent
 	dropped atomic.Uint64
 
@@ -152,7 +163,15 @@ func (p *Pane) Draw(dst uv.Screen, area image.Rectangle) {
 // child is told to redraw against it. The child second because
 // TIOCSWINSZ raises SIGWINCH, and a well-behaved full-screen app repaints
 // immediately.
+//
+// Held under resizeMu for its whole body, including the no-op check: two
+// callers racing on the same pane could otherwise both read stale
+// p.cols/p.rows, both decide a resize is needed, and both run
+// term.Reflow's read-out/write-back concurrently against the same buffer.
 func (p *Pane) Resize(cols, rows int) error {
+	p.resizeMu.Lock()
+	defer p.resizeMu.Unlock()
+
 	if cols <= 0 || rows <= 0 {
 		return fmt.Errorf("pane %d: refusing resize to %dx%d", p.id, cols, rows)
 	}
@@ -168,7 +187,17 @@ func (p *Pane) Resize(cols, rows int) error {
 func (p *Pane) Write(b []byte) (int, error) { return p.pty.Master.Write(b) }
 
 // Size reports logical dimensions.
-func (p *Pane) Size() (cols, rows int) { return p.cols, p.rows }
+//
+// Locked under resizeMu, the same lock Resize holds while writing
+// p.cols/p.rows: Resize no longer runs under s.mu (resizePanesLocked
+// releases it around the resize calls), so a caller reading Size only
+// under s.mu -- as Server.PaneSize does -- would otherwise race a
+// concurrent Resize on the same plain, unguarded ints.
+func (p *Pane) Size() (cols, rows int) {
+	p.resizeMu.Lock()
+	defer p.resizeMu.Unlock()
+	return p.cols, p.rows
+}
 
 // CursorPosition reports the cell coordinates of the cursor relative to origin.
 func (p *Pane) CursorPosition() image.Point { return p.grid.CursorPosition() }
@@ -184,7 +213,15 @@ func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }
 func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 
 // Close tears down the process tree and emulator.
+//
+// Also held under resizeMu, the same lock Resize takes: without it, Close
+// could run its own Kill/grid.Close concurrently with a Resize that is
+// mid read-out/reflow/write-back on the same buffer, or resurrect fields a
+// resize is about to touch on an already-closed pty.
 func (p *Pane) Close() error {
+	p.resizeMu.Lock()
+	defer p.resizeMu.Unlock()
+
 	p.closeOnce.Do(func() { close(p.closed) })
 
 	errs := []error{p.pty.Kill(CloseGrace)}
@@ -205,6 +242,17 @@ func (p *Pane) Close() error {
 func (p *Pane) panicked(where string, r any) {
 	err := fmt.Errorf("%s goroutine panicked: %v\n%s", where, r, debug.Stack())
 	p.dead.Store(true)
+	p.failMu.Lock()
+	p.failures = append(p.failures, err)
+	p.failMu.Unlock()
+}
+
+// recordFailure appends an operational error (e.g. a failed TIOCSWINSZ
+// during resize) to be surfaced the next time the pane closes, alongside
+// pump-goroutine panics. This exists so a failure can be collected without
+// logging it: log.Printf writes to stderr, which is live alt-screen real
+// estate while wideboi is running.
+func (p *Pane) recordFailure(err error) {
 	p.failMu.Lock()
 	p.failures = append(p.failures, err)
 	p.failMu.Unlock()

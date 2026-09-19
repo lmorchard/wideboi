@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -91,12 +90,12 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			_, _ = s.spawnPaneLocked()
 			s.strip.FocusLeft()
 		}
-		_ = s.resizePanesLocked()
+		s.resizePanesLocked()
 		s.broadcastLayoutLocked(ctx)
 
 	case protocol.MsgResize:
 		s.cols, s.rows = m.Cols, m.Rows
-		_ = s.resizePanesLocked()
+		s.resizePanesLocked()
 		s.broadcastLayoutLocked(ctx)
 
 	case protocol.MsgVerb:
@@ -107,15 +106,15 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			s.strip.FocusRight()
 		case protocol.VerbNewColumn:
 			_, _ = s.spawnPaneLocked()
-			_ = s.resizePanesLocked()
+			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
 			s.strip.CycleWidth()
-			_ = s.resizePanesLocked()
+			s.resizePanesLocked()
 		case protocol.VerbKillPane:
 			focusedID := s.strip.FocusedPaneID()
 			if focusedID > 0 {
 				s.removePaneLocked(focusedID)
-				_ = s.resizePanesLocked()
+				s.resizePanesLocked()
 			}
 		case protocol.VerbSmartJump:
 			for id, p := range s.panes {
@@ -192,7 +191,7 @@ func (s *Server) onPaneExit(id int) {
 	s.strip.KillPane(id)
 	p := s.panes[id]
 	delete(s.panes, id)
-	_ = s.resizePanesLocked()
+	s.resizePanesLocked()
 	s.broadcastLayoutLocked(context.Background())
 	s.mu.Unlock()
 
@@ -220,58 +219,71 @@ func (s *Server) removePaneLocked(id int) {
 // layout spec's invariant 4 is that "a pane's logical width equals its
 // column width, independent of what is visible." A column scrolled
 // partly (or entirely) off-screen keeps its full width, so its child gets
-// no SIGWINCH and never learns it was occluded. Height has no equivalent
-// invariant to protect -- it is uniform across every column and
-// Placement.Dst.Dy() already reports it correctly.
+// no SIGWINCH and never learns it was occluded.
+//
+// Height comes from layout.AvailHeight(s.rows), the same uniform formula
+// ComputePlacements uses internally -- NOT from Placement.Dst.Dy(). A
+// column scrolled fully off-screen has no Placement at all (ComputePlacements
+// drops it once its Dst is empty), so iterating Placements silently skips
+// it: it would keep whatever height it had at
+// spawn forever, mismatched against every visible pane, corrected only if
+// it happens to scroll back into view before anything else touches it.
+// Iterating s.strip.PaneIDs() instead of ComputePlacements's output covers
+// every pane in the strip, visible or not.
 //
 // Called with s.mu held, per the *Locked convention, but does not hold it
 // across the resize calls themselves: Pane.Resize -> Grid.Resize can block
 // writing into the emulator's own unbuffered pipe, which only the pane's
 // pty-writer pump goroutine drains -- and that goroutine can itself be
 // blocked in Master.Write against a child that has stopped reading its
-// stdin. Blocking here while holding s.mu would park the entire server (no
-// input routing, no quit) on one wedged child. So the geometry is read and
-// the lock released before any pane is actually touched, following
-// DrawPane's precedent, and the lock is reacquired before returning so the
-// caller's held lock is honored on exit. A pane could theoretically be
-// closed by another goroutine in that window; Pane.Resize and Pane.Close
-// racing is a known, narrow residual (same family as the vtGrid.Resize /
-// em.Write ordering note in term/grid.go) left to the -race work already
-// tracked for this branch.
+// stdin. Blocking here while holding s.mu would park every other goroutine
+// that needs s.mu on one wedged child -- notably srv.Close() from the
+// client goroutine, i.e. the user could no longer quit. It does NOT rescue
+// the Run loop itself, which still blocks inside the wedged Resize call;
+// only other goroutines gain anything from the lock being released. So the
+// geometry is read and the lock released before any pane is actually
+// touched, following DrawPane's precedent, and the lock is reacquired
+// before returning so the caller's held lock is honored on exit.
 //
-// Errors are collected into the returned error (via errors.Join) rather
-// than logged: log.Printf writes to stderr, which corrupts the user's
-// screen while the alt screen is active. One child failing TIOCSWINSZ
-// must not stop the others from being resized.
-func (s *Server) resizePanesLocked() error {
+// That release also means two resizePanesLocked calls can now overlap --
+// this one and, e.g., the one onPaneExit runs for a different pane's
+// death -- and both can reach the very same surviving pane's Resize
+// concurrently. Pane.Resize and Pane.Close serialize against each other
+// and against themselves via Pane's own resizeMu for exactly this reason;
+// see pane.go.
+//
+// Errors are recorded on the pane itself (surfaced the next time it
+// closes) rather than logged: log.Printf writes to stderr, which corrupts
+// the user's screen while the alt screen is active. One child failing
+// TIOCSWINSZ must not stop the others from being resized.
+func (s *Server) resizePanesLocked() {
 	type resizeJob struct {
 		pane *Pane
 		w, h int
 	}
 
+	h := layout.AvailHeight(s.rows)
 	var jobs []resizeJob
-	for _, pl := range s.strip.ComputePlacements(s.cols, s.rows) {
-		p, ok := s.panes[pl.PaneID]
+	for _, id := range s.strip.PaneIDs() {
+		p, ok := s.panes[id]
 		if !ok {
 			continue
 		}
-		w, ok := s.strip.ColumnWidth(pl.PaneID)
+		w, ok := s.strip.ColumnWidth(id)
 		if !ok {
 			continue
 		}
-		jobs = append(jobs, resizeJob{pane: p, w: w, h: pl.Dst.Dy()})
+		jobs = append(jobs, resizeJob{pane: p, w: w, h: h})
 	}
 
 	s.mu.Unlock()
 	defer s.mu.Lock()
 
-	var errs []error
 	for _, j := range jobs {
 		if err := j.pane.Resize(j.w, j.h); err != nil {
-			errs = append(errs, fmt.Errorf("pane %d: %w", j.pane.ID(), err))
+			j.pane.recordFailure(fmt.Errorf("resize to %dx%d: %w", j.w, j.h, err))
 		}
 	}
-	return errors.Join(errs...)
 }
 
 func (s *Server) broadcastLayoutLocked(ctx context.Context) {

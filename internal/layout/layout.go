@@ -120,6 +120,27 @@ func (s *Strip) ColumnWidth(paneID int) (int, bool) {
 	return 0, false
 }
 
+// PaneIDs returns every pane currently in the strip, whether or not
+// ComputePlacements would give it a Placement. A column scrolled fully
+// off-screen has no Placement at all (ComputePlacements drops it via
+// dst.Empty()), but it still exists and still needs its logical size kept
+// current -- callers that only walk Placements silently skip it.
+func (s *Strip) PaneIDs() []int {
+	ids := make([]int, len(s.columns))
+	for i, c := range s.columns {
+		ids[i] = c.PaneID
+	}
+	return ids
+}
+
+// AvailHeight is the row count available to every pane in a viewport of
+// the given height: the viewport minus the one row the status line always
+// consumes. It is uniform across every column, visible or not, which is
+// what lets a caller size an off-screen pane without a Placement for it.
+func AvailHeight(viewportHeight int) int {
+	return max(viewportHeight-1, 1)
+}
+
 // FocusPaneID sets focus to the column containing paneID if it exists.
 func (s *Strip) FocusPaneID(paneID int) {
 	for i, c := range s.columns {
@@ -136,7 +157,7 @@ func (s *Strip) ComputePlacements(viewportWidth, viewportHeight int) []Placement
 		return nil
 	}
 
-	availHeight := max(viewportHeight-1, 1)
+	availHeight := AvailHeight(viewportHeight)
 
 	colX := make([]int, len(s.columns))
 	currX := 0
