@@ -328,11 +328,3 @@ func (cc *ClientSocketConn) ServerSendChan() <-chan ServerMessage {
 func (cc *ClientSocketConn) Close() error {
 	return cc.conn.Close()
 }
-
-// SocketConn is an alias for ServerSocketConn for backwards compatibility.
-type SocketConn = ServerSocketConn
-
-// NewSocketConn is an alias for NewServerSocketConn.
-func NewSocketConn(conn net.Conn, bufSize int) *SocketConn {
-	return NewServerSocketConn(conn, bufSize)
-}
