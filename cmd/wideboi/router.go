@@ -50,16 +50,20 @@ type router struct {
 	// prefix is an ultraviolet key name, already validated by
 	// parsePrefix.
 	prefix string
-	// control is true while control mode is active. The mode is sticky:
-	// only Escape, a doubled prefix, or quitting clears it, so C-b l l l
-	// moves three columns.
+	// control is true while control mode is active. It is per-keystroke,
+	// not sticky: holding Ctrl on a verb repeats it and keeps you here,
+	// but the unmodified form fires once and leaves, exactly like an
+	// unrecognised key, Escape, or the doubled prefix. So C-b l l l moves
+	// one column and types "ll" into the pane; C-b C-l C-l l is what
+	// moves three columns and then leaves.
 	control bool
 	// detachable mirrors the client's: true only when the session lives
 	// in a separate server process that survives this client leaving.
-	// When false, `d` is swallowed rather than routed, because the only
-	// thing detaching could mean in-process is killing every pane -- and
-	// a user who learned the key elsewhere would lose their work to a
-	// keystroke the bar no longer advertises.
+	// When false, `d` is swallowed and leaves control mode, exactly like
+	// any other key with no binding, because the only thing detaching
+	// could mean in-process is killing every pane -- and a user who
+	// learned the key elsewhere would lose their work to a keystroke the
+	// bar no longer advertises.
 	detachable bool
 	// help is true while the overlay is up. It is a mode, not a route:
 	// main mirrors it to the client after every key exactly as it does
@@ -162,8 +166,12 @@ const defaultPrefix = "ctrl+b"
 // The allowlist is narrow on purpose. An unmatchable prefix would leave
 // a running wideboi with no verbs and no way to quit but a signal, and
 // ultraviolet's MatchString gives no way to ask whether a name is one it
-// can ever produce. Restricting to ctrl+<letter> and ctrl+space keeps
-// the set to names that definitely work.
+// can ever produce. Restricting to ctrl+<letter> and ctrl+space rules
+// out most of that, but not all of it: ctrl+i decodes as tab and ctrl+m
+// as enter (keys.Reserved; docs/LESSONS.md has the story), so a prefix
+// on either would start a wideboi that can never enter control mode and
+// has no way to quit but a signal. The shape of the allowlist does not
+// imply those two are safe, so reject them explicitly.
 func parsePrefix(name string) (prefix, label string, err error) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	switch {
@@ -171,7 +179,13 @@ func parsePrefix(name string) (prefix, label string, err error) {
 		return name, "C-space", nil
 	case len(name) == len("ctrl+x") && strings.HasPrefix(name, "ctrl+") &&
 		name[len(name)-1] >= 'a' && name[len(name)-1] <= 'z':
-		return name, "C-" + name[len(name)-1:], nil
+		letter := name[len(name)-1:]
+		if why, bad := keys.Reserved[letter]; bad {
+			return "", "", fmt.Errorf(
+				"WIDEBOI_PREFIX=%q is not a usable prefix: ctrl+%s decodes as %s, not itself",
+				name, letter, why)
+		}
+		return name, "C-" + letter, nil
 	}
 	return "", "", fmt.Errorf(
 		"WIDEBOI_PREFIX=%q is not a usable prefix: want ctrl+<a-z> or ctrl+space", name)

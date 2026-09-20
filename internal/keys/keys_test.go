@@ -23,6 +23,17 @@ func TestTableIsWellFormed(t *testing.T) {
 		}
 		seen[b.Key] = true
 
+		// Aliases fire the same binding as Key, so they share Key's
+		// namespace: an alias that collides with another binding's Key
+		// (or another binding's alias) would shadow it in route()'s
+		// first-match loop exactly as silently as a duplicate Key would.
+		for _, a := range b.Aliases {
+			if seen[a] {
+				t.Errorf("%q's alias %q collides with another binding's key or alias", b.Key, a)
+			}
+			seen[a] = true
+		}
+
 		if b.BarGroup == "" {
 			t.Errorf("%q has no BarGroup; the status bar cannot name it", b.Key)
 		}

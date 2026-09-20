@@ -261,6 +261,52 @@ func TestParsePrefixRejectsUnusableKeys(t *testing.T) {
 	}
 }
 
+// ctrl+i decodes as tab and ctrl+m as enter, so a prefix on either would
+// start a wideboi that can never enter control mode -- there would be no
+// way to quit but a signal. parsePrefix's own allowlist shape does not
+// rule these out (they are ctrl+<a-z> like any other), so this has to be
+// an explicit check against keys.Reserved, and the error has to name
+// what the letter actually decodes as.
+func TestParsePrefixRejectsReservedLetters(t *testing.T) {
+	for letter, why := range keys.Reserved {
+		if len(letter) != 1 || letter[0] < 'a' || letter[0] > 'z' {
+			continue // "[" is not reachable here: the allowlist is ctrl+<a-z>.
+		}
+		in := "ctrl+" + letter
+		_, _, err := parsePrefix(in)
+		if err == nil {
+			t.Errorf("parsePrefix(%q) accepted a prefix that decodes as %s", in, why)
+			continue
+		}
+		if !strings.Contains(err.Error(), why) {
+			t.Errorf("parsePrefix(%q) error %q does not name what it decodes as (%s)", in, err, why)
+		}
+	}
+}
+
+// The doubled-prefix escape hatch has to win even when the configured
+// prefix collides with a binding's own ctrl repeat form.
+// WIDEBOI_PREFIX=ctrl+l means C-l C-l forwards one literal ctrl+l and
+// leaves control mode, rather than repeating focus-right twice -- route
+// checks the prefix before it walks the binding table, and that
+// ordering is deliberate, not emergent. See the README's "Changing the
+// prefix" section.
+func TestDoubledPrefixWinsOverAColludingCtrlForm(t *testing.T) {
+	r := &router{prefix: "ctrl+l"}
+
+	got := r.route(ctrl('l'))
+	if got.Kind != routeIgnore || !r.control {
+		t.Fatalf("first ctrl+l: kind %v control=%v, want routeIgnore and control mode entered",
+			got.Kind, r.control)
+	}
+
+	got = r.route(ctrl('l'))
+	if got.Kind != routeForward || r.control {
+		t.Errorf("second ctrl+l: kind %v control=%v, want routeForward and control mode left -- "+
+			"the doubled prefix must win over focus-right's repeat form", got.Kind, r.control)
+	}
+}
+
 // A configured prefix has to be the one that works, and the default has
 // to be the one that works when nothing is configured.
 func TestConfiguredPrefixReplacesTheDefault(t *testing.T) {

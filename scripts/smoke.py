@@ -401,20 +401,24 @@ def case_ctrl_repeats_control_mode(fail):
     # binding: MatchString returns false indistinguishably for "not
     # pressed" and "name I can never produce".
     #
-    # 0x02 = C-b, 0x0c = C-l, 0x6c = plain l. Two sticky rights and one
-    # that exits, so focus lands on pane 3 out of 4 and the mode ends.
+    # 0x02 = C-b, 0x0c = C-l, 0x6c = plain l. Columns are [1, 3, 4, 2]
+    # with focus on 4: the first C-l reaches the last column, 2, and the
+    # second clamps there rather than wrapping. The final plain l clamps
+    # again and exits the mode, so focus stays on pane 2 throughout --
+    # the actual two-hop repeat is what case_ctrl_repeat_moves_two_columns
+    # pins; this case's job is the mode-exit proof below, not movement.
     s = Session(cols=100, rows=30)
     s.type("\x02n", settle=1.2)   # a third column
     s.type("\x02n", settle=1.2)   # a fourth
     s.type("\x02")                # enter control mode
     s.type("\x0c")                # C-l: focus right, stay
-    s.type("\x0c")                # C-l: focus right, stay
+    s.type("\x0c")                # C-l: focus right (clamped), stay
     if cursor_visible(s.output()) is not False:
         fail("cursor is visible mid-repeat; control mode should hide it")
-    s.type("l")                   # plain l: focus right, exit
+    s.type("l")                   # plain l: focus right (clamped), exit
     out = s.output()
-    if focus_pane_id(out, s.rows) is None:
-        fail("no focus reported at all")
+    if focus_pane_id(out, s.rows) != 2:
+        fail(f"expected focus on pane 2, got {focus_pane_id(out, s.rows)}")
     # Typing must now reach the pane, which is the proof the mode ended.
     s.type("echo ctrl-repeat-done\r")
     if b"ctrl-repeat-done" not in s.output():
@@ -452,13 +456,32 @@ def case_help_overlay_opens_and_any_key_dismisses(fail):
         fail("? did not raise the help overlay")
     if b"scroll this pane's history up" not in out:
         fail("the overlay does not describe the bindings")
+
     before = len(s.output())
     # k dismisses, and must NOT also scroll.
     s.type("k", settle=1.0)
     after = s.output()[before:]
     if b"hold ctrl to stay" in after:
         fail("the overlay redrew after the dismissing key")
-    # Dismissal returns to control mode, so esc is still needed to leave.
+
+    # The check above cannot fail in either direction: ultraviolet only
+    # emits *changed* cells, so if k dismissed the overlay the text is
+    # simply not re-emitted (passes), and if k did nothing the frame is
+    # identical and nothing is emitted at all (also passes). Force a
+    # redraw instead: press ? again. If k returned to control mode, this
+    # reopens the overlay and repaints its text. If k did nothing, the
+    # overlay was still up and this ? is consumed as *its* dismissing
+    # key instead -- so the text does not appear, and now the two states
+    # disagree.
+    before = len(s.output())
+    s.type("?", settle=1.0)
+    reopened = s.output()[before:]
+    if b"hold ctrl to stay in control mode" not in reopened:
+        fail("the overlay did not reopen on a second '?' -- k may never have dismissed it")
+
+    # Dismiss this second overlay, then leave control mode entirely and
+    # confirm typing reaches the pane again.
+    s.type("k", settle=1.0)
     s.type("\x1b", settle=0.5)
     s.type("echo help-dismissed\r")
     if b"help-dismissed" not in s.output():

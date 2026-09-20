@@ -51,6 +51,12 @@ WIDEBOI_PREFIX=ctrl+a wideboi
 is `ctrl+b`, and whichever of the two is outermost will swallow it.
 `ctrl+a` is the conventional alternative.
 
+If your chosen prefix letter also has a ctrl repeat form of its own —
+`WIDEBOI_PREFIX=ctrl+l` collides with the ctrl repeat for focus-right —
+the doubled prefix still wins: `ctrl+l ctrl+l` sends one literal
+`ctrl+l` to the pane and leaves control mode, rather than moving focus
+right twice.
+
 ## Development
 
     make check    # fmt, vet, seam boundary, unit tests, race detector, exit contract, smoke

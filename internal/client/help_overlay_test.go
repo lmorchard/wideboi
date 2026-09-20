@@ -68,33 +68,43 @@ func TestHelpOverlaySurvivesTinyViewports(t *testing.T) {
 // the last column left alone -- ultraviolet brackets a final-column
 // write with autowrap toggles, which splits text across escapes on the
 // wire.
+//
+// 10x3 is included alongside the ordinary 80x24: it is the one size in
+// TestHelpOverlaySurvivesTinyViewports that does not hit either early
+// return (cols<=0/rows<=0, or boxW<4/boxH<3) and so actually paints
+// content, which makes it the size where the last-column rule could
+// break. It is correct today -- verified by hand -- so this pins that
+// rather than proving it for the first time.
 func TestHelpOverlayStaysInsideTheViewport(t *testing.T) {
-	const cols, rows = 80, 24
-	buf := compose.NewSurface(cols, rows)
-	drawHelpOverlay(buf, cols, rows, "C-b", true)
+	for _, size := range []struct{ cols, rows int }{{80, 24}, {10, 3}} {
+		t.Run("", func(t *testing.T) {
+			cols, rows := size.cols, size.rows
+			buf := compose.NewSurface(cols, rows)
+			drawHelpOverlay(buf, cols, rows, "C-b", true)
 
-	painted := false
-	for y := 0; y < rows; y++ {
-		for x := 0; x < cols; x++ {
-			c := buf.CellAt(x, y)
-			if c == nil || c.Content == "" || c.Content == " " {
-				continue
+			painted := false
+			for y := 0; y < rows; y++ {
+				for x := 0; x < cols; x++ {
+					c := buf.CellAt(x, y)
+					if c == nil || c.Content == "" || c.Content == " " {
+						continue
+					}
+					painted = true
+					if x >= cols-1 {
+						t.Errorf("overlay wrote the last column at row %d", y)
+					}
+				}
 			}
-			painted = true
-			if x >= cols-1 {
-				t.Errorf("overlay wrote the last column at row %d", y)
+			if !painted {
+				t.Errorf("overlay drew nothing at %dx%d", cols, rows)
 			}
-		}
-	}
-	if !painted {
-		t.Error("overlay drew nothing at 80x24")
+		})
 	}
 }
 
-// The overlay is modal, so it wins over a wipe: a wipe is decorative and
-// a modal is not. Draw returns early while a wipe runs, so the overlay
-// check has to sit above that branch, not below it.
-func TestHelpVisibleGatesTheOverlay(t *testing.T) {
+// SetHelpVisible is a plain setter; the gating behaviour it feeds is
+// tested separately by TestLayerLockedPrecedence.
+func TestSetHelpVisibleRoundTrips(t *testing.T) {
 	c := &Client{cols: 80, rows: 24, prefixLabel: "C-b"}
 	if c.helpVisible {
 		t.Fatal("help should start hidden")

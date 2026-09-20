@@ -171,7 +171,8 @@ Backspace.
 
 It does not. Ultraviolet maps 0x08 to `ctrl+h` unconditionally
 (`decoder.go`'s `parseControl`), and the Backspace key sends 0x7F. All
-eleven verb letters have working ctrl forms.
+ten verb letters (`h l j k n w x a d q`) have working ctrl forms; `?`
+and `esc` have no ctrl form to begin with.
 
 What *is* taken, and permanently: `ctrl+i` decodes as `tab`, `ctrl+m` as
 `enter`, `ctrl+[` as `escape`. Those three letters can never carry a

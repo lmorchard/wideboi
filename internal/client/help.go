@@ -78,6 +78,12 @@ func drawHelpOverlay(scr uv.Screen, cols, rows int, prefixLabel string, detachab
 
 	x0 := (cols - boxW) / 2
 	y0 := (rows - boxH) / 2
+	// The clamps above (boxW <= cols-1, boxH <= rows, and the boxW<4 /
+	// boxH<3 return) already guarantee x0 and y0 land non-negative here,
+	// so these two floors are not currently reachable. They stay anyway:
+	// this is exactly the arithmetic that goes wrong at 1x1 the moment
+	// someone loosens one of those clamps, and two reviewers have now
+	// had to re-derive that before trusting it is dead code.
 	if x0 < 0 {
 		x0 = 0
 	}

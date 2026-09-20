@@ -312,7 +312,6 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 	}
 }
 
-// Control-mode verbs, in display order, most essential first. These
 // controlHelp returns as much of the control-mode menu as fits in budget
 // cells, always including the entries keys marks Essential.
 //
