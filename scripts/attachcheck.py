@@ -135,6 +135,24 @@ class Client:
     def output(self) -> bytes:
         return self.drainer.output()
 
+    def wait_for(self, predicate, timeout=10.0, interval=0.1):
+        """Polls predicate(self.output()) until it is truthy or timeout.
+
+        Returns the last value. Fixed sleeps are a race here: the
+        reattached client paints one frame of `focus: [pane 0]` before
+        the server's snapshot lands, and how long that takes depends on
+        machine load -- attach-check runs last in `make check`, behind
+        verify-exit and the whole smoke suite. Polling to a deadline
+        removes the race without hiding a real failure: a reattach that
+        genuinely never reports focus still fails, at the deadline.
+        """
+        deadline = time.monotonic() + timeout
+        value = predicate(self.output())
+        while not value and time.monotonic() < deadline:
+            time.sleep(interval)
+            value = predicate(self.output())
+        return value
+
     def detach(self, timeout=6.0) -> int | None:
         """Sends C-b d and waits for the client to exit on its own."""
         os.write(self.fd, b"\x02")
@@ -243,10 +261,10 @@ def case_detach_leaves_the_session_running(fail):
             return
 
         second = Client(startup=SETTLE * 2)
-        if b"survives-detach" not in second.output():
+        if not second.wait_for(lambda out: b"survives-detach" in out):
             fail("reattached client does not show the pre-detach output; "
                  "the session was not preserved")
-        if focus_pane_id(second.output(), ROWS) != 1:
+        if not second.wait_for(lambda out: focus_pane_id(out, ROWS) == 1):
             fail("reattached client does not report pane 1 focused")
         second.kill()
     finally:
