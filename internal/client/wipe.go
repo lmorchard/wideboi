@@ -54,6 +54,17 @@ func (wt *WipeTransition) Active() bool {
 	return wt.step < wt.totalSteps
 }
 
+// Fits reports whether this transition's frames were composed for the
+// given viewport.
+//
+// A resize part-way through a transition leaves the frames sized for
+// the old viewport while the client's cols/rows have already moved on.
+// Blitting them anyway paints the previous layout for the rest of the
+// transition, so the caller drops the wipe and snaps instead.
+func (wt *WipeTransition) Fits(cols, rows int) bool {
+	return wt.cols == cols && wt.rows == rows
+}
+
 // Draw renders the progressive wipe state onto host screen scr.
 func (wt *WipeTransition) Draw(scr uv.Screen) {
 	if !wt.Active() {

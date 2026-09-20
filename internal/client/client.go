@@ -31,6 +31,36 @@ type cursorPos struct {
 	visible bool
 }
 
+// wipeSteps is how many frames a focus-change transition takes. At the
+// 16ms render tick in cmd/wideboi/main.go that is about 128ms.
+const wipeSteps = 8
+
+// frameState is the layout-dependent input to one composed frame.
+// Everything else Draw needs -- control mode, prefix label, detachable
+// -- is chrome that does not participate in a transition.
+type frameState struct {
+	placements   []protocol.PlacementData
+	focusPaneID  int
+	paneStatuses map[int]string
+}
+
+// pendingWipe is a focus change that has arrived but has not yet been
+// turned into a WipeTransition.
+//
+// The trigger and the frames live on different paths: HandleServerMsg
+// learns that focus moved, but pane content is only reachable inside
+// Draw -- through the drawPane callback in-process, or c.mirrors when
+// attached. So the message path records what to animate away from and
+// the next Draw composes both frames. Building them here instead is
+// what produced the original defect: two blank surfaces, and a screen
+// that went empty for the whole transition.
+type pendingWipe struct {
+	dir  Direction
+	from frameState
+	cols int
+	rows int
+}
+
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
 type Client struct {
 	mu           sync.Mutex
@@ -48,6 +78,17 @@ type Client struct {
 	helpVisible  bool
 	detachable   bool
 	activeWipe   *WipeTransition
+	pendingWipe  *pendingWipe
+}
+
+// frameStateLocked snapshots the layout state a frame is composed from.
+// c.mu must be held.
+func (c *Client) frameStateLocked() frameState {
+	return frameState{
+		placements:   c.placements,
+		focusPaneID:  c.focusPaneID,
+		paneStatuses: c.paneStatuses,
+	}
 }
 
 // NewClient initializes a Client instance. prefixLabel is the short
@@ -80,6 +121,9 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	case protocol.MsgLayoutSnapshot:
 		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", m.FocusPaneID)
 		oldFocus := c.focusPaneID
+		// Snapshot before the assignments below overwrite it: this is
+		// the state a wipe animates away from.
+		oldState := c.frameStateLocked()
 		if len(m.Columns) > 0 {
 			c.strip.SyncColumns(m.Columns, m.FocusPaneID)
 			c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
@@ -94,9 +138,17 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			if c.focusPaneID < oldFocus {
 				dir = WipeRightToLeft
 			}
-			fA := compose.NewSurface(c.cols, c.rows)
-			fB := compose.NewSurface(c.cols, c.rows)
-			c.activeWipe = NewWipeTransition(fA, fB, c.cols, c.rows, dir, 8)
+			// A newer focus change supersedes one still in flight.
+			// Restarting from the state just before this change is
+			// not true retargeting -- see BEYOND-V1 section 1 -- but
+			// it is bounded, and never blank.
+			c.activeWipe = nil
+			c.pendingWipe = &pendingWipe{
+				dir:  dir,
+				from: oldState,
+				cols: c.cols,
+				rows: c.rows,
+			}
 		}
 
 		activeIDs := make(map[int]bool)
@@ -197,10 +249,36 @@ func (c *Client) layerLocked() drawLayer {
 	}
 }
 
+// HostScreen is everything Draw needs from the host terminal: a cell
+// surface, plus cursor control.
+//
+// Draw used to take *uv.TerminalScreen concretely. That is a type a unit
+// test cannot cheaply build, which is why nothing ever called Draw from
+// a test -- and why a wipe that interpolated two blank frames shipped
+// green. uv.ScreenBuffer satisfies uv.Screen but has no cursor methods,
+// so the three Draw actually uses are named here and a test double
+// supplies them.
+type HostScreen interface {
+	uv.Screen
+	HideCursor()
+	ShowCursor()
+	SetCursorPosition(x, y int)
+}
+
 // Draw composites active pane surfaces, dividers, host cursor, and status bar onto host screen scr.
-func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
+func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	c.realizePendingWipeLocked(drawPane)
+
+	// A resize can also land after a transition has already started,
+	// in which case activeWipe still holds frames composed for the
+	// old viewport. Guarding only the pending case would leave those
+	// frames painting the previous layout until the wipe ran out.
+	if c.activeWipe != nil && !c.activeWipe.Fits(c.cols, c.rows-1) {
+		c.activeWipe = nil
+	}
 
 	switch c.layerLocked() {
 	case layerHelp:
@@ -209,6 +287,9 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 		return
 	case layerWipe:
 		c.activeWipe.Draw(scr)
+		// The bar is outside the transition, so it has to be painted
+		// here too -- the wipe's frames stop at row c.rows-2.
+		c.drawStatusBarLocked(scr)
 		scr.HideCursor()
 		if c.activeWipe.Step() {
 			c.activeWipe = nil
@@ -216,67 +297,8 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 		return
 	}
 
-	var focusedPlacement *protocol.PlacementData
-
-	for i := range c.placements {
-		p := &c.placements[i]
-		if p.PaneID == c.focusPaneID {
-			focusedPlacement = p
-		}
-
-		// Draw 1-row pane header bar at Y = 0
-		headerW := p.Dst.Dx()
-		if headerW > 0 {
-			glyph := c.paneStatuses[p.PaneID]
-			var header string
-			if glyph != "" && glyph != " " {
-				header = fmt.Sprintf(" [%d] %s", p.PaneID, glyph)
-			} else {
-				header = fmt.Sprintf(" [%d]", p.PaneID)
-			}
-			if p.PaneID == c.focusPaneID {
-				header += " ★"
-			}
-			if runeLen(header) < headerW {
-				header += strings.Repeat(" ", headerW-runeLen(header))
-			}
-			header = truncateRunes(header, headerW)
-
-			if p.PaneID == c.focusPaneID {
-				compose.WriteStyled(scr, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
-			} else {
-				compose.WriteString(scr, p.Dst.Min.X, 0, header)
-			}
-		}
-
-		if drawPane != nil {
-			drawPane(p.PaneID, scr, p.Dst)
-		} else if mirror, ok := c.mirrors[p.PaneID]; ok {
-			compose.Blit(scr, mirror.Surface, p.Dst)
-		}
-
-		// Draw column divider on right edge if applicable.
-		// Bold ┃ if adjacent to focused pane, otherwise │.
-		if p.Dst.Max.X < c.cols {
-			divider := "│"
-			if p.PaneID == c.focusPaneID || (i+1 < len(c.placements) && c.placements[i+1].PaneID == c.focusPaneID) {
-				divider = "┃"
-			}
-			for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-				compose.WriteString(scr, p.Dst.Max.X, y, divider)
-			}
-		}
-	}
-
-	// Status bar on bottom row.
-	//
-	// Leave the final column untouched: ultraviolet's terminal renderer
-	// writes the last cell of a row with autowrap toggled off and back
-	// on around it, which splits whatever glyph lands there across a
-	// mode escape sequence on the wire. Budgeting one cell short of
-	// c.cols keeps the whole line contiguous in the raw output.
-	statusText, statusStyle := c.statusLineLocked(c.cols - 1)
-	compose.WriteStyled(scr, 0, c.rows-1, statusText, statusStyle)
+	focusedPlacement := c.composeFrameLocked(scr, c.frameStateLocked(), drawPane)
+	c.drawStatusBarLocked(scr)
 
 	// Host cursor position and visibility.
 	//
@@ -310,6 +332,116 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 	default:
 		scr.HideCursor()
 	}
+}
+
+// composeFrameLocked draws pane headers, pane content and column
+// dividers for st into dst, and returns the focused placement (nil if
+// st has none).
+//
+// It deliberately stops short of the status bar and the cursor. The bar
+// is chrome that should not dissolve mid-transition, and the cursor is
+// hidden for a wipe's duration anyway, so a composed frame covers rows
+// 0..rows-2 only -- headers at row 0, panes and dividers from
+// Dst.Min.Y = 1 up to Dst.Max.Y = rows-1 exclusive, since
+// layout.AvailHeight is rows-2.
+//
+// Taking st rather than reading c directly is what lets a wipe compose
+// the frame it is animating away from. c.mu must be held.
+func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(id int, dst uv.Screen, area image.Rectangle)) *protocol.PlacementData {
+	var focusedPlacement *protocol.PlacementData
+
+	for i := range st.placements {
+		p := &st.placements[i]
+		if p.PaneID == st.focusPaneID {
+			focusedPlacement = p
+		}
+
+		// Draw 1-row pane header bar at Y = 0
+		headerW := p.Dst.Dx()
+		if headerW > 0 {
+			glyph := st.paneStatuses[p.PaneID]
+			var header string
+			if glyph != "" && glyph != " " {
+				header = fmt.Sprintf(" [%d] %s", p.PaneID, glyph)
+			} else {
+				header = fmt.Sprintf(" [%d]", p.PaneID)
+			}
+			if p.PaneID == st.focusPaneID {
+				header += " ★"
+			}
+			if runeLen(header) < headerW {
+				header += strings.Repeat(" ", headerW-runeLen(header))
+			}
+			header = truncateRunes(header, headerW)
+
+			if p.PaneID == st.focusPaneID {
+				compose.WriteStyled(dst, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
+			} else {
+				compose.WriteString(dst, p.Dst.Min.X, 0, header)
+			}
+		}
+
+		if drawPane != nil {
+			drawPane(p.PaneID, dst, p.Dst)
+		} else if mirror, ok := c.mirrors[p.PaneID]; ok {
+			compose.Blit(dst, mirror.Surface, p.Dst)
+		}
+
+		// Draw column divider on right edge if applicable.
+		// Bold ┃ if adjacent to focused pane, otherwise │.
+		if p.Dst.Max.X < c.cols {
+			divider := "│"
+			if p.PaneID == st.focusPaneID || (i+1 < len(st.placements) && st.placements[i+1].PaneID == st.focusPaneID) {
+				divider = "┃"
+			}
+			for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
+				compose.WriteString(dst, p.Dst.Max.X, y, divider)
+			}
+		}
+	}
+
+	return focusedPlacement
+}
+
+// drawStatusBarLocked paints the bottom row. c.mu must be held.
+//
+// Leave the final column untouched: ultraviolet's terminal renderer
+// writes the last cell of a row with autowrap toggled off and back on
+// around it, which splits whatever glyph lands there across a mode
+// escape sequence on the wire. Budgeting one cell short of c.cols keeps
+// the whole line contiguous in the raw output.
+func (c *Client) drawStatusBarLocked(scr uv.Screen) {
+	statusText, statusStyle := c.statusLineLocked(c.cols - 1)
+	compose.WriteStyled(scr, 0, c.rows-1, statusText, statusStyle)
+}
+
+// realizePendingWipeLocked turns a recorded focus change into a live
+// transition, composing both of its frames.
+//
+// This runs on the draw path because that is the only place pane
+// content is reachable -- through the drawPane callback in-process, or
+// c.mirrors when attached. HandleServerMsg, where the focus change
+// actually arrives, can see neither. c.mu must be held.
+func (c *Client) realizePendingWipeLocked(drawPane func(id int, dst uv.Screen, area image.Rectangle)) {
+	pw := c.pendingWipe
+	if pw == nil {
+		return
+	}
+	c.pendingWipe = nil
+
+	// A resize between the focus change and this frame invalidates the
+	// retained geometry: compositing the old placements at the new size
+	// would animate a layout that never existed. Snap instead.
+	if pw.cols != c.cols || pw.rows != c.rows || c.cols <= 0 || c.rows <= 1 {
+		return
+	}
+
+	h := c.rows - 1
+	fA := compose.NewSurface(c.cols, h)
+	fB := compose.NewSurface(c.cols, h)
+	c.composeFrameLocked(fA, pw.from, drawPane)
+	c.composeFrameLocked(fB, c.frameStateLocked(), drawPane)
+	c.activeWipe = NewWipeTransition(fA, fB, c.cols, h, pw.dir, wipeSteps)
 }
 
 // controlHelp returns as much of the control-mode menu as fits in budget

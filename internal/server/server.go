@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -32,6 +33,10 @@ type Server struct {
 	escapees   map[int]struct{} // Tracked descendant PIDs for teardown
 	stopCh     chan struct{}
 	closeOnce  sync.Once
+
+	// lastStatuses is the pane status glyph set as of the last layout
+	// broadcast, so the frame loop can tell when one has changed.
+	lastStatuses map[int]string
 }
 
 // NewServer initializes a Server instance connected via transport.
@@ -90,6 +95,18 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				s.mu.Lock()
 				s.removeTransportLocked(tp)
 				s.mu.Unlock()
+				// Close outside s.mu. Close can block, and
+				// BEYOND-V1 section 6 records holding s.mu across a
+				// blocking call as the shape behind the server that
+				// cannot be shut down. Close is not on the Transport
+				// interface -- only the socket implementations have
+				// it, InProcChannel does not -- so this is a type
+				// assertion rather than a call. Without it every
+				// detach leaked an fd and the socket's reader
+				// goroutine on a server built to outlive its clients.
+				if cl, ok := tp.(io.Closer); ok {
+					_ = cl.Close()
+				}
 				return
 			}
 			s.handleClientMsg(ctx, msg)
@@ -130,7 +147,12 @@ func (s *Server) Run(ctx context.Context) error {
 		case <-s.stopCh:
 			return nil
 		case <-frameTicker.C:
-			s.broadcastPaneUpdates(ctx)
+			// broadcastLayout already ends with a pane-update
+			// broadcast, so only send one separately when it did
+			// not fire.
+			if !s.broadcastLayoutIfStatusChanged(ctx) {
+				s.broadcastPaneUpdates(ctx)
+			}
 		case <-ticker.C:
 			s.pollDescendants()
 		}
@@ -180,12 +202,8 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 				s.resizePanesLocked()
 			}
 		case protocol.VerbSmartJump:
-			for id, p := range s.panes {
-				st := p.Status()
-				if st == term.StatusNeedsInput || st == term.StatusFailed {
-					s.strip.FocusPaneID(id)
-					break
-				}
+			if id := s.smartJumpTargetLocked(); id > 0 {
+				s.strip.FocusPaneID(id)
 			}
 		}
 		needBroadcast = true
@@ -388,13 +406,100 @@ func (s *Server) resizePanesLocked() {
 	}
 }
 
+// smartJumpTargetLocked picks the pane most worth jumping to, or 0 when
+// nothing wants attention. s.mu must be held.
+//
+// Priority rather than first match: OSC 133's A and B both mean
+// NeedsInput, and a shell sits at a prompt almost all the time, so
+// "first pane with an interesting status" would land on whichever idle
+// shell the map happened to yield first -- and map order is not stable
+// between runs, so the same screen could send you somewhere different
+// each press. A failed command outranks a finished one, which outranks
+// a prompt. Working and Idle are never targets: a busy pane does not
+// want you and an empty one has nothing to say. Ties break on the
+// lowest pane ID so repeated presses are deterministic.
+func (s *Server) smartJumpTargetLocked() int {
+	rank := func(st term.PaneStatus) int {
+		switch st {
+		case term.StatusFailed:
+			return 3
+		case term.StatusDone:
+			return 2
+		case term.StatusNeedsInput:
+			return 1
+		default:
+			return 0
+		}
+	}
+
+	bestID, bestRank := 0, 0
+	for id, p := range s.panes {
+		r := rank(p.Status())
+		switch {
+		case r == 0:
+		case r > bestRank:
+			bestID, bestRank = id, r
+		case r == bestRank && id < bestID:
+			bestID = id
+		}
+	}
+	return bestID
+}
+
+// statusGlyphsLocked renders the current per-pane status glyphs.
+// s.mu must be held.
+func (s *Server) statusGlyphsLocked() map[int]string {
+	out := make(map[int]string, len(s.panes))
+	for id, p := range s.panes {
+		out[id] = p.Status().Glyph()
+	}
+	return out
+}
+
+// broadcastLayoutIfStatusChanged pushes a layout snapshot when any
+// pane's status glyph differs from the last one sent, and reports
+// whether it did.
+//
+// PaneStatuses rides on MsgLayoutSnapshot, which is otherwise only
+// sent for verbs, spawns and kills. Without this, a status change
+// driven by OSC 133 would sit invisible until the user happened to
+// press a verb key -- which is how the glyphs stayed unobservable even
+// after the handler itself was fixed. Change detection keeps an idle
+// session quiet: the frame ticker runs at 33ms, but nothing is sent
+// unless the glyph set actually moved.
+func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
+	s.mu.Lock()
+	cur := s.statusGlyphsLocked()
+	changed := len(cur) != len(s.lastStatuses)
+	if !changed {
+		for id, g := range cur {
+			if s.lastStatuses[id] != g {
+				changed = true
+				break
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	if !changed {
+		return false
+	}
+	// Call outside s.mu: broadcastLayout takes it itself. It is also
+	// what marks the glyph set delivered -- deliberately not done
+	// here. A status broadcast is edge-triggered, so unlike the 33ms
+	// pane updates it does not self-heal: if this snapshot is dropped
+	// (SendServer returns false on a full buffer) and we had already
+	// recorded the set as sent, the client would stay stale until some
+	// later, unrelated status change. Leaving lastStatuses untouched
+	// on a failed send makes the next tick retry.
+	s.broadcastLayout(ctx)
+	return true
+}
+
 func (s *Server) broadcastLayout(ctx context.Context) {
 	s.mu.Lock()
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
-	statuses := make(map[int]string)
-	for id, p := range s.panes {
-		statuses[id] = p.Status().Glyph()
-	}
+	statuses := s.statusGlyphsLocked()
 	snapshot := protocol.MsgLayoutSnapshot{
 		Columns:      layout.ToColumnData(s.strip.Columns()),
 		Placements:   layout.ToProtocol(placements),
@@ -404,9 +509,24 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	tps := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()
 
+	// With no clients there is nobody left to be stale, so treat that
+	// as delivered rather than retrying every tick forever.
+	delivered := len(tps) == 0
 	for _, tp := range tps {
-		tp.SendServer(ctx, snapshot)
+		if tp.SendServer(ctx, snapshot) {
+			delivered = true
+		}
 	}
+
+	// Mark the glyph set clean only once it actually went somewhere.
+	// This is also what keeps a verb-triggered broadcast from making
+	// the next frame tick send a redundant status snapshot.
+	if delivered {
+		s.mu.Lock()
+		s.lastStatuses = statuses
+		s.mu.Unlock()
+	}
+
 	s.broadcastPaneUpdates(ctx)
 }
 

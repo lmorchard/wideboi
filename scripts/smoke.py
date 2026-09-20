@@ -336,14 +336,38 @@ def case_custom_prefix_from_env(fail):
 
 
 
-# There is deliberately no smoke case named after OSC 133 / smart-jump.
-# The one that used to live here passed for that feature's entire life
-# without ever exercising a working code path -- see docs/BEYOND-V1.md
-# section 6, "OSC 133 agent status has never worked", for the defect and
-# why fixing it is parked rather than done as a rider here. A case that
-# reports OK for a feature that cannot work is worse than no case; it
-# was deleted rather than patched into something that would pass against
-# a still-broken handler.
+# The OSC 133 case is back, and asserts through focus_pane_id.
+#
+# Its predecessor was deleted rather than patched, because it passed for
+# that feature's entire broken life: it echoed a command into a pane and
+# grepped the wire for the text it had just typed, which proves the pane
+# echoes and nothing else. The handler underneath never matched a single
+# sequence. See docs/LESSONS.md, "A smoke test that types a command and
+# then greps for its own text proves nothing."
+#
+# This version writes the escape sequences into a pane and then asks the
+# multiplexer a question only a working handler can answer: which pane
+# does smart jump choose? The answer arrives as the focused-pane digit
+# in the status line, which no amount of pane echo can fake.
+def case_osc133_status_drives_smart_jump(fail):
+    s = Session()
+
+    s.type("\x02l")                                  # focus pane 2
+    s.type("printf '\\033]133;D;1\\007'\r")           # mark pane 2 failed
+    s.type("\x02h")                                  # back to pane 1
+
+    if focus_pane_id(s.output(), s.rows) != 1:
+        s.quit_and_reap()
+        fail("setup did not return focus to pane 1")
+        return
+
+    before = len(s.output())
+    s.type("\x02a")                                  # smart jump
+    landed = focus_pane_id(s.output()[before:], s.rows)
+    s.quit_and_reap()
+
+    if landed != 2:
+        fail(f"smart jump landed on pane {landed}, want the failed pane 2")
 
 
 def case_quit_restores_and_reaps(fail):
@@ -622,8 +646,7 @@ CASES = [
     ("doubled prefix reaches the pane", case_doubled_prefix_reaches_the_pane),
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),
-    # No "osc133 status and smart jump" entry -- see the comment above
-    # case_quit_restores_and_reaps and docs/BEYOND-V1.md section 6.
+    ("osc133 status drives smart jump", case_osc133_status_drives_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names the prefix", case_status_line_names_the_prefix),
     ("control mode names every entry at 80 columns", case_control_mode_names_every_entry_at_80_columns),
