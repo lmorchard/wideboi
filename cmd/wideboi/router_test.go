@@ -1,9 +1,11 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
@@ -69,70 +71,154 @@ func TestEscapeLeavesControlModeWithoutReachingThePane(t *testing.T) {
 	}
 }
 
-// Control mode is sticky: verbs do not exit it, so C-b l l l moves three
-// columns. Enumerate the whole table rather than sampling it -- the
-// input space is finite and small.
-//
-// Run against both detachability settings, because `d` is the one entry
-// whose routing depends on it and an entry tested in only one state is
-// an entry half tested.
-func TestControlModeVerbTable(t *testing.T) {
-	cases := []struct {
-		ev uv.KeyPressEvent
-		// want is the route when the session lives in a server process
-		// this client can leave behind; wantLocal is the route for an
-		// in-process session, which has nothing to detach from.
-		want      route
-		wantLocal route
-	}{
-		{key('h'), route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}, route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}},
-		{key('l'), route{Kind: routeVerb, Verb: protocol.VerbFocusRight}, route{Kind: routeVerb, Verb: protocol.VerbFocusRight}},
-		{key(uv.KeyLeft), route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}, route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}},
-		{key(uv.KeyRight), route{Kind: routeVerb, Verb: protocol.VerbFocusRight}, route{Kind: routeVerb, Verb: protocol.VerbFocusRight}},
-		{key('n'), route{Kind: routeVerb, Verb: protocol.VerbNewColumn}, route{Kind: routeVerb, Verb: protocol.VerbNewColumn}},
-		{key('w'), route{Kind: routeVerb, Verb: protocol.VerbCycleWidth}, route{Kind: routeVerb, Verb: protocol.VerbCycleWidth}},
-		{key('x'), route{Kind: routeVerb, Verb: protocol.VerbKillPane}, route{Kind: routeVerb, Verb: protocol.VerbKillPane}},
-		{key('j'), route{Kind: routeVerb, Verb: protocol.VerbSmartJump}, route{Kind: routeVerb, Verb: protocol.VerbSmartJump}},
-		{key('u'), route{Kind: routeScroll, Scroll: 10}, route{Kind: routeScroll, Scroll: 10}},
-		// In-process, `d` is swallowed rather than routed: detaching
-		// there could only mean killing every pane, and the status bar
-		// does not offer the verb, so a user who typed it learned it
-		// somewhere that no longer applies.
-		{key('d'), route{Kind: routeDetach}, route{Kind: routeIgnore}},
-		{key('q'), route{Kind: routeQuit}, route{Kind: routeQuit}},
-	}
-	for _, tc := range cases {
+// Enumerate the table rather than sampling it, in every combination that
+// changes the answer: the input space is finite and small, and
+// MatchString cannot tell a key nobody pressed from a name it can never
+// produce.
+func TestControlModeTable(t *testing.T) {
+	for _, b := range keys.Bindings {
 		for _, detachable := range []bool{true, false} {
-			want := tc.want
-			if !detachable {
-				want = tc.wantLocal
+			hidden := b.NeedsDetach && !detachable
+
+			// Unmodified: act, then leave the mode.
+			t.Run(b.Key+"/plain", func(t *testing.T) {
+				r := &router{prefix: "ctrl+b", control: true, detachable: detachable}
+				got := r.route(keyNamed(t, b.Key))
+				if hidden {
+					if got.Kind != routeIgnore || r.control {
+						t.Errorf("hidden binding %q: got %+v control=%v, want ignore and exit",
+							b.Key, got, r.control)
+					}
+					return
+				}
+				assertAction(t, b, got)
+				if b.Action == keys.ActionHelp {
+					if !r.control || !r.help {
+						t.Errorf("? should raise help and stay in control mode: control=%v help=%v",
+							r.control, r.help)
+					}
+					return
+				}
+				if r.control {
+					t.Errorf("%q unmodified did not leave control mode", b.Key)
+				}
+			})
+
+			// Ctrl-modified: act, and stay -- except the terminal verbs,
+			// where staying is meaningless because the client is leaving.
+			name, hasCtrl := b.CtrlForm()
+			if !hasCtrl {
+				continue
 			}
-			r := &router{prefix: "ctrl+b", control: true, detachable: detachable}
-			if got := r.route(tc.ev); got != want {
-				t.Errorf("%s (detachable=%v): got %+v, want %+v", tc.ev.String(), detachable, got, want)
-			}
-			if want.Kind != routeQuit && !r.control {
-				t.Errorf("%s (detachable=%v): left control mode; the mode is sticky", tc.ev.String(), detachable)
-			}
+			t.Run(b.Key+"/ctrl", func(t *testing.T) {
+				r := &router{prefix: "ctrl+b", control: true, detachable: detachable}
+				got := r.route(keyNamed(t, name))
+				if hidden {
+					if got.Kind != routeIgnore || r.control {
+						t.Errorf("hidden binding %s: got %+v control=%v", name, got, r.control)
+					}
+					return
+				}
+				assertAction(t, b, got)
+				switch b.Action {
+				case keys.ActionQuit, keys.ActionDetach:
+					// ctrl+q and ctrl+d are exactly q and d.
+				default:
+					if !r.control {
+						t.Errorf("%s did not stay in control mode", name)
+					}
+				}
+			})
 		}
 	}
 }
 
-func TestControlModeSwallowsUnknownKeys(t *testing.T) {
-	// Forwarding would let a typo land in a pane while the user still
-	// believes they are issuing commands. Shift+Q is in here because
-	// ultraviolet does not match a shifted letter against its lowercase
-	// name, so it is genuinely unknown rather than a quit.
-	r := &router{prefix: "ctrl+b", control: true}
-	for _, ev := range []uv.KeyPressEvent{
-		key('z'), key('1'), ctrl('c'),
+func assertAction(t *testing.T, b keys.Binding, got route) {
+	t.Helper()
+	switch b.Action {
+	case keys.ActionVerb:
+		if got.Kind != routeVerb || got.Verb != b.Verb {
+			t.Errorf("%q: got %+v, want verb %v", b.Key, got, b.Verb)
+		}
+	case keys.ActionScroll:
+		if got.Kind != routeScroll || got.Scroll != b.Scroll {
+			t.Errorf("%q: got %+v, want scroll %d", b.Key, got, b.Scroll)
+		}
+	case keys.ActionQuit:
+		if got.Kind != routeQuit {
+			t.Errorf("%q: got %+v, want routeQuit", b.Key, got)
+		}
+	case keys.ActionDetach:
+		if got.Kind != routeDetach {
+			t.Errorf("%q: got %+v, want routeDetach", b.Key, got)
+		}
+	case keys.ActionHelp, keys.ActionExit:
+		if got.Kind != routeIgnore {
+			t.Errorf("%q: got %+v, want routeIgnore", b.Key, got)
+		}
+	}
+}
+
+// A keystroke that did nothing must never leave you in a mode that eats
+// the next one -- regardless of whether Ctrl was held. Holding Ctrl is
+// not evidence you meant a key that does not exist.
+func TestUnknownKeysExitControlModeWithAnyModifier(t *testing.T) {
+	cases := []uv.KeyPressEvent{
+		key('z'), key('5'),
+		{Code: 'g', Mod: uv.ModCtrl},
+		{Code: 'z', Mod: uv.ModCtrl},
 		{Code: 'q', Mod: uv.ModShift, Text: "Q"},
-	} {
-		if got := r.route(ev); got.Kind != routeIgnore {
+	}
+	for _, ev := range cases {
+		r := &router{prefix: "ctrl+b", control: true, detachable: true}
+		got := r.route(ev)
+		if got.Kind != routeIgnore {
 			t.Errorf("%s: kind %v, want routeIgnore", ev.String(), got.Kind)
 		}
+		if r.control {
+			t.Errorf("%s: stayed in control mode", ev.String())
+		}
+	}
+}
+
+// Three lefts and out, which is the whole point of the feature.
+func TestCtrlRepeatThenPlainExits(t *testing.T) {
+	r := &router{prefix: "ctrl+b", detachable: true}
+	if got := r.route(uv.KeyPressEvent{Code: 'b', Mod: uv.ModCtrl}); got.Kind != routeIgnore {
+		t.Fatalf("prefix: %+v", got)
+	}
+	for i := 0; i < 2; i++ {
+		got := r.route(uv.KeyPressEvent{Code: 'h', Mod: uv.ModCtrl})
+		if got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft {
+			t.Fatalf("repeat %d: %+v", i, got)
+		}
 		if !r.control {
-			t.Fatalf("%s: left control mode", ev.String())
+			t.Fatalf("repeat %d left control mode", i)
+		}
+	}
+	got := r.route(key('h'))
+	if got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft {
+		t.Fatalf("final: %+v", got)
+	}
+	if r.control {
+		t.Error("the unmodified final press did not leave control mode")
+	}
+}
+
+// The overlay eats the key that dismisses it. Pressing k to close help
+// must not also scroll.
+func TestAnyKeyDismissesHelpAndIsSwallowed(t *testing.T) {
+	for _, ev := range []uv.KeyPressEvent{key('k'), key('q'), key('z'), {Code: uv.KeyEscape}} {
+		r := &router{prefix: "ctrl+b", control: true, help: true, detachable: true}
+		got := r.route(ev)
+		if got.Kind != routeIgnore {
+			t.Errorf("%s dismissing help: kind %v, want routeIgnore", ev.String(), got.Kind)
+		}
+		if r.help {
+			t.Errorf("%s did not dismiss the overlay", ev.String())
+		}
+		if !r.control {
+			t.Errorf("%s: dismissing help should return to control mode", ev.String())
 		}
 	}
 }
@@ -184,4 +270,24 @@ func TestConfiguredPrefixReplacesTheDefault(t *testing.T) {
 	if label != "C-a" {
 		t.Errorf("label %q, want C-a", label)
 	}
+}
+
+// keyNamed builds a KeyPressEvent that MatchString will match against
+// name, for the handful of names the table uses.
+func keyNamed(t *testing.T, name string) uv.KeyPressEvent {
+	t.Helper()
+	switch name {
+	case "esc":
+		return uv.KeyPressEvent{Code: uv.KeyEscape}
+	case "?":
+		return uv.KeyPressEvent{Code: '?', Text: "?"}
+	}
+	if rest, ok := strings.CutPrefix(name, "ctrl+"); ok && len(rest) == 1 {
+		return uv.KeyPressEvent{Code: rune(rest[0]), Mod: uv.ModCtrl}
+	}
+	if len(name) == 1 {
+		return uv.KeyPressEvent{Code: rune(name[0]), Text: name}
+	}
+	t.Fatalf("keyNamed does not know how to build %q", name)
+	return uv.KeyPressEvent{}
 }
