@@ -162,6 +162,45 @@ Wanted for everything else: `log.Printf` from anywhere would otherwise land on
 stderr, which is live alt-screen real estate. But the fatal path has to bypass
 it. `main` writes to `os.Stderr` directly.
 
+## `ctrl+h` is not Backspace, and three other letters are not themselves
+
+Plan 15 nearly died on an assumption. Binding every verb to a ctrl form
+looked impossible because `ctrl+h` is ASCII 0x08, which is BS — so the
+focus-left key, the one you most want to repeat, would collide with
+Backspace.
+
+It does not. Ultraviolet maps 0x08 to `ctrl+h` unconditionally
+(`decoder.go`'s `parseControl`), and the Backspace key sends 0x7F. All
+eleven verb letters have working ctrl forms.
+
+What *is* taken, and permanently: `ctrl+i` decodes as `tab`, `ctrl+m` as
+`enter`, `ctrl+[` as `escape`. Those three letters can never carry a
+binding with a repeat form. `internal/keys` enforces it, because the
+failure mode is a key that silently does nothing when Ctrl is held.
+
+The general lesson is the repo's existing one, applied again: **probe the
+pinned dependency, do not reason from the ASCII table.** Two minutes with
+`uv.EventDecoder` answered what an afternoon of arguing would not have.
+
+## A smoke test that types a command and then greps for its own text proves nothing
+
+Two cases in `scripts/smoke.py` did exactly that — `s.type("echo marker\r")`
+then `if b"marker" not in s.output()`. Readline *echoes what you type*, so
+the assertion matches whether or not the shell ever ran the command. Both
+cases passed against inverted premises for exactly that reason:
+
+- `case_control_mode_is_sticky` asserted the semantics this plan deliberately
+  removed ("if the mode were one-shot the second h would land in a pane as a
+  literal letter") and kept passing after the mode stopped being sticky.
+- `case_osc133_status_and_smart_jump` reported OK for the entire life of a
+  feature that has never worked — see the OSC 133 row in `docs/BEYOND-V1.md`
+  section 6.
+
+The rule to draw: **assert on output the program produced, not on bytes you
+sent.** `focus_pane_id` works because it parses the status line's escape
+sequences, which only wideboi can emit. A command's *output* works only if it
+is distinguishable from its own echoed command line — `echo marker` is not.
+
 ## Never write the terminal's last column
 
 Ultraviolet brackets a write to the final column with autowrap-toggle escapes
