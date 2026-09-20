@@ -12,6 +12,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/client/compose"
+	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -277,53 +278,34 @@ func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Scree
 }
 
 // Control-mode verbs, in display order, most essential first. These
-// strings must match cmd/wideboi's router table; scripts/smoke.py
-// asserts they do, so the two cannot drift apart silently.
+// controlHelp returns as much of the control-mode menu as fits in budget
+// cells, always including the entries keys marks Essential.
 //
-// Unprefixed letters rather than a modifier because that is the whole
-// point of the mode: the terminal has already told us a prefix arrived,
-// so no modifier needs to survive the trip.
-var controlVerbs = []string{
-	"h/l focus",
-	"n new",
-	"w width",
-	"x kill",
-	"j jump",
-	"u scroll",
-}
-
-// detachVerb is listed apart from controlVerbs because it is the one
-// entry whose presence depends on how the client reached its server.
-// See Client.SetDetachable.
-const detachVerb = "d detach"
-
-// Never dropped. With no unprefixed bindings left, a user who cannot
-// read these two out of the bar has no way forward except a signal.
-var controlTail = []string{"q quit", "esc exit"}
-
-// controlHelp returns as much of the control-mode verb menu as fits in
-// budget cells, always including controlTail.
+// Both halves come from internal/keys, so the bar cannot advertise a
+// binding the router does not have, or omit one it does. That used to be
+// guaranteed by scripts/smoke.py comparing two hardcoded lists of the
+// same strings, which only ever caught drift someone remembered to
+// assert.
 //
-// The full menu is 71 cells, against a budget of 79 at an 80-column
-// terminal, so in practice nothing is dropped at any width wideboi is
-// usable at. The dropping exists for narrower terminals and for
-// whatever verbs get added later.
+// Dropping starts from the end of the droppable list. The essential
+// entries are never dropped: with no unprefixed escape hatch, a user who
+// cannot read "q quit" and "esc exit" out of the bar has no way forward
+// except a signal.
 func controlHelp(budget int, detachable bool) string {
-	verbs := controlVerbs
-	if detachable {
-		verbs = append(append([]string{}, controlVerbs...), detachVerb)
-	}
+	droppable, essential := keys.BarItems(detachable)
 
-	tail := strings.Join(controlTail, "  ")
+	tail := strings.Join(essential, "  ")
 	used := runeLen(tail)
-	taken := make([]string, 0, len(verbs))
-	for _, v := range verbs {
+
+	taken := make([]string, 0, len(droppable))
+	for _, v := range droppable {
 		if used+2+runeLen(v) > budget {
 			break
 		}
 		used += 2 + runeLen(v)
 		taken = append(taken, v)
 	}
+
 	return strings.Join(append(taken, tail), "  ")
 }
 

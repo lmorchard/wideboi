@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/lmorchard/wideboi/internal/keys"
 )
 
 // A user in control mode who cannot see how to quit or how to get back
@@ -24,20 +25,52 @@ func TestControlHelpAlwaysNamesQuitAndExit(t *testing.T) {
 	}
 }
 
-// The measurement the whole indicator decision rests on: inverting the
-// bar costs nothing, so at 80 columns -- the commonest width and
-// cmd/wideboi's own fallback -- every verb fits. If a verb is ever added
-// that breaks this, the spec's argument needs revisiting, so fail loudly
-// rather than silently dropping one.
-func TestControlHelpFitsEveryVerbAt80Columns(t *testing.T) {
-	at80 := controlHelp(79, true)
-	for _, want := range append(append(append([]string{}, controlVerbs...), detachVerb), controlTail...) {
-		if !strings.Contains(at80, want) {
-			t.Errorf("80 columns: control help omits %q: %q", want, at80)
+// The whole menu must fit at 80 columns, which is the commonest width
+// and cmd/wideboi's own fallback when the host reports no size.
+//
+// This assertion replaces one that pinned a smaller table. Adding
+// scroll-down pushed the descriptive form to 81 cells against a 79-cell
+// budget, so h/j/k/l collapse into one "hjkl move" entry and the help
+// overlay does the teaching. If a verb is ever added that breaks this
+// again, the overlay is already there and the bar should shed the entry
+// rather than grow.
+func TestControlHelpFitsEveryEntryAt80Columns(t *testing.T) {
+	for _, detachable := range []bool{true, false} {
+		at80 := controlHelp(79, detachable)
+		droppable, essential := keys.BarItems(detachable)
+		for _, want := range append(append([]string{}, droppable...), essential...) {
+			if !strings.Contains(at80, want) {
+				t.Errorf("detachable=%v: control help omits %q: %q", detachable, want, at80)
+			}
+		}
+		if got := runeLen(at80); got > 79 {
+			t.Errorf("detachable=%v: control help is %d cells at 80 columns, budget is 79: %q",
+				detachable, got, at80)
 		}
 	}
-	if got := runeLen(at80); got > 79 {
-		t.Errorf("control help is %d cells at 80 columns, budget is 79", got)
+}
+
+// Detach is the one entry whose presence depends on how the client
+// reached its server. An in-process wideboi owns its panes, so offering
+// the verb would be advertising data loss.
+func TestControlHelpOffersDetachOnlyWhenDetachable(t *testing.T) {
+	if got := controlHelp(79, false); strings.Contains(got, "d detach") {
+		t.Errorf("in-process control help offers detach: %q", got)
+	}
+	if got := controlHelp(79, true); !strings.Contains(got, "d detach") {
+		t.Errorf("attached control help omits detach: %q", got)
+	}
+}
+
+// The bar is built from the same table the router routes from, so a
+// binding can never be advertised without existing or exist without
+// being advertised.
+func TestControlHelpNamesEveryBarGroup(t *testing.T) {
+	at200 := controlHelp(199, true)
+	for _, b := range keys.Bindings {
+		if !strings.Contains(at200, b.BarGroup) {
+			t.Errorf("control help omits %q (binding %q): %q", b.BarGroup, b.Key, at200)
+		}
 	}
 }
 
@@ -102,19 +135,6 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 	}
 }
 
-// The detach verb is the only entry whose presence is conditional, so
-// it gets its own assertion in both directions. An in-process wideboi
-// owns its panes: "detaching" there would kill them, so offering the
-// verb would be advertising data loss.
-func TestControlHelpOffersDetachOnlyWhenDetachable(t *testing.T) {
-	if got := controlHelp(79, false); strings.Contains(got, detachVerb) {
-		t.Errorf("in-process control help offers %q: %q", detachVerb, got)
-	}
-	if got := controlHelp(79, true); !strings.Contains(got, detachVerb) {
-		t.Errorf("attached control help omits %q: %q", detachVerb, got)
-	}
-}
-
 // The status line is what a user actually reads, so assert through it
 // as well as through controlHelp: a Client that never passed its own
 // detachable flag down would pass the test above and still show the
@@ -122,14 +142,14 @@ func TestControlHelpOffersDetachOnlyWhenDetachable(t *testing.T) {
 func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
 	local := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
 	got, _ := local.statusLineLocked(99)
-	if strings.Contains(got, detachVerb) {
-		t.Errorf("in-process status line offers %q: %q", detachVerb, got)
+	if strings.Contains(got, "d detach") {
+		t.Errorf("in-process status line offers %q: %q", "d detach", got)
 	}
 
 	attached := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
 	attached.SetDetachable(true)
 	got, _ = attached.statusLineLocked(99)
-	if !strings.Contains(got, detachVerb) {
-		t.Errorf("attached status line omits %q: %q", detachVerb, got)
+	if !strings.Contains(got, "d detach") {
+		t.Errorf("attached status line omits %q: %q", "d detach", got)
 	}
 }
