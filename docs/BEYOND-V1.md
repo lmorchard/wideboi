@@ -261,6 +261,7 @@ Each was found, understood, and deliberately deferred. None is a mystery.
 | `compose.Text`/`WriteString` ignore `Cell.Width` | Current chrome is single-width | Real grapheme handling; comes due if status glyphs go wide |
 | `transport.SendServer` is called under `s.mu` | Only reachable behind the wedged-render defect above, which is its real fix | Hoist the broadcast out of `s.mu`, or bound the send. `broadcastLayoutLocked` runs under `s.mu` and `SendServer` blocks once `ServerSend`'s 256-deep buffer fills, bounded only by a context `main` cancels *after* `guard.Stop()`. So the chain "child stops reading stdin → pty-writer parks → reply pipe fills → `vtGrid.Write` parks holding `se.mu` → main loop parks in `Draw` → `ServerSend` stops draining" ends with `srv.Close()` waiting forever. The `*Locked`-release discipline in `resizePanesLocked`/`PaneSize`/`CursorInfo` removes one way to hold `s.mu` forever, not this one. |
 | The width cycle cannot reach a pane's spawn width | Absolute presets are load-bearing (see the v1 spec's layout core); a cycle seeded from the spawn width is a behaviour change, not a bug fix | `CycleWidth` steps `40 → 60 → 80`, but a pane spawns at `max((cols-1)/2, 40)`. On a 200-column terminal a pane spawns 99 cells wide and the *first* `alt+w` **shrinks** it to 80, which it can never exceed again. Either fold the spawn width into the cycle, or make the presets viewport-aware without making the *width* viewport-dependent. |
+| OSC 133 agent status has never worked. No status glyph (`!`, `✓`, `✗`) can render, and `VerbSmartJump` can never find a target pane | Found by Plan 15's control-mode work, a different subsystem from the fix. With no existing tests behind the handler (there are zero mentions of OSC or 133 anywhere in `internal/server/term`), correcting it will immediately surface the glyph-rendering path and the `D;0`-vs-`D;n` exit-code semantics sitting behind it — that deserves its own plan and review, not a rider on a keybinding change | Root cause is `internal/server/term/grid.go:180-196`: `RegisterOscHandler(133, ...)` is handed the full OSC payload including the command prefix — verified against the pinned emulator, the handler receives `"133;A"` and `"133;D;1"` — so `strings.HasPrefix(s, "A")` and its siblings never match. `sawOSC133` latches true before the dead switch runs, so `Status()` then freezes at whatever it held. Fix: strip the `<cmd>;` prefix before matching, the same way the same vt library already does in `handleTitle` via `bytes.Split(data, []byte{';'})`. Then restore an end-to-end smoke case asserting through `focus_pane_id` (not through echoing a command into a pane — that's how the previous case passed for this feature's entire broken life), plus unit tests in `internal/server/term`, which currently has none for OSC at all. A prior implementer verified by local patch that the prefix-strip alone makes the smoke suite pass 24/24, for whoever picks this up. |
 
 ## 7. Spec-vs-code drifts left standing
 
@@ -294,4 +295,29 @@ the spec will be wrong about the code.
 - **Do the target coding agents use the alternate screen?** Determines how much reflow matters for the actual workload. A full-screen TUI agent repaints itself; an Ink-style agent (Claude Code appears to be one — its transcript stays in your scrollback) commits output upward into terminal-owned scrollback, same split as a shell. One-line check: run each in a pty and look for `ESC[?1049h`.
 - **What should `$mod` be, per platform?** Option-as-Meta works locally but depends on the client terminal over SSH, and it requires terminal configuration users won't guess at.
 - **Session persistence.** v1 deliberately has none — resume is the agent harness's job (`claude --resume`). Worth revisiting only if detach lands.
-- **Config file.** Defaults live in one struct; reading a file into it is small and unexciting whenever it's wanted.
+- **Config file, and key remapping for control mode.** Defaults live in one
+  struct; reading a file into it is small and unexciting whenever it's wanted.
+  The part worth designing rather than assuming is **remapping the control-mode
+  verbs**, which is the thing people will actually want it for — `WIDEBOI_PREFIX`
+  already concedes that one key is not everyone's key, and the same argument
+  applies to the whole table.
+
+  Plan 15 builds `internal/keys` as a single table (letter, verb, labels,
+  whether it needs a detachable session) read by the router, the status bar and
+  the help overlay, so remapping is populating that table rather than patching
+  three places. Three constraints it already carries that a config format has to
+  respect:
+
+  - **`i`, `m` and `[` can never be bound.** Their control bytes are Tab, Enter
+    and Escape, so a verb on those letters has no working repeat form. Enforced
+    by a test today; a config file has to reject them with an error rather than
+    silently producing a dead binding.
+  - **An unmatchable key name is indistinguishable from a key nobody pressed.**
+    `uv.KeyPressEvent.MatchString` returns `false` either way, which is how the
+    `pgdn` binding shipped dead. Config-supplied names must be validated at load
+    against the set ultraviolet can actually produce — `parsePrefix`'s narrow
+    allowlist is the existing precedent, and it exists for exactly this.
+  - **The status bar has a hard 79-cell budget at 80 columns.** User-supplied
+    labels can overflow it, so the bar's existing drop-from-the-end behaviour
+    has to stay, and the help overlay becomes load-bearing rather than a
+    convenience.

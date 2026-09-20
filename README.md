@@ -17,18 +17,21 @@ wideboi uses a prefix key, like tmux. Press `ctrl+b` to enter control
 mode, then a verb. The status bar inverts and the cursor disappears
 while control mode is active.
 
-Control mode is sticky: it stays until you press `Escape`, so
-`ctrl+b l l l` moves three columns right.
+Control mode is per-keystroke sticky: hold `Ctrl` on a verb to stay in the
+mode and repeat the verb, press it unmodified to act and leave. `Escape` leaves
+without doing anything. For the full list, press `?` in control mode.
 
 | In control mode | Action |
 | --- | --- |
-| `h` / `l` | focus left / right (arrow keys work too) |
-| `n` | new column |
-| `w` | cycle column width |
-| `x` | kill focused pane |
-| `j` | jump to the pane that wants attention |
-| `u` / `d` | scroll the focused pane's history |
-| `q` | quit |
+| `h` / `l` | focus the column to the left / right (arrow keys work too) |
+| `j` / `k` | scroll this pane's history down / up |
+| `n` | open a new column |
+| `w` | cycle this column's width |
+| `x` | kill the focused pane |
+| `a` | jump to a pane wanting attention |
+| `?` | show the full help overlay |
+| `d` | detach, leaving the session running (socket sessions only) |
+| `q` | quit wideboi and close every pane |
 | `esc` | leave control mode |
 | `ctrl+b` | send a literal `ctrl+b` to the pane, and leave control mode |
 
@@ -47,6 +50,12 @@ WIDEBOI_PREFIX=ctrl+a wideboi
 **If you run wideboi inside tmux, change it.** tmux's own default prefix
 is `ctrl+b`, and whichever of the two is outermost will swallow it.
 `ctrl+a` is the conventional alternative.
+
+If your chosen prefix letter also has a ctrl repeat form of its own —
+`WIDEBOI_PREFIX=ctrl+l` collides with the ctrl repeat for focus-right —
+the doubled prefix still wins: `ctrl+l ctrl+l` sends one literal
+`ctrl+l` to the pane and leaves control mode, rather than moving focus
+right twice.
 
 ## Development
 
