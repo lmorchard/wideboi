@@ -90,3 +90,51 @@ func TestHelpOverlayStaysInsideTheViewport(t *testing.T) {
 		t.Error("overlay drew nothing at 80x24")
 	}
 }
+
+// The overlay is modal, so it wins over a wipe: a wipe is decorative and
+// a modal is not. Draw returns early while a wipe runs, so the overlay
+// check has to sit above that branch, not below it.
+func TestHelpVisibleGatesTheOverlay(t *testing.T) {
+	c := &Client{cols: 80, rows: 24, prefixLabel: "C-b"}
+	if c.helpVisible {
+		t.Fatal("help should start hidden")
+	}
+	c.SetHelpVisible(true)
+	if !c.helpVisible {
+		t.Error("SetHelpVisible(true) did not take")
+	}
+	c.SetHelpVisible(false)
+	if c.helpVisible {
+		t.Error("SetHelpVisible(false) did not take")
+	}
+}
+
+// The decision Draw acts on, asserted directly rather than through a
+// terminal: help outranks a wipe, a wipe outranks the ordinary panes,
+// and either alone lands where it should.
+func TestLayerLockedPrecedence(t *testing.T) {
+	fA := compose.NewSurface(80, 24)
+	fB := compose.NewSurface(80, 24)
+	activeWipe := NewWipeTransition(fA, fB, 80, 24, WipeLeftToRight, 8)
+
+	cases := []struct {
+		name        string
+		helpVisible bool
+		wipe        *WipeTransition
+		want        drawLayer
+	}{
+		{"neither", false, nil, layerPanes},
+		{"wipe only", false, activeWipe, layerWipe},
+		{"help only", true, nil, layerHelp},
+		{"help wins over an active wipe", true, activeWipe, layerHelp},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Client{helpVisible: tc.helpVisible, activeWipe: tc.wipe}
+			if got := c.layerLocked(); got != tc.want {
+				t.Errorf("layerLocked() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

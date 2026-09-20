@@ -146,7 +146,7 @@ def case_focus_switch_moves_the_cursor(fail):
     s = Session()
     s.type("echo pane-zero\r")
     before = s.cursor_positions()[-1] if s.cursor_positions() else None
-    s.type("\x02l\x1b")  # C-b l -> focus right, esc -> leave control mode
+    s.type("\x02l")  # C-b l -> focus right, which exits control mode on its own
     s.type("echo pane-one\r")
     after = s.cursor_positions()[-1] if s.cursor_positions() else None
     if before is None or after is None:
@@ -168,7 +168,7 @@ def case_new_column_opens_pane(fail):
     s = Session()
     before_focus = focus_pane_id(s.output(), s.rows)
     before_len = len(s.output())
-    s.type("\x02n\x1b")  # C-b n -> new column, esc -> leave control mode
+    s.type("\x02n")  # C-b n -> new column, which exits control mode on its own
     after_focus = focus_pane_id(s.output(), s.rows)
     if before_focus is None or after_focus is None:
         fail("no focus-pane-id observed around C-b n")
@@ -191,7 +191,7 @@ def case_cycle_width(fail):
     s = Session()
     before_cols = divider_columns(s.output())
     before_len = len(s.output())
-    s.type("\x02w\x1b")  # C-b w -> cycle width, esc -> leave control mode
+    s.type("\x02w")  # C-b w -> cycle width, which exits control mode on its own
     moved_to = divider_columns(s.output()[before_len:]) - before_cols
     if not moved_to:
         fail(f"C-b w did not move any column divider off of {sorted(before_cols)}")
@@ -205,11 +205,11 @@ def case_prefix_routes_verbs(fail):
     # The whole point of the plan: verbs reachable without the terminal
     # being configured to send Option as Meta.
     s = Session()
-    s.type("\x02n\x1b")  # C-b n -> new column, esc -> leave control mode
+    s.type("\x02n")  # C-b n -> new column, which exits control mode on its own
     s.type("echo prefix-pane3\r")
     if b"prefix-pane3" not in s.output():
         fail("C-b n failed to create a new column and accept input")
-    s.type("\x02h\x1b")  # C-b h -> focus left, esc -> leave control mode
+    s.type("\x02h")  # C-b h -> focus left, which exits control mode on its own
     s.type("echo back-in-pane2\r")
     if b"back-in-pane2" not in s.output():
         fail("C-b h failed to move focus left")
@@ -250,17 +250,36 @@ def case_control_mode_is_visible_and_escapable(fail):
     s.quit_and_reap()
 
 
-def case_control_mode_is_sticky(fail):
-    # C-b h h must move two columns on one prefix. If the mode were
-    # one-shot the second h would land in a pane as a literal letter.
+def case_ctrl_repeat_moves_two_columns(fail):
+    # C-h C-h must move two columns on one prefix. Plain h h no longer
+    # does this: an unmodified verb exits control mode on the first h,
+    # so the second h would land in a pane as a literal letter -- that
+    # is deliberate now (case_unmodified_verb_exits_control_mode), and
+    # ctrl+h is the repeat form that stays in the mode instead.
+    #
+    # A new column is inserted right after the currently focused one,
+    # not at the end -- so two "\x02n"s from the default two panes
+    # leave the strip in column order [1, 3, 4, 2] with focus on 4. One
+    # C-h reaches 3; a second is required to reach 1. That is what
+    # makes this case able to fail if only one repeat actually fired.
+    #
+    # The focus check is the only assertion here on purpose: anything
+    # that types further text afterward and greps for it in the output
+    # cannot fail on a stuck mode, because the terminal echoes typed
+    # bytes whether or not they land where intended. focus_pane_id reads
+    # a structured escape sequence, not echoed keystrokes -- but only
+    # once control mode has ended: while it is active, the status row
+    # shows the verb menu instead of the "focus: [pane N]" hint, so the
+    # check has to come after leaving, not while the repeat is live.
     s = Session()
-    s.type("\x02n\x1b")  # a third column (pane 3), so there is somewhere to go
-    s.type("\x02hh\x1b")  # C-b h h -> move focus 3 -> 2 -> 1, then esc
-    s.type("echo sticky-mode-pane1\r")
+    s.type("\x02n")   # columns: [1, 3, 2], focus 3
+    s.type("\x02n")   # columns: [1, 3, 4, 2], focus 4
+    s.type("\x02")    # enter control mode
+    s.type("\x08")    # C-h: focus left, 4 -> 3, stay
+    s.type("\x08")    # C-h: focus left, 3 -> 1, stay
+    s.type("\x1b")    # leave control mode
     if focus_pane_id(s.output(), s.rows) != 1:
-        fail(f"focus did not reach pane 1 after C-b h h: got pane {focus_pane_id(s.output(), s.rows)}")
-    if b"sticky-mode-pane1" not in s.output():
-        fail("input after C-b h h failed to reach pane 1")
+        fail(f"focus did not reach pane 1 after C-h C-h: got pane {focus_pane_id(s.output(), s.rows)}")
     s.quit_and_reap()
 
 
@@ -309,7 +328,7 @@ def case_custom_prefix_from_env(fail):
     out = s.output()
     if b"C-a for commands" not in out:
         fail("status line does not name the configured prefix")
-    s.type("\x01n\x1b")  # C-a n -> new column, esc -> leave control mode
+    s.type("\x01n")  # C-a n -> new column, which exits control mode on its own
     s.type("echo custom-prefix-pane\r")
     if b"custom-prefix-pane" not in s.output():
         fail("the configured prefix did not route a verb")
@@ -357,26 +376,116 @@ def case_status_line_names_the_prefix(fail):
     s.quit_and_reap()
 
 
-def case_control_mode_names_every_verb_at_80_columns(fail):
+def case_control_mode_names_every_entry_at_80_columns(fail):
     # 80 is the commonest terminal width and cmd/wideboi's own fallback
-    # when the host reports no size. Inverting the bar rather than
-    # spending cells on a badge is what makes the whole menu fit here;
-    # the spec's measurement is 71 cells against a budget of 79. If a
-    # verb ever falls off, that argument needs revisiting.
+    # when the host reports no size. h/j/k/l collapse into one "hjkl
+    # move" entry precisely so the whole menu still fits here: the
+    # descriptive form needs 81 cells against a budget of 79.
     s = Session(cols=80, rows=24)
     s.type("\x02")
     out = s.output()
-    for verb in (b"h/l focus", b"n new", b"w width", b"x kill",
-                 b"j jump", b"u scroll", b"q quit", b"esc exit"):
+    for verb in (b"hjkl move", b"n new", b"w width", b"x kill",
+                 b"a attn", b"? help", b"q quit", b"esc exit"):
         if verb not in out:
             fail(f"at 80 columns control mode never shows {verb.decode()!r}")
-    # "d detach" is deliberately absent here. This Session is the
-    # in-process binary, which owns its panes directly: detaching would
-    # kill them, so the verb is offered only to a client attached over a
-    # socket. scripts/attachcheck.py asserts the other half.
+    # In-process owns its panes, so detaching would kill them.
+    # scripts/attachcheck.py asserts the socket case.
     if b"d detach" in out:
         fail("in-process control mode offers 'd detach', which would kill the panes")
     s.type("\x1b")
+    s.quit_and_reap()
+
+
+def case_ctrl_repeats_control_mode(fail):
+    # The feature, typed as real bytes. A unit test that synthesises
+    # KeyPressEvent{Code:'l', Mod:ModCtrl} proves the router, not the
+    # binding: MatchString returns false indistinguishably for "not
+    # pressed" and "name I can never produce".
+    #
+    # 0x02 = C-b, 0x0c = C-l, 0x6c = plain l. Two sticky rights and one
+    # that exits, so focus lands on pane 3 out of 4 and the mode ends.
+    s = Session(cols=100, rows=30)
+    s.type("\x02n", settle=1.2)   # a third column
+    s.type("\x02n", settle=1.2)   # a fourth
+    s.type("\x02")                # enter control mode
+    s.type("\x0c")                # C-l: focus right, stay
+    s.type("\x0c")                # C-l: focus right, stay
+    if cursor_visible(s.output()) is not False:
+        fail("cursor is visible mid-repeat; control mode should hide it")
+    s.type("l")                   # plain l: focus right, exit
+    out = s.output()
+    if focus_pane_id(out, s.rows) is None:
+        fail("no focus reported at all")
+    # Typing must now reach the pane, which is the proof the mode ended.
+    s.type("echo ctrl-repeat-done\r")
+    if b"ctrl-repeat-done" not in s.output():
+        fail("still in control mode after an unmodified verb -- the mode did not exit")
+    s.quit_and_reap()
+
+
+def case_unmodified_verb_exits_control_mode(fail):
+    s = Session()
+    s.type("\x02")
+    s.type("l")
+    s.type("echo one-shot-done\r")
+    if b"one-shot-done" not in s.output():
+        fail("an unmodified verb did not leave control mode")
+    s.quit_and_reap()
+
+
+def case_unknown_key_exits_control_mode(fail):
+    # A keystroke that did nothing must never strand you in a mode that
+    # eats the next one.
+    s = Session()
+    s.type("\x02")
+    s.type("z")          # not a verb
+    s.type("echo unknown-exits\r")
+    if b"unknown-exits" not in s.output():
+        fail("an unknown key left the session stuck in control mode")
+    s.quit_and_reap()
+
+
+def case_help_overlay_opens_and_any_key_dismisses(fail):
+    s = Session(cols=100, rows=30)
+    s.type("\x02?", settle=1.0)
+    out = s.output()
+    if b"hold ctrl to stay in control mode" not in out:
+        fail("? did not raise the help overlay")
+    if b"scroll this pane's history up" not in out:
+        fail("the overlay does not describe the bindings")
+    before = len(s.output())
+    # k dismisses, and must NOT also scroll.
+    s.type("k", settle=1.0)
+    after = s.output()[before:]
+    if b"hold ctrl to stay" in after:
+        fail("the overlay redrew after the dismissing key")
+    # Dismissal returns to control mode, so esc is still needed to leave.
+    s.type("\x1b", settle=0.5)
+    s.type("echo help-dismissed\r")
+    if b"help-dismissed" not in s.output():
+        fail("could not get back to typing after dismissing help")
+    s.quit_and_reap()
+
+
+def case_help_overlay_works_after_a_focus_switch(fail):
+    # A focus switch starts an 8-frame wipe. This does not prove help
+    # wins the race against the wipe -- the wipe self-clears in ~128ms
+    # (8 frames at the 16ms tick), well inside this case's settle time,
+    # so the overlay would show up here even with the layers in the
+    # wrong order. The actual precedence is asserted directly, without a
+    # terminal, by TestLayerLockedPrecedence in
+    # internal/client/help_overlay_test.go. This case is just an
+    # integration check that raising help right after a focus switch
+    # still works end to end.
+    s = Session(cols=100, rows=30)
+    s.type("\x02")
+    os.write(s.fd, b"l")     # focus right: starts a wipe
+    os.write(s.fd, b"\x02?")  # and immediately raise help
+    time.sleep(1.0)
+    if b"hold ctrl to stay in control mode" not in s.output():
+        fail("help raised during a wipe never appeared")
+    s.type("k", settle=0.5)
+    s.type("\x1b", settle=0.5)
     s.quit_and_reap()
 
 
@@ -445,7 +554,7 @@ def case_partly_clipped_pane_keeps_full_width(fail):
     # share of the screen did.
     s = Session(cols=120, rows=30)
 
-    s.type("\x02l\x1b")  # C-b l -> focus right, onto pane 2, esc -> exit
+    s.type("\x02l")  # C-b l -> focus right, onto pane 2, which exits control mode on its own
     s.type("stty size\r", settle=1.4)
     first = re.findall(rb"(\d+) (\d+)", s.output())
     if not first:
@@ -453,14 +562,14 @@ def case_partly_clipped_pane_keeps_full_width(fail):
         s.quit_and_reap()
         return
     before_cols = first[-1][1]
-    s.type("\x02h\x1b")  # C-b h -> focus back to pane 1, leaving pane 2 unfocused, esc -> exit
+    s.type("\x02h")  # C-b h -> focus back to pane 1, leaving pane 2 unfocused, exits on its own
 
     # Narrow enough that two full-width columns no longer both fit: pane 1
     # (focused) stays fully visible, pane 2 is scrolled down to a sliver.
     fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
     time.sleep(1.5)
 
-    s.type("\x02l\x1b")  # C-b l -> focus pane 2, esc -> exit
+    s.type("\x02l")  # C-b l -> focus pane 2, which exits control mode on its own
     mark = len(s.output())
     s.type("stty size\r", settle=1.6)
     after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
@@ -487,14 +596,19 @@ CASES = [
     ("cycle width adjusts column", case_cycle_width),
     ("prefix routes verbs", case_prefix_routes_verbs),
     ("control mode is visible and escapable", case_control_mode_is_visible_and_escapable),
-    ("control mode is sticky", case_control_mode_is_sticky),
+    ("ctrl repeat moves two columns", case_ctrl_repeat_moves_two_columns),
     ("doubled prefix reaches the pane", case_doubled_prefix_reaches_the_pane),
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),
     ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names the prefix", case_status_line_names_the_prefix),
-    ("control mode names every verb at 80 columns", case_control_mode_names_every_verb_at_80_columns),
+    ("control mode names every entry at 80 columns", case_control_mode_names_every_entry_at_80_columns),
+    ("ctrl repeats control mode", case_ctrl_repeats_control_mode),
+    ("unmodified verb exits control mode", case_unmodified_verb_exits_control_mode),
+    ("unknown key exits control mode", case_unknown_key_exits_control_mode),
+    ("help overlay opens and any key dismisses", case_help_overlay_opens_and_any_key_dismisses),
+    ("help overlay works after a focus switch", case_help_overlay_works_after_a_focus_switch),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),
     ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),

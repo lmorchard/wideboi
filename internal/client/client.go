@@ -45,6 +45,7 @@ type Client struct {
 	cursorInfos  map[int]cursorPos
 	prefixLabel  string
 	controlMode  bool
+	helpVisible  bool
 	detachable   bool
 	activeWipe   *WipeTransition
 }
@@ -167,12 +168,46 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	}
 }
 
+// drawLayer names what Draw paints this frame.
+//
+// Extracted so the precedence between the layers is assertable. As
+// inline statement order it was observable only through a real
+// terminal, and the wire test that tried could not distinguish "the
+// overlay drew immediately" from "the overlay drew after the wipe's
+// eight frames finished on their own".
+type drawLayer int
+
+const (
+	layerPanes drawLayer = iota
+	layerWipe
+	layerHelp
+)
+
+// layerLocked reports which layer owns this frame. c.mu must be held.
+//
+// Help outranks a wipe: a wipe is decorative and a modal is not.
+func (c *Client) layerLocked() drawLayer {
+	switch {
+	case c.helpVisible:
+		return layerHelp
+	case c.activeWipe != nil && c.activeWipe.Active():
+		return layerWipe
+	default:
+		return layerPanes
+	}
+}
+
 // Draw composites active pane surfaces, dividers, host cursor, and status bar onto host screen scr.
 func (c *Client) Draw(scr *uv.TerminalScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.activeWipe != nil && c.activeWipe.Active() {
+	switch c.layerLocked() {
+	case layerHelp:
+		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable)
+		scr.HideCursor()
+		return
+	case layerWipe:
 		c.activeWipe.Draw(scr)
 		scr.HideCursor()
 		if c.activeWipe.Step() {
@@ -373,6 +408,16 @@ func (c *Client) SetControlMode(on bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.controlMode = on
+}
+
+// SetHelpVisible raises or clears the control-mode help overlay. Called
+// by cmd/wideboi after every key from the router's own help flag, the
+// same mirroring SetControlMode uses, so the overlay can never disagree
+// with the router about whether it is up.
+func (c *Client) SetHelpVisible(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.helpVisible = on
 }
 
 // runeLen counts cells the way compose.WriteString consumes them: one

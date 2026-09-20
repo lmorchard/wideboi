@@ -196,6 +196,7 @@ func runAttach(socketPath string) error {
 				case routeIgnore:
 				}
 				cli.SetControlMode(rt.control)
+				cli.SetHelpVisible(rt.help)
 			}
 
 		case <-frame.C:
@@ -333,6 +334,7 @@ func run() error {
 				// mode: the bar must never be able to disagree with the
 				// router about which mode is active.
 				cli.SetControlMode(rt.control)
+				cli.SetHelpVisible(rt.help)
 			}
 
 		case <-frame.C:
