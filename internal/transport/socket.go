@@ -3,13 +3,68 @@ package transport
 import (
 	"context"
 	"encoding/gob"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
+	"syscall"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
+
+// connErr records the first non-clean reason a connection's pumps
+// stopped, so a caller can tell a protocol failure from a detach.
+//
+// Before this existed, all four pump loops did `if err != nil { return
+// }`. A gob encode error -- the kind raised by an interface field with
+// no registered concrete type -- was therefore indistinguishable from
+// the user pressing C-b d: the socket closed, the peer saw EOF, and
+// `wideboi attach` exited with status 0 and no message. That is how a
+// defect that killed every session within two seconds of attaching
+// survived to a third fix attempt. A pump that gives up must say why.
+type connErr struct {
+	err atomic.Value // error
+}
+
+func (c *connErr) set(where string, err error) {
+	if err == nil || isCleanClose(err) {
+		return
+	}
+	wrapped := fmt.Errorf("%s: %w", where, err)
+	c.err.CompareAndSwap(nil, wrapped)
+	slog.Error("transport pump failed", "where", where, "err", err)
+}
+
+// Err returns the first protocol-level failure seen on this connection,
+// or nil if it only ever saw a clean shutdown.
+func (c *connErr) Err() error {
+	if v := c.err.Load(); v != nil {
+		return v.(error)
+	}
+	return nil
+}
+
+// isCleanClose reports whether err is an ordinary end-of-connection
+// rather than something worth telling the user about. A peer that
+// detaches closes its socket, which surfaces as EOF on our decoder and
+// as ErrClosed on any write that races it; neither is a fault.
+func isCleanClose(err error) bool {
+	// EPIPE and ECONNRESET belong here with EOF: they are what a write
+	// in flight sees when the peer has already gone. A detaching client
+	// closes its socket while the server's broadcast ticker is mid-frame
+	// roughly every time, so treating them as faults would file an error
+	// on every ordinary C-b d.
+	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, context.Canceled)
+}
 
 func init() {
 	gob.Register(protocol.ColumnData{})
@@ -34,8 +89,25 @@ type SocketListener struct {
 }
 
 // NewSocketListener binds a Unix domain socket at path.
+//
+// A leftover socket file has to be removed before Listen will bind, but
+// removing it unconditionally is how you steal the address from a
+// server that is still running: the old process keeps its listening fd
+// and its clients, the new one binds a fresh inode at the same path,
+// and every subsequent `wideboi attach` reaches the new server while
+// the old one's panes keep running invisibly. So probe first. A
+// successful dial means somebody is home, and that is an error, not a
+// file to delete.
 func NewSocketListener(path string) (*SocketListener, error) {
-	_ = os.Remove(path) // Clean up stale socket file if present
+	if c, derr := net.Dial("unix", path); derr == nil {
+		c.Close()
+		return nil, fmt.Errorf("a wideboi server is already listening at %s", path)
+	}
+	// Nothing answered, so any file here is a corpse from a server that
+	// did not get to clean up after itself.
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("removing stale socket %s: %w", path, err)
+	}
 	l, err := net.Listen("unix", path)
 	if err != nil {
 		return nil, fmt.Errorf("listen unix socket %s: %w", path, err)
@@ -71,6 +143,7 @@ func (sl *SocketListener) Close() error {
 
 // ServerSocketConn bridges a server-side net.Conn to ClientSend/ServerSend channels.
 type ServerSocketConn struct {
+	connErr
 	conn       net.Conn
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
@@ -109,6 +182,7 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 				return
 			}
 			if err := sc.encoder.Encode(&msg); err != nil {
+				sc.set(fmt.Sprintf("encoding %T to client", msg), err)
 				return
 			}
 		}
@@ -120,6 +194,7 @@ func (sc *ServerSocketConn) readLoop(ctx context.Context) {
 	for {
 		var msg ClientMessage
 		if err := sc.decoder.Decode(&msg); err != nil {
+			sc.set("decoding from client", err)
 			return
 		}
 		select {
@@ -162,6 +237,7 @@ func (sc *ServerSocketConn) Close() error {
 
 // ClientSocketConn bridges a client-side net.Conn to ClientSend/ServerSend channels.
 type ClientSocketConn struct {
+	connErr
 	conn       net.Conn
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
@@ -200,6 +276,7 @@ func (cc *ClientSocketConn) writeLoop(ctx context.Context) {
 				return
 			}
 			if err := cc.encoder.Encode(&msg); err != nil {
+				cc.set(fmt.Sprintf("encoding %T to server", msg), err)
 				return
 			}
 		}
@@ -211,6 +288,7 @@ func (cc *ClientSocketConn) readLoop(ctx context.Context) {
 	for {
 		var msg ServerMessage
 		if err := cc.decoder.Decode(&msg); err != nil {
+			cc.set("decoding from server", err)
 			return
 		}
 		select {
@@ -249,12 +327,4 @@ func (cc *ClientSocketConn) ServerSendChan() <-chan ServerMessage {
 // Close closes the underlying network connection.
 func (cc *ClientSocketConn) Close() error {
 	return cc.conn.Close()
-}
-
-// SocketConn is an alias for ServerSocketConn for backwards compatibility.
-type SocketConn = ServerSocketConn
-
-// NewSocketConn is an alias for NewServerSocketConn.
-func NewSocketConn(conn net.Conn, bufSize int) *SocketConn {
-	return NewServerSocketConn(conn, bufSize)
 }

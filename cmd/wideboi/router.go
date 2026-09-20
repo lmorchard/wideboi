@@ -53,6 +53,13 @@ type router struct {
 	// only Escape, a doubled prefix, or quitting clears it, so C-b l l l
 	// moves three columns.
 	control bool
+	// detachable mirrors the client's: true only when the session lives
+	// in a separate server process that survives this client leaving.
+	// When false, `d` is swallowed rather than routed, because the only
+	// thing detaching could mean in-process is killing every pane -- and
+	// a user who learned the key elsewhere would lose their work to a
+	// keystroke the bar no longer advertises.
+	detachable bool
 }
 
 // route decides what to do with one key press, updating the mode as a
@@ -93,6 +100,9 @@ func (r *router) route(ev uv.KeyPressEvent) route {
 	case ev.MatchString("u"):
 		return route{Kind: routeScroll, Scroll: 10}
 	case ev.MatchString("d"):
+		if !r.detachable {
+			return route{Kind: routeIgnore}
+		}
 		return route{Kind: routeDetach}
 	}
 

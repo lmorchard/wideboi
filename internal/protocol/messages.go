@@ -4,8 +4,6 @@ package protocol
 
 import (
 	"image"
-
-	uv "github.com/charmbracelet/ultraviolet"
 )
 
 type VerbType int
@@ -27,10 +25,13 @@ type ColumnData struct {
 }
 
 // CellData carries one cell's text content, width, and style across transport.
+//
+// Style is protocol.StyleData, not uv.Style: see wire.go for why an
+// upstream style cannot cross this boundary.
 type CellData struct {
 	Content string
 	Width   int
-	Style   uv.Style
+	Style   StyleData
 }
 
 // LineData represents a horizontal row of cells.
@@ -67,10 +68,14 @@ type MsgVerb struct {
 	Verb VerbType
 }
 
-// MsgInput carries decoded key events or pasted text destined for a specific pane's PTY.
+// MsgInput carries decoded key events or pasted text destined for a
+// specific pane's PTY. Data wins when it is non-empty; otherwise Key is
+// replayed into the pane's emulator.
+//
+// Key is protocol.KeyData, not uv.KeyEvent: see wire.go.
 type MsgInput struct {
 	PaneID int
-	Key    uv.KeyEvent
+	Key    KeyData
 	Data   []byte
 }
 

@@ -4,7 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,6 +16,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/client"
 	"github.com/lmorchard/wideboi/internal/hostterm"
+	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -32,23 +33,44 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "server":
-			if err := runServer(defaultSocketPath()); err != nil {
-				log.Fatal(err)
-			}
+			fatal(runServer(defaultSocketPath()))
 			return
 		case "attach":
-			if err := runAttach(defaultSocketPath()); err != nil {
-				log.Fatal(err)
-			}
+			fatal(runAttach(defaultSocketPath()))
 			return
 		}
 	}
-	if err := run(); err != nil {
-		log.Fatal(err)
+	fatal(run())
+}
+
+// fatal reports err on stderr and exits non-zero.
+//
+// Deliberately not log.Fatal. logger.Init calls slog.SetDefault, which
+// since Go 1.21 also repoints the standard log package at the slog
+// handler -- and that handler writes to a file under the runtime dir.
+// That redirection is wanted for everything else (log.Printf from
+// anywhere writes to stderr, which is live alt-screen real estate while
+// wideboi is running, and LESSONS.md records that hazard), but it turned
+// the one message a user most needs to see -- "no wideboi server running
+// at ...; start one with 'wideboi server'" -- into a silent exit 1.
+//
+// os.Exit skips deferred closes, which is fine: os.File writes are
+// unbuffered, so nothing already logged is lost.
+func fatal(err error) {
+	if err == nil {
+		return
 	}
+	fmt.Fprintln(os.Stderr, "wideboi:", err)
+	os.Exit(1)
 }
 
 func runServer(socketPath string) error {
+	f, _ := logger.Init("server")
+	if f != nil {
+		defer f.Close()
+	}
+	slog.Info("starting wideboi server", "socketPath", socketPath)
+
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -72,6 +94,12 @@ func runServer(socketPath string) error {
 }
 
 func runAttach(socketPath string) error {
+	f, _ := logger.Init("client")
+	if f != nil {
+		defer f.Close()
+	}
+	slog.Info("attaching wideboi client to socket", "socketPath", socketPath)
+
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("no wideboi server running at %s (start one with 'wideboi server'): %w", socketPath, err)
@@ -116,7 +144,8 @@ func runAttach(socketPath string) error {
 	}
 
 	cli := client.NewClient(cConn, width, height, prefixLabel)
-	rt := &router{prefix: prefix}
+	cli.SetDetachable(true)
+	rt := &router{prefix: prefix, detachable: true}
 
 	cli.Attach(ctx)
 
@@ -127,6 +156,16 @@ func runAttach(socketPath string) error {
 		select {
 		case msg, ok := <-cConn.ServerSendChan():
 			if !ok {
+				// The stream ended. Distinguish a server that shut
+				// down or was detached from cleanly -- both ordinary,
+				// both exit 0 -- from a protocol failure, which used
+				// to look exactly the same from here and so hid a
+				// defect that killed every session on the first
+				// coloured cell a child printed.
+				if err := cConn.Err(); err != nil {
+					return fmt.Errorf("connection to wideboi server failed: %w", err)
+				}
+				slog.Info("server closed the connection")
 				return nil
 			}
 			cli.HandleServerMsg(msg)
@@ -143,6 +182,10 @@ func runAttach(socketPath string) error {
 				act := rt.route(ev)
 				switch act.Kind {
 				case routeQuit, routeDetach:
+					// Detaching leaves the server and its children
+					// running; the socket close is what tells the
+					// server this client is gone.
+					slog.Info("client detaching", "verb", act.Kind)
 					return nil
 				case routeVerb:
 					cli.SendVerb(ctx, act.Verb)

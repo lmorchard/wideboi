@@ -72,30 +72,48 @@ func TestEscapeLeavesControlModeWithoutReachingThePane(t *testing.T) {
 // Control mode is sticky: verbs do not exit it, so C-b l l l moves three
 // columns. Enumerate the whole table rather than sampling it -- the
 // input space is finite and small.
+//
+// Run against both detachability settings, because `d` is the one entry
+// whose routing depends on it and an entry tested in only one state is
+// an entry half tested.
 func TestControlModeVerbTable(t *testing.T) {
 	cases := []struct {
-		ev   uv.KeyPressEvent
-		want route
+		ev uv.KeyPressEvent
+		// want is the route when the session lives in a server process
+		// this client can leave behind; wantLocal is the route for an
+		// in-process session, which has nothing to detach from.
+		want      route
+		wantLocal route
 	}{
-		{key('h'), route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}},
-		{key('l'), route{Kind: routeVerb, Verb: protocol.VerbFocusRight}},
-		{key(uv.KeyLeft), route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}},
-		{key(uv.KeyRight), route{Kind: routeVerb, Verb: protocol.VerbFocusRight}},
-		{key('n'), route{Kind: routeVerb, Verb: protocol.VerbNewColumn}},
-		{key('w'), route{Kind: routeVerb, Verb: protocol.VerbCycleWidth}},
-		{key('x'), route{Kind: routeVerb, Verb: protocol.VerbKillPane}},
-		{key('j'), route{Kind: routeVerb, Verb: protocol.VerbSmartJump}},
-		{key('u'), route{Kind: routeScroll, Scroll: 10}},
-		{key('d'), route{Kind: routeDetach}},
-		{key('q'), route{Kind: routeQuit}},
+		{key('h'), route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}, route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}},
+		{key('l'), route{Kind: routeVerb, Verb: protocol.VerbFocusRight}, route{Kind: routeVerb, Verb: protocol.VerbFocusRight}},
+		{key(uv.KeyLeft), route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}, route{Kind: routeVerb, Verb: protocol.VerbFocusLeft}},
+		{key(uv.KeyRight), route{Kind: routeVerb, Verb: protocol.VerbFocusRight}, route{Kind: routeVerb, Verb: protocol.VerbFocusRight}},
+		{key('n'), route{Kind: routeVerb, Verb: protocol.VerbNewColumn}, route{Kind: routeVerb, Verb: protocol.VerbNewColumn}},
+		{key('w'), route{Kind: routeVerb, Verb: protocol.VerbCycleWidth}, route{Kind: routeVerb, Verb: protocol.VerbCycleWidth}},
+		{key('x'), route{Kind: routeVerb, Verb: protocol.VerbKillPane}, route{Kind: routeVerb, Verb: protocol.VerbKillPane}},
+		{key('j'), route{Kind: routeVerb, Verb: protocol.VerbSmartJump}, route{Kind: routeVerb, Verb: protocol.VerbSmartJump}},
+		{key('u'), route{Kind: routeScroll, Scroll: 10}, route{Kind: routeScroll, Scroll: 10}},
+		// In-process, `d` is swallowed rather than routed: detaching
+		// there could only mean killing every pane, and the status bar
+		// does not offer the verb, so a user who typed it learned it
+		// somewhere that no longer applies.
+		{key('d'), route{Kind: routeDetach}, route{Kind: routeIgnore}},
+		{key('q'), route{Kind: routeQuit}, route{Kind: routeQuit}},
 	}
 	for _, tc := range cases {
-		r := &router{prefix: "ctrl+b", control: true}
-		if got := r.route(tc.ev); got != tc.want {
-			t.Errorf("%s: got %+v, want %+v", tc.ev.String(), got, tc.want)
-		}
-		if tc.want.Kind != routeQuit && !r.control {
-			t.Errorf("%s: left control mode; the mode is sticky", tc.ev.String())
+		for _, detachable := range []bool{true, false} {
+			want := tc.want
+			if !detachable {
+				want = tc.wantLocal
+			}
+			r := &router{prefix: "ctrl+b", control: true, detachable: detachable}
+			if got := r.route(tc.ev); got != want {
+				t.Errorf("%s (detachable=%v): got %+v, want %+v", tc.ev.String(), detachable, got, want)
+			}
+			if want.Kind != routeQuit && !r.control {
+				t.Errorf("%s (detachable=%v): left control mode; the mode is sticky", tc.ev.String(), detachable)
+			}
 		}
 	}
 }

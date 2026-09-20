@@ -142,8 +142,63 @@ Already true and load-bearing:
 - Placement is computed **client-side**, so two clients of different sizes attached to one session are correct by construction.
 - Focus is shared session state (the tmux model). *Independent* per-client focus is a much larger question and is explicitly not answered.
 
-Remaining work: socket framing, a reconnect handshake, a session directory and
-attach command, and deciding what happens when the last client detaches.
+Landed since (Plans 13-15): a Unix socket transport, `wideboi server` and
+`wideboi attach`, `C-b d`, and multi-client broadcast. Placement moved
+client-side, closing the first drift in §7. `scripts/attachcheck.py` drives
+the real pair of processes and is part of `make check`.
+
+### Wishlist: detach from plain `wideboi`
+
+`wideboi` with no subcommand still runs both halves in one process and binds
+no socket, so there is nothing to detach *from*: the process that owns the
+panes is the one that would be leaving. `C-b d` is therefore offered only to a
+client that reached its server over a socket — `Client.SetDetachable`, mirrored
+by `router.detachable` — and in-process the verb is both hidden from the bar
+and swallowed by the router. That is honest, but it makes the commonest way to
+start wideboi the one way you cannot detach from, which is backwards.
+
+What it would take, and why it was not just done:
+
+- **Default mode spawns a detached `wideboi server` and attaches to it.** One
+  code path for every mode, and detach works everywhere. The cost is that the
+  panes then belong to a background process, so `SIGTERM` to the foreground
+  client no longer reaps them — and that is precisely the guarantee
+  `docs/LESSONS.md` calls load-bearing and `make verify-exit` asserts. The
+  teardown contract would have to be redesigned around the server, not merely
+  re-pointed: "nothing wideboi spawned outlives it" has to become "nothing
+  outlives the last client, unless a detach said so."
+- **Or: hand the panes off on detach.** Keep the in-process fast path, and on
+  `C-b d` re-exec the session into a background server. Avoids the daemon on
+  every launch, but moving live PTY master fds across an exec is real work and
+  the failure mode is orphaned shells.
+- **Then: what happens when the last client detaches?** Still unanswered, and
+  it gets sharper here — an idle background server per forgotten `wideboi`
+  invocation is exactly the leak the teardown guarantee exists to prevent. A
+  timeout, an explicit `wideboi kill-session`, or both.
+
+Remaining work elsewhere: a reconnect handshake (today a dropped connection
+means running `attach` again), a session directory so more than one session
+can exist at once (the socket path is currently a fixed `default.sock`), and
+the last-client-detaches question above.
+
+### Drift: the protocol is gob over interfaces, not the codec-neutral wire §4 assumes
+
+§4 records the v1 constraint as "protocol types stay codec-neutral (no `gob`,
+no `any`, no interface fields)". Two of those three are not true today:
+`transport` encodes with `gob`, and `ClientMessage`/`ServerMessage` are bare
+`interface{}` so the concrete message type rides as a registered gob name.
+
+The third one — no interface *fields* — was violated too, and that is what
+took `attach` down: `CellData.Style` was a `uv.Style`, whose colour fields are
+`color.Color` interfaces, so the first coloured cell a child printed failed to
+encode and killed the socket. It is now enforced rather than documented, by
+`protocol.TestWireTypesCarryNoInterfaces`, with concrete mirrors in
+`protocol/wire.go`.
+
+The remaining two matter for §4's web client, which cannot speak gob. The wire
+types being flat scalars is most of the work; swapping the codec is then a
+`transport` change with nothing above it affected — which was the point of the
+constraint.
 
 ## 4. A web client
 

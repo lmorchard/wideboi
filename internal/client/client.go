@@ -44,6 +44,7 @@ type Client struct {
 	cursorInfos  map[int]cursorPos
 	prefixLabel  string
 	controlMode  bool
+	detachable   bool
 	activeWipe   *WipeTransition
 }
 
@@ -146,7 +147,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			currX := 0
 			for _, cell := range line {
 				uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
-				uvCell.Style = cell.Style
+				uvCell.Style = cell.Style.Decode()
 				mirror.Surface.SetCell(currX, y, uvCell)
 				w := cell.Width
 				if w <= 0 {
@@ -289,8 +290,12 @@ var controlVerbs = []string{
 	"x kill",
 	"j jump",
 	"u scroll",
-	"d detach",
 }
+
+// detachVerb is listed apart from controlVerbs because it is the one
+// entry whose presence depends on how the client reached its server.
+// See Client.SetDetachable.
+const detachVerb = "d detach"
 
 // Never dropped. With no unprefixed bindings left, a user who cannot
 // read these two out of the bar has no way forward except a signal.
@@ -303,11 +308,16 @@ var controlTail = []string{"q quit", "esc exit"}
 // terminal, so in practice nothing is dropped at any width wideboi is
 // usable at. The dropping exists for narrower terminals and for
 // whatever verbs get added later.
-func controlHelp(budget int) string {
+func controlHelp(budget int, detachable bool) string {
+	verbs := controlVerbs
+	if detachable {
+		verbs = append(append([]string{}, controlVerbs...), detachVerb)
+	}
+
 	tail := strings.Join(controlTail, "  ")
 	used := runeLen(tail)
-	taken := make([]string, 0, len(controlVerbs))
-	for _, v := range controlVerbs {
+	taken := make([]string, 0, len(verbs))
+	for _, v := range verbs {
 		if used+2+runeLen(v) > budget {
 			break
 		}
@@ -329,7 +339,7 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 		budget = 0
 	}
 	if c.controlMode {
-		menu := truncateRunes(controlHelp(budget), budget)
+		menu := truncateRunes(controlHelp(budget, c.detachable), budget)
 		// Pad to the full budget: a partly-inverted row reads as a
 		// rendering glitch, not as a mode.
 		menu += strings.Repeat(" ", budget-runeLen(menu))
@@ -356,6 +366,22 @@ func (c *Client) normalStatusLocked(budget int) string {
 		status += strings.Repeat(" ", pad) + hint
 	}
 	return truncateRunes(status, budget)
+}
+
+// SetDetachable declares whether this client can leave its session
+// running behind it -- true only when it reached the server over a
+// socket, so the panes belong to a process that outlives it.
+//
+// It gates the "d detach" entry in the control-mode menu. The zero
+// value is false on purpose: a client that forgets to call this hides a
+// verb it could have offered, which is a smaller lie than a client that
+// advertises detach and then kills the user's session. An in-process
+// wideboi owns its panes directly, so "detaching" there could only ever
+// mean quitting.
+func (c *Client) SetDetachable(on bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.detachable = on
 }
 
 // SetControlMode switches the client between forwarding keys to the
@@ -404,7 +430,7 @@ func (c *Client) SendKey(ctx context.Context, k uv.KeyEvent) {
 	c.mu.Unlock()
 
 	if focusedID > 0 {
-		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Key: k})
+		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Key: protocol.EncodeKey(k)})
 	}
 }
 

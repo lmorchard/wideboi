@@ -109,6 +109,59 @@ The rule: **if a cell pointer outlives the call that produced it, copy the
 cell.** `cc := *c` is enough — `Line.Set` copies by value, and the emulator
 replaces whole cells rather than mutating their fields.
 
+## A struct that looks like plain data can still be full of interfaces
+
+`uv.Style` has five fields and reads like a value type. Three of them are
+`color.Color` — an interface. `uv.KeyEvent` does not read like a struct at all;
+it *is* an interface. Both were put on the wire, and gob refuses to encode an
+interface value whose concrete type is not registered.
+
+The failure had three properties that together cost three fix attempts:
+
+1. **It fires on content, not on code paths.** Every blank cell encoded fine.
+   The stream died the moment a child printed something coloured — a shell
+   prompt, two seconds in. Reproductions that waited 1.5s saw a working attach.
+2. **The error surfaced on a pump goroutine**, which did `if err != nil {
+   return }` and closed the connection. From the client that is EOF, which is
+   also exactly what a clean detach looks like. Exit 0, no message.
+3. **No unit test could see it.** `make smoke` only ever runs the in-process
+   binary, so nothing it asserts is ever serialised. A wire format that cannot
+   encode a coloured cell passed the entire suite.
+
+Registering the concrete types is the obvious fix and the trap. The set is
+open-ended — `ansi.ReadStyleColor` alone produces `ansi.IndexedColor`,
+`color.RGBA`, `color.CMYK` and `color.Transparent`, `uv.ReadStyle` adds
+`ansi.BasicColor`, and the next upstream branch adds more. A registration table
+cannot tell you what it is missing, and what it is missing fails at runtime on
+a user's prompt.
+
+The rule: **wire types get concrete mirrors, and a test enforces it.**
+`protocol.TestWireTypesCarryNoInterfaces` walks every message type by
+reflection and fails on any interface it can reach. "Contains no interface" is
+a property of the declared type, so it can be checked once for all values;
+a roundtrip test only ever covers the values it happens to build. The same
+walk also catches unexported fields, which gob drops silently rather than
+refusing — the worse of the two failures.
+
+Corollary, learned the same day: **a pump that gives up must say why.** All
+four socket pumps swallowed their error. Adding one `slog.Error` turned a
+three-attempt hunt into a single line naming the exact type and the exact
+missing registration.
+
+Corollary for the harness: **a test suite that only runs one transport tests
+one transport.** `scripts/attachcheck.py` exists because `smoke.py` structurally
+could not fail here, however many cases it grew.
+
+## `slog.SetDefault` also hijacks the standard `log` package
+
+Go 1.21+ repoints `log`'s default output at the slog handler. Here that handler
+writes to a file under the runtime dir, so `log.Fatal` — the one message a user
+most needs, `no wideboi server running at ...` — became a silent exit 1.
+
+Wanted for everything else: `log.Printf` from anywhere would otherwise land on
+stderr, which is live alt-screen real estate. But the fatal path has to bypass
+it. `main` writes to `os.Stderr` directly.
+
 ## Never write the terminal's last column
 
 Ultraviolet brackets a write to the final column with autowrap-toggle escapes
