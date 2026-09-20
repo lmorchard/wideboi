@@ -178,20 +178,50 @@ func NewVT(cols, rows int) Grid {
 	})
 
 	g.em.RegisterOscHandler(133, func(data []byte) bool {
-		g.sawOSC133.Store(true)
-		s := string(data)
-		switch {
-		case strings.HasPrefix(s, "A"):
-			g.status.Store(int32(StatusNeedsInput))
-		case strings.HasPrefix(s, "B") || strings.HasPrefix(s, "C"):
-			g.status.Store(int32(StatusWorking))
-		case strings.HasPrefix(s, "D"):
-			if strings.Contains(s, ";") && !strings.HasSuffix(s, ";0") {
-				g.status.Store(int32(StatusFailed))
-			} else {
-				g.status.Store(int32(StatusDone))
-			}
+		// x/vt hands OSC handlers the whole payload, command number
+		// included -- "133;A", not "A". ansi.Parser.parseStringCmd
+		// reads the leading digits into p.cmd without removing them
+		// from p.data, which is why every one of vt's own OSC
+		// handlers starts by splitting on ';' and reading parts[1]
+		// (see handleTitle in x/vt's osc.go). Matching HasPrefix
+		// against the raw payload is how this handler stayed dead
+		// from the day it was written: no status glyph ever rendered
+		// and VerbSmartJump never had a target.
+		parts := strings.Split(string(data), ";")
+		if len(parts) < 2 {
+			return false
 		}
+
+		var st PaneStatus
+		switch parts[1] {
+		case "A", "B":
+			// A is prompt-start, B is prompt-end, and a shell emits
+			// both back to back on every prompt. Mapping B to Working
+			// would clobber A microseconds later and leave an idle
+			// shell reading as busy, so both mean "waiting on you".
+			st = StatusNeedsInput
+		case "C":
+			st = StatusWorking
+		case "D":
+			// Bare "D" and "D;0" are success; any other exit-code
+			// field is a failure. Split rather than match a ";0"
+			// suffix: the payload may carry trailing key=value
+			// fields, so "133;D;0;aid=1" is still a success.
+			st = StatusDone
+			if len(parts) > 2 && parts[2] != "" && parts[2] != "0" {
+				st = StatusFailed
+			}
+		default:
+			// Unrecognised. Let vt log it as unhandled, and leave
+			// sawOSC133 clear -- the latch also disables the activity
+			// fallback in Write and the idle timeout in Status, and
+			// one malformed sequence should not switch those off
+			// permanently.
+			return false
+		}
+
+		g.status.Store(int32(st))
+		g.sawOSC133.Store(true)
 		return true
 	})
 

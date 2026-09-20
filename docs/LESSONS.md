@@ -194,13 +194,56 @@ cases passed against inverted premises for exactly that reason:
   removed ("if the mode were one-shot the second h would land in a pane as a
   literal letter") and kept passing after the mode stopped being sticky.
 - `case_osc133_status_and_smart_jump` reported OK for the entire life of a
-  feature that has never worked — see the OSC 133 row in `docs/BEYOND-V1.md`
-  section 6.
+  feature that had never worked. Plan 16 fixed the feature and restored the
+  case, this time asserting through `focus_pane_id` — and proved it can fail
+  by reverting the handler and watching it go red.
 
 The rule to draw: **assert on output the program produced, not on bytes you
 sent.** `focus_pane_id` works because it parses the status line's escape
 sequences, which only wideboi can emit. A command's *output* works only if it
 is distinguishable from its own echoed command line — `echo marker` is not.
+
+## A unit test that supplies its own inputs proves the mechanism, not the wiring
+
+The lesson above is about tests that assert on bytes they sent. This is its
+sibling one layer up: tests that assert on *inputs they constructed*.
+
+Plan 16 fixed two features that were fully implemented, unit-tested, green,
+and non-functional in production, for the same reason.
+
+- `WipeTransition` was tested against frames the test wrote into itself
+  (`"AAA..."`, `"BBB..."`). Its only caller passed two surfaces straight from
+  `compose.NewSurface` and never drew into them, so every focus change blanked
+  the screen for ~128 ms. The mechanism was proven; the wiring was never
+  touched.
+- The OSC 133 handler was tested against nothing at all — `internal/server/term`
+  had no OSC test — and matched `HasPrefix(s, "A")` against a payload that is
+  actually `"133;A"`. No status glyph had ever rendered.
+
+And when the handler was fixed, the glyphs *still* did not appear: `PaneStatuses`
+rides on `MsgLayoutSnapshot`, which was only sent for verbs, spawns and kills.
+Fixing a dead component can just reveal the next dead link in the chain.
+
+Two rules:
+
+**Something has to test the caller.** A component that takes data from a caller
+is only half-covered by a test that hands it data directly. The seam between
+"the mechanism" and "the thing that feeds it" is where both of these bugs
+lived, and a green suite said nothing about it.
+
+**If the caller is untestable, that is the bug to fix first.** Nothing tested
+`Client.Draw` because it took a concrete `*uv.TerminalScreen`, which a unit
+test cannot cheaply build. Narrowing it to a `HostScreen` interface — three
+cursor methods on top of `uv.Screen` — was the whole of what stood between
+this defect and a test that catches it. Look for load-bearing functions no
+test calls, and ask whether the reason is mechanical.
+
+Corollary for the red step: **check that a new test fails for the reason you
+think.** Two of Plan 16's planned assertions passed before the fix — one
+because `Write`'s activity fallback set the same status the test wanted, one
+because the status is `Working` immediately after any write either way. Both
+were replaced. A test written against a broken system and passing on arrival
+is evidence about the test, not the system.
 
 ## Never write the terminal's last column
 

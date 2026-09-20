@@ -5,22 +5,59 @@ explored in design and want to keep. Not a commitment — a record, so ideas don
 have to be rediscovered and decisions don't have to be re-argued.
 
 v1 is: a scrolling tiling multiplexer with a client/server seam, a pure layout
-core, `$mod` verbs, OSC 133 agent status, scrollback navigation, and
-non-destructive resize. See `docs/dev-sessions/` for how it got there and
+core, `$mod` verbs, OSC 133 agent status (*written in v1, first actually
+working in Plan 16*), scrollback navigation, and non-destructive resize. See `docs/dev-sessions/` for how it got there and
 `docs/LESSONS.md` for what it taught us.
+
+**Last reconciled against the code at `b21eb5f` (Plan 15), on 2026-09-20.**
+Sections 1, 2 and 7 had drifted far enough that a reader trusting them would
+have been wrong about what exists — Plans 7, 8, 9 and 12 shipped things these
+sections still described as unbuilt. They are corrected below. That pass also
+turned up one new defect and sharpened an existing one; both are in section 6.
+When you finish a plan, re-read this file — it is only useful while it is
+true.
 
 ---
 
-## 1. The motivating feature that isn't built yet: animation
+## 1. Animation: the wipe shipped, motion did not
 
-**This is the largest gap, and it is the thing the project was started for.**
+**This was the largest gap, and it is the thing the project was started for.**
 
 The original brief was gwae's scrolling tiling *"with more lightly animated
 feedback when switching between terminals."* The v1 spec designed it in detail.
 It was scoped as its own plan, then the plan numbering shifted during execution
-and it fell out. Today `scrollX` snaps instantly — `internal/layout/layout.go`
-recomputes it and the next frame draws at the new offset.
+and it fell out.
 
+**Plan 9 built the cheap half.** `internal/client/wipe.go` implements the
+directional column wipe designed further down, and `internal/client/client.go`
+arms one on every focus change — 8 frames against `main.go`'s 16 ms render
+ticker, cursor hidden for the duration, outranked by the help overlay. Springs
+and true motion are still unbuilt.
+
+**The shipped wipe was broken until Plan 16.** `client.go` allocated its two
+frames with `compose.NewSurface` and never filled either, so a focus switch
+blanked the screen for ~128 ms instead of transitioning between anything —
+measured on a pty as one erase, then 18/30/48 bytes across three 32 ms slices,
+then a 973-byte repaint. `wipe_test.go` passed throughout because it builds its
+own populated frames; the only production call site did not.
+
+Plan 16 fixed it by splitting the trigger from the composition, because the
+frames could not have been built where they were being built: `HandleServerMsg`
+runs on the message path, and pane content is only reachable inside `Draw` —
+via the `drawPane` callback in-process, or `c.mirrors` when attached. The
+message path now records a `pendingWipe` carrying the layout state to animate
+away from, and `Draw` composes both frames through an extracted
+`composeFrameLocked`. Measured after: 36/629/2500/3010 bytes across the same
+slices, pane text back by t+64 ms.
+
+**Cost note.** That is ~3.06x a snap (3,712 bytes against 1,214), where the
+table below predicts ~1.9x for a directional column wipe. Not a contradiction:
+the table models a diffed change set, and what shipped blits whole clipped
+rects on either side of a moving split. Same order, different constant.
+
+### The spring design, for when real motion lands
+
+Still the answer for cards, which need genuine motion rather than a reveal.
 Everything it needs already exists. The design, decided and recorded:
 
 - **Springs on placements, per pane** — not on a global scroll offset. A scalar cannot express a column opening, a killed column collapsing, or a card re-deal; per-pane springs get all three for the same work. `[]Placement` is already the layout core's output type, chosen for exactly this.
@@ -40,7 +77,7 @@ blit horizontally — so every animation frame redraws everything. gwae budgets
 under 4 ms for a 300×80 viewport and gates its scroll animation on synchronized
 updates plus frame budget. Ours should measure before committing to 60 fps.
 
-### A cheaper first cut: wipes instead of motion
+### Why the wipe was the cheaper first cut (built, Plan 9)
 
 Motion is expensive for a structural reason. Terminals cannot blit
 horizontally, so every frame of a scroll animation is a **full repaint** — an
@@ -69,8 +106,8 @@ as one run behind one cursor move, exactly as it would inside a snap. A random
 scatter is catastrophic for the mirror-image reason — one `CUP` sequence per
 cell. "Cell-by-cell dissolve" in the naive sense is the shape to avoid.
 
-**Recommendation: a directional column wipe.** Reveal left-to-right when focus
-moves right, right-to-left when it moves left. That buys back the one thing a
+**This is what shipped: a directional column wipe.** Reveal left-to-right when
+focus moves right, right-to-left when it moves left. That buys back the one thing a
 wipe otherwise loses — motion tells you *which way you went*, and scrolling
 tiling is a spatial model — at roughly 2x a snap, still an order of magnitude
 under real motion. Fewer frames is cheaper (8 frames costs less than 20,
@@ -90,34 +127,60 @@ out for free:
 Total writes equal the size of the change set. Retargeting mid-wipe is just
 "snapshot the live screen as the new A and recompose B".
 
-Two hazards:
+Two hazards were called out here before it was built. One was handled, one was
+never checked:
 
-- **Wide glyphs must be atomic in the change set.** A cell-level mask can reveal the left half of a double-width glyph from B beside its right half from A. This codebase has been bitten by that class twice already — see `docs/LESSONS.md`.
-- **Hide the cursor for the duration.** Its position is meaningless mid-wipe.
+- **Wide glyphs must be atomic in the change set.** A cell-level mask can reveal the left half of a double-width glyph from B beside its right half from A. This codebase has been bitten by that class twice already — see `docs/LESSONS.md`. **Status: still unverified, and reachable for the first time.** `WipeTransition.Draw` cuts at a hard column index and hands the two halves to `compose.Blit`, which delegates to the surface's own clipped `Draw`. Whether that splits a straddling wide glyph has never been tested. Until Plan 16 it could not matter, because both frames were blank; now that they carry real content, it can.
+- **Hide the cursor for the duration.** Its position is meaningless mid-wipe. **Status: done** — `client.go`'s `layerWipe` branch calls `scr.HideCursor()`.
 
 **What a wipe does not replace.** Cards need genuine motion — slivers sliding
 and re-dealing — so the spring design above stays the answer there. A wipe is
-for focus switches, column open and column close. If cards ever land, both
-mechanisms coexist: springs for placement changes, wipes for focus.
+for focus switches, column open and column close. Both mechanisms are meant to
+coexist: springs for placement changes, wipes for focus.
 
-## 2. Card layout — panes that slip under each other
+**What shipped is simpler than what was designed here.** The design above
+composes A and B, diffs them into a change set, and reveals that set in slices
+so total writes equal the size of the change. `WipeTransition.Draw` instead
+blits whole clipped rectangles of A and B on either side of a moving split. The
+renderer's own diffing recovers most of the benefit, so the byte costs in the
+table above are roughly right — but the change-set framing is what makes
+retargeting mid-wipe ("snapshot the live screen as the new A") cheap, and that
+is not implemented either: a focus change during a wipe simply replaces the
+transition.
 
-Deferred from v1 with the hook already paid for. Instead of columns scrolling out
-of view, off-screen columns compress into overlapping "cards", each showing a
-sliver, so you see every pane at once and reveal one fully by focusing it.
+## 2. Card layout — built, tested, and unreachable
 
-The insight that makes it cheap: **cards are clipping plus z-order, not
-resizing.** An occluded card keeps its full *logical* width, so its child never
-learns it is partly covered — no `SIGWINCH`, no reflow, no redraw. `Placement`
-already carries `Dst`, `Src` and `Z`; `ScrollStrategy` emits non-overlapping
-rects with `Z=0` and a `CardStrategy` would emit overlapping full-width rects
-with a z-fan. The compositor, the animator, and mouse hit-testing consume
-`[]Placement` and don't care which produced it.
+Instead of columns scrolling out of view, off-screen columns compress into
+"cards", each showing a sliver, so you see every pane at once and reveal one
+fully by focusing it.
 
-Two things learned from mocking it up:
+**Plan 8 built `internal/layout/card.go`.** `CardStrategy` implements
+`Strategy`, has unit and `rapid` property tests, and honours the invariant that
+matters: `ColumnWidth` is untouched, so an occluded pane's child never learns it
+is partly covered — no `SIGWINCH`, no reflow, no redraw.
 
-- **Cards don't eliminate scrolling, they defer it.** At a 200-column terminal with 4-cell slivers you can fan maybe 20–25 cards before the focused pane has no room. Past that the strip still has to scroll — now scrolling a row of slivers.
-- **A 4-cell sliver of real terminal content is visual noise.** The sliver that earns its space is *chrome*: a vertical spine with the status glyph, a truncated title, and a colour that pulses on activity. So occluded cards show a representation of activity, not a peek at content.
+**Nothing can reach it.** `Strip.SetStrategy` has exactly one caller in the
+repo and it is `card_test.go`. There is no verb, no key, and no config that
+selects `CardStrategy`, so every running wideboi is a `ScrollStrategy`. This is
+probably the cheapest real feature left on the board: the hard part is written
+and proven, and what is missing is a way to ask for it — plus the two items
+below, which are what make it worth looking at.
+
+The insight that made it cheap: **cards are clipping plus z-order, not
+resizing.** `Placement` already carries `Dst`, `Src` and `Z`; the compositor,
+the animator, and mouse hit-testing consume `[]Placement` and don't care which
+strategy produced it.
+
+Two ways the implementation differs from the sketch this section used to carry,
+neither yet decided as right or wrong:
+
+- **It emits non-overlapping rects, not overlapping full-width ones.** Slivers are laid side by side at `i*sliverWidth` with the focused card between them; `Z` is 0 for slivers and 1 for the focused pane, but nothing actually occludes anything, so the z-fan is currently decoration. "Panes that slip under each other" is the name, not yet the behaviour.
+- **A sliver shows `Src = Rect(0, 0, 4, h)`** — the leftmost four columns of real pane content. That is exactly what the second bullet of the next list calls the wrong thing to show.
+
+Two things learned from mocking it up, both still unbuilt:
+
+- **Cards don't eliminate scrolling, they defer it.** At a 200-column terminal with 4-cell slivers you can fan maybe 20–25 cards before the focused pane has no room. Past that the strip still has to scroll — now scrolling a row of slivers. `CardStrategy` currently `continue`s past any card that would fall outside the viewport, so they silently vanish instead.
+- **A 4-cell sliver of real terminal content is visual noise.** The sliver that earns its space is *chrome*: a vertical spine with the status glyph, a truncated title, and a colour that pulses on activity. So occluded cards should show a representation of activity, not a peek at content. That depends on the status glyph working, which it now does as of Plan 16 — so this is unblocked.
 
 Known tension with animation: freeze-during-motion undercuts the point of
 slivers, which is watching peripheral agents. The fix is to exempt chrome from
@@ -259,36 +322,39 @@ Each was found, understood, and deliberately deferred. None is a mystery.
 | `ps -axo` parsing unverified on Linux | No Linux host available | One `make check` run on Linux. The anti-leak guarantee degrades **silently** if `Descendants` returns a short list. |
 | Upstream `x/vt` data race on `e.closed` | Practically inert — single bool, `Close` is its only writer | Give the pump goroutine sole ownership of the emulator lifecycle so `Close` never races `Read` |
 | `compose.Text`/`WriteString` ignore `Cell.Width` | Current chrome is single-width | Real grapheme handling; comes due if status glyphs go wide |
-| `transport.SendServer` is called under `s.mu` | Only reachable behind the wedged-render defect above, which is its real fix | Hoist the broadcast out of `s.mu`, or bound the send. `broadcastLayoutLocked` runs under `s.mu` and `SendServer` blocks once `ServerSend`'s 256-deep buffer fills, bounded only by a context `main` cancels *after* `guard.Stop()`. So the chain "child stops reading stdin → pty-writer parks → reply pipe fills → `vtGrid.Write` parks holding `se.mu` → main loop parks in `Draw` → `ServerSend` stops draining" ends with `srv.Close()` waiting forever. The `*Locked`-release discipline in `resizePanesLocked`/`PaneSize`/`CursorInfo` removes one way to hold `s.mu` forever, not this one. |
+| ~~`transport.SendServer` is called under `s.mu`~~ — **no longer true; re-verified 2026-09-20** | The headline claim was stale and is corrected here rather than left standing | Both `SendServer` call sites in `internal/server` (`server.go:512` in `broadcastLayout`, `server.go:528` in `broadcastPaneUpdates`) copy the transport slice and `s.mu.Unlock()` *before* sending, so neither holds the lock across the send. There is no `broadcastLayoutLocked` function at all — the name survives only in two comments (`server.go:338`, `server_test.go:272`), which should be reworded. **Not re-derived:** whether the wedge chain this row described has any surviving path to an unkillable `srv.Close()` by some other route. The first row's wedged-render defect is unchanged, and `SendServer` on a socket transport can still block — just not while holding `s.mu`. Worth one focused pass before trusting that the whole chain is gone |
+| `CardStrategy` is reachable only from tests | Plan 8 built it complete, with unit and `rapid` property tests, and nothing selects it | `Strip.SetStrategy` has exactly one caller in the repo and it is `card_test.go`. There is no verb, key or config that installs `CardStrategy`, so every running wideboi is a `ScrollStrategy`. See §2 — the hard part is written and proven; what is missing is a way to ask for it, plus the sliver-chrome and off-viewport-card questions §2 records |
+| Four exported symbols have no callers at all | Found 2026-09-20 by an exported-surface audit, not by a failure | `Pane.Dead` (`pane.go:153`), `Pane.SendText` (`pane.go:148`), `SocketListener.Path` (`socket.go:122`) and `Server.SpawnPane` (`server.go:216`) are referenced from nowhere — not production, not tests. Either they are API for a caller that was never written, or they are dead. Decide per symbol rather than deleting in bulk |
+| `Client.FocusPaneID` is test-only | Harmless on its own, but it is the same audit's finding and worth knowing before trusting it as API | Its five call sites are all tests. Note the name collision: `layout.Strip.FocusPaneID(id)` is a *setter* with a real production caller at `server.go:186`. Do not conflate them |
 | The width cycle cannot reach a pane's spawn width | Absolute presets are load-bearing (see the v1 spec's layout core); a cycle seeded from the spawn width is a behaviour change, not a bug fix | `CycleWidth` steps `40 → 60 → 80`, but a pane spawns at `max((cols-1)/2, 40)`. On a 200-column terminal a pane spawns 99 cells wide and the *first* `alt+w` **shrinks** it to 80, which it can never exceed again. Either fold the spawn width into the cycle, or make the presets viewport-aware without making the *width* viewport-dependent. |
-| OSC 133 agent status has never worked. No status glyph (`!`, `✓`, `✗`) can render, and `VerbSmartJump` can never find a target pane | Found by Plan 15's control-mode work, a different subsystem from the fix. With no existing tests behind the handler (there are zero mentions of OSC or 133 anywhere in `internal/server/term`), correcting it will immediately surface the glyph-rendering path and the `D;0`-vs-`D;n` exit-code semantics sitting behind it — that deserves its own plan and review, not a rider on a keybinding change | Root cause is `internal/server/term/grid.go:180-196`: `RegisterOscHandler(133, ...)` is handed the full OSC payload including the command prefix — verified against the pinned emulator, the handler receives `"133;A"` and `"133;D;1"` — so `strings.HasPrefix(s, "A")` and its siblings never match. `sawOSC133` latches true before the dead switch runs, so `Status()` then freezes at whatever it held. Fix: strip the `<cmd>;` prefix before matching, the same way the same vt library already does in `handleTitle` via `bytes.Split(data, []byte{';'})`. Then restore an end-to-end smoke case asserting through `focus_pane_id` (not through echoing a command into a pane — that's how the previous case passed for this feature's entire broken life), plus unit tests in `internal/server/term`, which currently has none for OSC at all. A prior implementer verified by local patch that the prefix-strip alone makes the smoke suite pass 24/24, for whoever picks this up. |
 
-## 7. Spec-vs-code drifts left standing
+## 7. Spec-vs-code drifts: all three closed
 
-The v1 spec is a design document, not a conformance target, and v1 shipped
-against it with three differences that are worth naming rather than quietly
-carrying. None is a defect today; each is a place where a reader who trusts
-the spec will be wrong about the code.
+This section used to list three places where v1 shipped short of the v1 spec.
+Plans 7 and 12 closed all three. They are kept here rather than deleted because
+the *spec* is unchanged, so a reader who trusts it is still wrong about the
+code — just in the other direction now.
 
-- **Placement is computed server-side, not client-side.** The spec argues at
-  length that `Place()` should run per client so two clients of different
-  sizes are correct by construction, and §3 above still leans on that. In v1
-  the server runs `ComputePlacements` and ships the result. With one in-process
-  client the distinction is invisible; it becomes real the moment detach lands,
-  and moving it then is the work §3 is quietly assuming is already done.
-- **The `Strategy` interface does not exist.** The spec specifies
-  `Strategy.Place(...)` with `ScrollStrategy` as the first implementation, and
-  §2's card layout is written as "add a `CardStrategy`". `internal/layout` has
-  one concrete function instead. Introducing the interface is small, but it is
-  not free, and nothing today exercises the seam it is supposed to create.
-- **The layout core has table tests, not `rapid` property tests.** The spec
-  turns its four invariants into a property-test suite. What exists is
-  hand-picked rows. The gap that matters most: invariant 4 — a pane's logical
-  width equals its column width, independent of what is visible — has **no
-  test at the layout layer at all**. It is covered only end-to-end, by
-  `scripts/smoke.py`'s `case_partly_clipped_pane_keeps_full_width`. That is the
-  invariant this project's no-shrink premise rests on hardest, and it is the
-  one a layout-level refactor could break without a unit test noticing.
+- **Placement is computed client-side, as the spec wanted.** Plan 12 moved it.
+  `Client.HandleServerMsg` runs `strip.SyncColumns` then `ComputePlacements`
+  against its own `c.cols`/`c.rows`, so two clients of different sizes are
+  correct by construction and §3 is no longer assuming work that hasn't
+  happened. One wrinkle to know about: the server still computes and ships
+  `Placements` too, and the client falls back to that field when
+  `len(m.Columns) == 0`. Two producers of the same value is a drift waiting to
+  happen; the fallback should probably go.
+- **The `Strategy` interface exists.** `internal/layout/layout.go` defines
+  `Strategy`, `Strip` holds one, and there are two implementations —
+  `ScrollStrategy` (the default from `NewStrip`) and `CardStrategy`. The seam
+  the spec wanted is real and has a second implementation exercising it, though
+  only from tests; see §2.
+- **The layout core has `rapid` property tests.** `TestLayoutPropertyInvariants`
+  covers all four invariants, including the one this section called out as
+  having no layout-level test at all: invariant 4, a pane's logical width equals
+  its column width independent of what is visible. `TestCardStrategyPropertyInvariants`
+  asserts the same invariant against `CardStrategy`, which is the real payoff —
+  the no-shrink premise now holds across both strategies by construction rather
+  than by inspection.
 
 ## 8. Open questions worth answering cheaply
 
