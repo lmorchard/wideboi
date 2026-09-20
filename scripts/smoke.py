@@ -335,16 +335,15 @@ def case_custom_prefix_from_env(fail):
     s.quit_and_reap()
 
 
-def case_osc133_status_and_smart_jump(fail):
-    s = Session()
-    s.type("printf '\\033]133;A\\007'\r")
-    time.sleep(0.5)
-    s.type("\x02l")  # C-b l -> focus right
-    s.type("j\x1b")  # sticky mode: j smart jumps back, esc -> leave control mode
-    s.type("echo smart-jumped\r")
-    if b"smart-jumped" not in s.output():
-        fail("smart jump failed to focus pane requiring attention")
-    s.quit_and_reap()
+
+# There is deliberately no smoke case named after OSC 133 / smart-jump.
+# The one that used to live here passed for that feature's entire life
+# without ever exercising a working code path -- see docs/BEYOND-V1.md
+# section 6, "OSC 133 agent status has never worked", for the defect and
+# why fixing it is parked rather than done as a rider here. A case that
+# reports OK for a feature that cannot work is worse than no case; it
+# was deleted rather than patched into something that would pass against
+# a still-broken handler.
 
 
 def case_quit_restores_and_reaps(fail):
@@ -600,7 +599,8 @@ CASES = [
     ("doubled prefix reaches the pane", case_doubled_prefix_reaches_the_pane),
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),
-    ("osc133 status and smart jump", case_osc133_status_and_smart_jump),
+    # No "osc133 status and smart jump" entry -- see the comment above
+    # case_quit_restores_and_reaps and docs/BEYOND-V1.md section 6.
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names the prefix", case_status_line_names_the_prefix),
     ("control mode names every entry at 80 columns", case_control_mode_names_every_entry_at_80_columns),
