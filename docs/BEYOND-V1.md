@@ -358,7 +358,47 @@ code — just in the other direction now.
 
 ## 8. Open questions worth answering cheaply
 
-- **Do the target coding agents use the alternate screen?** Determines how much reflow matters for the actual workload. A full-screen TUI agent repaints itself; an Ink-style agent (Claude Code appears to be one — its transcript stays in your scrollback) commits output upward into terminal-owned scrollback, same split as a shell. One-line check: run each in a pty and look for `ESC[?1049h`.
+- **Do the target coding agents use the alternate screen?** ~~Open.~~
+  **Measured 2026-09-20 against Claude Code v2.1.278: yes.** One
+  `ESC[?1049h` at startup and no exit until killed, so it is a full-screen
+  TUI that repaints itself, not the Ink-style scrollback-committing shape
+  this bullet guessed. It also emits 3 synchronized-update sequences
+  (`ESC[?2026h`) at boot. Reflow therefore matters less for the agent
+  workload than for a shell pane. Not yet measured for any other agent.
+
+- **Agent status: OSC 133 is the wrong protocol for the motivating use
+  case.** Measured the same day, across a full turn: Claude Code emits
+  **zero** OSC 133 sequences — at startup, during the turn, or on
+  completion. So Plan 16 made the glyphs work and the actual target still
+  drives none of them. What it *does* emit is usable, and is the real
+  integration path:
+
+  | sequence | when | meaning |
+  | --- | --- | --- |
+  | `ESC]9;4;3;BEL` | turn starts | ConEmu/WT progress, state 3 = indeterminate ("busy") |
+  | `ESC]9;4;0;BEL` | turn ends | state 0 = clear progress |
+  | `ESC]2;◐ Pong reply BEL` | continuously | title: spinner glyph + a short summary of the turn |
+
+  `OSC 9;4` maps onto `PaneStatus` almost directly — `3` → `StatusWorking`,
+  `0` → done/idle, and the protocol's `2` (error) and `4` (warning) states
+  would give `StatusFailed` for free if any agent emits them. Worth
+  checking whether Claude Code ever sends `9;4;2`; this session only
+  observed `3` and `0`.
+
+  The **title** is the other prize. §2 says a card sliver that earns its
+  space shows "a vertical spine with the status glyph, a truncated title,
+  and a colour that pulses on activity" — and here is a live, per-pane,
+  self-updating title with a spinner already in it. `x/vt` already parses
+  OSC 0/1/2 into `Emulator.title` and fires a `Title` callback
+  (`handlers.go:305-343`, `osc.go:21`); wideboi registers neither. That is
+  a small, well-understood addition.
+
+  **Recommendation:** keep OSC 133 (it is correct, tested, and what
+  shell-integration users get) and add OSC 9;4 plus title tracking
+  alongside it, feeding the same `PaneStatus`. Decide precedence when both
+  arrive — the obvious rule is last-writer-wins per pane, but note the
+  `sawOSC133` latch already disables the activity heuristic, so a second
+  authoritative source needs the same treatment rather than a second latch.
 - **What should `$mod` be, per platform?** Option-as-Meta works locally but depends on the client terminal over SSH, and it requires terminal configuration users won't guess at.
 - **Session persistence.** v1 deliberately has none — resume is the agent harness's job (`claude --resume`). Worth revisiting only if detach lands.
 - **Config file, and key remapping for control mode.** Defaults live in one
