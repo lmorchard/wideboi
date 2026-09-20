@@ -294,4 +294,29 @@ the spec will be wrong about the code.
 - **Do the target coding agents use the alternate screen?** Determines how much reflow matters for the actual workload. A full-screen TUI agent repaints itself; an Ink-style agent (Claude Code appears to be one — its transcript stays in your scrollback) commits output upward into terminal-owned scrollback, same split as a shell. One-line check: run each in a pty and look for `ESC[?1049h`.
 - **What should `$mod` be, per platform?** Option-as-Meta works locally but depends on the client terminal over SSH, and it requires terminal configuration users won't guess at.
 - **Session persistence.** v1 deliberately has none — resume is the agent harness's job (`claude --resume`). Worth revisiting only if detach lands.
-- **Config file.** Defaults live in one struct; reading a file into it is small and unexciting whenever it's wanted.
+- **Config file, and key remapping for control mode.** Defaults live in one
+  struct; reading a file into it is small and unexciting whenever it's wanted.
+  The part worth designing rather than assuming is **remapping the control-mode
+  verbs**, which is the thing people will actually want it for — `WIDEBOI_PREFIX`
+  already concedes that one key is not everyone's key, and the same argument
+  applies to the whole table.
+
+  Plan 15 builds `internal/keys` as a single table (letter, verb, labels,
+  whether it needs a detachable session) read by the router, the status bar and
+  the help overlay, so remapping is populating that table rather than patching
+  three places. Three constraints it already carries that a config format has to
+  respect:
+
+  - **`i`, `m` and `[` can never be bound.** Their control bytes are Tab, Enter
+    and Escape, so a verb on those letters has no working repeat form. Enforced
+    by a test today; a config file has to reject them with an error rather than
+    silently producing a dead binding.
+  - **An unmatchable key name is indistinguishable from a key nobody pressed.**
+    `uv.KeyPressEvent.MatchString` returns `false` either way, which is how the
+    `pgdn` binding shipped dead. Config-supplied names must be validated at load
+    against the set ultraviolet can actually produce — `parsePrefix`'s narrow
+    allowlist is the existing precedent, and it exists for exactly this.
+  - **The status bar has a hard 79-cell budget at 80 columns.** User-supplied
+    labels can overflow it, so the bar's existing drop-from-the-end behaviour
+    has to stay, and the help overlay becomes load-bearing rather than a
+    convenience.
