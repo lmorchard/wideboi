@@ -122,7 +122,14 @@ func TestControlModeTable(t *testing.T) {
 				assertAction(t, b, got)
 				switch b.Action {
 				case keys.ActionQuit, keys.ActionDetach:
-					// ctrl+q and ctrl+d are exactly q and d.
+					// ctrl+q and ctrl+d are exactly q and d: staying is
+					// meaningless when the client is leaving, so the
+					// modifier must not make the mode sticky here the
+					// way it does for every other verb.
+					if r.control {
+						t.Errorf("%s stayed in control mode; ctrl+%s must behave exactly as %s",
+							name, b.Key, b.Key)
+					}
 				default:
 					if !r.control {
 						t.Errorf("%s did not stay in control mode", name)
