@@ -167,6 +167,7 @@ func TestUnknownKeysExitControlModeWithAnyModifier(t *testing.T) {
 		key('z'), key('5'),
 		{Code: 'g', Mod: uv.ModCtrl},
 		{Code: 'z', Mod: uv.ModCtrl},
+		ctrl('c'),
 		{Code: 'q', Mod: uv.ModShift, Text: "Q"},
 	}
 	for _, ev := range cases {
