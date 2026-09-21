@@ -14,6 +14,7 @@ import os
 import re
 import signal
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,7 +59,12 @@ def summarize(raw: bytes) -> str:
 
 
 def capture() -> str:
-    pid, fd = spawn_in_pty(["./bin/wideboi"], 100, 30, True)
+    # Never created: a plain wideboi attaches to whatever answers this
+    # socket, so the snapshot would record someone else's session. See
+    # smoke.py's NEVER_SOCK.
+    never = os.path.join(tempfile.gettempdir(), f"wideboi-never-golden-{os.getpid()}.sock")
+    pid, fd = spawn_in_pty(["./bin/wideboi"], 100, 30, True,
+                           {"WIDEBOI_SOCK": never})
     d = Drainer(fd)
     d.start()
     time.sleep(2.0)

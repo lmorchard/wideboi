@@ -43,7 +43,25 @@ func (g *Guard) Stop() error {
 //
 // Go delivers signals on an ordinary goroutine, so this handler may
 // allocate, take locks, and run arbitrary code.
+//
+// The re-raise can be discarded, and then the process has to exit by
+// itself. POSIX requires a shell to set SIGINT and SIGQUIT to SIG_IGN
+// for an asynchronous list, so anything started as `cmd &` inherits
+// them ignored -- and Go's runtime deliberately respects an inherited
+// SIG_IGN for SIGHUP and SIGINT (sigInstallGoHandler), so signal.Reset
+// restores SIG_IGN rather than SIG_DFL. signal.Notify still catches the
+// signal, so shutdown runs correctly; the re-raise then goes nowhere.
+// Before this was handled, `wideboi &` followed by SIGINT tore the
+// session down, restored the terminal, and then lived forever, immune
+// to every signal it had armed.
 func (g *Guard) Arm(sigs ...os.Signal) {
+	// Sampled before Notify, which installs a handler and would make
+	// every signal report as not-ignored from here on.
+	inherited := make(map[os.Signal]bool, len(sigs))
+	for _, s := range sigs {
+		inherited[s] = signal.Ignored(s)
+	}
+
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, sigs...)
 
@@ -53,8 +71,22 @@ func (g *Guard) Arm(sigs ...os.Signal) {
 
 		signal.Stop(ch)
 		signal.Reset(s)
-		if sig, ok := s.(syscall.Signal); ok {
-			_ = syscall.Kill(os.Getpid(), sig)
+
+		sig, ok := s.(syscall.Signal)
+		if !ok {
+			return
 		}
+		if inherited[s] {
+			// Reset put the inherited SIG_IGN back, so a re-raise would
+			// be discarded and this process would never exit. Exit with
+			// the status a shell would have reported anyway.
+			//
+			// Decided here rather than after a failed re-raise: Kill can
+			// return before the signal is delivered, so "did Kill
+			// return?" is a race, and it loses often enough to break
+			// TestGuardArmRestoresAndReRaises.
+			os.Exit(128 + int(sig))
+		}
+		_ = syscall.Kill(os.Getpid(), sig)
 	}()
 }

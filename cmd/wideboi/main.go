@@ -24,7 +24,23 @@ import (
 
 const signalExitMargin = 500 * time.Millisecond
 
+// defaultSocketPath is where `wideboi server` listens, where `wideboi
+// attach` dials, and what a plain `wideboi` probes before deciding
+// whether to start its own session.
+//
+// WIDEBOI_SOCK overrides it outright. The default is machine-global
+// per-uid, so two sessions cannot coexist and anything started while a
+// server is up silently joins that server instead of starting its own.
+// That is a real collision, not just a test one: with a server running,
+// `make smoke` failed 9 cases before this existed.
+//
+// A single escape hatch, deliberately not a design -- see #27 for real
+// session naming and #58 for configuration as a whole.
 func defaultSocketPath() string {
+	if p := os.Getenv("WIDEBOI_SOCK"); p != "" {
+		_ = os.MkdirAll(filepath.Dir(p), 0700)
+		return p
+	}
 	dir := filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
 	_ = os.MkdirAll(dir, 0700)
 	return filepath.Join(dir, "default.sock")

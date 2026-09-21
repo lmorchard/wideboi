@@ -63,13 +63,12 @@ from __future__ import annotations
 import argparse
 import os
 import signal
-import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
-    ALT_SCREEN_EXIT, Drainer, spawn_in_pty, descendants, pane_children, still_alive,
+    ALT_SCREEN_EXIT, Drainer, spawn_in_pty, descendants, pane_children, ps_rows, still_alive,
     wait_for_exit, force_cleanup, parse_size, parse_signal,
 )
 
@@ -95,36 +94,39 @@ def plant_escapee(master_fd: int, pid: int, within: float) -> tuple[int, str] | 
     return None
 
 
-def find_stray_wideboi(binary_path: str, exclude_pid: int) -> list[str]:
-    """Looks for any process whose argv[0] is exactly binary_path (the
-    absolute path this script exec'd).
-    """
-    try:
-        out = subprocess.run(
-            ["ps", "-axo", "pid=,command="],
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout
-    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
-        return [f"<could not run ps to check for strays: {exc}>"]
+def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
+    """Looks for a process still running this binary that this run is
+    responsible for.
 
+    Assertion 4 in the module docstring: a wideboi outliving the one we
+    reaped means something -- a double-fork, a hung child of a panic --
+    kept a copy of the binary alive.
+
+    Scoped by parentage, not by "is any wideboi running". The binary
+    path is identical for every concurrent invocation of this script, so
+    a bare process-table match reports the *other* runs under `make -j`
+    as strays: measured, deterministically, with one other run alive.
+    That is the same false-positive smoke.py's strays() was rewritten to
+    avoid, and a check that cries wolf gets ignored.
+
+    A copy this run leaked is either still our child, or orphaned onto
+    init when its parent died. A copy belonging to another run still has
+    that run's live harness as its parent, so it is not ours to report.
+    """
+    rows = ps_rows()
+    live = {pid for pid, _, _ in rows}
     strays = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
+    for pid, ppid, command in rows:
+        if pid == own_pid:
             continue
-        pid_str, _, command = line.partition(" ")
         argv0 = command.split(" ", 1)[0] if command else ""
         if argv0 != binary_path:
             continue
-        try:
-            pid = int(pid_str)
-        except ValueError:
-            continue
-        if pid == exclude_pid:
-            continue
-        strays.append(f"pid={pid} command={command.strip()}")
+        # ppid 1 means orphaned (its parent died); ppid == own_pid means
+        # the process we reaped spawned another copy of itself. A live
+        # parent that is not us belongs to somebody else's run.
+        if ppid == own_pid or ppid == 1 or ppid not in live:
+            strays.append(f"pid={pid} ppid={ppid} command={command.strip()}")
     return strays
 
 
@@ -243,7 +245,7 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     elif tracked:
         print(f"OK: all {len(tracked)} process(es) wideboi spawned were reaped")
 
-    strays = find_stray_wideboi(argv[0], exclude_pid=pid)
+    strays = find_stray_wideboi(argv[0], own_pid=pid)
     if strays:
         print(f"FAIL: {len(strays)} stray wideboi process(es) left behind:")
         for s in strays:

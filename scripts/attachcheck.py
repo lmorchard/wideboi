@@ -57,14 +57,28 @@ PROMPT_WAIT = 8.0
 SETTLE = 1.5
 
 
+# Per-run, not the per-uid default. The default path is machine-global,
+# so two runs of this suite -- or a run alongside the developer's own
+# session -- fight over the same name, and a plain wideboi started
+# anywhere attaches to whichever server holds it. Cases here assert
+# *exclusive* ownership of the path ("a second server refuses to steal
+# the socket", "attach without a server says so"), so the path has to
+# belong to this run alone. Passed to the binary as WIDEBOI_SOCK.
+RUNTIME_DIR = tempfile.mkdtemp(prefix=f"wideboi-attach-{os.getuid()}-")
+
+
 def runtime_dir() -> str:
-    d = os.path.join(tempfile.gettempdir(), f"wideboi-{os.getuid()}")
-    os.makedirs(d, mode=0o700, exist_ok=True)
-    return d
+    return RUNTIME_DIR
 
 
 def socket_path() -> str:
     return os.path.join(runtime_dir(), "default.sock")
+
+
+def bin_env() -> dict:
+    """Environment for every wideboi this suite starts, so server,
+    attach and the plain-binary probe all agree on one private path."""
+    return {**os.environ, "WIDEBOI_SOCK": socket_path()}
 
 
 class Server:
@@ -78,6 +92,7 @@ class Server:
             [BIN, "server"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            env=bin_env(),
         )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -115,7 +130,8 @@ class Client:
     """An attached `wideboi attach` on a pty, with helpers to type."""
 
     def __init__(self, startup=PROMPT_WAIT):
-        self.pid, self.fd = spawn_in_pty([BIN, "attach"], COLS, ROWS, True, None)
+        self.pid, self.fd = spawn_in_pty([BIN, "attach"], COLS, ROWS, True,
+                                         {"WIDEBOI_SOCK": socket_path()})
         self.drainer = Drainer(self.fd)
         self.drainer.start()
         settle_output(self.drainer, timeout=startup)
@@ -281,7 +297,7 @@ def case_second_server_refuses_to_steal_the_socket(fail):
     srv = Server()
     try:
         second = subprocess.run(
-            [BIN, "server"], capture_output=True, timeout=10,
+            [BIN, "server"], capture_output=True, timeout=10, env=bin_env(),
         )
         if second.returncode == 0:
             fail("a second server started while the first was listening")
@@ -299,7 +315,8 @@ def case_attach_without_a_server_says_so(fail):
     sock = socket_path()
     if os.path.exists(sock):
         os.remove(sock)
-    r = subprocess.run([BIN, "attach"], capture_output=True, timeout=10)
+    r = subprocess.run([BIN, "attach"], capture_output=True, timeout=10,
+                       env=bin_env())
     if r.returncode == 0:
         fail("attach succeeded with no server running")
     msg = (r.stdout + r.stderr).decode(errors="replace")
