@@ -280,9 +280,9 @@ quick: fmt-check lint seam-check test
 
 **Verification — automated:**
 - [x] `make quick` passes, and is **under 8s** from a cold `go clean -testcache` — **4.53s**
-- [x] `make check` passes, and is recorded against the 90.8s baseline — **78.59s**
+- [x] `make check` passes, and is recorded against the 90.8s baseline — **78.59s first run, 81.66s on the final tree**
 - [x] `env -u TERM make check` passes — the Plan 19 lesson that CI runners set no `TERM` — **78.17s, green**
-- [x] `make check` run a second time, to catch anything that passes only once — **78.05s, green; three runs total at 78.59/78.05/78.17s**
+- [x] `make check` run a second time, to catch anything that passes only once — **78.05s, green; four runs total at 78.59 / 78.05 / 78.17 / 81.66s.** The fourth was run after the branch self-review fixes and is the only one covering the shipped tree; the spread is machine noise.
 - [x] `go test -count=1 ./...` recorded against the 16.2s baseline — **4.03s**
 
 **Verification — manual:**

@@ -16,8 +16,13 @@ edit loop.
 | **`make check`** | **90.8s** | **78.1s** |
 | `make quick` | — | **4.53s** cold |
 
-`make check` ran three times — 78.59 / 78.05 / 78.17s, the last with `TERM`
-unset. No assertion changed anywhere in this branch.
+`make check` ran four times — 78.59 / 78.05 / 78.17 / 81.66s, the third with
+`TERM` unset. The first three were taken at the end of Phase 4; **the 81.66s
+run is the one that covers the tree actually shipped**, since it came after
+the self-review fixes. The 78.1–81.7s spread is machine noise, and the number
+to quote against the 90.8s baseline is the slowest, not the prettiest.
+
+No assertion changed anywhere in this branch.
 
 ## The issue was wrong, and measuring is what caught it
 
