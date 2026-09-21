@@ -89,6 +89,34 @@ It was also proved to fail — spawning a session and deliberately not closing
 it makes `strays()` report it. A leak check nobody has watched fail is not a
 leak check.
 
+## What the Copilot review caught
+
+Two comments, both real, both in the new waiting/cleanup code.
+
+**1. `settle_output` treated an empty stream as settled.** At entry `size()`
+is 0 and `last_change` is now, so a process that had not yet produced its
+first byte "settled" after one quiet window. Locally a process starts in well
+under 250 ms so it never bit — but a cold or loaded runner is exactly when it
+would, and exactly what the generous startup ceiling existed to prevent.
+Proved directly: against a stream returning `b""`, it returned `True` after
+0.26s of a 2.0s ceiling. Now gated on `last > 0`, and runs the full ceiling.
+
+**2. `close()` killed only direct pane children.** A pane shell can leave a
+grandchild that escaped its process group entirely — the whole subject of
+`ptyx`'s reap tests — and `pane_children` misses precisely that process.
+Measured on a live session: 2 direct children, **4 descendants**, and the
+escapee present only in the second set. Worse, `strays()` tracked only the
+wideboi pid, so this path could have leaked while the suite reported clean.
+
+The escapee did die in the probe, via SIGHUP when the pty master closed. That
+is incidental, not guaranteed, and the reap tests exist because of it.
+`close()` now uses `descendants()` and feeds them to the guard, which grew
+from 1 tracked pid to 3 on a plain session.
+
+**Both were in code I added to make things faster**, which is the risk of this
+kind of change in one line: the cleanup shortcut and the wait shortcut are
+each a place to be subtly less thorough than the thing they replaced.
+
 ## Deliberately not done
 
 - **Parallelism and pytest.** Projected savings were achievable without

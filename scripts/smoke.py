@@ -23,8 +23,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty,
-    wait_for_exit, force_cleanup, pane_children, ps_rows, settle_output,
-    still_alive,
+    wait_for_exit, descendants, force_cleanup, pane_children, ps_rows,
+    settle_output, still_alive,
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
@@ -126,7 +126,15 @@ class Session:
         would be a bad deal, and check_no_strays below is what notices
         if this stops holding.
         """
-        kids = [p for p, _ in pane_children(self.pid)]
+        # descendants, not pane_children: a pane's shell can leave
+        # behind a grandchild that escaped its process group entirely,
+        # which is the whole subject of ptyx's reap tests. Direct
+        # children miss exactly the process most likely to leak.
+        #
+        # Such a process often dies anyway, via SIGHUP when the pty
+        # master closes -- but that is incidental, and the reap tests
+        # exist because it is not guaranteed.
+        kids = [p for p, _ in descendants(self.pid)]
         force_cleanup(self.pid)
         for kid in kids:
             try:
@@ -134,6 +142,10 @@ class Session:
             except ProcessLookupError:
                 pass
         still_alive(kids, 1.0)
+        # Hand them to the guard too. Tracking only the wideboi pid
+        # would let this path leak a descendant while the suite still
+        # reported a clean run.
+        SPAWNED.extend(kids)
         self.drainer.stop()
 
     def quit_and_reap(self, sig=signal.SIGTERM, timeout=8.0) -> int | None:

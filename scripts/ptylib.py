@@ -104,7 +104,14 @@ def settle_output(drainer: "Drainer", timeout: float, quiet: float = 0.25,
         n = size()
         if n != last:
             last, last_change = n, time.monotonic()
-        elif time.monotonic() - last_change >= quiet:
+        elif last > 0 and time.monotonic() - last_change >= quiet:
+            # last > 0 matters at startup: a process that has not
+            # produced its first byte yet is not "settled", it has not
+            # begun. Without this the very first call returns after one
+            # quiet window against an empty buffer, and the caller
+            # asserts on a screen that was never drawn -- which on a
+            # cold runner is exactly when it would happen, and exactly
+            # what the generous startup ceiling was there to prevent.
             return True
     return False
 
