@@ -19,41 +19,57 @@ true.
 
 ---
 
-## 1. Animation: the wipe shipped, motion did not
+## 1. Animation: motion, as of Plan 18
 
 **This was the largest gap, and it is the thing the project was started for.**
 
 The original brief was gwae's scrolling tiling *"with more lightly animated
-feedback when switching between terminals."* The v1 spec designed it in detail.
-It was scoped as its own plan, then the plan numbering shifted during execution
+feedback when switching between terminals."* The v1 spec designed it in detail,
+it was scoped as its own plan, then the plan numbering shifted during execution
 and it fell out.
 
-**Plan 9 built the cheap half.** `internal/client/wipe.go` implements the
-directional column wipe designed further down, and `internal/client/client.go`
-arms one on every focus change — 8 frames against `main.go`'s 16 ms render
-ticker, cursor hidden for the duration, outranked by the help overlay. Springs
-and true motion are still unbuilt.
+**Plan 9 built a directional column wipe. Plan 16 fixed it. Plan 18 deleted
+it.** The wipe blitted the new layout on one side of a moving seam and the old
+layout on the other, so nothing actually moved — content teleported in
+vertical bands. Tolerable in the scrolling strip, where a horizontal seam
+loosely mimics horizontal scrolling. Incoherent once cards landed: a focus
+change resizes and repositions *every* pane, so the two halves of the screen
+showed different geometries at once. Les's report, which is the honest summary
+of what a wipe is: *"I don't understand what the animation is doing, it seems
+kind of random."*
 
-**The shipped wipe was broken until Plan 16.** `client.go` allocated its two
-frames with `compose.NewSurface` and never filled either, so a focus switch
-blanked the screen for ~128 ms instead of transitioning between anything —
-measured on a pty as one erase, then 18/30/48 bytes across three 32 ms slices,
-then a 973-byte repaint. `wipe_test.go` passed throughout because it builds its
-own populated frames; the only production call site did not.
+**What runs now is placement interpolation** (`internal/client/motion.go`):
+each pane's rect eases from where it was to where it is going, fed through the
+ordinary compose path. Panes slide and resize; the card fan visibly re-deals.
+Panes present in only one of the two layouts grow from, or collapse to, a
+zero-width rect at their own edge, so opening and killing a column are
+animated too.
 
-Plan 16 fixed it by splitting the trigger from the composition, because the
-frames could not have been built where they were being built: `HandleServerMsg`
-runs on the message path, and pane content is only reachable inside `Draw` —
-via the `drawPane` callback in-process, or `c.mirrors` when attached. The
-message path now records a `pendingWipe` carrying the layout state to animate
-away from, and `Draw` composes both frames through an extracted
-`composeFrameLocked`. Measured after: 36/629/2500/3010 bytes across the same
-slices, pane text back by t+64 ms.
+This is the first cut of the spring design below, with eased interpolation
+standing in for real springs. It is also *less* machinery than the wipe was:
+no composed frame snapshots, no viewport-fit check, no direction, and
+`drawLayer` drops from three states to two.
 
-**Cost note.** That is ~3.06x a snap (3,712 bytes against 1,214), where the
-table below predicts ~1.9x for a directional column wipe. Not a contradiction:
-the table models a diffed change set, and what shipped blits whole clipped
-rects on either side of a moving split. Same order, different constant.
+Two things Plan 18 measured that change the design's premises:
+
+**Motion costs ~3.8x a snap, not ~20x.** Measured on a pty: 4,664 bytes for a
+card-mode focus change against a 1,214-byte snap and the wipe's 3,712. The
+~20x figure below assumed an N-frame animation costs N full repaints. It does
+not — the renderer diffs, and a sliding pane changes far fewer cells per frame
+than a whole screen. **The cost argument for preferring wipes over motion does
+not survive measurement**, which is worth knowing before the table below is
+used to justify anything again.
+
+**An animation that moves nothing should not run.** Motion is armed on a
+placement change, not on a focus change, and starts from whatever is currently
+on screen so a second change mid-flight continues rather than jumps. Two panes
+that both fit keep identical placements when focus moves between them, so
+scroll mode measures 694 bytes for that keypress and animates nothing at all.
+The wipe fired on every focus change regardless, which is part of why it read
+as arbitrary.
+
+Still unbuilt, and still wanted: real springs with velocity, and retargeting
+that carries momentum rather than restarting. See below.
 
 ### The spring design, for when real motion lands
 
@@ -77,7 +93,13 @@ blit horizontally — so every animation frame redraws everything. gwae budgets
 under 4 ms for a 300×80 viewport and gates its scroll animation on synchronized
 updates plus frame budget. Ours should measure before committing to 60 fps.
 
-### Why the wipe was the cheaper first cut (built, Plan 9)
+### Why the wipe looked like the cheaper first cut (built Plan 9, removed Plan 18)
+
+**Read the numbers below with Plan 18's measurement in hand.** The argument
+here is that motion costs ~20x a snap and a wipe ~2x, which made the wipe look
+like most of the benefit for a tenth of the cost. Measured, motion is ~3.8x —
+so the gap this section is built on is roughly 1.2x, not 10x, and the wipe's
+advantage was very nearly all of its justification.
 
 Motion is expensive for a structural reason. Terminals cannot blit
 horizontally, so every frame of a scroll animation is a **full repaint** — an
@@ -106,8 +128,9 @@ as one run behind one cursor move, exactly as it would inside a snap. A random
 scatter is catastrophic for the mirror-image reason — one `CUP` sequence per
 cell. "Cell-by-cell dissolve" in the naive sense is the shape to avoid.
 
-**This is what shipped: a directional column wipe.** Reveal left-to-right when
-focus moves right, right-to-left when it moves left. That buys back the one thing a
+**This is what shipped in Plan 9 and was removed in Plan 18: a directional
+column wipe.** Reveal left-to-right when focus moves right, right-to-left when
+it moves left. That buys back the one thing a
 wipe otherwise loses — motion tells you *which way you went*, and scrolling
 tiling is a spatial model — at roughly 2x a snap, still an order of magnitude
 under real motion. Fewer frames is cheaper (8 frames costs less than 20,
@@ -148,7 +171,7 @@ retargeting mid-wipe ("snapshot the live screen as the new A") cheap, and that
 is not implemented either: a focus change during a wipe simply replaces the
 transition.
 
-## 2. Card layout — shipped in Plan 17
+## 2. Card layout — shipped in Plan 17, proportioned in Plan 18
 
 Instead of columns scrolling out of view, off-screen columns compress into
 "cards", each showing a sliver, so you see every pane at once and reveal one
@@ -165,9 +188,36 @@ runtime. The mode is shared session state carried on `MsgLayoutSnapshot`
 beside focus, because placements are computed client-side (Plan 12) and two
 clients attached to one session have to agree about the layout.
 
-An occluded card now renders **chrome, not content**: its status glyph, its
+An occluded card renders **chrome, not content**: its status glyph, its
 terminal title, and a spine that brightens while the pane is producing
-output. Sliver width went 4 → 10 to fit a readable horizontal title.
+output.
+
+**Plan 18 replaced the fixed sliver width with a share.** Plan 17 used a
+constant — 4 cells, then 10 — which knew nothing about the viewport, so the
+fan simply stopped partway across: a 120-column window with three 30-wide
+panes used 50 columns and left 70 dead. Now the focused pane keeps its own
+width and the rest divide what is left, with the remainder spread one cell at
+a time so the fan's right edge lands exactly on the viewport edge. A 90-cell
+window with a 60-cell focused pane and three others gives each of them 10.
+
+Two consequences fall out of dividing rather than fixing:
+
+- **A card whose share covers its whole pane renders full, not chrome.**
+  Nothing is occluded, and a 45-cell "sliver" showing a spine and a short
+  title wastes what it was given. Card mode degrades toward scroll-like when
+  everything fits, which makes the sliver/full split a property of available
+  space rather than of the mode.
+- **`MinSliverWidth` (4) is a floor, not a governing number.** With enough
+  columns the even share rounds below what chrome needs, so only cards
+  clearing the floor are shown — taken from nearest the focused pane outward
+  — and the rest overflow into the `+N` marker. `DefaultSliverWidth` decided
+  how wide cards were; a floor only decides how many fit.
+
+**Cards draw no dividers.** They are contiguous, so a divider at one card's
+right edge is the next card's first column and was painted over the moment
+that card drew — every card divider but the last was invisible, and the
+survivor sat at the fan's outer edge separating nothing. Each sliver's spine
+is the separator. `ScrollStrategy` reserves a column and keeps its dividers.
 
 The insight that made it cheap: **cards are clipping plus z-order, not
 resizing.** `Placement` already carries `Dst`, `Src` and `Z`; the compositor,
@@ -197,7 +247,7 @@ carry:
 
 Two things learned from mocking it up, both still unbuilt:
 
-- **Cards don't eliminate scrolling, they defer it.** At a 200-column terminal you can fan maybe 10–12 cards at the 10-cell sliver width before the focused pane has no room — fewer than the 20–25 this section predicted at 4 cells, which is the price of a readable title. Past that the strip still has to scroll, now scrolling a row of slivers. **Partly addressed:** Plan 17 stopped them vanishing silently — cards that do not fit collapse into a `+N` marker on the header row — but actually scrolling the sliver row is still unbuilt.
+- **Cards don't eliminate scrolling, they defer it.** How many fit is no longer a fixed count: it is however many clear `MinSliverWidth` once the focused pane has taken its width. At a 200-column terminal with a 100-cell focused pane that is 25 cards; with a wider focused pane, fewer. Past that the strip still has to scroll, now scrolling a row of slivers. **Partly addressed:** Plan 17 stopped them vanishing silently — cards that do not fit collapse into a `+N` marker on the header row — but actually scrolling the sliver row is still unbuilt.
 
   **`ScrollStrategy` has the same problem and no marker.** It skips any column whose `Dst` is empty, so a pane scrolled fully out of view has no placement either. Plan 17's `hiddenCountsLocked` finds those too, and the marker is deliberately gated to card mode: surfacing them would change the chrome every user sees in the default layout, which was outside that change. Worth deciding on its own.
 - **A 4-cell sliver of real terminal content is visual noise. Fixed in Plan 17.** The sliver that earns its space is *chrome*, and that is now what one shows: the status glyph, a truncated terminal title, and a spine that brightens while the pane is producing output. The activity signal reads the existing `»` status glyph rather than a new wire field — `Write`'s heuristic already sets it on every write and lets it decay after three seconds — so "is this pane doing something" crosses the socket for free. Titles are truncated with `compose.TruncateWidth`, by display width rather than rune count, because a child can put anything in its title.

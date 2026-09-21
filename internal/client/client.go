@@ -31,35 +31,14 @@ type cursorPos struct {
 	visible bool
 }
 
-// wipeSteps is how many frames a focus-change transition takes. At the
-// 16ms render tick in cmd/wideboi/main.go that is about 128ms.
-const wipeSteps = 8
-
 // frameState is the layout-dependent input to one composed frame.
-// Everything else Draw needs -- control mode, prefix label, detachable
-// -- is chrome that does not participate in a transition.
+// Everything else Draw needs -- control mode, prefix label,
+// detachable -- is chrome that does not participate in a transition.
 type frameState struct {
 	placements   []protocol.PlacementData
 	focusPaneID  int
 	paneStatuses map[int]string
 	paneTitles   map[int]string
-}
-
-// pendingWipe is a focus change that has arrived but has not yet been
-// turned into a WipeTransition.
-//
-// The trigger and the frames live on different paths: HandleServerMsg
-// learns that focus moved, but pane content is only reachable inside
-// Draw -- through the drawPane callback in-process, or c.mirrors when
-// attached. So the message path records what to animate away from and
-// the next Draw composes both frames. Building them here instead is
-// what produced the original defect: two blank surfaces, and a screen
-// that went empty for the whole transition.
-type pendingWipe struct {
-	dir  Direction
-	from frameState
-	cols int
-	rows int
 }
 
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
@@ -80,8 +59,7 @@ type Client struct {
 	controlMode  bool
 	helpVisible  bool
 	detachable   bool
-	activeWipe   *WipeTransition
-	pendingWipe  *pendingWipe
+	motion       *motion
 }
 
 // frameStateLocked snapshots the layout state a frame is composed from.
@@ -126,8 +104,8 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", m.FocusPaneID)
 		oldFocus := c.focusPaneID
 		// Snapshot before the assignments below overwrite it: this is
-		// the state a wipe animates away from.
-		oldState := c.frameStateLocked()
+		// where an animation starts from.
+		prevPlacements := c.currentPlacementsLocked()
 		// Unconditionally, before anything below reads them: the
 		// mode decides which strategy runs, and the strip is what
 		// hiddenCountsLocked compares placements against.
@@ -150,22 +128,13 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		c.paneStatuses = m.PaneStatuses
 		c.paneTitles = m.PaneTitles
 
-		if oldFocus != 0 && c.focusPaneID != oldFocus {
-			dir := WipeLeftToRight
-			if c.focusPaneID < oldFocus {
-				dir = WipeRightToLeft
-			}
-			// A newer focus change supersedes one still in flight.
-			// Restarting from the state just before this change is
-			// not true retargeting -- see BEYOND-V1 section 1 -- but
-			// it is bounded, and never blank.
-			c.activeWipe = nil
-			c.pendingWipe = &pendingWipe{
-				dir:  dir,
-				from: oldState,
-				cols: c.cols,
-				rows: c.rows,
-			}
+		// Animate whenever the geometry moved, not only on a focus
+		// change: opening and killing a column re-deal the fan too.
+		// Starting from what is currently on screen rather than from
+		// the pre-animation layout is what lets a second change
+		// mid-flight continue rather than jump.
+		if oldFocus != 0 && !placementsEqual(prevPlacements, c.placements) {
+			c.motion = &motion{from: prevPlacements, to: c.placements, total: motionFrames}
 		}
 
 		activeIDs := make(map[int]bool)
@@ -239,31 +208,31 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 
 // drawLayer names what Draw paints this frame.
 //
-// Extracted so the precedence between the layers is assertable. As
+// Two layers now, not three. The wipe had its own because it took
+// over the whole screen and drew from composed snapshots; motion
+// does not -- it feeds interpolated rects through the ordinary pane
+// path, so there is nothing to arbitrate between.
+//
+// Kept as a named type rather than a bare bool because the help
+// overlay's precedence is the thing worth being able to assert: as
 // inline statement order it was observable only through a real
-// terminal, and the wire test that tried could not distinguish "the
-// overlay drew immediately" from "the overlay drew after the wipe's
-// eight frames finished on their own".
+// terminal.
 type drawLayer int
 
 const (
 	layerPanes drawLayer = iota
-	layerWipe
 	layerHelp
 )
 
 // layerLocked reports which layer owns this frame. c.mu must be held.
 //
-// Help outranks a wipe: a wipe is decorative and a modal is not.
+// Help outranks everything: an animation is decorative, a modal is
+// not.
 func (c *Client) layerLocked() drawLayer {
-	switch {
-	case c.helpVisible:
+	if c.helpVisible {
 		return layerHelp
-	case c.activeWipe != nil && c.activeWipe.Active():
-		return layerWipe
-	default:
-		return layerPanes
 	}
+	return layerPanes
 }
 
 // HostScreen is everything Draw needs from the host terminal: a cell
@@ -287,35 +256,32 @@ func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.realizePendingWipeLocked(drawPane)
-
-	// A resize can also land after a transition has already started,
-	// in which case activeWipe still holds frames composed for the
-	// old viewport. Guarding only the pending case would leave those
-	// frames painting the previous layout until the wipe ran out.
-	if c.activeWipe != nil && !c.activeWipe.Fits(c.cols, c.rows-1) {
-		c.activeWipe = nil
-	}
-
-	switch c.layerLocked() {
-	case layerHelp:
+	if c.layerLocked() == layerHelp {
 		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable)
 		scr.HideCursor()
 		return
-	case layerWipe:
-		c.activeWipe.Draw(scr)
-		// The bar is outside the transition, so it has to be painted
-		// here too -- the wipe's frames stop at row c.rows-2.
-		c.drawStatusBarLocked(scr)
-		scr.HideCursor()
-		if c.activeWipe.Step() {
-			c.activeWipe = nil
-		}
-		return
 	}
 
-	focusedPlacement := c.composeFrameLocked(scr, c.frameStateLocked(), drawPane)
+	st := c.frameStateLocked()
+	animating := c.motion != nil
+	if animating {
+		st.placements = c.motion.at()
+		c.motion.step++
+		if c.motion.done() {
+			c.motion = nil
+		}
+	}
+
+	focusedPlacement := c.composeFrameLocked(scr, st, drawPane)
 	c.drawStatusBarLocked(scr)
+
+	// The cursor belongs to a pane that is sliding, so its position
+	// is meaningless mid-flight. The wipe hid it too; that part was
+	// right.
+	if animating {
+		scr.HideCursor()
+		return
+	}
 
 	// Host cursor position and visibility.
 	//
@@ -411,7 +377,14 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 
 		// Draw column divider on right edge if applicable.
 		// Bold ┃ if adjacent to focused pane, otherwise │.
-		if p.Dst.Max.X < c.cols {
+		//
+		// Not in card mode. Cards are laid out contiguously, so a
+		// divider at one card's right edge is the next card's first
+		// column and is painted over the moment that card draws --
+		// which is why every card divider but the last was invisible,
+		// and the surviving one sat at the fan's outer edge
+		// separating nothing. Each sliver's spine is the separator.
+		if c.layoutMode != protocol.LayoutCards && p.Dst.Max.X < c.cols {
 			divider := "│"
 			if p.PaneID == st.focusPaneID || (i+1 < len(st.placements) && st.placements[i+1].PaneID == st.focusPaneID) {
 				divider = "┃"
@@ -577,33 +550,18 @@ func (c *Client) drawStatusBarLocked(scr uv.Screen) {
 	compose.WriteStyled(scr, 0, c.rows-1, statusText, statusStyle)
 }
 
-// realizePendingWipeLocked turns a recorded focus change into a live
-// transition, composing both of its frames.
+// currentPlacementsLocked is what is on screen right now: the
+// interpolated rects if an animation is running, otherwise the
+// settled ones.
 //
-// This runs on the draw path because that is the only place pane
-// content is reachable -- through the drawPane callback in-process, or
-// c.mirrors when attached. HandleServerMsg, where the focus change
-// actually arrives, can see neither. c.mu must be held.
-func (c *Client) realizePendingWipeLocked(drawPane func(id int, dst uv.Screen, area image.Rectangle)) {
-	pw := c.pendingWipe
-	if pw == nil {
-		return
+// Arming a new animation from here rather than from c.placements is
+// what makes a second focus change mid-flight continue from what the
+// user is looking at instead of jumping back. c.mu must be held.
+func (c *Client) currentPlacementsLocked() []protocol.PlacementData {
+	if c.motion != nil {
+		return c.motion.at()
 	}
-	c.pendingWipe = nil
-
-	// A resize between the focus change and this frame invalidates the
-	// retained geometry: compositing the old placements at the new size
-	// would animate a layout that never existed. Snap instead.
-	if pw.cols != c.cols || pw.rows != c.rows || c.cols <= 0 || c.rows <= 1 {
-		return
-	}
-
-	h := c.rows - 1
-	fA := compose.NewSurface(c.cols, h)
-	fB := compose.NewSurface(c.cols, h)
-	c.composeFrameLocked(fA, pw.from, drawPane)
-	c.composeFrameLocked(fB, c.frameStateLocked(), drawPane)
-	c.activeWipe = NewWipeTransition(fA, fB, c.cols, h, pw.dir, wipeSteps)
+	return c.placements
 }
 
 // controlHelp returns as much of the control-mode menu as fits in budget
@@ -781,6 +739,10 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	c.mu.Lock()
 	c.cols = cols
 	c.rows = rows
+	// A resize invalidates an animation in flight: its rects are in
+	// the old viewport's coordinates, so continuing would interpolate
+	// toward a layout that no longer exists. Snap instead.
+	c.motion = nil
 	if c.strip != nil && c.strip.ColCount() > 0 {
 		c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
 	}
