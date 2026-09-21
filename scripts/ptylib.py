@@ -123,6 +123,30 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
                 os.close(slave_fd)
             child_env = dict(os.environ)
             child_env["SHELL"] = "/bin/sh"
+            # Pinned for the same reason SHELL is: the assertions
+            # depend on it, so it cannot be whatever the person
+            # running the suite happens to have.
+            #
+            # A GitHub runner sets no TERM at all, and ultraviolet
+            # then emits a plainer stream -- the status bar still
+            # renders its text but without the SGR 7 that makes the
+            # inversion assertable, and the divider draws without the
+            # absolute cursor move divider_columns matches on. Two
+            # smoke cases failed on the first CI run for exactly that,
+            # and reproduce locally under `env -u TERM`.
+            #
+            # Matches what internal/server/ptyx gives the panes.
+            child_env["TERM"] = "xterm-256color"
+            # And PS1, for the third time the same reason.
+            #
+            # /bin/sh is bash on macOS and dash on Linux, and their
+            # default prompts differ -- "sh-3.2$" against a bare "$".
+            # The golden snapshot records every word wideboi renders,
+            # so the macOS prompt was baked into it as the token
+            # "sh-3" and CI failed on its absence. The prompt is the
+            # child's output, not wideboi's chrome, and the snapshot
+            # exists to pin the chrome.
+            child_env["PS1"] = "$ "
             if env:
                 child_env.update(env)
             os.execvpe(argv[0], argv, child_env)
