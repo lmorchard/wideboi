@@ -11,6 +11,14 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
+// testGrace is the SIGTERM grace these tests tear down with. None of
+// them asserts anything about the grace, escalation, or reaping -- those
+// contracts belong to internal/server/ptyx's reap tests and to
+// scripts/ptycheck.py via `make verify-exit`. At the 2s production
+// default these seven tests spent ~14s between them waiting for an
+// interactive /bin/sh to ignore SIGTERM.
+const testGrace = 100 * time.Millisecond
+
 func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgLayoutSnapshot {
 	t.Helper()
 	deadline := time.After(timeout)
@@ -30,6 +38,7 @@ func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout
 func TestServerLifecycleAndAttach(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -54,6 +63,7 @@ func TestServerLifecycleAndAttach(t *testing.T) {
 func TestServerVerbHandling(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -90,6 +100,7 @@ func TestServerVerbHandling(t *testing.T) {
 func TestResizePropagatesToPanes(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -138,6 +149,7 @@ func TestResizePropagatesToPanes(t *testing.T) {
 func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -191,6 +203,7 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -252,6 +265,7 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 	tp := transport.NewInProcChannel(256)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -326,6 +340,7 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

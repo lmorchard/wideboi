@@ -1,4 +1,4 @@
-.PHONY: check test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+.PHONY: check quick test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -25,7 +25,22 @@ print-go-version:
 # the exit-status/teardown contract that the other tests only exercise in
 # isolation. build's output (bin/wideboi) is gitignored, so verify-exit is
 # still read-only with respect to the tree check is judging.
+#
+# For the edit loop, use `make quick` below -- check is the gate, not the
+# thing to run on save.
 check: fmt-check lint seam-check test race verify-exit smoke attach-check
+
+# quick is the inner-loop tier: everything that does not spawn the real
+# binary in a real pty, and no race detector. Run this on save; run check
+# before pushing.
+#
+# There is deliberately no fast-package list. Once the Go tests stopped
+# waiting out fixed grace periods the whole suite is a few seconds, so the
+# useful boundary is "Go tests" vs "race + the pty suites" -- which is
+# stable, where a hand-maintained list of fast packages would drift. A new
+# package joins quick automatically; if someone adds a slow test, quick
+# gets slower, which is noticeable and self-correcting rather than silent.
+quick: fmt-check lint seam-check test
 
 test:
 	go test ./...
