@@ -18,9 +18,11 @@ func TestKillReapsEscapedGrandchild(t *testing.T) {
 	}
 
 	// A sleeper that escapes the pane's process group entirely. A plain
-	// killpg would not reach it.
+	// killpg would not reach it. It traps HUP so closing the pty master
+	// does not reap it via SIGHUP: only Kill's explicit descendant
+	// signalling carries it.
 	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
-	cmd := fmt.Sprintf("%s && ./%s 300 &\n", linkSleepAs(tag), tag)
+	cmd := fmt.Sprintf("%s && sh -c 'trap \"\" HUP; exec ./%s 300' &\n", linkSleepAs(tag), tag)
 	if _, err := io.WriteString(p.Master, cmd); err != nil {
 		t.Fatalf("write to pty: %v", err)
 	}
@@ -39,8 +41,9 @@ func TestKillReapsEscapedGrandchild(t *testing.T) {
 }
 
 // TestKillReapsSIGTERMIgnoringEscapee covers a descendant that both
-// escaped the process group and ignores SIGTERM. The interactive root
-// shell here also ignores SIGTERM (see TestKillIsIdempotent's timing),
+// escaped the process group and ignores SIGTERM. It also traps HUP so
+// closing the pty master does not reap it via SIGHUP. The interactive
+// root shell here also ignores SIGTERM (see TestKillIsIdempotent's timing),
 // so this exercises the ordinary grace-timeout escalation path: it does
 // not, by itself, distinguish that path from the unconditional one
 // TestKillEscalatesEvenWhenRootExitsWithinGrace covers below.
@@ -51,10 +54,10 @@ func TestKillReapsSIGTERMIgnoringEscapee(t *testing.T) {
 	}
 
 	// An escapee that both leaves the pane's process group and ignores
-	// SIGTERM. SIG_IGN dispositions survive exec, so the renamed sleep
-	// keeps ignoring TERM after the trap'd subshell execs into it.
+	// both SIGTERM and SIGHUP. SIG_IGN dispositions survive exec, so
+	// the renamed sleep keeps ignoring them after the trap'd subshell execs.
 	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
-	cmd := fmt.Sprintf("%s && sh -c 'trap \"\" TERM; exec ./%s 300' &\n", linkSleepAs(tag), tag)
+	cmd := fmt.Sprintf("%s && sh -c 'trap \"\" TERM HUP; exec ./%s 300' &\n", linkSleepAs(tag), tag)
 	if _, err := io.WriteString(p.Master, cmd); err != nil {
 		t.Fatalf("write to pty: %v", err)
 	}
@@ -89,7 +92,7 @@ func TestKillReapsSIGTERMIgnoringEscapee(t *testing.T) {
 // against the pre-signal snapshot.
 func TestKillEscalatesEvenWhenRootExitsWithinGrace(t *testing.T) {
 	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
-	script := fmt.Sprintf(`sh -c 'trap "" TERM HUP; exec -a %s sleep 300' & sleep 60`, tag)
+	script := fmt.Sprintf(`%s && sh -c 'trap "" TERM HUP; exec ./%s 300' & sleep 60`, linkSleepAs(tag), tag)
 
 	p, err := ptyx.Spawn([]string{"/bin/sh", "-c", script}, 40, 10, t.TempDir())
 	if err != nil {

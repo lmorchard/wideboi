@@ -25,7 +25,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"image"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -192,11 +194,20 @@ func TestChildNotReadingStdinDoesNotFreezeServer(t *testing.T) {
 	}
 	buf[len(buf)-1] = '\n'
 
-	for i := 0; i < 64; i++ {
-		_, err := p1.pty.WriteBounded(buf, 10*time.Millisecond)
-		if err != nil {
-			break
+	timeouts := 0
+	for i := 0; i < 64 && timeouts < 3; i++ {
+		n, err := p1.pty.WriteBounded(buf, 10*time.Millisecond)
+		if errors.Is(err, os.ErrDeadlineExceeded) && n == 0 {
+			timeouts++
+		} else {
+			timeouts = 0
 		}
+		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("fill write %d: %v", i, err)
+		}
+	}
+	if timeouts < 3 {
+		t.Fatal("failed to saturate tty input buffer within 64KB")
 	}
 
 	// Send keystrokes to pane 1:
