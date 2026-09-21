@@ -128,13 +128,20 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// Snapshot before the assignments below overwrite it: this is
 		// the state a wipe animates away from.
 		oldState := c.frameStateLocked()
+		// Unconditionally, before anything below reads them: the
+		// mode decides which strategy runs, and the strip is what
+		// hiddenCountsLocked compares placements against.
+		//
+		// Both used to be inside the len(m.Columns) > 0 branch, which
+		// meant the snapshot sent when the last pane closes left a
+		// stale strip behind -- so card mode drew a "+N" counting
+		// panes that no longer existed -- and a mode change arriving
+		// while the session was empty was dropped.
+		c.layoutMode = m.Layout
+		layout.ApplyMode(c.strip, m.Layout)
+		c.strip.SyncColumns(m.Columns, m.FocusPaneID)
+
 		if len(m.Columns) > 0 {
-			// Before ComputePlacements: the mode decides which
-			// strategy runs, and placements are computed here rather
-			// than server-side since Plan 12.
-			c.layoutMode = m.Layout
-			layout.ApplyMode(c.strip, m.Layout)
-			c.strip.SyncColumns(m.Columns, m.FocusPaneID)
 			c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
 		} else {
 			c.placements = m.Placements

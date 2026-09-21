@@ -101,6 +101,39 @@ you have since replaced. Written up in `LESSONS.md`. **Habit to adopt: once a
 PR is handed over, stop force-pushing — and after a merge, verify the merged
 tree, not just that the branch merged.**
 
+## What the Copilot review caught
+
+Three comments, all real, none skipped. Two were multi-client or
+edge-of-lifecycle cases the plan never considered.
+
+1. **A stale strip on the empty snapshot.** When the last pane closes the
+   server broadcasts a snapshot with no columns, and the client's mode
+   application and strip sync both lived inside the `len(m.Columns) > 0`
+   branch. So the strip kept its old columns, `hiddenCountsLocked` counted
+   panes that no longer existed, and card mode drew `+2` for them. A mode
+   change arriving while the session was empty was dropped too. Both hoisted
+   out of the branch.
+2. **`TruncateWidth` and `WriteStyled` disagreed about zero-width runes.**
+   Truncation charged a combining mark 0 cells; the writer advances at least
+   one column per rune. A title with combining marks passed the budget check
+   and still overflowed. They share one contract now — truncation charges
+   exactly what the writer advances.
+3. **`delivered` meant "any client", not "every client".** With two clients
+   attached and one buffer full, the glyph and title sets were marked clean
+   and the client that missed the edge-triggered broadcast would never see
+   that change again. Now every attached client has to accept before the set
+   goes clean, so a wedged client causes retries rather than silent
+   divergence.
+
+All three verified to fail first. The messages are worth keeping: *"marker
+survived an empty snapshot, counting panes that no longer exist"*, *"truncated
+to \"ééabcd\" for a 6-cell budget, but it wrote into column 6"*, and *"marked
+delivered while one attached client never received it"*.
+
+Pattern worth noticing across both this plan and Plan 16: **the reviewer's
+findings clustered in multi-client and teardown paths** — exactly the states
+my own tests build fixtures for least often.
+
 ## Where to pick up
 
 - **`OSC 9;4` support**, feeding the same `PaneStatus`. Needs a precedence rule

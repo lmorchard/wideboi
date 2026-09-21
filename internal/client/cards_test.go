@@ -354,3 +354,43 @@ func TestScrollModeNeverShowsAMarker(t *testing.T) {
 		t.Errorf("scroll mode drew an overflow marker: %q", header)
 	}
 }
+
+// When the last pane closes the server broadcasts a snapshot with no
+// columns. The client used to skip its strip sync entirely on that
+// path, leaving stale columns behind -- so hiddenCountsLocked counted
+// panes that no longer exist and card mode drew a "+N" for them.
+func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
+	const cols, rows = 60, 16
+	cli := cardClientWithColumns(t, cols, rows, 6, 1)
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+	if !strings.Contains(strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), ""), "+") {
+		t.Fatal("fixture should overflow and show a marker before the empty snapshot")
+	}
+
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: nil, FocusPaneID: 0, Layout: protocol.LayoutCards,
+	})
+
+	scr2 := newFakeHostScreen(cols, rows)
+	cli.Draw(scr2, nil, nil)
+	header := strings.Join(compose.Text(scr2, image.Rect(0, 0, cols, 1)), "")
+	if strings.Contains(header, "+") {
+		t.Errorf("marker survived an empty snapshot, counting panes that no longer exist: %q", header)
+	}
+}
+
+// A mode change must land even while the session has no panes, or the
+// next snapshot renders under the previous strategy.
+func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
+	cli := NewClient(transport.NewInProcChannel(16), 60, 16, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: nil, Layout: protocol.LayoutCards})
+
+	cli.mu.Lock()
+	got := cli.layoutMode
+	cli.mu.Unlock()
+	if got != protocol.LayoutCards {
+		t.Errorf("layoutMode = %v after an empty card-mode snapshot, want %v", got, protocol.LayoutCards)
+	}
+}

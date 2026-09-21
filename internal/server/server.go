@@ -555,12 +555,19 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	tps := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()
 
-	// With no clients there is nobody left to be stale, so treat that
-	// as delivered rather than retrying every tick forever.
-	delivered := len(tps) == 0
+	// Delivered means *every* attached client accepted it, not any
+	// one of them.
+	//
+	// A status or title broadcast is edge-triggered, so a client
+	// whose buffer was full when it fired would never see that change
+	// again -- two clients of one session would disagree about what
+	// the panes are doing, with nothing to retry. With no clients at
+	// all there is nobody to be stale, so that counts as delivered
+	// rather than retrying forever.
+	delivered := true
 	for _, tp := range tps {
-		if tp.SendServer(ctx, snapshot) {
-			delivered = true
+		if !tp.SendServer(ctx, snapshot) {
+			delivered = false
 		}
 	}
 

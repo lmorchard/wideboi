@@ -90,9 +90,14 @@ func TruncateWidth(s uv.Screen, text string, budget int) string {
 	}
 	used := 0
 	for i, r := range text {
-		w := uv.NewCell(s.WidthMethod(), string(r)).Width
-		if w < 0 {
-			w = 0
+		// Charge exactly what WriteStyled will advance, including
+		// the one column it gives a zero-width rune. Measuring a
+		// combining mark as free here would let a string pass the
+		// budget and still overflow when drawn -- truncation and
+		// writing have to share one width contract.
+		w := 1
+		if cw := uv.NewCell(s.WidthMethod(), string(r)).Width; cw > 1 {
+			w = cw
 		}
 		if used+w > budget {
 			return text[:i]

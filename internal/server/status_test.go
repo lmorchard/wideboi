@@ -254,3 +254,43 @@ func TestPaneTitlesReachTheSnapshot(t *testing.T) {
 		t.Errorf("snapshot PaneTitles[1] = %q, want %q", got, "◑ Pong reply")
 	}
 }
+
+// "Delivered" has to mean every attached client got it, not any one.
+// A status or title broadcast is edge-triggered, so a client whose
+// buffer was full when it fired never sees that change again -- the
+// session goes inconsistent between clients and nothing retries.
+func TestUndeliveredToOneOfTwoClientsIsRetried(t *testing.T) {
+	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	ctx := context.Background()
+
+	healthy := s.transports[0].(*transport.InProcChannel)
+	wedged := transport.NewInProcChannel(4)
+	s.transports = append(s.transports, wedged)
+	for len(wedged.ServerSend) < cap(wedged.ServerSend) {
+		wedged.ServerSend <- struct{}{}
+	}
+
+	grids[1].set(term.StatusFailed)
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Fatal("no broadcast attempted after a status change")
+	}
+	// The healthy client got it; the wedged one did not, so the
+	// change is not done.
+	for len(healthy.ServerSend) > 0 {
+		<-healthy.ServerSend
+	}
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Error("marked delivered while one attached client never received it")
+	}
+
+	// Once it drains, the retry lands and the set finally goes clean.
+	for len(wedged.ServerSend) > 0 {
+		<-wedged.ServerSend
+	}
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Fatal("expected the retry to fire")
+	}
+	if s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Error("kept broadcasting after every client accepted")
+	}
+}

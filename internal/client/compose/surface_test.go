@@ -183,3 +183,26 @@ func TestWriteStyledAdvancesByMeasuredWidth(t *testing.T) {
 		t.Errorf("col 2 = %v, want \"X\" -- a wide glyph must advance two columns", c)
 	}
 }
+
+// TruncateWidth and WriteStyled have to agree about what a rune costs,
+// or a string that passes the budget check still overflows when drawn.
+// WriteStyled advances at least one column per rune; truncation must
+// charge the same, even for a zero-width combining mark.
+func TestTruncateWidthMatchesWriterAdvance(t *testing.T) {
+	s := compose.NewSurface(40, 1)
+	// "e" + combining acute, twice, then padding. The marks measure
+	// zero but each still consumes a column when written.
+	const text = "ééabcdefgh"
+
+	const budget = 6
+	got := compose.TruncateWidth(s, text, budget)
+
+	dst := compose.NewSurface(40, 1)
+	compose.WriteStyled(dst, 0, 0, got, uv.Style{})
+	for x := budget; x < 40; x++ {
+		if c := dst.CellAt(x, 0); c != nil && c.Content != "" && c.Content != " " {
+			t.Fatalf("truncated to %q for a %d-cell budget, but it wrote into column %d (%q)",
+				got, budget, x, c.Content)
+		}
+	}
+}
