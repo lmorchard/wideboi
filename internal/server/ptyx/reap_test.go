@@ -20,7 +20,7 @@ func TestKillReapsEscapedGrandchild(t *testing.T) {
 	// A sleeper that escapes the pane's process group entirely. A plain
 	// killpg would not reach it.
 	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
-	cmd := fmt.Sprintf("sh -c 'exec -a %s sleep 300' &\n", tag)
+	cmd := fmt.Sprintf("%s && ./%s 300 &\n", linkSleepAs(tag), tag)
 	if _, err := io.WriteString(p.Master, cmd); err != nil {
 		t.Fatalf("write to pty: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestKillReapsSIGTERMIgnoringEscapee(t *testing.T) {
 	// SIGTERM. SIG_IGN dispositions survive exec, so the renamed sleep
 	// keeps ignoring TERM after the trap'd subshell execs into it.
 	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
-	cmd := fmt.Sprintf("sh -c 'trap \"\" TERM; exec -a %s sleep 300' &\n", tag)
+	cmd := fmt.Sprintf("%s && sh -c 'trap \"\" TERM; exec ./%s 300' &\n", linkSleepAs(tag), tag)
 	if _, err := io.WriteString(p.Master, cmd); err != nil {
 		t.Fatalf("write to pty: %v", err)
 	}
@@ -125,6 +125,27 @@ func TestKillIsIdempotent(t *testing.T) {
 
 // waitForProcess polls the real process table until a process matching
 // tag is present (want=true) or absent (want=false).
+// linkSleepAs returns a shell command that symlinks sleep into the
+// pane's cwd under a unique name, so the escapee is findable in ps by
+// that name.
+//
+// The obvious spelling is `exec -a TAG sleep 300`, and that is what
+// this used to do. `exec -a` is a bash builtin, not POSIX: on Ubuntu
+// /bin/sh is dash, which answers `exec: -a: not found`, so the
+// escapee never started and these tests failed on Linux during setup
+// -- before reaching any of the descendant-walking they exist to
+// cover. macOS /bin/sh is bash, which is why it survived until CI ran
+// on Linux.
+//
+// A symlink rather than a copy: copying a system binary on macOS
+// breaks its code signature and the kernel SIGKILLs it immediately
+// ("Killed: 9"), which trades a Linux failure for a macOS one. A
+// symlink keeps the signature, works in any POSIX shell, and still
+// gives ps a distinct argv[0].
+func linkSleepAs(tag string) string {
+	return fmt.Sprintf("ln -s \"$(command -v sleep)\" ./%s", tag)
+}
+
 func waitForProcess(t *testing.T, tag string, want bool, within time.Duration) bool {
 	t.Helper()
 	deadline := time.Now().Add(within)
