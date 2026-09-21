@@ -13,14 +13,22 @@ teaches you something; session-scoped notes go under `docs/dev-sessions/` instea
 - **Number:** `10`
 - **Status field:** `Status`
 - **Columns:**
-  - `ready: Ready`
+  - `ready: Backlog`
   - `in_progress: In progress`
   - `in_review: In review`
   - `done: Done`
 
-Note the sentence case — `In progress`, not `In Progress`. The board also has a
-`Backlog` column the dev-session skill does not touch, plus `Priority` (P0–P3)
-and `Size` (XS–XL) fields it does not set. Curating those is a human job.
+Two things about that mapping are deliberate:
+
+- **`ready` points at `Backlog`, not `Ready`.** `ready` is the skill's key for
+  "where a freshly filed spec lands". On this board `Ready` means *picked, and
+  next up* — a human decision — so `/dev-session file` drops new issues into
+  `Backlog` and Les promotes them.
+- **Sentence case.** `In progress`, not `In Progress`. A name that does not
+  match the board does not error, it silently no-ops every transition.
+
+`Priority` (P0–P3) and `Size` (XS–XL) exist and the skill does not set them.
+Curating those is a human job.
 
 ## The premise everything rests on
 
