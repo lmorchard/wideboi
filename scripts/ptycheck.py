@@ -64,6 +64,7 @@ import argparse
 import os
 import signal
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -114,6 +115,13 @@ def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
     that run's live harness as its parent, so it is not ours to report.
     """
     rows = ps_rows()
+    if not rows:
+        # ps_rows swallows a failed query and returns []. The table
+        # always contains at least this process, so empty means the
+        # query failed -- and reporting "no strays" then would let
+        # assertion 4 pass silently, which is what the old ps shell-out
+        # deliberately avoided.
+        return ["<could not read the process table to check for strays>"]
     live = {pid for pid, _, _ in rows}
     strays = []
     for pid, ppid, command in rows:
@@ -136,7 +144,15 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     print(f"--- size={label} signal={signal.Signals(sig).name} ---")
 
     argv = [os.path.abspath(binary)]
-    pid, master_fd = spawn_in_pty(argv, cols, rows, set_winsize)
+    # Never created: a plain wideboi attaches to whatever answers this
+    # socket, and an unrelated server on the default path would leave
+    # this child with no panes of its own -- the run then fails at
+    # "expected 2 pane children" before reaching any signal assertion.
+    # Same reasoning as smoke.py's NEVER_SOCK.
+    never_sock = os.path.join(tempfile.gettempdir(),
+                              f"wideboi-never-ptycheck-{os.getpid()}.sock")
+    pid, master_fd = spawn_in_pty(argv, cols, rows, set_winsize,
+                                  {"WIDEBOI_SOCK": never_sock})
 
     drainer = Drainer(master_fd)
     drainer.start()
@@ -144,7 +160,23 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     ok = True
     tracked: list[tuple[int, str]] = []
     try:
-        time.sleep(startup_delay)
+        # Wait for the panes to exist rather than sleeping a fixed
+        # interval: the very next assertion is that there are two of
+        # them, and under `make -j` the machine is loaded enough that
+        # wideboi has not always got there in half a second. Observed
+        # as an intermittent "expected 2 pane children, found 0" once
+        # check went parallel -- the same fixed-sleep failure #51
+        # removed from the other suites, left here because #51 scoped
+        # ptycheck out on the grounds that its waits are the thing
+        # under test. Its *teardown* waits are; this one is not.
+        #
+        # startup_delay is the ceiling, so a fast machine still gets
+        # through in a fraction of it.
+        deadline = time.monotonic() + startup_delay
+        while time.monotonic() < deadline:
+            if len(pane_children(pid)) >= 2:
+                break
+            time.sleep(0.02)
 
         # The process must still be alive at this point -- if it already
         # exited (e.g. the panic this harness was built to catch), there
@@ -261,7 +293,10 @@ def main() -> int:
     parser.add_argument("--size", type=parse_size, default=(80, 24), help="pty size as COLSxROWS (default: 80x24); 0x0 means leave the winsize unset")
     parser.add_argument("--signal", type=parse_signal, default=signal.SIGTERM, help="signal to send (default: SIGTERM)")
     parser.add_argument("--timeout", type=float, default=10.0, help="seconds to wait for exit after signalling (default: 10)")
-    parser.add_argument("--startup-delay", type=float, default=0.5, help="seconds to let the process start before signalling (default: 0.5)")
+    parser.add_argument("--startup-delay", type=float, default=5.0,
+                        help="ceiling on the wait for wideboi to spawn its panes before "
+                             "signalling (default: 5); satisfied by observation, so a fast "
+                             "run takes a fraction of it")
     parser.add_argument("--no-escapee", action="store_true", help="skip planting the nohup'd background job; the leaked-pane assertion becomes much weaker (see module docstring)")
     args = parser.parse_args()
 

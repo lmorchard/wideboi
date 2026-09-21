@@ -153,6 +153,63 @@ Smoke needed **no per-case socket**: a plain wideboi only ever dials, never
 binds (`ListenSocket` is reached only from `runServer`), so cases cannot reach
 each other. That collapsed a chunk of expected work.
 
+## The review found five things, and two of them were mine to have caught
+
+Copilot's pass on #59 returned five comments and **all five were real**. Two
+were gaps in work I had already called done.
+
+1. **`WIDEBOI_SOCK` made an existing unlink destructive.**
+   `NewSocketListener` removes a stale socket so a dead server does not block
+   the next one. Harmless while the path was a fixed `default.sock` under a
+   wideboi-owned directory; once a caller can name any path,
+   `WIDEBOI_SOCK=~/notes.txt wideboi server` **deletes that file** before
+   failing to listen. Proved with a test that writes a regular file and
+   watches it disappear. Now refused unless the path is actually a socket.
+   **I added the override and did not look at what consumed it.**
+2. **ptycheck never got the socket isolation.** I gave it to smoke, golden and
+   attachcheck and missed the fourth. `make verify-exit` failed outright with
+   a default-path server running — the same foot-gun this plan exists to fix,
+   still live in one of four suites.
+3. **attachcheck leaked a temp dir per run.** I had fixed exactly this for
+   smoke and golden during self-review and did not check the third site.
+4. **`ps_rows()` returns `[]` on failure**, so a failed process-table query
+   made assertion 4 pass silently. The old `ps` shell-out reported it. I
+   weakened an assertion while scoping it.
+5. **Raising only the default settle left twenty explicit overrides behind**
+   (0.5–1.6s), which are precisely the tight ones under contention.
+
+## And then the gate did its job
+
+After fixing those, `make check` failed **1 run in 8** — two different
+failures in different suites. The flake rate across all the runs of that
+configuration was roughly 15%. Four green runs earlier had said it was fine.
+
+**This is the second time today that pattern has appeared**, and it is the
+single most valuable habit from #51: a fast green number is worth nothing
+until it repeats. Both causes were real races that contention exposed, and
+both were fixed rather than tuned around:
+
+- **`ptycheck` slept a fixed 0.5s and then asserted two pane children
+  existed.** Under `make -j` wideboi has not always got there. Now waits for
+  the panes with the delay as a ceiling — the same fixed-sleep bug #51
+  removed elsewhere, left behind because #51 scoped ptycheck out on the
+  grounds that "its waits are the thing under test". Its *teardown* waits are.
+  This one was not.
+- **`Session()` returned before either pane shell had prompted.** Settling
+  only says wideboi's own chrome stopped changing, and it draws that
+  immediately. A case that typed into a pane with no shell behind it got no
+  echo — surfacing as "lowercase input never reached the pane". Startup now
+  waits for both prompts. wideboi emits exactly one `$` of its own (the
+  DECRQM query `ESC[?2027$p`); every other one on a fresh screen is a prompt,
+  because `PS1` is pinned.
+
+**10/10 `make check`** after those, plus 4/4 with `TERM` unset — 14
+consecutive green runs across configurations.
+
+Note what this means about the earlier numbers: the parallelism was never
+*quite* safe until the last two fixes, and four green runs had already told
+me it was.
+
 ## Deliberately not done
 
 - **#27 / #58.** `WIDEBOI_SOCK` is one escape hatch; session naming and

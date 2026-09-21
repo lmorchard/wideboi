@@ -21,7 +21,9 @@ Never hangs: every wait is bounded and every child is reaped.
 """
 
 import argparse
+import atexit
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -65,6 +67,10 @@ SETTLE = 1.5
 # the socket", "attach without a server says so"), so the path has to
 # belong to this run alone. Passed to the binary as WIDEBOI_SOCK.
 RUNTIME_DIR = tempfile.mkdtemp(prefix=f"wideboi-attach-{os.getuid()}-")
+# A real directory is needed here (unlike smoke's never-created path)
+# because a server actually binds inside it, so it has to be removed
+# again or every run leaves litter behind.
+atexit.register(shutil.rmtree, RUNTIME_DIR, True)
 
 
 def runtime_dir() -> str:

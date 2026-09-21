@@ -12,6 +12,32 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
+// NewSocketListener unlinks a stale socket so a server that died
+// without cleaning up does not block the next one. Once WIDEBOI_SOCK
+// let a caller name any path, that unlink became a way to delete an
+// arbitrary file by typo -- `WIDEBOI_SOCK=~/notes.txt wideboi server`
+// would have removed it before failing to listen.
+func TestNewSocketListenerRefusesToRemoveANonSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "precious.txt")
+	if err := os.WriteFile(path, []byte("do not delete me"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	sl, err := transport.NewSocketListener(path)
+	if err == nil {
+		sl.Close()
+		t.Fatal("NewSocketListener accepted a regular file")
+	}
+
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("the file was removed: %v", readErr)
+	}
+	if string(got) != "do not delete me" {
+		t.Fatalf("file contents changed: %q", got)
+	}
+}
+
 func TestSocketListenerAndConnRoundTrip(t *testing.T) {
 	dir, err := os.MkdirTemp("/tmp", "wb")
 	if err != nil {

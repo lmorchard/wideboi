@@ -100,6 +100,19 @@ NEVER_SOCK = os.path.join(tempfile.gettempdir(), f"wideboi-never-{os.getpid()}.s
 # today, but the guard's correctness should not rest on that.
 SPAWNED_LOCK = threading.Lock()
 
+# The smallest settle ceiling any case may use. See Session.type.
+MIN_SETTLE = 3.0
+
+# wideboi emits exactly one "$" of its own, in the DECRQM query
+# ESC[?2027$p. Every other "$" on a fresh screen is a pane shell's
+# prompt, because ptylib pins PS1="$ ".
+_DECRQM = re.compile(rb"\x1b\[\?2027\$p")
+
+
+def prompts_seen(out: bytes) -> int:
+    """How many pane shells have written their prompt."""
+    return _DECRQM.sub(b"", out).count(b"$")
+
 
 class Session:
     """A running wideboi in a pty, with helpers to type and observe."""
@@ -126,10 +139,30 @@ class Session:
         # ceiling costs nothing when things are fast, so the headroom is
         # free; the old values were the entire margin under load.
         settle_output(self.drainer, timeout=startup)
+        # Settling only says wideboi's own chrome stopped changing, and
+        # it draws that immediately -- well before either pane shell has
+        # exec'd and prompted. A case that types into a pane with no
+        # shell behind it gets no echo back, which surfaced under `make
+        # -j` contention as "lowercase input never reached the pane".
+        #
+        # Both panes, because every session starts with two. Bounded by
+        # the same ceiling, so a slow shell degrades to the old
+        # behaviour rather than hanging.
+        deadline = time.monotonic() + startup
+        while time.monotonic() < deadline:
+            if prompts_seen(self.drainer.output()) >= 2:
+                break
+            time.sleep(0.02)
 
     def type(self, text: str, settle=3.0):
         os.write(self.fd, text.encode())
-        settle_output(self.drainer, timeout=settle)
+        # Floored, not just defaulted: twenty call sites pass their own
+        # settle between 0.5 and 1.6, all chosen serially, and raising
+        # only the default would leave exactly those under-provisioned
+        # under contention. Each value is a ceiling, so a floor cannot
+        # slow a case that settles promptly -- it only stops one being
+        # handed a half-drawn screen when the machine is loaded.
+        settle_output(self.drainer, timeout=max(settle, MIN_SETTLE))
 
     def output(self) -> bytes:
         return self.drainer.output()
