@@ -23,7 +23,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty,
-    wait_for_exit, force_cleanup, pane_children, still_alive,
+    wait_for_exit, descendants, force_cleanup, pane_children, ps_rows,
+    settle_output, still_alive,
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
@@ -85,19 +86,67 @@ class Session:
     def __init__(self, cols=100, rows=30, startup=1.2, env=None):
         self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True, env)
         self.rows = rows
+        SPAWNED.append(self.pid)
         self.drainer = Drainer(self.fd)
         self.drainer.start()
-        time.sleep(startup)
+        # startup and settle are ceilings now, not durations. Every
+        # value a case passes was chosen as "long enough for this to
+        # finish", which is exactly the right timeout; waiting for the
+        # screen to stop changing turns it into the worst case rather
+        # than the every case. Measured: startup settles in 0.154s
+        # against this 1.2s, a keystroke in 0.10-0.28s against 0.8s.
+        settle_output(self.drainer, timeout=startup)
 
     def type(self, text: str, settle=0.8):
         os.write(self.fd, text.encode())
-        time.sleep(settle)
+        settle_output(self.drainer, timeout=settle)
 
     def output(self) -> bytes:
         return self.drainer.output()
 
     def cursor_positions(self) -> list[tuple[int, int]]:
         return [(int(r), int(c)) for r, c in CUP.findall(self.output())]
+
+    def close(self) -> None:
+        """Tears the session down without asserting anything about how.
+
+        quit_and_reap sends SIGTERM and waits for the ordinary teardown
+        path, which costs ~2s: an interactive /bin/sh ignores SIGTERM,
+        so pane teardown always burns its full grace before escalating
+        to SIGKILL. None of that is the panes -- still_alive returns in
+        0.000s -- it is wideboi waiting.
+
+        That contract is real and asserted twice already: by the
+        verify-exit target, and by case_quit_restores_and_reaps, the
+        only reader of s.leaked. The other 24 cases were each paying 2s
+        to re-verify it, which is ~47s of the suite.
+
+        Children are reaped explicitly rather than trusting a SIGKILL'd
+        wideboi to have done it. Trading 47 seconds for a process leak
+        would be a bad deal, and check_no_strays below is what notices
+        if this stops holding.
+        """
+        # descendants, not pane_children: a pane's shell can leave
+        # behind a grandchild that escaped its process group entirely,
+        # which is the whole subject of ptyx's reap tests. Direct
+        # children miss exactly the process most likely to leak.
+        #
+        # Such a process often dies anyway, via SIGHUP when the pty
+        # master closes -- but that is incidental, and the reap tests
+        # exist because it is not guaranteed.
+        kids = [p for p, _ in descendants(self.pid)]
+        force_cleanup(self.pid)
+        for kid in kids:
+            try:
+                os.kill(kid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        still_alive(kids, 1.0)
+        # Hand them to the guard too. Tracking only the wideboi pid
+        # would let this path leak a descendant while the suite still
+        # reported a clean run.
+        SPAWNED.extend(kids)
+        self.drainer.stop()
 
     def quit_and_reap(self, sig=signal.SIGTERM, timeout=8.0) -> int | None:
         kids = [p for p, _ in pane_children(self.pid)]
@@ -119,7 +168,7 @@ def case_launch_shows_two_panes(fail):
         fail("no column divider in the first frames")
     if not s.cursor_positions():
         fail("no cursor positioning emitted -- is the cursor being rendered?")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_typing_reaches_the_focused_pane(fail):
@@ -127,7 +176,7 @@ def case_typing_reaches_the_focused_pane(fail):
     s.type("echo smoke-lower-42\r")
     if b"smoke-lower-42" not in s.output():
         fail("lowercase input never reached the pane")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_shifted_keys_reach_the_pane(fail):
@@ -139,7 +188,7 @@ def case_shifted_keys_reach_the_pane(fail):
         fail("capital letters never reached the pane")
     if b"!bang" not in out:
         fail("shifted punctuation never reached the pane")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_focus_switch_moves_the_cursor(fail):
@@ -156,7 +205,7 @@ def case_focus_switch_moves_the_cursor(fail):
         fail(f"cursor column did not move across panes: {before} -> {after}")
     if b"pane-one" not in s.output():
         fail("input did not follow focus to the second pane")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_new_column_opens_pane(fail):
@@ -179,7 +228,7 @@ def case_new_column_opens_pane(fail):
     landed = s.output()[before_len:]
     if b"pane-three" not in landed:
         fail("input did not reach the newly opened column pane")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_cycle_width(fail):
@@ -198,7 +247,7 @@ def case_cycle_width(fail):
     s.type("echo cycled-width\r")
     if b"cycled-width" not in s.output():
         fail("input failed to reach pane after cycling column width")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_prefix_routes_verbs(fail):
@@ -213,7 +262,7 @@ def case_prefix_routes_verbs(fail):
     s.type("echo back-in-pane2\r")
     if b"back-in-pane2" not in s.output():
         fail("C-b h failed to move focus left")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_control_mode_is_visible_and_escapable(fail):
@@ -247,7 +296,7 @@ def case_control_mode_is_visible_and_escapable(fail):
     s.type("echo after-mode\r")
     if b"after-mode" not in s.output():
         fail("input did not reach the pane after leaving control mode")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_ctrl_repeat_moves_two_columns(fail):
@@ -280,7 +329,7 @@ def case_ctrl_repeat_moves_two_columns(fail):
     s.type("\x1b")    # leave control mode
     if focus_pane_id(s.output(), s.rows) != 1:
         fail(f"focus did not reach pane 1 after C-h C-h: got pane {focus_pane_id(s.output(), s.rows)}")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_doubled_prefix_reaches_the_pane(fail):
@@ -298,7 +347,7 @@ def case_doubled_prefix_reaches_the_pane(fail):
     s.type("\r", settle=1.2)
     if b"^B" not in s.output()[before:]:
         fail("a doubled prefix did not put a literal ctrl+b into the pane")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_reclaimed_control_keys_pass_through(fail):
@@ -317,7 +366,7 @@ def case_reclaimed_control_keys_pass_through(fail):
     for name, mark in (("ctrl+q", b"^Q"), ("ctrl+o", b"^O")):
         if mark not in seen:
             fail(f"{name} is still claimed by the multiplexer; the pane should have it now")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_custom_prefix_from_env(fail):
@@ -332,7 +381,7 @@ def case_custom_prefix_from_env(fail):
     s.type("echo custom-prefix-pane\r")
     if b"custom-prefix-pane" not in s.output():
         fail("the configured prefix did not route a verb")
-    s.quit_and_reap()
+    s.close()
 
 
 
@@ -357,14 +406,14 @@ def case_osc133_status_drives_smart_jump(fail):
     s.type("\x02h")                                  # back to pane 1
 
     if focus_pane_id(s.output(), s.rows) != 1:
-        s.quit_and_reap()
+        s.close()
         fail("setup did not return focus to pane 1")
         return
 
     before = len(s.output())
     s.type("\x02a")                                  # smart jump
     landed = focus_pane_id(s.output()[before:], s.rows)
-    s.quit_and_reap()
+    s.close()
 
     if landed != 2:
         fail(f"smart jump landed on pane {landed}, want the failed pane 2")
@@ -395,7 +444,7 @@ def case_card_layout_toggles(fail):
 
     s.type("\x02c")                       # and back
     back_col = s.cursor_positions()[-1][1]
-    s.quit_and_reap()
+    s.close()
 
     if cards_col == scroll_col:
         fail(f"card layout left the focused pane at column {scroll_col}; "
@@ -430,7 +479,7 @@ def case_status_line_names_the_prefix(fail):
         fail("status line never tells the user how to reach the verbs")
     if b"alt+" in out:
         fail("status line still advertises the removed alt bindings")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_control_mode_names_every_entry_at_80_columns(fail):
@@ -450,7 +499,7 @@ def case_control_mode_names_every_entry_at_80_columns(fail):
     if b"d detach" in out:
         fail("in-process control mode offers 'd detach', which would kill the panes")
     s.type("\x1b")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_ctrl_repeats_control_mode(fail):
@@ -481,7 +530,7 @@ def case_ctrl_repeats_control_mode(fail):
     s.type("echo ctrl-repeat-done\r")
     if b"ctrl-repeat-done" not in s.output():
         fail("still in control mode after an unmodified verb -- the mode did not exit")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_unmodified_verb_exits_control_mode(fail):
@@ -491,7 +540,7 @@ def case_unmodified_verb_exits_control_mode(fail):
     s.type("echo one-shot-done\r")
     if b"one-shot-done" not in s.output():
         fail("an unmodified verb did not leave control mode")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_unknown_key_exits_control_mode(fail):
@@ -503,7 +552,7 @@ def case_unknown_key_exits_control_mode(fail):
     s.type("echo unknown-exits\r")
     if b"unknown-exits" not in s.output():
         fail("an unknown key left the session stuck in control mode")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_help_overlay_opens_and_any_key_dismisses(fail):
@@ -544,7 +593,7 @@ def case_help_overlay_opens_and_any_key_dismisses(fail):
     s.type("echo help-dismissed\r")
     if b"help-dismissed" not in s.output():
         fail("could not get back to typing after dismissing help")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_help_overlay_works_after_a_focus_switch(fail):
@@ -566,7 +615,7 @@ def case_help_overlay_works_after_a_focus_switch(fail):
         fail("help raised during a wipe never appeared")
     s.type("k", settle=0.5)
     s.type("\x1b", settle=0.5)
-    s.quit_and_reap()
+    s.close()
 
 
 def case_shell_control_keys_pass_through(fail):
@@ -590,7 +639,7 @@ def case_shell_control_keys_pass_through(fail):
                        ("ctrl+n", b"^N"), ("ctrl+h", b"^H")):
         if mark not in seen:
             fail(f"{name} was swallowed by the multiplexer; the shell needs it")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_host_resize_resizes_panes(fail):
@@ -609,7 +658,7 @@ def case_host_resize_resizes_panes(fail):
     first = re.findall(rb"(\d+) (\d+)", s.output())
     if not first:
         fail("could not read the pane's initial size")
-        s.quit_and_reap()
+        s.close()
         return
     before = first[-1]
 
@@ -622,7 +671,7 @@ def case_host_resize_resizes_panes(fail):
         fail("pane produced no size output after the host resized")
     elif after[-1] == before:
         fail(f"pane size unchanged after host resize: {before} -- SIGWINCH never reached the child")
-    s.quit_and_reap()
+    s.close()
 
 
 def case_partly_clipped_pane_keeps_full_width(fail):
@@ -639,7 +688,7 @@ def case_partly_clipped_pane_keeps_full_width(fail):
     first = re.findall(rb"(\d+) (\d+)", s.output())
     if not first:
         fail("could not read pane 2's initial size")
-        s.quit_and_reap()
+        s.close()
         return
     before_cols = first[-1][1]
     s.type("\x02h")  # C-b h -> focus back to pane 1, leaving pane 2 unfocused, exits on its own
@@ -655,7 +704,7 @@ def case_partly_clipped_pane_keeps_full_width(fail):
     after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
     if not after:
         fail("pane 2 produced no size output after being focused post-resize")
-        s.quit_and_reap()
+        s.close()
         return
     after_cols = after[-1][1]
     if after_cols != before_cols:
@@ -664,7 +713,7 @@ def case_partly_clipped_pane_keeps_full_width(fail):
             f"{before_cols.decode()} to {after_cols.decode()} -- a "
             "partly-covered pane must keep its full logical width"
         )
-    s.quit_and_reap()
+    s.close()
 
 
 CASES = [
@@ -696,6 +745,27 @@ CASES = [
 ]
 
 
+# Every pid this run spawned, so the stray check can be about what we
+# started rather than about whatever else is on the machine. A global
+# "is any wideboi running" check false-positives on a stray from an
+# earlier run, another terminal, or a developer poking at the binary
+# -- and a check that cries wolf gets ignored, which is worse than not
+# having one.
+SPAWNED: list[int] = []
+
+
+def strays() -> list[tuple[int, str]]:
+    """Processes this run started that are still alive.
+
+    Session.close SIGKILLs wideboi rather than letting it tear itself
+    down, which is what makes the suite fast -- and the whole risk of
+    that trade is leaking processes instead of time. Nothing noticed
+    before, because every case that cared used quit_and_reap.
+    """
+    live = {pid: cmd for pid, _, cmd in ps_rows()}
+    return [(pid, live[pid]) for pid in SPAWNED if pid in live]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--only", help="substring filter on case names")
@@ -717,6 +787,13 @@ def main() -> int:
                 print(f"        {p}")
         else:
             print(f"OK    {name}")
+
+    left = strays()
+    if left:
+        print("FAIL  no stray processes after the suite")
+        for pid, cmd in left:
+            print(f"        still running: {pid} {cmd}")
+        failures.append(("no stray processes after the suite", left))
 
     print(f"\n{len(CASES) - len(failures)} passed, {len(failures)} failed")
     return 1 if failures else 0
