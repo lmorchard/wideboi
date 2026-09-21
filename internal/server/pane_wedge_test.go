@@ -24,14 +24,17 @@ package server
 // done what the real one does: break the wedge.
 
 import (
+	"context"
 	"image"
 	"sync"
 	"testing"
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
 	"github.com/lmorchard/wideboi/internal/server/term"
+	"github.com/lmorchard/wideboi/internal/transport"
 )
 
 // blockingGrid is a term.Grid whose Resize blocks until Close is called,
@@ -142,4 +145,99 @@ func TestCloseDoesNotHangOnWedgedResize(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Resize never returned even after Close ran -- grid.Close should have unblocked it")
 	}
+}
+
+// Regression guard for issue #38: a child process that stops reading its stdin
+// must not wedge the pty-writer pump, which would otherwise fill the emulator's
+// unbuffered reply pipe, cause SafeEmulator.SendKey to block holding se.mu, and
+// cause the server's render loop (broadcastPaneUpdates under s.mu) to freeze
+// all panes across the multiplexer.
+func TestChildNotReadingStdinDoesNotFreezeServer(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := NewServer(tp, "/bin/sh", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	// Attach so server spawns 2 panes running shell
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+
+	// Wait for layout snapshot
+	select {
+	case <-tp.ServerSend:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for initial attach response")
+	}
+
+	srv.mu.Lock()
+	p1 := srv.panes[1]
+	p2 := srv.panes[2]
+	srv.mu.Unlock()
+
+	// Tell pane 1's shell to run sleep 100 so its foreground process does
+	// not read stdin.
+	p1.SendText("sleep 100\n")
+	time.Sleep(200 * time.Millisecond)
+
+	// Fill pane 1's tty input queue completely across OSes (1024 on macOS,
+	// 4096+ on Linux) so the next child-bound write blocks in the kernel if
+	// unbounded.
+	buf := make([]byte, 1024)
+	for i := range buf {
+		buf[i] = 'A'
+	}
+	buf[len(buf)-1] = '\n'
+
+	for i := 0; i < 64; i++ {
+		_, err := p1.pty.WriteBounded(buf, 10*time.Millisecond)
+		if err != nil {
+			break
+		}
+	}
+
+	// Send keystrokes to pane 1:
+	// Key 1 enters the pty-writer pump, which hits the write deadline
+	// (trading dropped child-bound bytes) and continues draining the pipe.
+	p1.SendKey(uv.KeyPressEvent{Code: '1', Text: "1"})
+	time.Sleep(100 * time.Millisecond)
+
+	// Key 2 is processed without blocking SafeEmulator.SendKey.
+	p1.SendKey(uv.KeyPressEvent{Code: '2', Text: "2"})
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify pane 1 Draw() completes and does not hang on se.mu.
+	draw1Done := make(chan struct{})
+	go func() {
+		scr := uv.NewScreenBuffer(40, 24)
+		p1.Draw(scr, image.Rect(0, 0, 40, 24))
+		close(draw1Done)
+	}()
+
+	select {
+	case <-draw1Done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("p1.Draw is blocked on se.mu")
+	}
+
+	// Verify the server's render loop (frameTicker -> broadcastPaneUpdates)
+	// has not deadlocked srv.mu, and other panes remain fully responsive.
+	responsive := make(chan struct{})
+	go func() {
+		srv.mu.Lock()
+		defer srv.mu.Unlock()
+		_ = p2.CursorPosition()
+		close(responsive)
+	}()
+
+	select {
+	case <-responsive:
+	case <-time.After(1 * time.Second):
+		t.Fatal("srv.mu is deadlocked by a child that stopped reading stdin")
+	}
+
+	_ = srv.Close()
 }
