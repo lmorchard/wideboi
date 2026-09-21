@@ -67,6 +67,11 @@ type Grid interface {
 	// freshly started shell has not hidden it yet.
 	CursorVisible() bool
 
+	// Title reports the pane's terminal title, or "" if the child has
+	// never set one. OSC 0/1/2; x/vt parses it either way, this just
+	// surfaces what was already being discarded.
+	Title() string
+
 	// Status reports the current agent/command status derived from OSC 133
 	// sequences or output heuristics.
 	Status() PaneStatus
@@ -136,8 +141,13 @@ type vtGrid struct {
 	cursorVisible atomic.Bool
 	status        atomic.Int32
 	lastWriteTime atomic.Pointer[time.Time]
-	sawOSC133     atomic.Bool
-	scrollOffset  atomic.Int32
+
+	// title is written from the emulator's parse path (inside Write)
+	// and read from the broadcast path, so it is atomic for the same
+	// reason cursorVisible is.
+	title        atomic.Pointer[string]
+	sawOSC133    atomic.Bool
+	scrollOffset atomic.Int32
 
 	// writeResizeMu serializes Write against Resize. SafeEmulator's
 	// CellAt returns *uv.Cell aliasing its live buffer slot (uv.Line.At
@@ -175,6 +185,12 @@ func NewVT(cols, rows int) Grid {
 
 	g.em.SetCallbacks(vt.Callbacks{
 		CursorVisibility: func(visible bool) { g.cursorVisible.Store(visible) },
+		// x/vt has parsed OSC 0/1/2 into a title all along; nobody
+		// registered the callback, so it was thrown away. An agent
+		// harness keeps this current -- Claude Code writes a spinner
+		// and a summary of the turn into it -- which makes it the
+		// most informative thing a card sliver can show.
+		Title: func(s string) { g.title.Store(&s) },
 	})
 
 	g.em.RegisterOscHandler(133, func(data []byte) bool {
@@ -239,6 +255,14 @@ func (g *vtGrid) Write(p []byte) (int, error) {
 		g.status.Store(int32(StatusWorking))
 	}
 	return g.em.Write(p)
+}
+
+// Title reports the pane's terminal title. See the Grid interface.
+func (g *vtGrid) Title() string {
+	if t := g.title.Load(); t != nil {
+		return *t
+	}
+	return ""
 }
 
 func (g *vtGrid) Status() PaneStatus {

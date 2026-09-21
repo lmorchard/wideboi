@@ -30,18 +30,17 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 // WriteString writes plain unstyled text into s starting at (x, y).
 // Delegates to WriteStyled with a zero style.
 //
-// Caveat: one rune per cell. It does not consult Cell.Width, so it is
-// correct only for single-width glyphs. A double-width rune is written
-// into one cell and everything after it on the line lands one column
-// left of where it should. Combining marks get a cell of their own
-// instead of joining the base rune.
+// Caveat: one rune per cell, so combining marks get a cell of their
+// own instead of joining their base rune. Width, however, is handled:
+// WriteStyled advances by each cell's measured width, so a
+// double-width glyph occupies two columns and what follows it lands
+// where it should. See TestWriteStyledAdvancesByMeasuredWidth.
 //
-// This matters sooner than it looks: WriteString is what a reader will
-// reach for when the spec's status glyphs (`»` working, `!` needs
-// input, `✓` done, `✗` failed) land. Widen this to grapheme clusters
-// with their measured width — uv.Cell already carries Width, and
-// Surface exposes WidthMethod — before using it for anything but ASCII
-// chrome.
+// An earlier version of this comment claimed width was ignored too.
+// It was wrong, and docs/BEYOND-V1.md carried a defect row resting on
+// it. What genuinely does not consult width is Text, below, and
+// rune-counting truncation -- use TruncateWidth for any text a child
+// process supplied.
 func WriteString(s uv.Screen, x, y int, text string) {
 	WriteStyled(s, x, y, text, uv.Style{})
 }
@@ -50,7 +49,9 @@ func WriteString(s uv.Screen, x, y int, text string) {
 // style. A zero style is exactly what an unstyled write produces, which
 // is why WriteString is one of these.
 //
-// Shares WriteString's one-rune-per-cell caveat; see there.
+// Advances by each cell's measured width, so wide glyphs do not push
+// the rest of the line left. Shares WriteString's combining-mark
+// caveat; see there.
 //
 // Kept as a separate function rather than a variadic option on
 // WriteString because every existing call site wants the unstyled form
@@ -70,6 +71,35 @@ func WriteStyled(s uv.Screen, x, y int, text string, style uv.Style) {
 		}
 		currX += w
 	}
+}
+
+// TruncateWidth returns the longest prefix of text whose total display
+// width fits budget, measured with s's width method.
+//
+// Distinct from counting runes: a double-width glyph occupies two
+// cells, so an N-rune prefix can be up to 2N cells and overflow
+// whatever it was budgeted against. Chrome that renders a title its
+// child process chose cannot assume single-width input.
+//
+// A glyph that would straddle the budget is dropped rather than half
+// drawn -- there is no half cell, and its continuation would land
+// under the next thing drawn.
+func TruncateWidth(s uv.Screen, text string, budget int) string {
+	if budget <= 0 || text == "" {
+		return ""
+	}
+	used := 0
+	for i, r := range text {
+		w := uv.NewCell(s.WidthMethod(), string(r)).Width
+		if w < 0 {
+			w = 0
+		}
+		if used+w > budget {
+			return text[:i]
+		}
+		used += w
+	}
+	return text
 }
 
 // Text renders a screen region to plain strings, for tests and snapshots.

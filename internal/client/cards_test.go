@@ -1,0 +1,356 @@
+package client
+
+import (
+	"image"
+	"strings"
+	"testing"
+
+	"github.com/lmorchard/wideboi/internal/client/compose"
+
+	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/transport"
+)
+
+// threeColumns is a fan wide enough that card mode has slivers to
+// produce on both sides of the focused pane.
+func threeColumns() []protocol.ColumnData {
+	return []protocol.ColumnData{
+		{PaneID: 1, Width: 30, Height: 10},
+		{PaneID: 2, Width: 30, Height: 10},
+		{PaneID: 3, Width: 30, Height: 10},
+	}
+}
+
+func sliverCount(ps []protocol.PlacementData) int {
+	n := 0
+	for _, p := range ps {
+		if p.Kind == protocol.PlacementSliver {
+			n++
+		}
+	}
+	return n
+}
+
+// Placements are computed client-side (Plan 12), so the client's own
+// strip has to learn the mode. Carrying it on the snapshot is what
+// keeps two clients of different sizes agreeing about the layout, the
+// same argument that makes focus shared state.
+func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
+	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
+
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:     threeColumns(),
+		FocusPaneID: 2,
+		Layout:      protocol.LayoutCards,
+	})
+
+	cli.mu.Lock()
+	got := sliverCount(cli.placements)
+	total := len(cli.placements)
+	cli.mu.Unlock()
+
+	if total == 0 {
+		t.Fatal("no placements computed")
+	}
+	if got == 0 {
+		t.Errorf("card layout produced no slivers out of %d placements; "+
+			"the client's strip is still on ScrollStrategy", total)
+	}
+}
+
+// The toggle has to work in both directions, and going back to scroll
+// must leave nothing marked as chrome.
+func TestClientRevertsToScrollLayout(t *testing.T) {
+	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
+
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
+	})
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutScroll,
+	})
+
+	cli.mu.Lock()
+	got := sliverCount(cli.placements)
+	cli.mu.Unlock()
+
+	if got != 0 {
+		t.Errorf("after reverting to scroll layout, %d placements are still slivers", got)
+	}
+}
+
+// The zero value is scroll, so a snapshot from a server that never sets
+// the field behaves exactly as before.
+func TestClientDefaultsToScrollLayout(t *testing.T) {
+	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
+
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneID: 2,
+	})
+
+	cli.mu.Lock()
+	got := sliverCount(cli.placements)
+	cli.mu.Unlock()
+
+	if got != 0 {
+		t.Errorf("default layout produced %d slivers, want 0", got)
+	}
+}
+
+// regionText reads back what was drawn inside a placement's Dst.
+func regionText(scr *fakeHostScreen, r image.Rectangle) string {
+	return strings.Join(compose.Text(scr, r), "\n")
+}
+
+func placementFor(cli *Client, paneID int) protocol.PlacementData {
+	cli.mu.Lock()
+	defer cli.mu.Unlock()
+	for _, p := range cli.placements {
+		if p.PaneID == paneID {
+			return p
+		}
+	}
+	return protocol.PlacementData{}
+}
+
+// newCardClient returns a client in card mode with three panes, each
+// carrying distinct content and a distinct title, focused on pane 2.
+func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client {
+	t.Helper()
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:      threeColumns(),
+		FocusPaneID:  2,
+		Layout:       protocol.LayoutCards,
+		PaneTitles:   titles,
+		PaneStatuses: map[int]string{1: "✓", 2: " ", 3: "»"},
+	})
+	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
+	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
+	cli.HandleServerMsg(paneUpdate(3, 30, 10, "CONTENT-THREE"))
+	return cli
+}
+
+// The point of the whole feature. Four columns of someone else's
+// terminal output is noise; what is worth knowing about a pane you are
+// not looking at is whether it wants you and what it is doing.
+func TestSliverRendersGlyphAndTitle(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := newCardClient(t, cols, rows, map[int]string{1: "deploying", 3: "compiling"})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	p1 := placementFor(cli, 1)
+	if p1.Kind != protocol.PlacementSliver {
+		t.Fatalf("pane 1 is %v, expected a sliver", p1.Kind)
+	}
+	got := regionText(scr, p1.Dst)
+
+	if !strings.Contains(got, "deploy") {
+		t.Errorf("sliver does not show the title:\n%s", got)
+	}
+	if !strings.Contains(got, "✓") {
+		t.Errorf("sliver does not show the status glyph:\n%s", got)
+	}
+	if strings.Contains(got, "CONTENT-ONE") {
+		t.Errorf("sliver is still showing pane content:\n%s", got)
+	}
+}
+
+// A pane whose child never set a title must not render a row that
+// looks like a rendering bug.
+func TestSliverWithoutATitleStillRenders(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := newCardClient(t, cols, rows, map[int]string{})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	got := regionText(scr, placementFor(cli, 1).Dst)
+	if strings.TrimSpace(got) == "" {
+		t.Error("a titleless sliver rendered nothing at all")
+	}
+	if !strings.Contains(got, "✓") {
+		t.Errorf("a titleless sliver dropped its status glyph too:\n%s", got)
+	}
+}
+
+// The focused card is the one you are actually looking at.
+func TestFocusedCardRendersContentNotChrome(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := newCardClient(t, cols, rows, map[int]string{2: "focused title"})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	got := regionText(scr, placementFor(cli, 2).Dst)
+	if !strings.Contains(got, "CONTENT-TWO") {
+		t.Errorf("focused card is not showing its content:\n%s", got)
+	}
+}
+
+// The regression guard for the entire Kind design: under the
+// scrolling strip a pane clipped by the viewport edge is still showing
+// its own content, and must never be painted over with chrome.
+func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
+	// Narrow enough that the unfocused column is clipped.
+	const cols, rows = 45, 16
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:     threeColumns(),
+		FocusPaneID: 1,
+		Layout:      protocol.LayoutScroll,
+		PaneTitles:  map[int]string{2: "should not appear"},
+	})
+	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
+	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	whole := strings.Join(scr.text(), "\n")
+	if strings.Contains(whole, "should not appear") {
+		t.Errorf("a clipped pane was drawn as chrome:\n%s", whole)
+	}
+}
+
+// A title the child chose can be any width. Truncating it by rune
+// count would let it spill past the sliver into whatever is drawn
+// beside it.
+//
+// Uses the RIGHTMOST sliver deliberately. composeFrameLocked draws
+// left slivers, then the focused card, then right slivers, so a spill
+// from a left sliver is painted over by the focused card and the test
+// would pass against rune truncation -- which it did, on the first
+// attempt. The last placement drawn is the one whose overflow
+// survives.
+func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
+	const cols, rows = 120, 16
+	// Twelve double-width runes: 12 runes but 24 cells, against a
+	// 10-cell sliver. Rune-count truncation keeps 10 of them and
+	// writes 20 cells.
+	cli := newCardClient(t, cols, rows, map[int]string{3: "日本語日本語日本語日本語"})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	p3 := placementFor(cli, 3)
+	if p3.Kind != protocol.PlacementSliver {
+		t.Fatalf("pane 3 is %v, expected the rightmost sliver", p3.Kind)
+	}
+
+	for y := p3.Dst.Min.Y; y < p3.Dst.Max.Y; y++ {
+		for x := p3.Dst.Max.X; x < cols; x++ {
+			c := scr.CellAt(x, y)
+			if c == nil {
+				continue
+			}
+			if strings.ContainsAny(c.Content, "日本語") {
+				t.Fatalf("row %d col %d: title glyph %q spilled past the sliver's "+
+					"right edge at %d", y, x, c.Content, p3.Dst.Max.X)
+			}
+		}
+	}
+
+	if !strings.ContainsAny(regionText(scr, p3.Dst), "日") {
+		t.Error("the sliver drew none of the title at all")
+	}
+}
+
+// manyColumns is wide enough that card mode cannot fit them all.
+func manyColumns(n int) []protocol.ColumnData {
+	out := make([]protocol.ColumnData, 0, n)
+	for i := 1; i <= n; i++ {
+		out = append(out, protocol.ColumnData{PaneID: i, Width: 30, Height: 10})
+	}
+	return out
+}
+
+func cardClientWithColumns(t *testing.T, cols, rows, n, focus int) *Client {
+	t.Helper()
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:     manyColumns(n),
+		FocusPaneID: focus,
+		Layout:      protocol.LayoutCards,
+	})
+	return cli
+}
+
+// CardStrategy drops cards that do not fit rather than scrolling them.
+// A pane that exists and is invisible with no indication of it is the
+// kind of thing that quietly erodes trust in the layout -- and with
+// 10-cell slivers this is reachable, not hypothetical.
+func TestHiddenCardsAreCounted(t *testing.T) {
+	cli := cardClientWithColumns(t, 60, 16, 6, 1)
+
+	cli.mu.Lock()
+	left, right := cli.hiddenCountsLocked(cli.frameStateLocked())
+	placed := len(cli.placements)
+	cli.mu.Unlock()
+
+	if placed >= 6 {
+		t.Fatalf("all %d columns were placed; this fixture is supposed to overflow", placed)
+	}
+	if left+right != 6-placed {
+		t.Errorf("hidden counts %d+%d do not account for %d unplaced columns",
+			left, right, 6-placed)
+	}
+	if right == 0 {
+		t.Errorf("focus is on the leftmost column, so the overflow must be on the right; got left=%d right=%d", left, right)
+	}
+}
+
+func TestHiddenCardMarkerIsRendered(t *testing.T) {
+	const cols, rows = 60, 16
+	cli := cardClientWithColumns(t, cols, rows, 6, 1)
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
+	if !strings.Contains(header, "+") {
+		t.Errorf("no overflow marker on the header row: %q", header)
+	}
+}
+
+func TestNoMarkerWhenEverythingFits(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := newCardClient(t, cols, rows, map[int]string{})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
+	if strings.Contains(header, "+") {
+		t.Errorf("overflow marker drawn when every card fits: %q", header)
+	}
+}
+
+// The marker is card-mode chrome and must not leak into the default
+// layout.
+//
+// Note the reason is NOT that scroll mode keeps every column:
+// ScrollStrategy drops any column whose Dst is empty, so panes
+// scrolled fully out of view have no placement either and
+// hiddenCountsLocked finds them. Marking those is a change to the
+// default layout's chrome for every user, which is out of scope here
+// -- see BEYOND-V1 section 2.
+func TestScrollModeNeverShowsAMarker(t *testing.T) {
+	const cols, rows = 60, 16
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:     manyColumns(6),
+		FocusPaneID: 1,
+		Layout:      protocol.LayoutScroll,
+	})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
+	if strings.Contains(header, "+") {
+		t.Errorf("scroll mode drew an overflow marker: %q", header)
+	}
+}

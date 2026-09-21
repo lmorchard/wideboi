@@ -148,7 +148,7 @@ retargeting mid-wipe ("snapshot the live screen as the new A") cheap, and that
 is not implemented either: a focus change during a wipe simply replaces the
 transition.
 
-## 2. Card layout — built, tested, and unreachable
+## 2. Card layout — shipped in Plan 17
 
 Instead of columns scrolling out of view, off-screen columns compress into
 "cards", each showing a sliver, so you see every pane at once and reveal one
@@ -159,28 +159,48 @@ fully by focusing it.
 matters: `ColumnWidth` is untouched, so an occluded pane's child never learns it
 is partly covered — no `SIGWINCH`, no reflow, no redraw.
 
-**Nothing can reach it.** `Strip.SetStrategy` has exactly one caller in the
-repo and it is `card_test.go`. There is no verb, no key, and no config that
-selects `CardStrategy`, so every running wideboi is a `ScrollStrategy`. This is
-probably the cheapest real feature left on the board: the hard part is written
-and proven, and what is missing is a way to ask for it — plus the two items
-below, which are what make it worth looking at.
+**Plan 17 made it reachable and gave the slivers something worth showing.**
+`WIDEBOI_LAYOUT=cards` selects it at startup and `$mod c` toggles it at
+runtime. The mode is shared session state carried on `MsgLayoutSnapshot`
+beside focus, because placements are computed client-side (Plan 12) and two
+clients attached to one session have to agree about the layout.
+
+An occluded card now renders **chrome, not content**: its status glyph, its
+terminal title, and a spine that brightens while the pane is producing
+output. Sliver width went 4 → 10 to fit a readable horizontal title.
 
 The insight that made it cheap: **cards are clipping plus z-order, not
 resizing.** `Placement` already carries `Dst`, `Src` and `Z`; the compositor,
 the animator, and mouse hit-testing consume `[]Placement` and don't care which
 strategy produced it.
 
-Two ways the implementation differs from the sketch this section used to carry,
-neither yet decided as right or wrong:
+**The title is the payoff, and it arrived for a reason worth recording.**
+Measured 2026-09-20, Claude Code emits no OSC 133 at all but keeps a live
+terminal title carrying a spinner and a summary of the current turn — `◐ Claude
+Code`, `✳ Pong reply`. `x/vt` had been parsing OSC 0/1/2 into a title all
+along and wideboi registered no callback for it, so it was parsed and
+discarded. For the agent workload this project exists for, that title is the
+status signal that actually exists. See §8.
+
+**A sliver is distinguishable from a clipped pane on the wire.**
+`protocol.PlacementKind` (`PlacementFull`, `PlacementSliver`) rides on
+`Placement` and `PlacementData`. Geometry could not tell them apart — both are
+a narrow `Dst` over a cropped `Src`, and `ScrollStrategy` emits `Z=0` for
+everything — so without the mark the client would have painted chrome over the
+visible edge of a legitimately clipped pane, which
+`case_partly_clipped_pane_keeps_full_width` exists to prevent.
+
+One way the implementation still differs from the sketch this section used to
+carry:
 
 - **It emits non-overlapping rects, not overlapping full-width ones.** Slivers are laid side by side at `i*sliverWidth` with the focused card between them; `Z` is 0 for slivers and 1 for the focused pane, but nothing actually occludes anything, so the z-fan is currently decoration. "Panes that slip under each other" is the name, not yet the behaviour.
-- **A sliver shows `Src = Rect(0, 0, 4, h)`** — the leftmost four columns of real pane content. That is exactly what the second bullet of the next list calls the wrong thing to show.
 
 Two things learned from mocking it up, both still unbuilt:
 
-- **Cards don't eliminate scrolling, they defer it.** At a 200-column terminal with 4-cell slivers you can fan maybe 20–25 cards before the focused pane has no room. Past that the strip still has to scroll — now scrolling a row of slivers. `CardStrategy` currently `continue`s past any card that would fall outside the viewport, so they silently vanish instead.
-- **A 4-cell sliver of real terminal content is visual noise.** The sliver that earns its space is *chrome*: a vertical spine with the status glyph, a truncated title, and a colour that pulses on activity. So occluded cards should show a representation of activity, not a peek at content. That depends on the status glyph working, which it now does as of Plan 16 — so this is unblocked.
+- **Cards don't eliminate scrolling, they defer it.** At a 200-column terminal you can fan maybe 10–12 cards at the 10-cell sliver width before the focused pane has no room — fewer than the 20–25 this section predicted at 4 cells, which is the price of a readable title. Past that the strip still has to scroll, now scrolling a row of slivers. **Partly addressed:** Plan 17 stopped them vanishing silently — cards that do not fit collapse into a `+N` marker on the header row — but actually scrolling the sliver row is still unbuilt.
+
+  **`ScrollStrategy` has the same problem and no marker.** It skips any column whose `Dst` is empty, so a pane scrolled fully out of view has no placement either. Plan 17's `hiddenCountsLocked` finds those too, and the marker is deliberately gated to card mode: surfacing them would change the chrome every user sees in the default layout, which was outside that change. Worth deciding on its own.
+- **A 4-cell sliver of real terminal content is visual noise. Fixed in Plan 17.** The sliver that earns its space is *chrome*, and that is now what one shows: the status glyph, a truncated terminal title, and a spine that brightens while the pane is producing output. The activity signal reads the existing `»` status glyph rather than a new wire field — `Write`'s heuristic already sets it on every write and lets it decay after three seconds — so "is this pane doing something" crosses the socket for free. Titles are truncated with `compose.TruncateWidth`, by display width rather than rune count, because a child can put anything in its title.
 
 Known tension with animation: freeze-during-motion undercuts the point of
 slivers, which is watching peripheral agents. The fix is to exempt chrome from
@@ -321,9 +341,8 @@ Each was found, understood, and deliberately deferred. None is a mystery.
 | A pane whose root exits before `Kill` leaves escapees unsignalled | Needs state the current design doesn't keep | A descendant snapshot maintained while the root is alive, which server-owned pane lifecycle now makes possible |
 | `ps -axo` parsing unverified on Linux | No Linux host available | One `make check` run on Linux. The anti-leak guarantee degrades **silently** if `Descendants` returns a short list. |
 | Upstream `x/vt` data race on `e.closed` | Practically inert — single bool, `Close` is its only writer | Give the pump goroutine sole ownership of the emulator lifecycle so `Close` never races `Read` |
-| `compose.Text`/`WriteString` ignore `Cell.Width` | Current chrome is single-width | Real grapheme handling; comes due if status glyphs go wide |
+| `compose.Text` ignores `Cell.Width` — **row corrected 2026-09-20** | Reading back, not writing; only tests and snapshots consume it | The `WriteString` half of this row was **wrong**, and had been since it was written. `WriteString`/`WriteStyled` advance by `cell.Width` and always did (`surface.go:66-71`, now pinned by `TestWriteStyledAdvancesByMeasuredWidth`) — the row was resting on `WriteString`'s own doc comment, which described a bug the code did not have. Plan 17 corrected the comment and nearly built a redundant width-aware writer on the strength of it. What remains true: `Text` emits exactly one rune per cell, so a wide glyph reads as its base rune plus whatever the continuation cell holds, and combining marks are dropped. Adequate for the ASCII snapshots it serves. Separately, rune-counting truncation *was* a real gap and is closed by `compose.TruncateWidth` |
 | ~~`transport.SendServer` is called under `s.mu`~~ — **no longer true; re-verified 2026-09-20** | The headline claim was stale and is corrected here rather than left standing | Both `SendServer` call sites in `internal/server` (`server.go:512` in `broadcastLayout`, `server.go:528` in `broadcastPaneUpdates`) copy the transport slice and `s.mu.Unlock()` *before* sending, so neither holds the lock across the send. There is no `broadcastLayoutLocked` function at all — the name survives only in two comments (`server.go:338`, `server_test.go:272`), which should be reworded. **Not re-derived:** whether the wedge chain this row described has any surviving path to an unkillable `srv.Close()` by some other route. The first row's wedged-render defect is unchanged, and `SendServer` on a socket transport can still block — just not while holding `s.mu`. Worth one focused pass before trusting that the whole chain is gone |
-| `CardStrategy` is reachable only from tests | Plan 8 built it complete, with unit and `rapid` property tests, and nothing selects it | `Strip.SetStrategy` has exactly one caller in the repo and it is `card_test.go`. There is no verb, key or config that installs `CardStrategy`, so every running wideboi is a `ScrollStrategy`. See §2 — the hard part is written and proven; what is missing is a way to ask for it, plus the sliver-chrome and off-viewport-card questions §2 records |
 | Four exported symbols have no callers at all | Found 2026-09-20 by an exported-surface audit, not by a failure | `Pane.Dead` (`pane.go:153`), `Pane.SendText` (`pane.go:148`), `SocketListener.Path` (`socket.go:122`) and `Server.SpawnPane` (`server.go:216`) are referenced from nowhere — not production, not tests. Either they are API for a caller that was never written, or they are dead. Decide per symbol rather than deleting in bulk |
 | `Client.FocusPaneID` is test-only | Harmless on its own, but it is the same audit's finding and worth knowing before trusting it as API | Its five call sites are all tests. Note the name collision: `layout.Strip.FocusPaneID(id)` is a *setter* with a real production caller at `server.go:186`. Do not conflate them |
 | The width cycle cannot reach a pane's spawn width | Absolute presets are load-bearing (see the v1 spec's layout core); a cycle seeded from the spawn width is a behaviour change, not a bug fix | `CycleWidth` steps `40 → 60 → 80`, but a pane spawns at `max((cols-1)/2, 40)`. On a 200-column terminal a pane spawns 99 cells wide and the *first* `alt+w` **shrinks** it to 80, which it can never exceed again. Either fold the spawn width into the cycle, or make the presets viewport-aware without making the *width* viewport-dependent. |
@@ -358,7 +377,62 @@ code — just in the other direction now.
 
 ## 8. Open questions worth answering cheaply
 
-- **Do the target coding agents use the alternate screen?** Determines how much reflow matters for the actual workload. A full-screen TUI agent repaints itself; an Ink-style agent (Claude Code appears to be one — its transcript stays in your scrollback) commits output upward into terminal-owned scrollback, same split as a shell. One-line check: run each in a pty and look for `ESC[?1049h`.
+- **Do the target coding agents use the alternate screen?** ~~Open.~~
+  **Measured 2026-09-20 against Claude Code v2.1.278: yes.** One
+  `ESC[?1049h` at startup and no exit until killed, so it is a full-screen
+  TUI that repaints itself, not the Ink-style scrollback-committing shape
+  this bullet guessed. It also emits 3 synchronized-update sequences
+  (`ESC[?2026h`) at boot. Reflow therefore matters less for the agent
+  workload than for a shell pane. Not yet measured for any other agent.
+
+- **Agent status: OSC 133 is the wrong protocol for the motivating use
+  case.** Measured the same day, across a full turn: Claude Code emits
+  **zero** OSC 133 sequences — at startup, during the turn, or on
+  completion. So Plan 16 made the glyphs work and the actual target still
+  drives none of them. What it *does* emit is usable, and is the real
+  integration path:
+
+  | sequence | when | meaning |
+  | --- | --- | --- |
+  | `ESC]9;4;3;BEL` | turn starts | ConEmu/WT progress, state 3 = indeterminate ("busy") |
+  | `ESC]9;4;0;BEL` | turn ends | state 0 = clear progress |
+  | `ESC]2;◐ Pong reply BEL` | continuously | title: spinner glyph + a short summary of the turn |
+
+  `OSC 9;4` maps onto `PaneStatus` almost directly — `3` → `StatusWorking`,
+  `0` → done/idle, and the protocol's `2` (error) and `4` (warning) states
+  would give `StatusFailed` for free if any agent emits them. Worth
+  checking whether Claude Code ever sends `9;4;2`; this session only
+  observed `3` and `0`.
+
+  **Plan 17 shipped the title tracking, and Claude Code still does not feed
+  it.** Measured 2026-09-20 after sliver chrome landed: Claude Code boots
+  normally inside a wideboi pane and its banner renders, but no title reaches
+  the pane's emulator, so its sliver shows only the status spine. The chrome
+  is not at fault — a title set by hand (`printf '\033]2;compiling\007'`)
+  renders correctly in a sliver. Ruled out: the alternate screen
+  (`Grid.Title()` captures OSC 2 issued after `ESC[?1049h`), `TERM` (panes get
+  `xterm-256color`, `ptyx/pane.go:48`), and being a shell's child (Claude Code
+  under `/bin/sh` in a plain pty still emits one title sequence). Remaining
+  suspect, **unverified**: a terminal capability probe wideboi's emulator does
+  not answer, leading Claude Code to conclude titles are unsupported. This is
+  the difference between the card fan being useful for agent panes and merely
+  being decorative, so it is worth one focused pass — and `OSC 9;4` above may
+  be the better signal regardless.
+
+  The **title** is the other prize. §2 says a card sliver that earns its
+  space shows "a vertical spine with the status glyph, a truncated title,
+  and a colour that pulses on activity" — and here is a live, per-pane,
+  self-updating title with a spinner already in it. `x/vt` already parses
+  OSC 0/1/2 into `Emulator.title` and fires a `Title` callback
+  (`handlers.go:305-343`, `osc.go:21`); wideboi registers neither. That is
+  a small, well-understood addition.
+
+  **Recommendation:** keep OSC 133 (it is correct, tested, and what
+  shell-integration users get) and add OSC 9;4 plus title tracking
+  alongside it, feeding the same `PaneStatus`. Decide precedence when both
+  arrive — the obvious rule is last-writer-wins per pane, but note the
+  `sawOSC133` latch already disables the activity heuristic, so a second
+  authoritative source needs the same treatment rather than a second latch.
 - **What should `$mod` be, per platform?** Option-as-Meta works locally but depends on the client terminal over SSH, and it requires terminal configuration users won't guess at.
 - **Session persistence.** v1 deliberately has none — resume is the agent harness's job (`claude --resume`). Worth revisiting only if detach lands.
 - **Config file, and key remapping for control mode.** Defaults live in one

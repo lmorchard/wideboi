@@ -58,6 +58,7 @@ func (g *blockingGrid) SendText(string)                 {}
 func (g *blockingGrid) CursorPosition() image.Point     { return image.Point{} }
 func (g *blockingGrid) CursorVisible() bool             { return false }
 func (g *blockingGrid) Status() term.PaneStatus         { return term.StatusIdle }
+func (g *blockingGrid) Title() string                   { return "" }
 func (g *blockingGrid) ScrollbackLen() int              { return 0 }
 func (g *blockingGrid) ScrollOffset() int               { return 0 }
 func (g *blockingGrid) SetScrollOffset(int)             {}

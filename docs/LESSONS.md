@@ -245,6 +245,74 @@ because the status is `Working` immediately after any write either way. Both
 were replaced. A test written against a broken system and passing on arrival
 is evidence about the test, not the system.
 
+Plan 17 hit the same trap in a form worth naming, because it is specific to
+compositing: **something drawn later can paint over the failure you are
+looking for.** A test that a sliver's title does not overflow its width
+watched the *leftmost* sliver and passed against deliberately broken
+truncation — `composeFrameLocked` draws left slivers, then the focused card,
+then right slivers, so the focused card had already covered the spill by the
+time the test read the screen. Retargeted at the rightmost sliver, which
+nothing is drawn after, it failed correctly. When asserting that something
+does not escape its bounds, assert it where nothing else can tidy up.
+
+## A force-push to an open PR can race the merge, silently
+
+Plan 16 was reviewed, then force-pushed once more with a docs-only commit
+recording a measurement, then merged. The merge landed the **pre-force-push**
+head: the pushed tip `013218e` contained the new section 8 content, the
+squashed merge commit on `main` did not, and nothing anywhere reported a
+problem. The push succeeded. The merge succeeded. The work was gone.
+
+It surfaced a session later, by accident, when a `grep` for content that
+should have been in `BEYOND-V1.md` came back empty.
+
+What makes this nastier than an ordinary lost commit is that every signal is
+green. `--force-with-lease` does not help — it guards against overwriting
+commits you have not fetched, not against a reviewer merging a head you have
+since replaced. The PR page shows the new commit. The merge button merges
+whatever it resolved earlier.
+
+Two habits:
+
+- **Once a PR is handed over for review, stop force-pushing.** If something
+  needs adding, say so and wait, or push a normal commit on top and let the
+  squash pick it up — a new commit is visible to the merge in a way a
+  rewritten head is not.
+- **After a merge, verify the merged tree contains your last change**, not
+  just that the branch merged. `git show <merge>:path | grep <thing>` is one
+  line and is the only thing that would have caught this at the time.
+
+## An unverified comment becomes an unverified roadmap entry
+
+`compose.WriteString`'s doc comment described, in careful detail, a bug the
+code did not have. It said width was ignored and a double-width glyph would
+push the rest of the line left. `WriteStyled` had advanced by `cell.Width`
+the whole time.
+
+That would have been harmless on its own. It wasn't, because the comment got
+believed twice:
+
+- `docs/BEYOND-V1.md` §6 carried a defect row — "`compose.Text`/`WriteString`
+  ignore `Cell.Width`" — sourced from the comment rather than the code. Half
+  of it was true (`Text` really does emit one rune per cell) and half was
+  fiction, and the row read as one finding.
+- Plan 17 budgeted a phase to build a width-aware writer, on the strength of
+  the row. It was most of the way to a redundant function before a probe
+  showed `"日X"` already landing `X` at column 2.
+
+Nothing tested the claim either way, which is what let it drift: the comment
+was written when it was true, or was never true, and no run would have said
+so. **A comment asserting a behavioural property is an untested assertion.**
+When one is load-bearing enough to appear in the roadmap, pin it —
+`TestWriteStyledAdvancesByMeasuredWidth` is four lines and would have stopped
+all of this.
+
+The corollary for the roadmap specifically: **a defect row should cite the
+code, not the comment.** `docs/BEYOND-V1.md` is re-read at the start of
+planning and its rows become work. A row sourced from prose inherits whatever
+that prose got wrong, and the error compounds — by the time someone acts on
+it, two documents agree and neither is the code.
+
 ## Never write the terminal's last column
 
 Ultraviolet brackets a write to the final column with autowrap-toggle escapes

@@ -17,6 +17,7 @@ import (
 	"github.com/lmorchard/wideboi/internal/client"
 	"github.com/lmorchard/wideboi/internal/hostterm"
 	"github.com/lmorchard/wideboi/internal/logger"
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -64,6 +65,29 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
+// parseLayout maps WIDEBOI_LAYOUT onto a mode.
+//
+// An unknown value is an error rather than a silent fallback. A typo
+// that quietly starts the wrong layout is the same defect shape as the
+// pgdn binding that shipped dead: an unmatchable config value looks
+// exactly like an absent one, so nothing ever tells you. See
+// docs/LESSONS.md, "A binding nobody typed is a binding nobody
+// verified."
+//
+// Only the halves that own a server read this. An attaching client
+// takes the mode from the server's snapshot, because layout is shared
+// session state.
+func parseLayout(name string) (protocol.LayoutMode, error) {
+	switch name {
+	case "", "scroll":
+		return protocol.LayoutScroll, nil
+	case "cards":
+		return protocol.LayoutCards, nil
+	default:
+		return 0, fmt.Errorf("WIDEBOI_LAYOUT=%q: want \"scroll\" or \"cards\"", name)
+	}
+}
+
 func runServer(socketPath string) error {
 	f, _ := logger.Init("server")
 	if f != nil {
@@ -77,6 +101,11 @@ func runServer(socketPath string) error {
 	}
 	cwd, _ := os.Getwd()
 
+	layoutMode, err := parseLayout(os.Getenv("WIDEBOI_LAYOUT"))
+	if err != nil {
+		return err
+	}
+
 	sl, err := transport.NewSocketListener(socketPath)
 	if err != nil {
 		return err
@@ -84,6 +113,7 @@ func runServer(socketPath string) error {
 	defer sl.Close()
 
 	srv := server.NewServer(nil, shell, cwd)
+	srv.SetLayout(layoutMode)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -230,6 +260,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Parse before the alt screen is entered, so a bad value prints
+	// where the user can read it.
+	layoutMode, err := parseLayout(os.Getenv("WIDEBOI_LAYOUT"))
+	if err != nil {
+		return err
+	}
 
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
@@ -255,6 +291,7 @@ func run() error {
 
 	tp := transport.NewInProcChannel(256)
 	srv := server.NewServer(tp, shell, cwd)
+	srv.SetLayout(layoutMode)
 
 	guard := hostterm.NewGuard(func() error {
 		stopped.Store(true)

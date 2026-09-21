@@ -113,3 +113,73 @@ func assertLines(t *testing.T, got, want []string) {
 		}
 	}
 }
+
+// Chrome that renders a child-supplied title cannot assume
+// single-width input, and truncating by rune count overflows the
+// budget: a double-width glyph occupies two cells, so N runes can be
+// up to 2N cells and the text spills into whatever is drawn beside it.
+func TestTruncateWidthCountsCellsNotRunes(t *testing.T) {
+	s := compose.NewSurface(20, 1)
+
+	// 6 runes, 9 cells: three double-width then three single.
+	const text = "日本語abc"
+
+	got := compose.TruncateWidth(s, text, 4)
+	if got != "日本" {
+		t.Errorf("TruncateWidth(%q, 4) = %q, want %q (4 cells, not 4 runes)", text, got, "日本")
+	}
+}
+
+// A budget that falls mid-glyph must drop the glyph rather than emit
+// half of it: there is no such thing as half a cell of content, and
+// the continuation cell would land under the next thing drawn.
+func TestTruncateWidthNeverSplitsAWideGlyph(t *testing.T) {
+	s := compose.NewSurface(20, 1)
+	if got := compose.TruncateWidth(s, "日本", 3); got != "日" {
+		t.Errorf("TruncateWidth(%q, 3) = %q, want %q", "日本", got, "日")
+	}
+	if got := compose.TruncateWidth(s, "日", 1); got != "" {
+		t.Errorf("TruncateWidth(%q, 1) = %q, want empty", "日", got)
+	}
+}
+
+func TestTruncateWidthPassesThroughWhatFits(t *testing.T) {
+	s := compose.NewSurface(20, 1)
+	if got := compose.TruncateWidth(s, "abc", 10); got != "abc" {
+		t.Errorf("TruncateWidth(%q, 10) = %q, want it unchanged", "abc", got)
+	}
+	// Claude Code's real titles: the spinner glyphs measure one cell
+	// each under WcWidth, so these are not a truncation hazard -- but
+	// the budget still has to be respected.
+	if got := compose.TruncateWidth(s, "◐ Pong reply", 6); got != "◐ Pong" {
+		t.Errorf("TruncateWidth = %q, want %q", got, "◐ Pong")
+	}
+}
+
+func TestTruncateWidthEmptyAndZeroBudget(t *testing.T) {
+	s := compose.NewSurface(20, 1)
+	if got := compose.TruncateWidth(s, "", 5); got != "" {
+		t.Errorf("empty text gave %q", got)
+	}
+	if got := compose.TruncateWidth(s, "abc", 0); got != "" {
+		t.Errorf("zero budget gave %q", got)
+	}
+	if got := compose.TruncateWidth(s, "abc", -3); got != "" {
+		t.Errorf("negative budget gave %q", got)
+	}
+}
+
+// The counterpart guard: writing is already width-aware, so a
+// truncated title lands where its measured width says it should. This
+// pins behaviour the doc comments used to deny.
+func TestWriteStyledAdvancesByMeasuredWidth(t *testing.T) {
+	s := compose.NewSurface(20, 1)
+	compose.WriteStyled(s, 0, 0, "日X", uv.Style{})
+
+	if c := s.CellAt(0, 0); c == nil || c.Content != "日" {
+		t.Fatalf("col 0 = %v, want the wide glyph", c)
+	}
+	if c := s.CellAt(2, 0); c == nil || c.Content != "X" {
+		t.Errorf("col 2 = %v, want \"X\" -- a wide glyph must advance two columns", c)
+	}
+}

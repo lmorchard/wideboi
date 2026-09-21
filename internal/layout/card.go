@@ -2,9 +2,20 @@ package layout
 
 import (
 	"image"
+
+	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
-const DefaultSliverWidth = 4
+// DefaultSliverWidth is how wide an occluded card is.
+//
+// BEYOND-V1 section 2 budgeted 4 cells, but that was on the
+// assumption that a sliver shows a peek at pane content. It shows
+// chrome instead -- status glyph, title, activity spine -- which makes
+// the width a free parameter, and 10 cells is what fits a readable
+// horizontal title. The cost is fan size: roughly 10-12 cards at 200
+// columns rather than 25, which is why cards that do not fit get a
+// marker rather than vanishing.
+const DefaultSliverWidth = 10
 
 // CardStrategy arranges off-screen/peripheral columns as overlapping card slivers.
 type CardStrategy struct {
@@ -34,6 +45,8 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 				Src:    image.Rect(0, 0, w, availHeight),
 				Dst:    image.Rect(0, 1, w, 1+availHeight),
 				Z:      1,
+				// A lone column is occluded by nothing.
+				Kind: protocol.PlacementFull,
 			},
 		}
 	}
@@ -83,6 +96,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			Src:    image.Rect(0, 0, dst.Dx(), availHeight),
 			Dst:    dst,
 			Z:      0,
+			Kind:   protocol.PlacementSliver,
 		})
 	}
 
@@ -94,6 +108,8 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			Src:    image.Rect(0, 0, focusedDst.Dx(), availHeight),
 			Dst:    focusedDst,
 			Z:      1,
+			// The focused card is the one showing real content.
+			Kind: protocol.PlacementFull,
 		})
 	}
 
@@ -116,6 +132,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			Src:    image.Rect(0, 0, dst.Dx(), availHeight),
 			Dst:    dst,
 			Z:      0,
+			Kind:   protocol.PlacementSliver,
 		})
 	}
 

@@ -13,6 +13,10 @@ type Placement struct {
 	Src    image.Rectangle
 	Dst    image.Rectangle
 	Z      int
+	// Kind distinguishes a pane drawing its own content from an
+	// occluded card drawn as chrome. Geometry cannot: see
+	// protocol.PlacementKind.
+	Kind protocol.PlacementKind
 }
 
 // Column represents one vertical column in the strip.
@@ -36,6 +40,19 @@ func NewStrip() *Strip {
 		columns:    make([]Column, 0),
 		focusIndex: 0,
 		strategy:   ScrollStrategy{},
+	}
+}
+
+// ApplyMode installs the strategy for mode.
+//
+// Both the server's strip and each client's strip go through here, so
+// the two halves cannot end up disagreeing about what a mode means.
+func ApplyMode(s *Strip, mode protocol.LayoutMode) {
+	switch mode {
+	case protocol.LayoutCards:
+		s.SetStrategy(CardStrategy{})
+	default:
+		s.SetStrategy(ScrollStrategy{})
 	}
 }
 
@@ -225,6 +242,10 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 			Src:    src,
 			Dst:    dst,
 			Z:      0,
+			// Always Full. This strategy clips panes at the viewport
+			// edge, and a clipped pane is still showing its own
+			// content -- the no-shrink premise depends on it.
+			Kind: protocol.PlacementFull,
 		})
 	}
 
@@ -240,6 +261,7 @@ func ToProtocol(placements []Placement) []protocol.PlacementData {
 			Src:    p.Src,
 			Dst:    p.Dst,
 			Z:      p.Z,
+			Kind:   p.Kind,
 		}
 	}
 	return out
