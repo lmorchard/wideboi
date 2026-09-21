@@ -123,6 +123,20 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
                 os.close(slave_fd)
             child_env = dict(os.environ)
             child_env["SHELL"] = "/bin/sh"
+            # Pinned for the same reason SHELL is: the assertions
+            # depend on it, so it cannot be whatever the person
+            # running the suite happens to have.
+            #
+            # A GitHub runner sets no TERM at all, and ultraviolet
+            # then emits a plainer stream -- the status bar still
+            # renders its text but without the SGR 7 that makes the
+            # inversion assertable, and the divider draws without the
+            # absolute cursor move divider_columns matches on. Two
+            # smoke cases failed on the first CI run for exactly that,
+            # and reproduce locally under `env -u TERM`.
+            #
+            # Matches what internal/server/ptyx gives the panes.
+            child_env["TERM"] = "xterm-256color"
             if env:
                 child_env.update(env)
             os.execvpe(argv[0], argv, child_env)
