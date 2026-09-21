@@ -17,4 +17,3 @@ commands
 focus
 for
 pane
-sh-3
