@@ -2,6 +2,7 @@ package client
 
 import (
 	"image"
+	"sort"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
@@ -106,6 +107,18 @@ func interpolate(from, to []protocol.PlacementData, t float64) []protocol.Placem
 		}
 		out = append(out, p)
 	}
+
+	// Back to front, because part-way through a transition these
+	// rects overlap -- a focused pane expanding leftward crosses the
+	// sliver shrinking out of its way -- and composeFrameLocked
+	// paints in slice order. Without this, a Z=0 sliver appearing
+	// later in the slice paints over the Z=1 pane the user is
+	// looking at, and a collapsing pane appended above would paint
+	// over everything.
+	//
+	// Stable, so panes at equal Z keep their left-to-right order:
+	// the divider logic reads neighbours positionally.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Z < out[j].Z })
 	return out
 }
 

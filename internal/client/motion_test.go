@@ -222,3 +222,94 @@ func TestNoMotionWhenFocusMovesButGeometryDoesNot(t *testing.T) {
 		t.Error("animated a focus change that moved no placement")
 	}
 }
+
+// A status or title snapshot must not restart an animation.
+//
+// The comparison used to be "does what is on screen differ from the
+// new target", which is true on every frame of a running animation --
+// so each of the status broadcasts a busy pane generates would reset
+// the step counter and the motion would never settle. Compare the new
+// target against the previous target instead.
+func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
+	const cols, rows = 90, 12
+	cli := newMotionClient(t, cols, rows)
+
+	focusTo(cli, 2)
+	cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+	cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+
+	cli.mu.Lock()
+	stepBefore := cli.motion.step
+	cli.mu.Unlock()
+	if stepBefore == 0 {
+		t.Fatal("expected the animation to have advanced")
+	}
+
+	// Same geometry, different glyphs -- exactly what
+	// broadcastLayoutIfStatusChanged sends while a pane is working.
+	for i := 0; i < 3; i++ {
+		cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+			Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
+			PaneStatuses: map[int]string{2: "»"},
+		})
+	}
+
+	cli.mu.Lock()
+	stepAfter := 0
+	if cli.motion != nil {
+		stepAfter = cli.motion.step
+	}
+	cli.mu.Unlock()
+
+	if stepAfter < stepBefore {
+		t.Errorf("animation restarted: step went %d -> %d across status-only snapshots",
+			stepBefore, stepAfter)
+	}
+}
+
+// Interpolated rects can overlap part-way through -- a focused pane
+// expanding leftward crosses the sliver that is shrinking out of its
+// way. composeFrameLocked paints in slice order, so the set has to
+// come back sorted with the highest Z last or a sliver paints over
+// the pane the user is looking at.
+func TestInterpolatedPlacementsArePaintedBackToFront(t *testing.T) {
+	from := []protocol.PlacementData{
+		{PaneID: 1, Dst: image.Rect(0, 1, 10, 11), Src: image.Rect(0, 0, 10, 10), Z: 0},
+		{PaneID: 2, Dst: image.Rect(10, 1, 70, 11), Src: image.Rect(0, 0, 60, 10), Z: 1},
+	}
+	// Focus moves left: pane 1 becomes the wide one.
+	to := []protocol.PlacementData{
+		{PaneID: 1, Dst: image.Rect(0, 1, 60, 11), Src: image.Rect(0, 0, 60, 10), Z: 1},
+		{PaneID: 2, Dst: image.Rect(60, 1, 70, 11), Src: image.Rect(0, 0, 10, 10), Z: 0},
+	}
+
+	for _, tt := range []float64{0, 0.25, 0.5, 0.75, 1} {
+		got := interpolate(from, to, tt)
+		for i := 1; i < len(got); i++ {
+			if got[i-1].Z > got[i].Z {
+				t.Fatalf("t=%v: Z goes %d then %d at index %d; painter's algorithm needs back to front",
+					tt, got[i-1].Z, got[i].Z, i)
+			}
+		}
+	}
+}
+
+// An outgoing pane must not be painted over the survivors just
+// because it was appended last.
+func TestCollapsingPaneDoesNotPaintOverTheRest(t *testing.T) {
+	from := []protocol.PlacementData{
+		{PaneID: 1, Dst: image.Rect(0, 1, 40, 11), Src: image.Rect(0, 0, 40, 10), Z: 1},
+		{PaneID: 9, Dst: image.Rect(40, 1, 80, 11), Src: image.Rect(0, 0, 40, 10), Z: 0},
+	}
+	to := []protocol.PlacementData{
+		{PaneID: 1, Dst: image.Rect(0, 1, 80, 11), Src: image.Rect(0, 0, 80, 10), Z: 1},
+	}
+
+	got := interpolate(from, to, 0.5)
+	for i := 1; i < len(got); i++ {
+		if got[i-1].Z > got[i].Z {
+			t.Fatalf("Z goes %d then %d at index %d; the collapsing pane is painting last",
+				got[i-1].Z, got[i].Z, i)
+		}
+	}
+}

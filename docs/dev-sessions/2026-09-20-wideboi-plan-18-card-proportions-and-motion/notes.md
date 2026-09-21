@@ -76,6 +76,37 @@ The obvious motion fixture also animates nothing, correctly: two 25-cell panes
 in a 60-cell viewport are both fully visible, so a focus change moves no
 placement. `newMotionClient` uses card mode with panes wider than their share.
 
+## What the Copilot review caught
+
+Three comments. Two were real bugs I introduced, and both were in the new
+motion code.
+
+1. **A status snapshot restarted the animation.** Arming compared *what is on
+   screen* against the new target — but an interpolated layout never equals
+   its target, so every frame of a running animation satisfied it. And
+   `broadcastLayoutIfStatusChanged` sends a snapshot whenever a busy pane's
+   glyph changes, so the step counter reset repeatedly and the motion never
+   settled. Fixed by comparing the new target against the *previous target*
+   while still starting from what is on screen — two different "previous"
+   values, and the distinction is the whole bug. Caught with `step went 2 -> 0
+   across status-only snapshots`.
+2. **Interpolated rects overlap, and nothing sorted by `Z`.**
+   `composeFrameLocked` paints in slice order and the interpolated set
+   preserved the target's left-to-right order, so a `Z=0` sliver could paint
+   over the `Z=1` pane the user is looking at — and a collapsing pane, being
+   appended last, painted over everything. Only reachable mid-transition,
+   which is exactly the state that did not exist before this PR. Now sorted
+   back-to-front, stably so equal-`Z` panes keep left-to-right order for the
+   divider logic.
+3. **The roadmap still pointed at deleted code.** I rewrote §1's opening and
+   flagged its cost premise, but left the analysis below still describing
+   `WipeTransition.Draw` as live and saying wipes and springs coexist.
+
+Worth noting where these landed: **both real bugs were in transient states —
+mid-animation overlap, and a mid-animation snapshot.** The same shape as the
+last two reviews, which clustered in multi-client and teardown paths. Steady
+state gets tested; the in-between does not.
+
 ## Deliberately not done
 
 - **Real springs.** Eased interpolation only; velocity and momentum-carrying

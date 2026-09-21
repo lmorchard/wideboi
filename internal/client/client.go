@@ -103,9 +103,22 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	case protocol.MsgLayoutSnapshot:
 		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", m.FocusPaneID)
 		oldFocus := c.focusPaneID
-		// Snapshot before the assignments below overwrite it: this is
-		// where an animation starts from.
-		prevPlacements := c.currentPlacementsLocked()
+		// Two different "previous" values, and the distinction
+		// matters.
+		//
+		// prevTarget is the layout we were heading to, and is what
+		// decides whether anything moved. prevOnScreen is where the
+		// pixels are right now, and is where a new animation starts
+		// so a change mid-flight continues rather than jumping.
+		//
+		// Comparing against prevOnScreen instead would re-arm on
+		// every frame of a running animation, because an
+		// interpolated layout never equals its target -- and
+		// broadcastLayoutIfStatusChanged sends a snapshot every time
+		// a busy pane's glyph changes, so the motion would reset its
+		// step counter repeatedly and never settle.
+		prevTarget := c.placements
+		prevOnScreen := c.currentPlacementsLocked()
 		// Unconditionally, before anything below reads them: the
 		// mode decides which strategy runs, and the strip is what
 		// hiddenCountsLocked compares placements against.
@@ -133,8 +146,8 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// Starting from what is currently on screen rather than from
 		// the pre-animation layout is what lets a second change
 		// mid-flight continue rather than jump.
-		if oldFocus != 0 && !placementsEqual(prevPlacements, c.placements) {
-			c.motion = &motion{from: prevPlacements, to: c.placements, total: motionFrames}
+		if oldFocus != 0 && !placementsEqual(prevTarget, c.placements) {
+			c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
 		}
 
 		activeIDs := make(map[int]bool)

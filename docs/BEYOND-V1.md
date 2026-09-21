@@ -153,7 +153,7 @@ Total writes equal the size of the change set. Retargeting mid-wipe is just
 Two hazards were called out here before it was built. One was handled, one was
 never checked:
 
-- **Wide glyphs must be atomic in the change set.** A cell-level mask can reveal the left half of a double-width glyph from B beside its right half from A. This codebase has been bitten by that class twice already — see `docs/LESSONS.md`. **Status: still unverified, and reachable for the first time.** `WipeTransition.Draw` cuts at a hard column index and hands the two halves to `compose.Blit`, which delegates to the surface's own clipped `Draw`. Whether that splits a straddling wide glyph has never been tested. Until Plan 16 it could not matter, because both frames were blank; now that they carry real content, it can.
+- **Wide glyphs must be atomic in the change set.** A cell-level mask can reveal the left half of a double-width glyph from B beside its right half from A. This codebase has been bitten by that class twice already — see `docs/LESSONS.md`. **Status: moot for the wipe, which no longer exists, but the class did not go away.** The wipe cut at a hard column index; Plan 18 deleted it. Placement interpolation clips whole pane rects instead, so the hazard is now wherever a pane's `Dst` boundary can land mid-glyph during a transition — untested, and harder to reason about than a single seam was, because every pane edge moves.
 - **Hide the cursor for the duration.** Its position is meaningless mid-wipe. **Status: done** — `client.go`'s `layerWipe` branch calls `scr.HideCursor()`.
 
 **What a wipe does not replace.** Cards need genuine motion — slivers sliding
@@ -161,9 +161,17 @@ and re-dealing — so the spring design above stays the answer there. A wipe is
 for focus switches, column open and column close. Both mechanisms are meant to
 coexist: springs for placement changes, wipes for focus.
 
+**Superseded by Plan 18.** There is one mechanism now, not two. Focus
+switches animate the same way everything else does — the placements
+interpolate — which turned out to be both simpler and, measured, no more
+expensive than the wipe. What is still missing from the design above is the
+spring itself: velocity, and a retarget that carries momentum rather than
+restarting from the current rects.
+
 **What shipped is simpler than what was designed here.** The design above
 composes A and B, diffs them into a change set, and reveals that set in slices
-so total writes equal the size of the change. `WipeTransition.Draw` instead
+so total writes equal the size of the change. The wipe that shipped (Plan 9,
+removed Plan 18)
 blits whole clipped rectangles of A and B on either side of a moving split. The
 renderer's own diffing recovers most of the benefit, so the byte costs in the
 table above are roughly right — but the change-set framing is what makes
