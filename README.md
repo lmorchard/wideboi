@@ -4,7 +4,7 @@ A scrolling tiling terminal multiplexer for CLI coding agents. Panes keep their
 width; open more and the viewport scrolls instead of squeezing what is already
 there.
 
-Status: v1. Working, and rough in places — see `docs/BEYOND-V1.md`.
+Status: v1. Working, and rough in places — see the [open issues](https://github.com/lmorchard/wideboi/issues) for what is known and parked.
 
 ## Build and run
 

@@ -1,5 +1,10 @@
 # Working lessons for this repo
 
+> The "roadmap doc" these lessons refer to was `docs/BEYOND-V1.md`. Its
+> contents now live as GitHub issues; the file was removed once everything
+> valid in it had been filed. The lessons still hold — a planning list is a
+> planning list whatever it is stored in.
+
 Evergreen. Not session-scoped — session artifacts live under `docs/dev-sessions/`.
 Add to this when the project teaches you something that would cost the next person
 a wasted round.
@@ -264,7 +269,7 @@ squashed merge commit on `main` did not, and nothing anywhere reported a
 problem. The push succeeded. The merge succeeded. The work was gone.
 
 It surfaced a session later, by accident, when a `grep` for content that
-should have been in `BEYOND-V1.md` came back empty.
+should have been in the roadmap doc came back empty.
 
 What makes this nastier than an ordinary lost commit is that every signal is
 green. `--force-with-lease` does not help — it guards against overwriting
@@ -292,7 +297,7 @@ the whole time.
 That would have been harmless on its own. It wasn't, because the comment got
 believed twice:
 
-- `docs/BEYOND-V1.md` §6 carried a defect row — "`compose.Text`/`WriteString`
+- The roadmap's parked-defect list carried a row — "`compose.Text`/`WriteString`
   ignore `Cell.Width`" — sourced from the comment rather than the code. Half
   of it was true (`Text` really does emit one rune per cell) and half was
   fiction, and the row read as one finding.
@@ -308,8 +313,8 @@ When one is load-bearing enough to appear in the roadmap, pin it —
 all of this.
 
 The corollary for the roadmap specifically: **a defect row should cite the
-code, not the comment.** `docs/BEYOND-V1.md` is re-read at the start of
-planning and its rows become work. A row sourced from prose inherits whatever
+code, not the comment.** The roadmap — now the GitHub issue list — is
+re-read at the start of planning and its rows become work. A row sourced from prose inherits whatever
 that prose got wrong, and the error compounds — by the time someone acts on
 it, two documents agree and neither is the code.
 

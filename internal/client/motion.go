@@ -25,7 +25,7 @@ const motionFrames = 8
 // machinery than the wipe was: no composed frame snapshots, no
 // viewport-fit check, no direction.
 //
-// This is the first cut of BEYOND-V1 section 1's spring design, with
+// This is the first cut of the spring design in issue #19, with
 // eased interpolation standing in for real springs. Retargeting
 // mid-flight is handled by restarting from the current interpolated
 // rects rather than by carrying velocity.

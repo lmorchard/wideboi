@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_call:
+
+jobs:
+  ci:
+    name: CI (make check)
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check if CI should be skipped
+      id: skip_check
+      env:
+        HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+      run: |
+        if [[ "$HEAD_COMMIT_MESSAGE" == "[noci]"* ]]; then
+          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "CI skipped due to [noci] in commit message"
+        else
+          echo "skip=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Checkout
+      if: steps.skip_check.outputs.skip != 'true'
+      uses: actions/checkout@v4
+
+    # Read the pin out of go.mod so CI builds on exactly the Go that
+    # `make check` runs on locally. setup-go resolves `go-version-file`
+    # from the `go` directive, which is the one we pin.
+    - name: Set up Go
+      if: steps.skip_check.outputs.skip != 'true'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Download dependencies
+      if: steps.skip_check.outputs.skip != 'true'
+      run: go mod download
+
+    # make check, not a hand-rolled list of steps. It is the project's
+    # own gate -- fmt-check, lint, seam-check, test, race, verify-exit,
+    # smoke, golden, attach-check -- and running anything narrower here
+    # would mean CI and a local run could disagree about what passing
+    # means.
+    #
+    # Most of it needs a pty: verify-exit, smoke and attach-check all
+    # spawn the real binary under openpty and assert on the bytes it
+    # writes. That works on a Linux runner, and it is the point of
+    # running here at all -- see issue #40, the ps -axo descendant
+    # parsing that had never been exercised on Linux because there was
+    # no Linux host to exercise it on.
+    - name: Run make check
+      if: steps.skip_check.outputs.skip != 'true'
+      run: make check

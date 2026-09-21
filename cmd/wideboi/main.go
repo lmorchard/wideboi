@@ -30,9 +30,21 @@ func defaultSocketPath() string {
 	return filepath.Join(dir, "default.sock")
 }
 
+// Stamped by the linker at build time; see LDFLAGS in the Makefile.
+// The defaults are what an unstamped `go build` produces, and saying
+// so is more useful than an empty string.
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version", "--version", "-v":
+			fmt.Printf("wideboi %s (%s, built %s)\n", version, commit, date)
+			return
 		case "server":
 			fatal(runServer(defaultSocketPath()))
 			return
