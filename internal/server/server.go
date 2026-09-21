@@ -42,6 +42,11 @@ type Server struct {
 
 	// layout is the session's strategy mode, shared with every client.
 	layout protocol.LayoutMode
+
+	// closeGrace is handed to every pane this server spawns. Zero means
+	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
+	// it, via SetCloseGrace in export_test.go.
+	closeGrace time.Duration
 }
 
 // SetLayout installs the session's layout mode.
@@ -286,6 +291,7 @@ func (s *Server) spawnPaneLocked() (*Pane, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.closeGrace = s.closeGrace
 
 	s.panes[id] = p
 	s.strip.AddColumn(id, paneCols, paneRows)

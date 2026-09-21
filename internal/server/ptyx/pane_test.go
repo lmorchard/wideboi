@@ -9,6 +9,19 @@ import (
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
 )
 
+// testGrace is for teardown that is not itself the assertion: the three
+// spawn tests below, and TestKillIsIdempotent in reap_test.go (same
+// package). /bin/sh ignores SIGTERM, so Kill's waitForExit(grace) burns
+// the full window every time; at 2s those four cost ~2.05s each while
+// asserting nothing about the grace.
+//
+// The three reap-contract tests in reap_test.go keep their own graces
+// instead -- TestKillReapsEscapedGrandchild and
+// TestKillReapsSIGTERMIgnoringEscapee because the escapee needs a real
+// window, and TestKillEscalatesEvenWhenRootExitsWithinGrace because its
+// subject requires a grace longer than the root's own exit.
+const testGrace = 100 * time.Millisecond
+
 func TestSpawnRunsCommandAndEchoesOutput(t *testing.T) {
 	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
 	if err != nil {
@@ -19,7 +32,7 @@ func TestSpawnRunsCommandAndEchoesOutput(t *testing.T) {
 	// depend on. Kill is the teardown path the rest of the program
 	// uses, and it reports a tree that survived.
 	t.Cleanup(func() {
-		if err := p.Kill(2 * time.Second); err != nil {
+		if err := p.Kill(testGrace); err != nil {
 			t.Errorf("Kill: %v", err)
 		}
 	})
@@ -43,7 +56,7 @@ func TestSpawnReportsWindowSizeToChild(t *testing.T) {
 	// depend on. Kill is the teardown path the rest of the program
 	// uses, and it reports a tree that survived.
 	t.Cleanup(func() {
-		if err := p.Kill(2 * time.Second); err != nil {
+		if err := p.Kill(testGrace); err != nil {
 			t.Errorf("Kill: %v", err)
 		}
 	})
@@ -68,7 +81,7 @@ func TestSpawnPutsChildInItsOwnProcessGroup(t *testing.T) {
 	// depend on. Kill is the teardown path the rest of the program
 	// uses, and it reports a tree that survived.
 	t.Cleanup(func() {
-		if err := p.Kill(2 * time.Second); err != nil {
+		if err := p.Kill(testGrace); err != nil {
 			t.Errorf("Kill: %v", err)
 		}
 	})

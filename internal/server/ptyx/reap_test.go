@@ -115,10 +115,10 @@ func TestKillIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if err := p.Kill(2 * time.Second); err != nil {
+	if err := p.Kill(testGrace); err != nil {
 		t.Fatalf("first Kill: %v", err)
 	}
-	if err := p.Kill(2 * time.Second); err != nil {
+	if err := p.Kill(testGrace); err != nil {
 		t.Fatalf("second Kill: %v", err)
 	}
 }

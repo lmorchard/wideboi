@@ -96,10 +96,13 @@ func TestMalformedOSC133StillAllowsALaterValidSequence(t *testing.T) {
 // clear. If an unrecognised payload latched, this pane would read
 // Working forever instead of going Idle.
 //
-// Costs just over 3s. That buys the one assertion that actually proves
-// a malformed sequence does not permanently disable the fallback.
+// The idle window is injected rather than waited out: this test is about
+// whether an unrecognised payload latches sawOSC133, not about the length
+// of the production timeout. At the 3s default it slept 3100ms and was
+// the whole cost of this package's suite.
 func TestMalformedOSC133LeavesTheIdleFallbackArmed(t *testing.T) {
-	g := term.NewVT(20, 5)
+	const idle = 100 * time.Millisecond
+	g := term.NewVTWithIdleTimeout(20, 5, idle)
 	defer g.Close()
 
 	if _, err := g.Write([]byte("\x1b]133;Z\x07")); err != nil {
@@ -109,10 +112,10 @@ func TestMalformedOSC133LeavesTheIdleFallbackArmed(t *testing.T) {
 		t.Fatalf("Status() = %v immediately after a write, want %v", got, term.StatusWorking)
 	}
 
-	time.Sleep(3100 * time.Millisecond)
+	time.Sleep(idle + 50*time.Millisecond)
 
 	if got := g.Status(); got != term.StatusIdle {
-		t.Errorf("Status() = %v after 3s idle, want %v -- an unrecognised 133 payload latched sawOSC133 and disabled the idle fallback", got, term.StatusIdle)
+		t.Errorf("Status() = %v after the idle window, want %v -- an unrecognised 133 payload latched sawOSC133 and disabled the idle fallback", got, term.StatusIdle)
 	}
 }
 

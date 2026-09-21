@@ -47,10 +47,29 @@ type Pane struct {
 	closeOnce sync.Once
 	closeErr  error
 
+	// closeGrace overrides CloseGrace for this pane. Zero means the
+	// default; see graceOrDefault.
+	closeGrace time.Duration
+
 	dead atomic.Bool
 
 	failMu   sync.Mutex
 	failures []error
+}
+
+// graceOrDefault resolves the SIGTERM grace for this pane.
+//
+// The resolution happens here, at the point of use, rather than in a
+// constructor: the white-box fixtures in this package build &Pane{}
+// literals directly (status_test.go, transport_close_test.go,
+// pane_wedge_test.go), and a constructor cannot reach those. Zero
+// therefore has to mean the default, or those fixtures would tear down
+// with no grace at all and quietly stop exercising the real path.
+func (p *Pane) graceOrDefault() time.Duration {
+	if p.closeGrace <= 0 {
+		return CloseGrace
+	}
+	return p.closeGrace
 }
 
 // NewPane spawns argv on a PTY sized cols x rows for the given pane id.
@@ -311,7 +330,7 @@ func (p *Pane) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.closed)
 
-		killErr := p.pty.Kill(CloseGrace)
+		killErr := p.pty.Kill(p.graceOrDefault())
 		gridErr := p.grid.Close()
 
 		p.resizeMu.Lock()

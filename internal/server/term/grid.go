@@ -149,6 +149,12 @@ type vtGrid struct {
 	sawOSC133    atomic.Bool
 	scrollOffset atomic.Int32
 
+	// idleTimeout is how long Status waits before the fallback calls a
+	// pane idle. Zero means DefaultIdleTimeout; resolved in Status
+	// rather than here so a zero-valued vtGrid cannot silently report
+	// idle immediately.
+	idleTimeout time.Duration
+
 	// writeResizeMu serializes Write against Resize. SafeEmulator's
 	// CellAt returns *uv.Cell aliasing its live buffer slot (uv.Line.At
 	// is literally &l[x]), not a copy, and its own se.mu.RLock is
@@ -177,9 +183,27 @@ type vtGrid struct {
 	writeResizeMu sync.Mutex
 }
 
+// DefaultIdleTimeout is how long a pane may go without output before the
+// status fallback calls it idle. Consulted only when no OSC 133 has been
+// seen -- a shell that reports its own status is authoritative.
+const DefaultIdleTimeout = 3 * time.Second
+
 // NewVT returns a Grid backed by charmbracelet/x/vt.
 func NewVT(cols, rows int) Grid {
-	g := &vtGrid{em: vt.NewSafeEmulator(cols, rows)}
+	return NewVTWithIdleTimeout(cols, rows, DefaultIdleTimeout)
+}
+
+// NewVTWithIdleTimeout is NewVT with the status fallback's idle window
+// overridden.
+//
+// A second constructor rather than a setter: NewVT returns the Grid
+// interface, so a setter would have to go on that interface and be
+// implemented by every hand-rolled fake (statusGrid in the server
+// package's status_test.go, newBlockingGrid in pane_wedge_test.go).
+// Widening NewVT itself would touch its ~20 existing call sites to serve
+// one test.
+func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
+	g := &vtGrid{em: vt.NewSafeEmulator(cols, rows), idleTimeout: idle}
 	g.cursorVisible.Store(true)
 	g.status.Store(int32(StatusIdle))
 
@@ -268,7 +292,11 @@ func (g *vtGrid) Title() string {
 func (g *vtGrid) Status() PaneStatus {
 	st := PaneStatus(g.status.Load())
 	if !g.sawOSC133.Load() && st == StatusWorking {
-		if t := g.lastWriteTime.Load(); t != nil && time.Since(*t) > 3*time.Second {
+		idle := g.idleTimeout
+		if idle <= 0 {
+			idle = DefaultIdleTimeout
+		}
+		if t := g.lastWriteTime.Load(); t != nil && time.Since(*t) > idle {
 			return StatusIdle
 		}
 	}
