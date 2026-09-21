@@ -167,6 +167,25 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
             os.dup2(slave_fd, 2)
             if slave_fd > 2:
                 os.close(slave_fd)
+            # Pinned for the same reason SHELL/TERM/PS1 are below: the
+            # assertions depend on it, so it cannot be whatever the
+            # person -- or the shell -- running the suite happens to
+            # hand us.
+            #
+            # POSIX requires a shell to set SIGINT and SIGQUIT to
+            # SIG_IGN for an asynchronous list, so everything spawned
+            # from a `cmd &` inherits them ignored, and that includes
+            # every target under `make -j`. ptycheck asserts a process
+            # "died by" the signal it was sent, which is not something
+            # that can happen under a disposition where the signal does
+            # nothing -- so the disposition has to be pinned, not the
+            # assertion relaxed.
+            #
+            # This has to be after the fork and before execvpe: it must
+            # not touch the harness process's own handlers.
+            for _sig in (signal.SIGINT, signal.SIGQUIT,
+                         signal.SIGTERM, signal.SIGHUP):
+                signal.signal(_sig, signal.SIG_DFL)
             child_env = dict(os.environ)
             child_env["SHELL"] = "/bin/sh"
             # Pinned for the same reason SHELL is: the assertions

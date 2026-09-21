@@ -103,10 +103,19 @@ func NewSocketListener(path string) (*SocketListener, error) {
 		c.Close()
 		return nil, fmt.Errorf("a wideboi server is already listening at %s", path)
 	}
-	// Nothing answered, so any file here is a corpse from a server that
-	// did not get to clean up after itself.
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("removing stale socket %s: %w", path, err)
+	// Nothing answered, so a socket here is a corpse from a server that
+	// did not get to clean up after itself. Only a socket: WIDEBOI_SOCK
+	// lets a caller name any path, and unlinking whatever happens to be
+	// there would turn a typo into data loss.
+	if fi, serr := os.Lstat(path); serr == nil {
+		if fi.Mode()&os.ModeSocket == 0 {
+			return nil, fmt.Errorf("refusing to remove %s: it exists and is not a socket", path)
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("removing stale socket %s: %w", path, err)
+		}
+	} else if !errors.Is(serr, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspecting %s: %w", path, serr)
 	}
 	l, err := net.Listen("unix", path)
 	if err != nil {

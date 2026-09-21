@@ -1,4 +1,4 @@
-.PHONY: check quick test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+.PHONY: check check-targets quick test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -28,7 +28,21 @@ print-go-version:
 #
 # For the edit loop, use `make quick` below -- check is the gate, not the
 # thing to run on save.
-check: fmt-check lint seam-check test race verify-exit smoke attach-check
+#
+# check delegates to a parallel sub-make so everyone gets the speedup
+# without having to remember -j. The targets are independent; build is a
+# shared prerequisite and a single make invocation runs it once.
+# CHECK_JOBS=1 restores a fully serial run.
+#
+# This only became safe once the suites stopped colliding: a plain
+# wideboi attaches to whatever answers the default socket, so
+# attach-check's server used to capture every session smoke started.
+# See WIDEBOI_SOCK in cmd/wideboi/main.go.
+CHECK_JOBS ?= 8
+check:
+	@$(MAKE) --no-print-directory -j$(CHECK_JOBS) check-targets
+
+check-targets: fmt-check lint seam-check test race verify-exit smoke attach-check
 
 # quick is the inner-loop tier: everything that does not spawn the real
 # binary in a real pty, and no race detector. Run this on save; run check
@@ -106,13 +120,28 @@ tidy:
 # ptycheck.py itself never hangs (bounded waits, SIGKILL-and-reap on
 # timeout), so this target fails loudly rather than wedging CI or a dev
 # machine.
+#
+# The six invocations are independent and run concurrently: each owns
+# its own wideboi, its own pty and its own socket path, and ptycheck's
+# stray scan is scoped by parentage so it no longer reports the other
+# five as leaks. 17.1s serial, ~4s fanned out.
+#
+# Every one of these is a background job, which is exactly why the
+# signal-disposition pin in ptylib.spawn_in_pty exists: POSIX has the
+# shell ignore SIGINT/SIGQUIT for an asynchronous list, and a test that
+# asserts "died by SIGINT" cannot run under a disposition where SIGINT
+# does nothing.
 verify-exit: build
-	@for size in 80x24 4x2 1x1 0x0; do \
-		python3 scripts/ptycheck.py --size $$size --signal SIGTERM || exit 1; \
+	@pids=""; \
+	for size in 80x24 4x2 1x1 0x0; do \
+		python3 scripts/ptycheck.py --size $$size --signal SIGTERM & \
+		pids="$$pids $$!"; \
 	done; \
 	for sig in SIGINT SIGHUP; do \
-		python3 scripts/ptycheck.py --size 80x24 --signal $$sig || exit 1; \
-	done
+		python3 scripts/ptycheck.py --size 80x24 --signal $$sig & \
+		pids="$$pids $$!"; \
+	done; \
+	rc=0; for p in $$pids; do wait $$p || rc=1; done; exit $$rc
 
 # Regenerate the golden wire snapshot. Review the diff before committing.
 golden: build

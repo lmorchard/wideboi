@@ -17,8 +17,11 @@ import re
 import signal
 import struct
 import sys
+import tempfile
 import termios
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
@@ -80,13 +83,46 @@ def cursor_visible(out: bytes) -> bool | None:
     return None if not found else found[-1] == b"h"
 
 
+# A plain wideboi probes this socket and *attaches* to whatever answers
+# (cmd/wideboi/main.go), so a server running anywhere -- attachcheck's, a
+# parallel run's, or the one the developer has open in another terminal
+# -- silently captures every session this suite starts. With a server up,
+# `make smoke` failed 9 cases.
+#
+# smoke only ever dials, never binds, so pointing every session at a
+# path that is never created makes the suite immune to all of them. Not
+# mkdtemp: nothing is ever written here, and a directory per run would
+# be litter that never gets cleaned up.
+NEVER_SOCK = os.path.join(tempfile.gettempdir(), f"wideboi-never-{os.getpid()}.sock")
+
+# SPAWNED is the only state shared across cases, and with --jobs > 1 the
+# cases run on separate threads. list.append is atomic under CPython
+# today, but the guard's correctness should not rest on that.
+SPAWNED_LOCK = threading.Lock()
+
+# The smallest settle ceiling any case may use. See Session.type.
+MIN_SETTLE = 3.0
+
+# wideboi emits exactly one "$" of its own, in the DECRQM query
+# ESC[?2027$p. Every other "$" on a fresh screen is a pane shell's
+# prompt, because ptylib pins PS1="$ ".
+_DECRQM = re.compile(rb"\x1b\[\?2027\$p")
+
+
+def prompts_seen(out: bytes) -> int:
+    """How many pane shells have written their prompt."""
+    return _DECRQM.sub(b"", out).count(b"$")
+
+
 class Session:
     """A running wideboi in a pty, with helpers to type and observe."""
 
-    def __init__(self, cols=100, rows=30, startup=1.2, env=None):
+    def __init__(self, cols=100, rows=30, startup=4.0, env=None):
+        env = {"WIDEBOI_SOCK": NEVER_SOCK, **(env or {})}
         self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True, env)
         self.rows = rows
-        SPAWNED.append(self.pid)
+        with SPAWNED_LOCK:
+            SPAWNED.append(self.pid)
         self.drainer = Drainer(self.fd)
         self.drainer.start()
         # startup and settle are ceilings now, not durations. Every
@@ -94,12 +130,39 @@ class Session:
         # finish", which is exactly the right timeout; waiting for the
         # screen to stop changing turns it into the worst case rather
         # than the every case. Measured: startup settles in 0.154s
-        # against this 1.2s, a keystroke in 0.10-0.28s against 0.8s.
+        # against this ceiling, a keystroke in 0.10-0.28s.
+        #
+        # Raised from 1.2s/0.8s when the suite went parallel. Contention
+        # roughly doubles per-case latency -- measured 42.9 to 89.3
+        # case-seconds at --jobs 8 -- and settle_output returning False
+        # does not fail, it just hands the case a half-drawn screen. A
+        # ceiling costs nothing when things are fast, so the headroom is
+        # free; the old values were the entire margin under load.
         settle_output(self.drainer, timeout=startup)
+        # Settling only says wideboi's own chrome stopped changing, and
+        # it draws that immediately -- well before either pane shell has
+        # exec'd and prompted. A case that types into a pane with no
+        # shell behind it gets no echo back, which surfaced under `make
+        # -j` contention as "lowercase input never reached the pane".
+        #
+        # Both panes, because every session starts with two. Bounded by
+        # the same ceiling, so a slow shell degrades to the old
+        # behaviour rather than hanging.
+        deadline = time.monotonic() + startup
+        while time.monotonic() < deadline:
+            if prompts_seen(self.drainer.output()) >= 2:
+                break
+            time.sleep(0.02)
 
-    def type(self, text: str, settle=0.8):
+    def type(self, text: str, settle=3.0):
         os.write(self.fd, text.encode())
-        settle_output(self.drainer, timeout=settle)
+        # Floored, not just defaulted: twenty call sites pass their own
+        # settle between 0.5 and 1.6, all chosen serially, and raising
+        # only the default would leave exactly those under-provisioned
+        # under contention. Each value is a ceiling, so a floor cannot
+        # slow a case that settles promptly -- it only stops one being
+        # handed a half-drawn screen when the machine is loaded.
+        settle_output(self.drainer, timeout=max(settle, MIN_SETTLE))
 
     def output(self) -> bytes:
         return self.drainer.output()
@@ -145,7 +208,8 @@ class Session:
         # Hand them to the guard too. Tracking only the wideboi pid
         # would let this path leak a descendant while the suite still
         # reported a clean run.
-        SPAWNED.extend(kids)
+        with SPAWNED_LOCK:
+            SPAWNED.extend(kids)
         self.drainer.stop()
 
     def quit_and_reap(self, sig=signal.SIGTERM, timeout=8.0) -> int | None:
@@ -766,20 +830,46 @@ def strays() -> list[tuple[int, str]]:
     return [(pid, live[pid]) for pid in SPAWNED if pid in live]
 
 
+def run_case(item) -> tuple[str, list]:
+    """Runs one case and collects its problems. Never raises: a crashed
+    case is a failed case, and under a thread pool an escaping exception
+    would be reported against whichever future happened to surface it.
+    """
+    name, fn = item
+    problems = []
+    try:
+        fn(problems.append)
+    except Exception as exc:
+        problems.append(f"raised {exc!r}")
+    return name, problems
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--only", help="substring filter on case names")
+    # Threads, not processes: cases block on pty reads, which release
+    # the GIL. Each case owns its own pty, pid and Drainer, and a plain
+    # wideboi never binds a socket -- only dials one -- so two cases
+    # cannot reach each other. Measured 42.9s -> 13.2s at 8.
+    #
+    # The default is a ceiling rather than a target: 8 buys only 1.4s
+    # over 4, and CI's smaller runners self-limit through cpu_count.
+    ap.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1),
+                    help="cases to run concurrently (default: min(8, cpu count); 1 runs serially)")
     args = ap.parse_args()
 
+    selected = [(n, f) for n, f in CASES if not args.only or args.only in n]
+
+    if args.jobs > 1:
+        with ThreadPoolExecutor(max_workers=args.jobs) as ex:
+            results = list(ex.map(run_case, selected))
+    else:
+        results = [run_case(item) for item in selected]
+
+    # Reported in declaration order, not completion order, so the
+    # transcript is diffable between runs and between --jobs values.
     failures = []
-    for name, fn in CASES:
-        if args.only and args.only not in name:
-            continue
-        problems = []
-        try:
-            fn(problems.append)
-        except Exception as exc:  # a crashed case is a failed case
-            problems.append(f"raised {exc!r}")
+    for name, problems in results:
         if problems:
             failures.append((name, problems))
             print(f"FAIL  {name}")
@@ -788,6 +878,10 @@ def main() -> int:
         else:
             print(f"OK    {name}")
 
+    case_failures = len(failures)
+
+    # Still after every case, and still counting only what this run
+    # spawned.
     left = strays()
     if left:
         print("FAIL  no stray processes after the suite")
@@ -795,7 +889,11 @@ def main() -> int:
             print(f"        still running: {pid} {cmd}")
         failures.append(("no stray processes after the suite", left))
 
-    print(f"\n{len(CASES) - len(failures)} passed, {len(failures)} failed")
+    # Counted against what actually ran, and against case failures
+    # only -- the stray guard is not a case. The old form was
+    # len(CASES) - len(failures), which misreported under --only and
+    # double-counted a stray failure against the pass total.
+    print(f"\n{len(selected) - case_failures} passed, {len(failures)} failed")
     return 1 if failures else 0
 
 
