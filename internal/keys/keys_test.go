@@ -34,9 +34,21 @@ func TestTableIsWellFormed(t *testing.T) {
 			seen[a] = true
 		}
 
-		if b.BarGroup == "" {
-			t.Errorf("%q has no BarGroup; the status bar cannot name it", b.Key)
-		}
+		// BarGroup is optional; Long is not.
+		//
+		// It used to be required, on the reasoning that the status bar
+		// should be able to name every binding. That stopped being
+		// possible: the attached bar reached exactly 77 cells against
+		// a 79-cell budget at 80 columns, so the next binding could
+		// not fit however short its label, and shrinking existing
+		// labels to make room only defers the problem one binding at
+		// a time. TestControlHelpFitsEveryEntryAt80Columns already
+		// recorded the resolution -- "the overlay is already there and
+		// the bar should shed the entry rather than grow."
+		//
+		// So a binding may be overlay-only, but it may never be
+		// undiscoverable: Long stays mandatory, and the overlay lists
+		// every row in the table.
 		if b.Long == "" {
 			t.Errorf("%q has no Long description; the help overlay cannot explain it", b.Key)
 		}
@@ -232,4 +244,37 @@ func TestSmartJumpIsOnA(t *testing.T) {
 		}
 	}
 	t.Error("no binding produces VerbSmartJump")
+}
+
+// The card toggle is help-overlay-only and has no repeat form.
+//
+// No BarGroup: the attached bar is already at 77 cells against a
+// 79-cell budget, and the rule recorded in
+// TestControlHelpFitsEveryEntryAt80Columns is that the bar sheds
+// rather than grows. NoRepeat: ctrl+c has to stay an unknown key that
+// leaves control mode.
+func TestToggleCardsIsOnC(t *testing.T) {
+	for _, b := range keys.Bindings {
+		if b.Action == keys.ActionVerb && b.Verb == protocol.VerbToggleCards {
+			if b.Key != "c" {
+				t.Errorf("card toggle is on %q, want %q", b.Key, "c")
+			}
+			if b.BarGroup != "" {
+				t.Errorf("card toggle has BarGroup %q; it must stay out of the "+
+					"status bar, which has no room for it", b.BarGroup)
+			}
+			if !b.NoRepeat {
+				t.Error("card toggle allows a repeat form; ctrl+c must stay an " +
+					"unknown key that leaves control mode")
+			}
+			if _, ok := b.CtrlForm(); ok {
+				t.Error("card toggle still produces a ctrl form")
+			}
+			if b.Long == "" {
+				t.Error("card toggle has no Long text, so the help overlay cannot name it")
+			}
+			return
+		}
+	}
+	t.Error("no binding produces VerbToggleCards")
 }

@@ -115,3 +115,49 @@ func TestMalformedOSC133LeavesTheIdleFallbackArmed(t *testing.T) {
 		t.Errorf("Status() = %v after 3s idle, want %v -- an unrecognised 133 payload latched sawOSC133 and disabled the idle fallback", got, term.StatusIdle)
 	}
 }
+
+// x/vt parses OSC 0/1/2 into a title and offers a Title callback.
+// NewVT registered only CursorVisibility, so the title was parsed and
+// dropped on the floor.
+//
+// This is worth more than a nicety: measured 2026-09-20, Claude Code
+// emits no OSC 133 at all but does keep a live title carrying a
+// spinner and a summary of the current turn. For the agent workload
+// this is the status signal that actually exists.
+func TestGridTracksTerminalTitle(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	if got := g.Title(); got != "" {
+		t.Errorf("fresh grid Title() = %q, want empty", got)
+	}
+
+	if _, err := g.Write([]byte("\x1b]2;first title\x07")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := g.Title(); got != "first title" {
+		t.Errorf("Title() = %q, want %q", got, "first title")
+	}
+
+	// A live title is replaced, not appended.
+	if _, err := g.Write([]byte("\x1b]2;second title\x07")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := g.Title(); got != "second title" {
+		t.Errorf("Title() = %q, want %q", got, "second title")
+	}
+}
+
+// OSC 0 sets both the icon name and the window title; OSC 1 sets only
+// the icon name. Panes care about the title.
+func TestGridTracksTitleFromOSC0(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	if _, err := g.Write([]byte("\x1b]0;both\x07")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := g.Title(); got != "both" {
+		t.Errorf("Title() after OSC 0 = %q, want %q", got, "both")
+	}
+}

@@ -97,3 +97,34 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 	cConn2.Close()
 	_ = srv.Close()
 }
+
+// A typo in WIDEBOI_LAYOUT must be an error, not a silent fallback to
+// the default. An unmatchable config value that looks exactly like an
+// absent one is how the pgdn binding shipped dead -- see
+// docs/LESSONS.md, "A binding nobody typed is a binding nobody
+// verified."
+func TestParseLayoutRejectsUnknown(t *testing.T) {
+	for _, name := range []string{"card", "Cards", "fan", "scrolling"} {
+		if _, err := parseLayout(name); err == nil {
+			t.Errorf("parseLayout(%q) accepted an unknown value; want an error", name)
+		}
+	}
+}
+
+func TestParseLayoutAcceptsKnown(t *testing.T) {
+	cases := map[string]protocol.LayoutMode{
+		"":       protocol.LayoutScroll,
+		"scroll": protocol.LayoutScroll,
+		"cards":  protocol.LayoutCards,
+	}
+	for name, want := range cases {
+		got, err := parseLayout(name)
+		if err != nil {
+			t.Errorf("parseLayout(%q): %v", name, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("parseLayout(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

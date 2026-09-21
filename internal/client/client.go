@@ -42,6 +42,7 @@ type frameState struct {
 	placements   []protocol.PlacementData
 	focusPaneID  int
 	paneStatuses map[int]string
+	paneTitles   map[int]string
 }
 
 // pendingWipe is a focus change that has arrived but has not yet been
@@ -71,6 +72,8 @@ type Client struct {
 	placements   []protocol.PlacementData
 	focusPaneID  int
 	paneStatuses map[int]string
+	paneTitles   map[int]string
+	layoutMode   protocol.LayoutMode
 	mirrors      map[int]*PaneMirror
 	cursorInfos  map[int]cursorPos
 	prefixLabel  string
@@ -88,6 +91,7 @@ func (c *Client) frameStateLocked() frameState {
 		placements:   c.placements,
 		focusPaneID:  c.focusPaneID,
 		paneStatuses: c.paneStatuses,
+		paneTitles:   c.paneTitles,
 	}
 }
 
@@ -124,14 +128,27 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// Snapshot before the assignments below overwrite it: this is
 		// the state a wipe animates away from.
 		oldState := c.frameStateLocked()
+		// Unconditionally, before anything below reads them: the
+		// mode decides which strategy runs, and the strip is what
+		// hiddenCountsLocked compares placements against.
+		//
+		// Both used to be inside the len(m.Columns) > 0 branch, which
+		// meant the snapshot sent when the last pane closes left a
+		// stale strip behind -- so card mode drew a "+N" counting
+		// panes that no longer existed -- and a mode change arriving
+		// while the session was empty was dropped.
+		c.layoutMode = m.Layout
+		layout.ApplyMode(c.strip, m.Layout)
+		c.strip.SyncColumns(m.Columns, m.FocusPaneID)
+
 		if len(m.Columns) > 0 {
-			c.strip.SyncColumns(m.Columns, m.FocusPaneID)
 			c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
 		} else {
 			c.placements = m.Placements
 		}
 		c.focusPaneID = m.FocusPaneID
 		c.paneStatuses = m.PaneStatuses
+		c.paneTitles = m.PaneTitles
 
 		if oldFocus != 0 && c.focusPaneID != oldFocus {
 			dir := WipeLeftToRight
@@ -381,10 +398,15 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 			}
 		}
 
-		if drawPane != nil {
+		switch {
+		case p.Kind == protocol.PlacementSliver:
+			c.drawSliverLocked(dst, p, st)
+		case drawPane != nil:
 			drawPane(p.PaneID, dst, p.Dst)
-		} else if mirror, ok := c.mirrors[p.PaneID]; ok {
-			compose.Blit(dst, mirror.Surface, p.Dst)
+		default:
+			if mirror, ok := c.mirrors[p.PaneID]; ok {
+				compose.Blit(dst, mirror.Surface, p.Dst)
+			}
 		}
 
 		// Draw column divider on right edge if applicable.
@@ -400,7 +422,147 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 		}
 	}
 
+	// Takes st, not c: composeFrameLocked also builds a wipe's
+	// before-frame, and a marker counted from the current placements
+	// would be wrong there for the same reason stale placements would
+	// be.
+	c.drawHiddenMarkersLocked(dst, st)
+
 	return focusedPlacement
+}
+
+// drawSliverLocked renders an occluded card as chrome rather than a
+// peek at its content.
+//
+// Four columns of someone else's terminal output is visual noise --
+// BEYOND-V1 section 2 -- so a sliver shows what is actually worth
+// knowing about a pane you are not looking at: whether it wants you,
+// what it is doing, and whether it is doing anything at all.
+//
+// The title is the good part. An agent harness keeps it current --
+// Claude Code writes a spinner and a summary of the turn into it, and
+// emits no OSC 133 at all -- so for the workload this project exists
+// for, the title is the status signal that actually exists.
+//
+// Row 0 is the pane header, drawn by the caller. This fills the rest.
+// c.mu must be held.
+func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st frameState) {
+	w := p.Dst.Dx()
+	if w <= 0 {
+		return
+	}
+
+	glyph := st.paneStatuses[p.PaneID]
+	if glyph == " " {
+		glyph = ""
+	}
+	title := st.paneTitles[p.PaneID]
+
+	// Glyph and title on the first row, whichever of them exists. A
+	// pane whose child never set a title still gets its glyph, so the
+	// row never looks like a rendering fault.
+	label := strings.TrimSpace(glyph + " " + title)
+	if label != "" {
+		compose.WriteStyled(dst, p.Dst.Min.X, p.Dst.Min.Y,
+			compose.TruncateWidth(dst, label, w), uv.Style{})
+	}
+
+	// A spine below it, bright while the pane is producing output.
+	//
+	// The activity signal is the status glyph rather than a new wire
+	// field: PaneStatuses already carries exactly this. Write's
+	// heuristic sets StatusWorking on every write and lets it decay
+	// after three seconds of quiet, so "»" means "this pane is doing
+	// something right now" without anything further crossing the
+	// socket.
+	spine := uv.Style{}
+	if glyph == "»" {
+		spine = uv.Style{Attrs: uv.AttrBold}
+	}
+	for y := p.Dst.Min.Y + 1; y < p.Dst.Max.Y; y++ {
+		compose.WriteStyled(dst, p.Dst.Min.X, y, "▌", spine)
+	}
+}
+
+// hiddenCountsLocked reports how many columns have no placement,
+// split by which side of the focused column they sit on.
+//
+// CardStrategy drops cards that do not fit rather than scrolling them
+// -- scrolling a row of slivers is its own design, parked in
+// BEYOND-V1 section 2. Dropping them silently is the part worth
+// fixing: a pane that exists and is invisible with nothing to say so
+// erodes trust in the layout.
+//
+// Derived here rather than carried on the wire: the client already
+// holds the strip, and widening the Strategy interface to return a
+// second value for one caller's benefit is a worse trade. Not stored
+// on frameState either -- a retained wipe frame would carry a stale
+// count for the same reason it would carry stale placements.
+//
+// c.mu must be held.
+func (c *Client) hiddenCountsLocked(st frameState) (left, right int) {
+	cols := c.strip.Columns()
+	if len(cols) == 0 {
+		return 0, 0
+	}
+
+	placed := make(map[int]bool, len(st.placements))
+	for _, p := range st.placements {
+		placed[p.PaneID] = true
+	}
+
+	focusIdx := 0
+	for i, col := range cols {
+		if col.PaneID == st.focusPaneID {
+			focusIdx = i
+			break
+		}
+	}
+
+	for i, col := range cols {
+		if placed[col.PaneID] {
+			continue
+		}
+		if i < focusIdx {
+			left++
+		} else {
+			right++
+		}
+	}
+	return left, right
+}
+
+// drawHiddenMarkersLocked writes a "+N" on the header row for cards
+// that did not fit, at whichever edge they fell off.
+//
+// The header row is already chrome, so no card has to reserve space
+// for this and CardStrategy stays untouched. c.mu must be held.
+func (c *Client) drawHiddenMarkersLocked(dst uv.Screen, st frameState) {
+	// Card mode only, deliberately.
+	//
+	// ScrollStrategy also drops columns -- it skips any whose Dst is
+	// empty, so a pane scrolled fully out of view has no placement
+	// either, and hiddenCountsLocked finds those too. Marking them
+	// would be defensible and arguably useful, but it changes the
+	// default layout's chrome for every user, which is well outside
+	// what this change is for. Recorded in BEYOND-V1 section 2 as a
+	// follow-up instead.
+	if c.layoutMode != protocol.LayoutCards {
+		return
+	}
+
+	left, right := c.hiddenCountsLocked(st)
+	if left > 0 {
+		compose.WriteStyled(dst, 0, 0, fmt.Sprintf("+%d", left), uv.Style{Attrs: uv.AttrBold})
+	}
+	if right > 0 {
+		s := fmt.Sprintf("+%d", right)
+		x := c.cols - runeLen(s)
+		if x < 0 {
+			x = 0
+		}
+		compose.WriteStyled(dst, x, 0, s, uv.Style{Attrs: uv.AttrBold})
+	}
 }
 
 // drawStatusBarLocked paints the bottom row. c.mu must be held.

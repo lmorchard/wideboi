@@ -34,9 +34,26 @@ type Server struct {
 	stopCh     chan struct{}
 	closeOnce  sync.Once
 
-	// lastStatuses is the pane status glyph set as of the last layout
-	// broadcast, so the frame loop can tell when one has changed.
+	// lastStatuses and lastTitles are the per-pane glyph and title
+	// sets as of the last layout broadcast, so the frame loop can
+	// tell when either has changed.
 	lastStatuses map[int]string
+	lastTitles   map[int]string
+
+	// layout is the session's strategy mode, shared with every client.
+	layout protocol.LayoutMode
+}
+
+// SetLayout installs the session's layout mode.
+//
+// A method rather than a NewServer parameter: the zero value is
+// already the scrolling strip, so only a caller that wants cards has
+// to say so, and the eight existing NewServer call sites stay put.
+func (s *Server) SetLayout(mode protocol.LayoutMode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layout = mode
+	layout.ApplyMode(s.strip, mode)
 }
 
 // NewServer initializes a Server instance connected via transport.
@@ -205,6 +222,17 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			if id := s.smartJumpTargetLocked(); id > 0 {
 				s.strip.FocusPaneID(id)
 			}
+		case protocol.VerbToggleCards:
+			if s.layout == protocol.LayoutCards {
+				s.layout = protocol.LayoutScroll
+			} else {
+				s.layout = protocol.LayoutCards
+			}
+			layout.ApplyMode(s.strip, s.layout)
+			// Deliberately no resizePanesLocked: a pane's logical
+			// width is its column's width regardless of what is
+			// visible, so changing presentation must not resize
+			// anything. That is the no-shrink premise.
 		}
 		needBroadcast = true
 
@@ -456,6 +484,29 @@ func (s *Server) statusGlyphsLocked() map[int]string {
 	return out
 }
 
+// paneTitlesLocked collects each pane's terminal title.
+// s.mu must be held.
+func (s *Server) paneTitlesLocked() map[int]string {
+	out := make(map[int]string, len(s.panes))
+	for id, p := range s.panes {
+		out[id] = p.Title()
+	}
+	return out
+}
+
+// sameStringMap reports whether two pane-keyed string maps agree.
+func sameStringMap(a, b map[int]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // broadcastLayoutIfStatusChanged pushes a layout snapshot when any
 // pane's status glyph differs from the last one sent, and reports
 // whether it did.
@@ -469,16 +520,8 @@ func (s *Server) statusGlyphsLocked() map[int]string {
 // unless the glyph set actually moved.
 func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	s.mu.Lock()
-	cur := s.statusGlyphsLocked()
-	changed := len(cur) != len(s.lastStatuses)
-	if !changed {
-		for id, g := range cur {
-			if s.lastStatuses[id] != g {
-				changed = true
-				break
-			}
-		}
-	}
+	changed := !sameStringMap(s.statusGlyphsLocked(), s.lastStatuses) ||
+		!sameStringMap(s.paneTitlesLocked(), s.lastTitles)
 	s.mu.Unlock()
 
 	if !changed {
@@ -500,21 +543,31 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	s.mu.Lock()
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
 	statuses := s.statusGlyphsLocked()
+	titles := s.paneTitlesLocked()
 	snapshot := protocol.MsgLayoutSnapshot{
 		Columns:      layout.ToColumnData(s.strip.Columns()),
 		Placements:   layout.ToProtocol(placements),
 		FocusPaneID:  s.strip.FocusedPaneID(),
 		PaneStatuses: statuses,
+		PaneTitles:   titles,
+		Layout:       s.layout,
 	}
 	tps := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()
 
-	// With no clients there is nobody left to be stale, so treat that
-	// as delivered rather than retrying every tick forever.
-	delivered := len(tps) == 0
+	// Delivered means *every* attached client accepted it, not any
+	// one of them.
+	//
+	// A status or title broadcast is edge-triggered, so a client
+	// whose buffer was full when it fired would never see that change
+	// again -- two clients of one session would disagree about what
+	// the panes are doing, with nothing to retry. With no clients at
+	// all there is nobody to be stale, so that counts as delivered
+	// rather than retrying forever.
+	delivered := true
 	for _, tp := range tps {
-		if tp.SendServer(ctx, snapshot) {
-			delivered = true
+		if !tp.SendServer(ctx, snapshot) {
+			delivered = false
 		}
 	}
 
@@ -524,6 +577,7 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	if delivered {
 		s.mu.Lock()
 		s.lastStatuses = statuses
+		s.lastTitles = titles
 		s.mu.Unlock()
 	}
 

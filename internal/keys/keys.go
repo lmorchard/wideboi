@@ -74,6 +74,16 @@ type Binding struct {
 	// unprefixed escape hatch, a user who cannot read these has no way
 	// forward except a signal.
 	Essential bool
+
+	// NoRepeat suppresses the ctrl+<letter> repeat form.
+	//
+	// Repeat exists so "move two columns left" is one chord rather
+	// than two, which is meaningless for a toggle -- pressing it
+	// twice returns you to where you started. Suppressing it also
+	// keeps the letter's control byte available for whatever it
+	// already meant: ctrl+c stays an unknown key that leaves control
+	// mode, which is the escape hatch a user reaches for by reflex.
+	NoRepeat bool
 }
 
 // Bindings is the table, in status-bar display order.
@@ -98,6 +108,18 @@ var Bindings = []Binding{
 		BarGroup: "? help", Long: "show this help"},
 	{Key: "d", Action: ActionDetach, NeedsDetach: true,
 		BarGroup: "d detach", Long: "detach, leaving the session running"},
+	// No BarGroup on purpose: this verb lives in the help overlay
+	// only. The attached bar already totals exactly 77 cells against a
+	// 79-cell budget at 80 columns, so there is no room for another
+	// entry, and TestControlHelpFitsEveryEntryAt80Columns says what to
+	// do about it -- "the overlay is already there and the bar should
+	// shed the entry rather than grow." Growing the bar would push
+	// "d detach" off, which scripts/attachcheck.py asserts is present.
+	//
+	// NoRepeat because ctrl+c must stay an unknown key that leaves
+	// control mode; see the field's comment.
+	{Key: "c", Action: ActionVerb, Verb: protocol.VerbToggleCards,
+		NoRepeat: true, Long: "toggle the card layout"},
 	{Key: "q", Action: ActionQuit, Essential: true,
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},
 	{Key: "esc", Action: ActionExit, Essential: true,
@@ -111,6 +133,9 @@ var Bindings = []Binding{
 // key with no ctrl encoding, and "?" needs a shift on every layout, so
 // ctrl+? is not a combination terminals reliably produce.
 func (b Binding) CtrlForm() (string, bool) {
+	if b.NoRepeat {
+		return "", false
+	}
 	if len(b.Key) != 1 {
 		return "", false
 	}

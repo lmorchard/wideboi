@@ -370,6 +370,40 @@ def case_osc133_status_drives_smart_jump(fail):
         fail(f"smart jump landed on pane {landed}, want the failed pane 2")
 
 
+# CardStrategy shipped complete in Plan 8 and was unreachable until
+# Plan 17 -- nothing outside a test ever called Strip.SetStrategy. This
+# asserts the toggle actually reaches the client's placement maths.
+#
+# Asserted on the cursor, not on divider columns: the dividers do move,
+# but the renderer emits them inside line runs rather than behind an
+# absolute cursor move, so divider_columns' CUP-then-glyph pattern does
+# not see them on a repaint. The focused pane's origin shifts when the
+# fan opens, and the cursor goes with it -- same observable
+# case_focus_switch_moves_the_cursor uses.
+def case_card_layout_toggles(fail):
+    s = Session()
+    s.type("\x02n")                       # third pane, so there is a fan
+
+    positions = s.cursor_positions()
+    if not positions:
+        fail("no cursor position reported before toggling")
+        return
+    scroll_col = positions[-1][1]
+
+    s.type("\x02c")                       # toggle to cards
+    cards_col = s.cursor_positions()[-1][1]
+
+    s.type("\x02c")                       # and back
+    back_col = s.cursor_positions()[-1][1]
+    s.quit_and_reap()
+
+    if cards_col == scroll_col:
+        fail(f"card layout left the focused pane at column {scroll_col}; "
+             "the toggle never reached the placement maths")
+    if back_col != scroll_col:
+        fail(f"toggling back landed at column {back_col}, want {scroll_col}")
+
+
 def case_quit_restores_and_reaps(fail):
     s = Session()
     s.type("echo before-quit\r")
@@ -647,6 +681,7 @@ CASES = [
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),
     ("osc133 status drives smart jump", case_osc133_status_drives_smart_jump),
+    ("card layout toggles", case_card_layout_toggles),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names the prefix", case_status_line_names_the_prefix),
     ("control mode names every entry at 80 columns", case_control_mode_names_every_entry_at_80_columns),

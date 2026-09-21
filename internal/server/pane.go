@@ -207,6 +207,10 @@ func (p *Pane) CursorPosition() image.Point { return p.grid.CursorPosition() }
 // CursorVisible reports whether DECTCEM cursor visibility is enabled.
 func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 
+// Title reports the pane's terminal title, or "" if its child has
+// never set one.
+func (p *Pane) Title() string { return p.grid.Title() }
+
 // Status reports the current agent status of the pane.
 func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
 

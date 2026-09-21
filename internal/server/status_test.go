@@ -13,6 +13,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -21,6 +22,7 @@ import (
 // Every other method is a cheap stub; these tests do not exercise them.
 type statusGrid struct {
 	status atomic.Int32
+	title  atomic.Pointer[string]
 }
 
 func newStatusGrid(st term.PaneStatus) *statusGrid {
@@ -30,6 +32,15 @@ func newStatusGrid(st term.PaneStatus) *statusGrid {
 }
 
 func (g *statusGrid) set(st term.PaneStatus) { g.status.Store(int32(st)) }
+
+func (g *statusGrid) setTitle(s string) { g.title.Store(&s) }
+
+func (g *statusGrid) Title() string {
+	if t := g.title.Load(); t != nil {
+		return *t
+	}
+	return ""
+}
 
 func (g *statusGrid) Status() term.PaneStatus { return term.PaneStatus(g.status.Load()) }
 
@@ -151,5 +162,135 @@ func TestUndeliveredStatusBroadcastIsRetried(t *testing.T) {
 	}
 	if s.broadcastLayoutIfStatusChanged(ctx) {
 		t.Error("kept broadcasting after a successful delivery")
+	}
+}
+
+// The toggle is a server-side flip of shared session state; clients
+// learn about it from the next snapshot.
+func TestToggleCardsFlipsLayoutMode(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	ctx := context.Background()
+
+	if s.layout != protocol.LayoutScroll {
+		t.Fatalf("initial layout = %v, want %v", s.layout, protocol.LayoutScroll)
+	}
+	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
+	if s.layout != protocol.LayoutCards {
+		t.Errorf("after one toggle layout = %v, want %v", s.layout, protocol.LayoutCards)
+	}
+	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
+	if s.layout != protocol.LayoutScroll {
+		t.Errorf("after two toggles layout = %v, want %v", s.layout, protocol.LayoutScroll)
+	}
+}
+
+// The no-shrink premise is what this whole project rests on: a pane's
+// logical width is its column's width, independent of what is visible.
+// Switching presentation must not touch it.
+func TestToggleCardsLeavesColumnWidthsAlone(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle, 3: term.StatusIdle})
+	ctx := context.Background()
+
+	before := map[int]int{}
+	for _, id := range s.strip.PaneIDs() {
+		w, ok := s.strip.ColumnWidth(id)
+		if !ok {
+			t.Fatalf("no width for pane %d", id)
+		}
+		before[id] = w
+	}
+
+	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
+
+	for id, want := range before {
+		got, ok := s.strip.ColumnWidth(id)
+		if !ok {
+			t.Fatalf("pane %d lost its column across the toggle", id)
+		}
+		if got != want {
+			t.Errorf("pane %d width %d -> %d across a layout toggle; "+
+				"presentation must not resize", id, want, got)
+		}
+	}
+}
+
+// Titles ride the same change-detected broadcast as status glyphs:
+// they are the other thing a card sliver renders, and they change on
+// their own schedule (an agent harness rewrites its title mid-turn).
+// A title change with no status change must still reach the client.
+func TestTitleChangeTriggersALayoutBroadcast(t *testing.T) {
+	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	ctx := context.Background()
+
+	s.broadcastLayoutIfStatusChanged(ctx) // baseline
+	if s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Fatal("broadcast fired with nothing changed")
+	}
+
+	grids[1].setTitle("building")
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Error("a title change did not trigger a broadcast")
+	}
+	if s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Error("kept broadcasting after the title change was delivered")
+	}
+}
+
+// The title has to survive the trip, not just trigger a send.
+func TestPaneTitlesReachTheSnapshot(t *testing.T) {
+	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	grids[1].setTitle("◑ Pong reply")
+
+	s.broadcastLayout(context.Background())
+
+	tp := s.transports[0].(*transport.InProcChannel)
+	var snap protocol.MsgLayoutSnapshot
+	for len(tp.ServerSend) > 0 {
+		if m, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot); ok {
+			snap = m
+		}
+	}
+	if got := snap.PaneTitles[1]; got != "◑ Pong reply" {
+		t.Errorf("snapshot PaneTitles[1] = %q, want %q", got, "◑ Pong reply")
+	}
+}
+
+// "Delivered" has to mean every attached client got it, not any one.
+// A status or title broadcast is edge-triggered, so a client whose
+// buffer was full when it fired never sees that change again -- the
+// session goes inconsistent between clients and nothing retries.
+func TestUndeliveredToOneOfTwoClientsIsRetried(t *testing.T) {
+	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	ctx := context.Background()
+
+	healthy := s.transports[0].(*transport.InProcChannel)
+	wedged := transport.NewInProcChannel(4)
+	s.transports = append(s.transports, wedged)
+	for len(wedged.ServerSend) < cap(wedged.ServerSend) {
+		wedged.ServerSend <- struct{}{}
+	}
+
+	grids[1].set(term.StatusFailed)
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Fatal("no broadcast attempted after a status change")
+	}
+	// The healthy client got it; the wedged one did not, so the
+	// change is not done.
+	for len(healthy.ServerSend) > 0 {
+		<-healthy.ServerSend
+	}
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Error("marked delivered while one attached client never received it")
+	}
+
+	// Once it drains, the retry lands and the set finally goes clean.
+	for len(wedged.ServerSend) > 0 {
+		<-wedged.ServerSend
+	}
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Fatal("expected the retry to fire")
+	}
+	if s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Error("kept broadcasting after every client accepted")
 	}
 }

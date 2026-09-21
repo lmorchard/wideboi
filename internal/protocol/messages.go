@@ -15,6 +15,9 @@ const (
 	VerbCycleWidth
 	VerbKillPane
 	VerbSmartJump
+	// VerbToggleCards switches between the scrolling strip and the
+	// card fan. Appended, not inserted: the value crosses the wire.
+	VerbToggleCards
 )
 
 // ColumnData describes a column's logical width and height.
@@ -48,6 +51,25 @@ type MsgPaneUpdate struct {
 	CursorVisible bool
 }
 
+// PlacementKind says what a placement represents, which the renderer
+// cannot infer from geometry: a card sliver and a pane clipped by the
+// viewport edge are both a narrow Dst over a cropped Src, and Z does
+// not separate them either -- ScrollStrategy emits Z=0 for everything.
+//
+// Without this the client would paint chrome over the visible edge of a
+// legitimately clipped pane, which is exactly what smoke.py's
+// case_partly_clipped_pane_keeps_full_width exists to prevent.
+type PlacementKind int
+
+const (
+	// PlacementFull is a pane rendering its own content, whether or not
+	// the viewport clips it. Clipping is not occlusion.
+	PlacementFull PlacementKind = iota
+	// PlacementSliver is an occluded card, drawn as chrome rather than
+	// as a peek at its content.
+	PlacementSliver
+)
+
 // PlacementData describes where a pane's content buffer is cropped from (Src)
 // and where on the host screen surface it blits (Dst), plus layer depth Z.
 type PlacementData struct {
@@ -55,6 +77,7 @@ type PlacementData struct {
 	Src    image.Rectangle
 	Dst    image.Rectangle
 	Z      int
+	Kind   PlacementKind
 }
 
 // MsgAttach is sent by the client upon connecting to report viewport geometry.
@@ -91,12 +114,32 @@ type MsgScroll struct {
 	Delta  int
 }
 
+// LayoutMode is which Strategy the session is using.
+//
+// Shared session state, like focus: two clients of different sizes
+// compute their own placements, but they must agree on the mode or
+// they disagree about what the session looks like. The zero value is
+// the scrolling strip, so a server that never sets it behaves exactly
+// as it did before the field existed.
+type LayoutMode int
+
+const (
+	// LayoutScroll is the horizontal strip: columns scroll out of view.
+	LayoutScroll LayoutMode = iota
+	// LayoutCards fans off-screen columns into chrome slivers.
+	LayoutCards
+)
+
 // MsgLayoutSnapshot is sent by the server to update the client on placements, focus, and statuses.
 type MsgLayoutSnapshot struct {
 	Columns      []ColumnData
 	Placements   []PlacementData
 	FocusPaneID  int
 	PaneStatuses map[int]string
+	// PaneTitles is each pane's terminal title, for chrome that wants
+	// to say what a pane is doing rather than show a sliver of it.
+	PaneTitles map[int]string
+	Layout     LayoutMode
 }
 
 // MsgPaneClosed notifies the client that a pane's process died or was reaped.
