@@ -31,7 +31,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, Drainer, spawn_in_pty, wait_for_exit, force_cleanup,
-    descendants, still_alive,
+    descendants, settle_output, still_alive,
 )
 # focus_pane_id reads the status line the way the diffing renderer
 # actually writes it: the "focus: [pane N" literal appears only in the
@@ -45,10 +45,14 @@ from smoke import focus_pane_id
 BIN = "./bin/wideboi"
 COLS, ROWS = 80, 24
 
-# Long enough for a login shell to print a prompt. Generous because a
-# false failure here costs more than the seconds do: the shell under
-# test is whatever $SHELL is on the developer's machine, and a themed
-# zsh takes multiple seconds to reach its first prompt.
+# Ceilings, not durations. Both are now the timeout handed to
+# settle_output, which returns as soon as the screen stops changing.
+#
+# PROMPT_WAIT stays generous for a reason that has changed: it used to
+# be waiting out whatever $SHELL was on the developer's machine, and a
+# themed zsh can take seconds to reach its first prompt. ptylib pins
+# SHELL=/bin/sh now, so that is no longer the risk -- but a cold CI
+# runner still is, and an unused ceiling costs nothing.
 PROMPT_WAIT = 8.0
 SETTLE = 1.5
 
@@ -114,7 +118,7 @@ class Client:
         self.pid, self.fd = spawn_in_pty([BIN, "attach"], COLS, ROWS, True, None)
         self.drainer = Drainer(self.fd)
         self.drainer.start()
-        time.sleep(startup)
+        settle_output(self.drainer, timeout=startup)
 
     def type(self, text: bytes, settle=SETTLE) -> None:
         # A client that has already exited closes the pty slave, so the
@@ -130,7 +134,7 @@ class Client:
                 f"transport-level failure looks like from here; check "
                 f"client.log and server.log in the runtime dir."
             ) from exc
-        time.sleep(settle)
+        settle_output(self.drainer, timeout=settle)
 
     def output(self) -> bytes:
         return self.drainer.output()
