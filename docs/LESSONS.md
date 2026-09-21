@@ -395,3 +395,67 @@ Corollary for tests: a test that synthesises the input bytes is testing
 your decoder, not your binding. Neither the unit tests nor the pty smoke
 suite could have caught this, because both typed the escape sequence an
 already-configured terminal would send.
+
+## Go respects an inherited `SIG_IGN` for SIGHUP and SIGINT
+
+POSIX requires a shell to set SIGINT and SIGQUIT to `SIG_IGN` for an
+asynchronous list, so anything started as `cmd &` — which is every target under
+`make -j` — inherits them ignored. Go's runtime deliberately honours that for
+**SIGHUP and SIGINT only** (`sigInstallGoHandler`), and installs its own
+handler over an ignored SIGTERM.
+
+`signal.Notify` installs a handler regardless, so a guard still *catches* the
+signal and tears down correctly. `signal.Stop` and `signal.Reset` then restore
+the **original** disposition — `SIG_IGN` — and the conventional
+`syscall.Kill(os.Getpid(), sig)` re-raise is discarded. `wideboi &` followed by
+Ctrl-C tore the session down, restored the terminal, and then lived forever,
+immune to every signal it had armed.
+
+Two things this cost, both worth knowing in advance:
+
+- **A test written against SIGTERM cannot reproduce it.** The first attempt
+  failed for the wrong reason — the child died by the signal — because Go
+  installs its own handler over an ignored SIGTERM. Use SIGINT or SIGHUP, and
+  inherit the disposition through `sh -c 'trap "" INT; exec ...'` rather than
+  `signal.Ignore`, which exercises Go's bookkeeping instead of the real case.
+- **Deciding after a failed re-raise is a race.** `Kill` can return before the
+  signal is delivered, so "did `Kill` return?" is not a test — `os.Exit`
+  sometimes wins and the process exits `128+signo` when it should have died
+  *by* the signal. Sample `signal.Ignored` at arm time, before `Notify`.
+
+## Widening what a value can be re-scopes every existing use of it
+
+`transport.NewSocketListener` unlinks a stale socket so a server that died
+without cleaning up does not block the next one. That was safe for as long as
+the path was a fixed `default.sock` inside a wideboi-owned directory: the only
+thing it could ever delete was its own corpse.
+
+Adding a `WIDEBOI_SOCK` override — a small, obviously-useful escape hatch —
+turned that same unlink into *delete any file the user names*.
+`WIDEBOI_SOCK=~/notes.txt wideboi server` removed the file before failing to
+listen. Confirmed by a test that writes a regular file and watches it vanish.
+
+**When you widen the domain of a value, re-read every consumer of it.** The new
+configuration did not introduce the `os.Remove`; it removed the invariant that
+had made the `os.Remove` harmless. Nothing about the diff that added the
+override looked dangerous, because the dangerous line was somewhere else and
+unchanged.
+
+## One green run is how a flaky suite presents
+
+This has now been paid for three times, in three different shapes:
+
+- A `quiet=0.10` settle window gave the best number and passed 25/25 on the
+  first run, then failed on each of the next three — three *different* cases,
+  never the same twice.
+- Parallel `make check` passed four consecutive runs, then failed 1 in 8, in
+  two different suites. Two real races that contention exposed.
+- `go test` caching (see above) showed 20/20 clean where `-count=1` showed 14
+  failures in 15.
+
+**A timing or concurrency change is not verified until it has repeated.** Run
+it four times, and prefer the slower number that holds over the faster one that
+does not. Both parallelism failures above were fixed rather than tuned around
+once the repeat runs pointed at them — a fixed `time.sleep` before an
+assertion, and a startup wait that returned before the thing being waited for
+existed.
