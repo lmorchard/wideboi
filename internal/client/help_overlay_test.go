@@ -120,31 +120,67 @@ func TestSetHelpVisibleRoundTrips(t *testing.T) {
 }
 
 // The decision Draw acts on, asserted directly rather than through a
-// terminal: help outranks a wipe, a wipe outranks the ordinary panes,
-// and either alone lands where it should.
+// terminal.
+//
+// Two layers now, not three: the wipe had its own because it took
+// over the whole screen and drew from composed snapshots. Motion
+// feeds interpolated rects through the ordinary pane path, so
+// layerLocked no longer arbitrates it -- see TestHelpOutranksMotion
+// for the precedence that replaced it.
 func TestLayerLockedPrecedence(t *testing.T) {
-	fA := compose.NewSurface(80, 24)
-	fB := compose.NewSurface(80, 24)
-	activeWipe := NewWipeTransition(fA, fB, 80, 24, WipeLeftToRight, 8)
-
 	cases := []struct {
 		name        string
 		helpVisible bool
-		wipe        *WipeTransition
 		want        drawLayer
 	}{
-		{"neither", false, nil, layerPanes},
-		{"wipe only", false, activeWipe, layerWipe},
-		{"help only", true, nil, layerHelp},
-		{"help wins over an active wipe", true, activeWipe, layerHelp},
+		{"panes by default", false, layerPanes},
+		{"help when visible", true, layerHelp},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &Client{helpVisible: tc.helpVisible, activeWipe: tc.wipe}
+			c := &Client{helpVisible: tc.helpVisible}
 			if got := c.layerLocked(); got != tc.want {
 				t.Errorf("layerLocked() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// Help outranks a running animation: an animation is decorative and
+// a modal is not. Asserted through Draw, because that precedence now
+// lives there rather than in layerLocked.
+func TestHelpOutranksMotion(t *testing.T) {
+	const cols, rows = 90, 24
+	cli := newMotionClient(t, cols, rows)
+
+	focusTo(cli, 2)
+	cli.mu.Lock()
+	running := cli.motion != nil
+	cli.mu.Unlock()
+	if !running {
+		t.Fatal("expected an animation to be armed")
+	}
+
+	cli.SetHelpVisible(true)
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	got := strings.Join(scr.text(), "\n")
+	if !strings.Contains(got, "control mode") {
+		t.Errorf("the overlay did not draw while an animation was running:\n%s", got)
+	}
+
+	// And the animation must not have advanced behind it -- it
+	// resumes when the overlay closes rather than running out of
+	// frames unseen.
+	cli.mu.Lock()
+	step := 0
+	if cli.motion != nil {
+		step = cli.motion.step
+	}
+	cli.mu.Unlock()
+	if step != 0 {
+		t.Errorf("animation advanced to step %d while the overlay was up", step)
 	}
 }

@@ -6,31 +6,53 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
-// DefaultSliverWidth is how wide an occluded card is.
+// MinSliverWidth is the narrowest a card can be and still say
+// anything: a column of spine, a status glyph, and a space.
 //
-// BEYOND-V1 section 2 budgeted 4 cells, but that was on the
-// assumption that a sliver shows a peek at pane content. It shows
-// chrome instead -- status glyph, title, activity spine -- which makes
-// the width a free parameter, and 10 cells is what fits a readable
-// horizontal title. The cost is fan size: roughly 10-12 cards at 200
-// columns rather than 25, which is why cards that do not fit get a
-// marker rather than vanishing.
-const DefaultSliverWidth = 10
+// This replaces DefaultSliverWidth, which was the layout's governing
+// number and knew nothing about the viewport -- a 120-column window
+// with three 30-wide panes used 50 columns and left 70 dead. A floor
+// is a different kind of number: it decides how many cards fit, not
+// how wide they are.
+const MinSliverWidth = 4
 
-// CardStrategy arranges off-screen/peripheral columns as overlapping card slivers.
+// CardStrategy fans the unfocused columns into chrome slivers beside
+// the focused pane.
+//
+// The focused pane keeps its own width and the rest divide whatever
+// is left, so the fan always spans the viewport. No divider columns
+// are reserved: every sliver draws a spine at its own left edge,
+// which is the separator -- reserving one as ScrollStrategy does
+// would cost a cell per card for no visible gain.
 type CardStrategy struct {
+	// SliverWidth, when positive, forces every sliver to this width
+	// instead of an even share. Tests use it to pin geometry; nothing
+	// in production sets it.
 	SliverWidth int
 }
 
-// ComputePlacements calculates card placements with z-ordering.
+// shareAt returns the width of the i-th of n cards dividing total
+// cells between them.
+//
+// The first (total % n) cards get one extra cell, so the widths sum
+// to exactly total and the fan's right edge lands on the viewport
+// edge rather than one or two columns short of it.
+func shareAt(total, n, i int) int {
+	if n <= 0 || total <= 0 {
+		return 0
+	}
+	w := total / n
+	if i < total%n {
+		w++
+	}
+	return w
+}
+
+// ComputePlacements lays the focused pane out at its own width and
+// divides the remainder among the others.
 func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight int) []Placement {
 	if len(s.columns) == 0 || viewportWidth <= 0 || viewportHeight <= 0 {
 		return nil
-	}
-
-	sliverWidth := cs.SliverWidth
-	if sliverWidth <= 0 {
-		sliverWidth = DefaultSliverWidth
 	}
 
 	availHeight := AvailHeight(viewportHeight)
@@ -39,102 +61,124 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	if numCols == 1 {
 		col := s.columns[0]
 		w := min(col.Width, viewportWidth)
-		return []Placement{
-			{
-				PaneID: col.PaneID,
-				Src:    image.Rect(0, 0, w, availHeight),
-				Dst:    image.Rect(0, 1, w, 1+availHeight),
-				Z:      1,
-				// A lone column is occluded by nothing.
-				Kind: protocol.PlacementFull,
-			},
-		}
+		return []Placement{{
+			PaneID: col.PaneID,
+			Src:    image.Rect(0, 0, w, availHeight),
+			Dst:    image.Rect(0, 1, w, 1+availHeight),
+			Z:      1,
+			// A lone column is occluded by nothing.
+			Kind: protocol.PlacementFull,
+		}}
 	}
 
 	focusedIdx := s.focusIndex
-	focusedCol := s.columns[focusedIdx]
-	focusedW := min(focusedCol.Width, viewportWidth)
+	focusedW := min(s.columns[focusedIdx].Width, viewportWidth)
+	remaining := max(viewportWidth-focusedW, 0)
 
-	leftSlivers := focusedIdx
-	rightSlivers := numCols - 1 - focusedIdx
+	showLeft, showRight := cs.visibleSides(focusedIdx, numCols, remaining)
+	sliverCount := showLeft + showRight
 
-	leftTotal := leftSlivers * sliverWidth
-	rightTotal := rightSlivers * sliverWidth
-
-	var focusedX int
-	if leftTotal+focusedW+rightTotal <= viewportWidth {
-		focusedX = leftTotal
-	} else {
-		focusedX = leftTotal
-		if focusedX+focusedW+rightTotal > viewportWidth {
-			focusedX = max(leftTotal, viewportWidth-focusedW-rightTotal)
+	// Sliver widths, indexed left to right across the whole fan so the
+	// remainder is spread evenly rather than piling onto one side.
+	widthOf := func(sliverIdx int, col Column) int {
+		share := cs.SliverWidth
+		if share <= 0 {
+			share = shareAt(remaining, sliverCount, sliverIdx)
 		}
-	}
-	if focusedX+focusedW > viewportWidth {
-		focusedX = max(0, viewportWidth-focusedW)
-	}
-	if focusedX < 0 {
-		focusedX = 0
+		// Never wider than the pane itself: a card given more room
+		// than it needs should show content, not a spine.
+		return min(share, col.Width)
 	}
 
-	placements := make([]Placement, 0, numCols)
+	placements := make([]Placement, 0, sliverCount+1)
+	x := 0
+	sliverIdx := 0
 
-	// Left cards (Z = 0)
-	for i := 0; i < focusedIdx; i++ {
-		c := s.columns[i]
-		dstX := i * sliverWidth
-		if dstX+sliverWidth > viewportWidth {
-			continue
+	place := func(col Column, w int, z int) {
+		if w <= 0 || x >= viewportWidth {
+			return
 		}
-		w := min(sliverWidth, c.Width)
-		dst := image.Rect(dstX, 1, min(dstX+w, viewportWidth), 1+availHeight)
+		right := min(x+w, viewportWidth)
+		dst := image.Rect(x, 1, right, 1+availHeight)
 		if dst.Empty() {
-			continue
+			return
+		}
+		kind := protocol.PlacementSliver
+		if z == 1 || dst.Dx() >= col.Width {
+			// Either the focused pane, or a card with room for the
+			// whole thing -- nothing is occluded, so draw content.
+			kind = protocol.PlacementFull
 		}
 		placements = append(placements, Placement{
-			PaneID: c.PaneID,
+			PaneID: col.PaneID,
 			Src:    image.Rect(0, 0, dst.Dx(), availHeight),
 			Dst:    dst,
-			Z:      0,
-			Kind:   protocol.PlacementSliver,
+			Z:      z,
+			Kind:   kind,
 		})
+		x = dst.Max.X
 	}
 
-	// Focused card (Z = 1)
-	focusedDst := image.Rect(focusedX, 1, min(focusedX+focusedW, viewportWidth), 1+availHeight)
-	if !focusedDst.Empty() {
-		placements = append(placements, Placement{
-			PaneID: focusedCol.PaneID,
-			Src:    image.Rect(0, 0, focusedDst.Dx(), availHeight),
-			Dst:    focusedDst,
-			Z:      1,
-			// The focused card is the one showing real content.
-			Kind: protocol.PlacementFull,
-		})
+	for i := focusedIdx - showLeft; i < focusedIdx; i++ {
+		col := s.columns[i]
+		place(col, widthOf(sliverIdx, col), 0)
+		sliverIdx++
 	}
 
-	// Right cards (Z = 0)
-	rightStartX := focusedDst.Max.X
-	for i := focusedIdx + 1; i < numCols; i++ {
-		c := s.columns[i]
-		idxOffset := i - (focusedIdx + 1)
-		dstX := rightStartX + idxOffset*sliverWidth
-		if dstX >= viewportWidth {
-			continue
-		}
-		w := min(sliverWidth, c.Width)
-		dst := image.Rect(dstX, 1, min(dstX+w, viewportWidth), 1+availHeight)
-		if dst.Empty() {
-			continue
-		}
-		placements = append(placements, Placement{
-			PaneID: c.PaneID,
-			Src:    image.Rect(0, 0, dst.Dx(), availHeight),
-			Dst:    dst,
-			Z:      0,
-			Kind:   protocol.PlacementSliver,
-		})
+	place(s.columns[focusedIdx], focusedW, 1)
+
+	for i := focusedIdx + 1; i <= focusedIdx+showRight; i++ {
+		col := s.columns[i]
+		place(col, widthOf(sliverIdx, col), 0)
+		sliverIdx++
 	}
 
 	return placements
+}
+
+// visibleSides decides how many cards to show on each side of the
+// focused pane.
+//
+// With enough columns the even share rounds below what chrome needs,
+// so only as many as clear MinSliverWidth are shown. The survivors
+// are taken from nearest the focused pane outward -- those are the
+// neighbours you are most likely to want next -- and the rest are
+// dropped, where hiddenCountsLocked finds them and the client draws a
+// "+N".
+func (cs CardStrategy) visibleSides(focusedIdx, numCols, remaining int) (left, right int) {
+	availLeft := focusedIdx
+	availRight := numCols - 1 - focusedIdx
+	wanted := availLeft + availRight
+
+	budget := wanted
+	if cs.SliverWidth > 0 {
+		// Pinned width: as many as fit whole.
+		budget = min(wanted, remaining/cs.SliverWidth)
+	} else if wanted > 0 && remaining/wanted < MinSliverWidth {
+		budget = remaining / MinSliverWidth
+	}
+	if budget > wanted {
+		budget = wanted
+	}
+
+	// Alternate outward from the focused pane so both neighbours
+	// survive before either side's second card does.
+	for left+right < budget {
+		grew := false
+		if right < availRight {
+			right++
+			grew = true
+			if left+right == budget {
+				break
+			}
+		}
+		if left < availLeft {
+			left++
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+	return left, right
 }

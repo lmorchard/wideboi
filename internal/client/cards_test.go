@@ -11,13 +11,18 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
-// threeColumns is a fan wide enough that card mode has slivers to
-// produce on both sides of the focused pane.
+// threeColumns is a fan whose panes are wider than the share they
+// will get, so card mode actually produces slivers.
+//
+// These were 30 cells wide when slivers were a fixed 10. Under
+// proportional shares a 30-wide pane in a 100-column viewport gets 35
+// and renders full, which is correct behaviour and useless as a
+// sliver fixture -- hence 60.
 func threeColumns() []protocol.ColumnData {
 	return []protocol.ColumnData{
-		{PaneID: 1, Width: 30, Height: 10},
-		{PaneID: 2, Width: 30, Height: 10},
-		{PaneID: 3, Width: 30, Height: 10},
+		{PaneID: 1, Width: 60, Height: 10},
+		{PaneID: 2, Width: 60, Height: 10},
+		{PaneID: 3, Width: 60, Height: 10},
 	}
 }
 
@@ -215,50 +220,66 @@ func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
 	}
 }
 
-// A title the child chose can be any width. Truncating it by rune
-// count would let it spill past the sliver into whatever is drawn
-// beside it.
+// A title the child chose can be any width, and a sliver must not
+// draw outside the rect it was given.
 //
-// Uses the RIGHTMOST sliver deliberately. composeFrameLocked draws
-// left slivers, then the focused card, then right slivers, so a spill
-// from a left sliver is painted over by the focused card and the test
-// would pass against rune truncation -- which it did, on the first
-// attempt. The last placement drawn is the one whose overflow
-// survives.
+// Asserted against drawSliverLocked directly rather than against the
+// composed screen, because the composed screen can no longer show
+// this. Cards are packed contiguously across the full viewport now,
+// so a sliver's overflow either lands in the next card's region and
+// is painted over when that card draws, or runs off the right edge
+// and is clipped. Plan 17's version watched the composited output and
+// silently stopped discriminating the moment the geometry changed --
+// it passed against deliberately broken truncation.
 func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
-	const cols, rows = 120, 16
-	// Twelve double-width runes: 12 runes but 24 cells, against a
-	// 10-cell sliver. Rune-count truncation keeps 10 of them and
-	// writes 20 cells.
-	cli := newCardClient(t, cols, rows, map[int]string{3: "日本語日本語日本語日本語"})
+	const cols, rows = 60, 12
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 
-	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
-
-	p3 := placementFor(cli, 3)
-	if p3.Kind != protocol.PlacementSliver {
-		t.Fatalf("pane 3 is %v, expected the rightmost sliver", p3.Kind)
+	// A 15-cell sliver parked in the middle of a wide blank surface,
+	// so anything it writes outside its bounds is visible.
+	p := &protocol.PlacementData{
+		PaneID: 7,
+		Src:    image.Rect(0, 0, 15, 10),
+		Dst:    image.Rect(20, 1, 35, 11),
+		Kind:   protocol.PlacementSliver,
+	}
+	st := frameState{
+		placements:   []protocol.PlacementData{*p},
+		focusPaneID:  1,
+		paneStatuses: map[int]string{7: "»"},
+		// 12 double-width runes: 12 runes but 24 cells, against 15.
+		paneTitles: map[int]string{7: "日本語日本語日本語日本語"},
 	}
 
-	for y := p3.Dst.Min.Y; y < p3.Dst.Max.Y; y++ {
-		for x := p3.Dst.Max.X; x < cols; x++ {
-			c := scr.CellAt(x, y)
-			if c == nil {
+	scr := newFakeHostScreen(cols, rows)
+	cli.mu.Lock()
+	cli.drawSliverLocked(scr, p, st)
+	cli.mu.Unlock()
+
+	for y := 0; y < rows; y++ {
+		for x := 0; x < cols; x++ {
+			inside := x >= p.Dst.Min.X && x < p.Dst.Max.X && y >= p.Dst.Min.Y && y < p.Dst.Max.Y
+			if inside {
 				continue
 			}
-			if strings.ContainsAny(c.Content, "日本語") {
-				t.Fatalf("row %d col %d: title glyph %q spilled past the sliver's "+
-					"right edge at %d", y, x, c.Content, p3.Dst.Max.X)
+			c := scr.CellAt(x, y)
+			if c != nil && strings.TrimSpace(c.Content) != "" {
+				t.Fatalf("sliver wrote %q at (%d,%d), outside its rect %v",
+					c.Content, x, y, p.Dst)
 			}
 		}
 	}
 
-	if !strings.ContainsAny(regionText(scr, p3.Dst), "日") {
+	// And it must have drawn something inside.
+	if !strings.ContainsAny(regionText(scr, p.Dst), "日") {
 		t.Error("the sliver drew none of the title at all")
 	}
 }
 
-// manyColumns is wide enough that card mode cannot fit them all.
+// manyColumns builds n panes. Overflow now depends on the share
+// falling below MinSliverWidth rather than on a fixed width running
+// off the edge, so a fixture that overflows needs enough columns for
+// the division to round under the floor -- see the callers.
 func manyColumns(n int) []protocol.ColumnData {
 	out := make([]protocol.ColumnData, 0, n)
 	for i := 1; i <= n; i++ {
@@ -283,19 +304,22 @@ func cardClientWithColumns(t *testing.T, cols, rows, n, focus int) *Client {
 // kind of thing that quietly erodes trust in the layout -- and with
 // 10-cell slivers this is reachable, not hypothetical.
 func TestHiddenCardsAreCounted(t *testing.T) {
-	cli := cardClientWithColumns(t, 60, 16, 6, 1)
+	// 14 columns in 60 cells: 30 remain after the focused pane, so
+	// 13 slivers would get 2 each -- below the 4-cell floor. Seven
+	// clear it, six are dropped.
+	cli := cardClientWithColumns(t, 60, 16, 14, 1)
 
 	cli.mu.Lock()
 	left, right := cli.hiddenCountsLocked(cli.frameStateLocked())
 	placed := len(cli.placements)
 	cli.mu.Unlock()
 
-	if placed >= 6 {
+	if placed >= 14 {
 		t.Fatalf("all %d columns were placed; this fixture is supposed to overflow", placed)
 	}
-	if left+right != 6-placed {
+	if left+right != 14-placed {
 		t.Errorf("hidden counts %d+%d do not account for %d unplaced columns",
-			left, right, 6-placed)
+			left, right, 14-placed)
 	}
 	if right == 0 {
 		t.Errorf("focus is on the leftmost column, so the overflow must be on the right; got left=%d right=%d", left, right)
@@ -304,7 +328,7 @@ func TestHiddenCardsAreCounted(t *testing.T) {
 
 func TestHiddenCardMarkerIsRendered(t *testing.T) {
 	const cols, rows = 60, 16
-	cli := cardClientWithColumns(t, cols, rows, 6, 1)
+	cli := cardClientWithColumns(t, cols, rows, 14, 1)
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr, nil, nil)
@@ -341,7 +365,7 @@ func TestScrollModeNeverShowsAMarker(t *testing.T) {
 	const cols, rows = 60, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     manyColumns(6),
+		Columns:     manyColumns(14),
 		FocusPaneID: 1,
 		Layout:      protocol.LayoutScroll,
 	})
@@ -361,7 +385,7 @@ func TestScrollModeNeverShowsAMarker(t *testing.T) {
 // panes that no longer exist and card mode drew a "+N" for them.
 func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 	const cols, rows = 60, 16
-	cli := cardClientWithColumns(t, cols, rows, 6, 1)
+	cli := cardClientWithColumns(t, cols, rows, 14, 1)
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr, nil, nil)
@@ -392,5 +416,53 @@ func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
 	cli.mu.Unlock()
 	if got != protocol.LayoutCards {
 		t.Errorf("layoutMode = %v after an empty card-mode snapshot, want %v", got, protocol.LayoutCards)
+	}
+}
+
+// Cards are laid out contiguously, so a divider at one card's right
+// edge is the next card's first column and gets painted over the
+// moment that card draws -- which is why every divider but the last
+// was invisible. The sliver spine at each card's left edge already
+// separates them, so cards draw no dividers at all.
+func TestCardsDrawNoDividers(t *testing.T) {
+	const cols, rows = 90, 16
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 60, Height: 10},
+			{PaneID: 2, Width: 60, Height: 10},
+			{PaneID: 3, Width: 60, Height: 10},
+		},
+		FocusPaneID: 2, Layout: protocol.LayoutCards,
+	})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	whole := strings.Join(scr.text(), "\n")
+	if strings.Contains(whole, "│") || strings.Contains(whole, "┃") {
+		t.Errorf("card mode drew a divider:\n%s", whole)
+	}
+}
+
+// Scroll mode still gets them: it reserves a column for the divider,
+// so there is somewhere for one to live.
+func TestScrollModeStillDrawsDividers(t *testing.T) {
+	const cols, rows = 90, 16
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 30, Height: 10},
+			{PaneID: 2, Width: 30, Height: 10},
+		},
+		FocusPaneID: 1, Layout: protocol.LayoutScroll,
+	})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	whole := strings.Join(scr.text(), "\n")
+	if !strings.Contains(whole, "│") && !strings.Contains(whole, "┃") {
+		t.Errorf("scroll mode drew no divider:\n%s", whole)
 	}
 }
