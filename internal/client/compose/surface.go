@@ -37,8 +37,8 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 // where it should. See TestWriteStyledAdvancesByMeasuredWidth.
 //
 // An earlier version of this comment claimed width was ignored too.
-// It was wrong, and docs/BEYOND-V1.md carried a defect row resting on
-// it. What genuinely does not consult width is Text, below, and
+// It was wrong, and the roadmap carried a defect row resting on it
+// (now issue #42, corrected). What genuinely does not consult width is Text, below, and
 // rune-counting truncation -- use TruncateWidth for any text a child
 // process supplied.
 func WriteString(s uv.Screen, x, y int, text string) {

@@ -1,0 +1,103 @@
+name: Rolling Release
+
+# Every push to main publishes a prerelease built from that commit, so
+# a binary is available without cutting a tag. The CI gate runs first
+# and the build only happens if it passes.
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build
+    needs: ci
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Set version variables
+      shell: bash
+      run: |
+        echo "VERSION=rolling-${GITHUB_SHA::7}" >> $GITHUB_ENV
+        echo "COMMIT=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      shell: bash
+      run: make build
+
+    - name: Create archive
+      shell: bash
+      run: |
+        archive="wideboi_rolling_${{ matrix.goos }}_${{ matrix.goarch }}"
+        tar -czf "${archive}.tar.gz" -C bin wideboi
+        echo "ARCHIVE=${archive}.tar.gz" >> $GITHUB_ENV
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARCHIVE }}
+        path: ${{ env.ARCHIVE }}
+
+  release:
+    name: Publish rolling release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+
+    - name: Generate checksums
+      run: cd dist && sha256sum * > checksums.txt
+
+    # A single moving tag rather than one release per merge, so the
+    # releases page does not fill up with every commit to main.
+    - name: Publish
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: rolling
+        name: Rolling build from main
+        body: |
+          Automatically built from the latest commit on `main` (${{ github.sha }}).
+
+          Unstable by construction: this moves with every merge. For something
+          that stays put, use a tagged release.
+        files: dist/*
+        prerelease: true
+        draft: false

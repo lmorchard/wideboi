@@ -360,7 +360,7 @@ func TestNoMarkerWhenEverythingFits(t *testing.T) {
 // scrolled fully out of view have no placement either and
 // hiddenCountsLocked finds them. Marking those is a change to the
 // default layout's chrome for every user, which is out of scope here
-// -- see BEYOND-V1 section 2.
+// -- see issue #48.
 func TestScrollModeNeverShowsAMarker(t *testing.T) {
 	const cols, rows = 60, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")

@@ -1,0 +1,101 @@
+name: Release
+
+# Tagged releases. Assumes the tag was cut from main after CI passed,
+# so this builds artifacts without re-running the gate.
+#
+# No Windows leg and no Docker image, unlike the workflow this was
+# adapted from. wideboi allocates ptys, walks the process table with
+# `ps -axo` and listens on a Unix socket, so it does not build for
+# Windows; and it is an interactive terminal UI, so a container image
+# would have nothing useful to run.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        # Unshallow, so `git describe` in the Makefile can see the tag
+        # it is being asked to stamp.
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Set version variables
+      shell: bash
+      run: |
+        echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        echo "COMMIT=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+
+    # VERSION/COMMIT/DATE are ?= in the Makefile, so passing them here
+    # overrides the `git describe` fallback with the tag being built.
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      shell: bash
+      run: make build
+
+    - name: Create archive
+      shell: bash
+      run: |
+        archive="wideboi_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+        tar -czf "${archive}.tar.gz" -C bin wideboi
+        echo "ARCHIVE=${archive}.tar.gz" >> $GITHUB_ENV
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARCHIVE }}
+        path: ${{ env.ARCHIVE }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: dist
+        merge-multiple: true
+
+    - name: Generate checksums
+      run: cd dist && sha256sum * > checksums.txt
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/*
+        generate_release_notes: true
+        draft: false
+        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}

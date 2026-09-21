@@ -113,7 +113,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				s.removeTransportLocked(tp)
 				s.mu.Unlock()
 				// Close outside s.mu. Close can block, and
-				// BEYOND-V1 section 6 records holding s.mu across a
+				// Issue #43 records holding s.mu across a
 				// blocking call as the shape behind the server that
 				// cannot be shut down. Close is not on the Transport
 				// interface -- only the socket implementations have
@@ -374,7 +374,7 @@ func (s *Server) removePaneLocked(id int) {
 // Run loop blocks in SendServer holding s.mu -> srv.Close() waits
 // forever. Hard to reach and pre-existing. Hoisting SendServer out of
 // s.mu would be a behaviour change, so the residual is recorded in
-// docs/BEYOND-V1.md alongside the parked bounded-write item, which is
+// issue #38 alongside the parked bounded-write item, which is
 // its real fix.
 //
 // That release also means two resizePanesLocked calls can now overlap --

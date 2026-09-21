@@ -421,7 +421,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 // peek at its content.
 //
 // Four columns of someone else's terminal output is visual noise --
-// BEYOND-V1 section 2 -- so a sliver shows what is actually worth
+// issue #21 and the card design notes -- so a sliver shows what is worth
 // knowing about a pane you are not looking at: whether it wants you,
 // what it is doing, and whether it is doing anything at all.
 //
@@ -475,7 +475,7 @@ func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st f
 //
 // CardStrategy drops cards that do not fit rather than scrolling them
 // -- scrolling a row of slivers is its own design, parked in
-// BEYOND-V1 section 2. Dropping them silently is the part worth
+// issue #20. Dropping them silently is the part worth
 // fixing: a pane that exists and is invisible with nothing to say so
 // erodes trust in the layout.
 //
@@ -531,7 +531,7 @@ func (c *Client) drawHiddenMarkersLocked(dst uv.Screen, st frameState) {
 	// either, and hiddenCountsLocked finds those too. Marking them
 	// would be defensible and arguably useful, but it changes the
 	// default layout's chrome for every user, which is well outside
-	// what this change is for. Recorded in BEYOND-V1 section 2 as a
+	// what this change is for. Recorded as issue #48, a
 	// follow-up instead.
 	if c.layoutMode != protocol.LayoutCards {
 		return

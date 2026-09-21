@@ -1,4 +1,18 @@
-.PHONY: check test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check
+.PHONY: check test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+
+# Stamped into the binary at build time so a released artifact can say
+# what it is. VERSION falls back to a placeholder outside a tagged
+# checkout, which is what a `go build` with no tags in sight produces.
+VERSION ?= $(shell git describe --tags --always --dirty --match 'v[0-9]*' 2>/dev/null || echo "v0.0.0-dev")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
+
+# The release workflow reads the Go pin from here rather than
+# hardcoding it, so CI and a local build cannot drift onto different
+# toolchains and disagree about what compiles.
+print-go-version:
+	@go list -f '{{.Module.GoVersion}}' ./cmd/wideboi 2>/dev/null || sed -n 's/^go //p' go.mod
 
 # check is the pre-merge / CI gate, so every target it depends on must be
 # read-only. fmt is deliberately NOT one of them: it rewrites files, and a
@@ -47,7 +61,7 @@ seam-check:
 	./scripts/seam-check.sh
 
 build:
-	go build -o bin/wideboi ./cmd/wideboi
+	go build -ldflags "$(LDFLAGS)" -o bin/wideboi ./cmd/wideboi
 
 run: build
 	./bin/wideboi
