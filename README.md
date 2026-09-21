@@ -59,8 +59,11 @@ right twice.
 
 ## Development
 
-    make check    # fmt, vet, seam boundary, unit tests, race detector, exit contract, smoke
-    make race     # go test -race -count=1 ./..., on its own (~3x the cost of `test`)
+    make quick    # the edit loop: fmt, vet, seam boundary, unit tests (~5s)
+    make check    # the gate: adds race detector, exit contract, smoke, attach (~12s)
+    make race     # go test -race -count=1 ./..., on its own
     make smoke    # scripted acceptance cases, asserted on the pty wire
+
+`make check` runs its targets in parallel; `CHECK_JOBS=1` forces serial.
 
 `docs/LESSONS.md` is worth reading before changing anything.
