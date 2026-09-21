@@ -2,7 +2,9 @@ package ptyx_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -122,5 +124,51 @@ func readUntil(t *testing.T, r io.Reader, want string, within time.Duration) boo
 		return ok
 	case <-time.After(within):
 		return false
+	}
+}
+
+func TestWriteBoundedDeadline(t *testing.T) {
+	// Spawn a command that does not read stdin.
+	p, err := ptyx.Spawn([]string{"/bin/sleep", "100"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Kill(testGrace) })
+
+	buf := make([]byte, 1024)
+	for i := range buf {
+		buf[i] = 'Z'
+	}
+	buf[len(buf)-1] = '\n'
+
+	// Fill the tty input buffer completely. Kernel queue sizes are OS-dependent
+	// (1024 on macOS, 4096+ on Linux), so write until the buffer is saturated
+	// and can accept 0 bytes.
+	filled := false
+	for i := 0; i < 64; i++ {
+		n, err := p.WriteBounded(buf, 10*time.Millisecond)
+		if errors.Is(err, os.ErrDeadlineExceeded) && n == 0 {
+			filled = true
+			break
+		}
+		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("fill write %d: %v", i, err)
+		}
+	}
+	if !filled {
+		t.Fatal("failed to saturate tty input buffer within 64KB")
+	}
+
+	// Once saturated, a write with 50ms deadline must time out rather than
+	// blocking indefinitely.
+	start := time.Now()
+	n, werr := p.WriteBounded(buf, 50*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if !errors.Is(werr, os.ErrDeadlineExceeded) {
+		t.Fatalf("expected os.ErrDeadlineExceeded, got err=%v n=%d (elapsed=%v)", werr, n, elapsed)
+	}
+	if elapsed < 40*time.Millisecond || elapsed > 1*time.Second {
+		t.Fatalf("write returned in %v, expected ~50ms", elapsed)
 	}
 }

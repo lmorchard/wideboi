@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"os"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 const CloseGrace = 2 * time.Second
 const CloseResidual = ptyx.KillResidual
 const keyQueueDepth = 256
+const ptyWriteTimeout = 50 * time.Millisecond
 
 // Pane is the server-side owner of a PTY-backed process and VT emulator.
 type Pane struct {
@@ -126,7 +128,11 @@ func (p *Pane) Start(onExit func()) {
 		for {
 			n, err := p.grid.Read(buf)
 			if n > 0 {
-				if _, werr := p.pty.Master.Write(buf[:n]); werr != nil {
+				if _, werr := p.pty.WriteBounded(buf[:n], ptyWriteTimeout); werr != nil {
+					if errors.Is(werr, os.ErrDeadlineExceeded) {
+						p.dropped.Add(uint64(n))
+						continue
+					}
 					return
 				}
 			}
@@ -205,7 +211,17 @@ func (p *Pane) Resize(cols, rows int) error {
 }
 
 // Write forwards raw bytes to the child process.
-func (p *Pane) Write(b []byte) (int, error) { return p.pty.Master.Write(b) }
+//
+// Uses ptyWriteTimeout so a child that has stopped reading its stdin
+// cannot hold callers (including Server.handleClientMsg under s.mu)
+// indefinitely.
+func (p *Pane) Write(b []byte) (int, error) {
+	n, err := p.pty.WriteBounded(b, ptyWriteTimeout)
+	if errors.Is(err, os.ErrDeadlineExceeded) && n < len(b) {
+		p.dropped.Add(uint64(len(b) - n))
+	}
+	return n, err
+}
 
 // Size reports logical dimensions.
 //

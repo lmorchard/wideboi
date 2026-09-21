@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -51,13 +52,33 @@ func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
 		Setctty: true,
 	}
 
-	master, err := pty.StartWithSize(cmd, &pty.Winsize{
+	rawMaster, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Rows: uint16(rows),
 		Cols: uint16(cols),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ptyx: start %s: %w", argv[0], err)
 	}
+
+	// creack/pty opens the master PTY in blocking mode, which causes Go's
+	// os.File to initialize without netpoller support (SetDeadline returns
+	// "file type does not support deadline"). To enable bounded writes,
+	// dup the descriptor, set it non-blocking, and wrap it in a fresh
+	// os.File so Go registers it with the runtime poller. Closing rawMaster
+	// immediately avoids fd aliasing and GC finalizer races.
+	newFd, err := syscall.Dup(int(rawMaster.Fd()))
+	if err != nil {
+		_ = rawMaster.Close()
+		return nil, fmt.Errorf("ptyx: dup master: %w", err)
+	}
+	syscall.CloseOnExec(newFd)
+	_ = rawMaster.Close()
+
+	if err := syscall.SetNonblock(newFd, true); err != nil {
+		_ = syscall.Close(newFd)
+		return nil, fmt.Errorf("ptyx: set nonblock: %w", err)
+	}
+	master := os.NewFile(uintptr(newFd), rawMaster.Name())
 
 	// Setsid makes the child a session and group leader, so its pgid is
 	// its own pid.
@@ -88,6 +109,19 @@ func (p *Pane) Resize(cols, rows int) error {
 		Rows: uint16(rows),
 		Cols: uint16(cols),
 	})
+}
+
+// WriteBounded writes b to the child's PTY master with an optional timeout.
+// If timeout > 0, it arms a write deadline on the poller-registered master
+// so that a child that has stopped reading stdin cannot block the write
+// indefinitely. When the deadline expires, it returns an error matching
+// os.ErrDeadlineExceeded.
+func (p *Pane) WriteBounded(b []byte, timeout time.Duration) (int, error) {
+	if timeout > 0 {
+		_ = p.Master.SetWriteDeadline(time.Now().Add(timeout))
+		defer func() { _ = p.Master.SetWriteDeadline(time.Time{}) }()
+	}
+	return p.Master.Write(b)
 }
 
 // Close releases the PTY master. It does not stop the child; see Kill.
