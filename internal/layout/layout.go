@@ -49,10 +49,10 @@ func NewStrip() *Strip {
 // the two halves cannot end up disagreeing about what a mode means.
 func ApplyMode(s *Strip, mode protocol.LayoutMode) {
 	switch mode {
-	case protocol.LayoutScroll:
-		s.SetStrategy(ScrollStrategy{})
-	default:
+	case protocol.LayoutCards:
 		s.SetStrategy(CardStrategy{})
+	default:
+		s.SetStrategy(ScrollStrategy{})
 	}
 }
 
@@ -64,7 +64,7 @@ func (s *Strip) SetStrategy(st Strategy) {
 // Strategy returns the current layout strategy.
 func (s *Strip) Strategy() Strategy {
 	if s.strategy == nil {
-		return CardStrategy{}
+		return ScrollStrategy{}
 	}
 	return s.strategy
 }

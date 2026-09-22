@@ -68,12 +68,10 @@ func TestCardsFillTheViewport(t *testing.T) {
 	if g := gaps(ps, 90); len(g) > 0 {
 		t.Errorf("columns left uncovered: %v", g)
 	}
-	for _, p := range ps {
-		if p.Kind != protocol.PlacementSliver {
-			continue
-		}
-		if w := p.Dst.Dx(); w != 10 {
-			t.Errorf("pane %d sliver is %d cells, want 10", p.PaneID, w)
+	wantStarts := []int{0, 10, 70, 80}
+	for i, want := range wantStarts {
+		if got := ps[i].Dst.Min.X; got != want {
+			t.Errorf("pane %d starts at %d, want %d", ps[i].PaneID, got, want)
 		}
 	}
 }
@@ -84,13 +82,16 @@ func TestCardShareRemainderIsDistributed(t *testing.T) {
 	s := stripOf(4, 60, 2)
 	ps := s.ComputePlacements(91, 24) // 91-60 = 31 over 3 slivers
 
-	// In an overlapping card layout, the "sliver width" is the difference
-	// between the starting X coordinates of adjacent panes on the same side.
-	// Actually, the total allocated width for unfocused panes should be 31.
-	// Since pane 2 is focused, panes 0 and 1 are on the left, pane 3 on the right.
-	// left_allocated = X of focused pane.
-	// right_allocated = distance from end of focused pane to X of next pane.
-	// For this test, we can just check if the maximum X offset allocated plus the focused width equals 91.
+	// In overlapping card layout, the sliver share is reflected in the start coordinates:
+	// 31 remainder distributed over 3 slivers gives shares 11, 10, 10,
+	// so the placement starts are 0, 11, 71, 81.
+	wantStarts := []int{0, 11, 71, 81}
+	for i, want := range wantStarts {
+		if got := ps[i].Dst.Min.X; got != want {
+			t.Errorf("pane %d starts at column %d, want %d", ps[i].PaneID, got, want)
+		}
+	}
+
 	if got := coveredWidth(ps); got != 91 {
 		t.Errorf("fan reaches column %d, want 91", got)
 	}

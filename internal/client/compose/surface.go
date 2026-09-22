@@ -107,6 +107,20 @@ func TruncateWidth(s uv.Screen, text string, budget int) string {
 	return text
 }
 
+// StringWidth reports the total display width of text on s, matching
+// the measurement used by WriteStyled and TruncateWidth.
+func StringWidth(s uv.Screen, text string) int {
+	used := 0
+	for _, r := range text {
+		w := 1
+		if cw := uv.NewCell(s.WidthMethod(), string(r)).Width; cw > 1 {
+			w = cw
+		}
+		used += w
+	}
+	return used
+}
+
 // Text renders a screen region to plain strings, for tests and snapshots.
 //
 // Caveat: the mirror image of WriteString's. It emits exactly one rune

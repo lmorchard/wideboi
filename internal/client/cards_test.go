@@ -84,9 +84,9 @@ func TestClientRevertsToScrollLayout(t *testing.T) {
 	}
 }
 
-// The zero value is cards, so a snapshot from a server that never sets
-// the field gets overlapping cards.
-func TestClientDefaultsToCardsLayout(t *testing.T) {
+// The zero value is scroll, so a snapshot from a server that never sets
+// the field behaves exactly as before.
+func TestClientDefaultsToScrollLayout(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
@@ -97,8 +97,8 @@ func TestClientDefaultsToCardsLayout(t *testing.T) {
 	got := sliverCount(cli.placements)
 	cli.mu.Unlock()
 
-	if got == 0 {
-		t.Errorf("default layout produced %d Z=1 placements, want 1", got)
+	if got != 0 {
+		t.Errorf("default layout produced %d slivers, want 0", got)
 	}
 }
 
@@ -202,6 +202,58 @@ func TestFocusedCardRendersContentNotChrome(t *testing.T) {
 	}
 }
 
+// TestHigherZSurfaceWinsAtOverlappingCells proves that when two panes occupy
+// the same physical columns, the higher-Z (focused) pane paints over the lower-Z pane,
+// even when the higher-Z pane appears earlier in slice order.
+func TestHigherZSurfaceWinsAtOverlappingCells(t *testing.T) {
+	const cols, rows = 60, 10
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+
+	// Pane 1 is focused (Z=1).
+	// We directly invoke composeFrameLocked with a slice where Z=1 comes FIRST
+	// and Z=0 comes SECOND, both covering overlapping columns [10..30).
+	pFocused := protocol.PlacementData{
+		PaneID: 1,
+		Src:    image.Rect(0, 0, 30, 10),
+		Dst:    image.Rect(0, 1, 30, 9),
+		Z:      1,
+		Kind:   protocol.PlacementFull,
+	}
+	pBackground := protocol.PlacementData{
+		PaneID: 2,
+		Src:    image.Rect(0, 0, 30, 10),
+		Dst:    image.Rect(10, 1, 40, 9),
+		Z:      0,
+		Kind:   protocol.PlacementFull,
+	}
+
+	st := frameState{
+		placements:  []protocol.PlacementData{pFocused, pBackground},
+		focusPaneID: 1,
+	}
+
+	cli.HandleServerMsg(paneUpdate(1, 30, 10, strings.Repeat("1", 30)))
+	cli.HandleServerMsg(paneUpdate(2, 30, 10, strings.Repeat("2", 30)))
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.mu.Lock()
+	cli.composeFrameLocked(scr, st, nil)
+	cli.mu.Unlock()
+
+	// In the overlap region [10..30) at row 1, Pane 1 (Z=1) must win over Pane 2 (Z=0),
+	// even though Pane 2 was after Pane 1 in st.placements.
+	sampleX := 20
+	c := scr.CellAt(sampleX, 1)
+	if c == nil || c.Content != "1" {
+		got := ""
+		if c != nil {
+			got = c.Content
+		}
+		t.Fatalf("at overlap cell (%d, 1): got %q, want \"1\" (higher-Z pane must paint over lower-Z pane)",
+			sampleX, got)
+	}
+}
+
 // The regression guard for the entire Kind design: under the
 // scrolling strip a pane clipped by the viewport edge is still showing
 // its own content, and must never be painted over with chrome.
@@ -280,6 +332,41 @@ func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	// And it must have drawn something inside.
 	if !strings.ContainsAny(regionText(scr, p.Dst), "日") {
 		t.Error("the sliver drew none of the title at all")
+	}
+}
+
+func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
+	const cols, rows = 60, 12
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+
+	p := protocol.PlacementData{
+		PaneID: 7,
+		Src:    image.Rect(0, 0, 15, 10),
+		Dst:    image.Rect(20, 1, 35, 11),
+		Kind:   protocol.PlacementFull,
+		Z:      1,
+	}
+	st := frameState{
+		placements:   []protocol.PlacementData{p},
+		focusPaneID:  7,
+		paneStatuses: map[int]string{7: "»"},
+		// 12 double-width runes: 12 runes but 24 cells, against 15.
+		paneTitles: map[int]string{7: "日本語日本語日本語日本語"},
+	}
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.mu.Lock()
+	cli.composeFrameLocked(scr, st, nil)
+	cli.mu.Unlock()
+
+	// Check row 0 (the header row). Columns outside [20..35) must be blank.
+	for x := 0; x < cols; x++ {
+		inside := x >= 20 && x < 35
+		if !inside {
+			if c := scr.CellAt(x, 0); c != nil && c.Content != "" && c.Content != " " {
+				t.Fatalf("header wrote %q at (%d,0), outside its rect [20..35)", c.Content, x)
+			}
+		}
 	}
 }
 

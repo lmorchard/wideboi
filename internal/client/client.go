@@ -492,10 +492,10 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 			if p.PaneID == st.focusPaneID {
 				header += " ★"
 			}
-			if runeLen(header) < headerW {
-				header += strings.Repeat(" ", headerW-runeLen(header))
+			header = compose.TruncateWidth(dst, header, headerW)
+			if used := compose.StringWidth(dst, header); used < headerW {
+				header += strings.Repeat(" ", headerW-used)
 			}
-			header = truncateRunes(header, headerW)
 
 			if p.PaneID == st.focusPaneID {
 				compose.WriteStyled(dst, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})

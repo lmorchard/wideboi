@@ -171,16 +171,16 @@ func TestToggleCardsFlipsLayoutMode(t *testing.T) {
 	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
 	ctx := context.Background()
 
+	if s.layout != protocol.LayoutScroll {
+		t.Fatalf("initial layout = %v, want %v", s.layout, protocol.LayoutScroll)
+	}
+	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
 	if s.layout != protocol.LayoutCards {
-		t.Fatalf("initial layout = %v, want %v", s.layout, protocol.LayoutCards)
+		t.Errorf("after one toggle layout = %v, want %v", s.layout, protocol.LayoutCards)
 	}
 	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
 	if s.layout != protocol.LayoutScroll {
-		t.Errorf("after one toggle layout = %v, want %v", s.layout, protocol.LayoutScroll)
-	}
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
-	if s.layout != protocol.LayoutCards {
-		t.Errorf("after two toggles layout = %v, want %v", s.layout, protocol.LayoutCards)
+		t.Errorf("after two toggles layout = %v, want %v", s.layout, protocol.LayoutScroll)
 	}
 }
 
