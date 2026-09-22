@@ -11,6 +11,7 @@ Cases derive from the spec's user-journey list. Add one per feature.
 """
 
 import argparse
+import base64
 import fcntl
 import os
 import re
@@ -271,6 +272,73 @@ def case_focus_switch_moves_the_cursor(fail):
     if b"pane-one" not in s.output():
         fail("input did not follow focus to the second pane")
     s.close()
+
+
+def case_click_focuses_pane(fail):
+    # Asserted through focus_pane_id, which parses the status line --
+    # bytes only wideboi emits -- not through anything the click itself
+    # sends. Startup focuses pane 1 at the left; column 95 of a
+    # 100-column viewport is inside pane 2 in either layout.
+    s = Session()
+    if b"\x1b[?1002h" not in s.output():
+        fail("startup never enabled mouse drag tracking (DEC 1002)")
+    before = focus_pane_id(s.output(), s.rows)
+    s.type("\x1b[<0;95;5M\x1b[<0;95;5m")  # SGR left press + release, 1-based
+    after = focus_pane_id(s.output(), s.rows)
+    s.close()
+    if before is None or after is None:
+        fail("no focus-pane-id observed around the click")
+        return
+    if after == before:
+        fail(f"clicking column 95 left focus on pane {before}")
+
+
+def case_drag_copies_over_osc52(fail):
+    # The typed command is printf 'AB%sCD' XY; only its *output* reads
+    # ABXYCD, so finding that in the clipboard payload proves the text
+    # came off the screen rather than out of the echoed command line.
+    # And OSC 52 itself is emitted by nothing but wideboi -- the shell
+    # never writes one.
+    #
+    # Scroll layout, so pane 1 starts at column 0. The drag runs from
+    # the top-left of its content (1-based row 2: row 1 is the header)
+    # down a dozen rows, which covers the prompt, the command and its
+    # output on a fresh session.
+    s = Session(args=["--layout", "scroll"])
+    s.type("printf 'AB%sCD\\n' XY\r")
+    s.type("\x1b[<0;1;2M\x1b[<32;20;8M\x1b[<0;30;14m")
+    out = s.output()
+    s.close()
+    m = re.search(rb"\x1b\]52;c;([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)", out)
+    if not m:
+        fail("no OSC 52 clipboard write after a drag")
+        return
+    copied = base64.b64decode(m.group(1))
+    if b"ABXYCD" not in copied:
+        fail(f"clipboard payload lacks the command's output: {copied!r}")
+
+
+def case_click_reaches_mouse_tracking_child(fail):
+    # The child turns on SGR mouse tracking, reads the nine raw bytes of
+    # one press report (ESC [ < 0 ; 5 ; 4 M), and prints them as hex.
+    # "1b 5b 3c" is ESC [ < -- the start of an SGR
+    # mouse report -- and appears nowhere in the typed command, so
+    # finding it means the click was forwarded and encoded for the
+    # child rather than consumed by wideboi or echoed back.
+    #
+    # Scroll layout keeps pane 1, the focused one, at the left edge.
+    s = Session(args=["--layout", "scroll"])
+    s.type("stty raw -echo; printf '\\033[?1000h\\033[?1006h'; "
+           "dd bs=1 count=9 2>/dev/null | od -An -tx1; "
+           "printf '\\033[?1000l\\033[?1006l'; stty sane\r")
+    before = len(s.output())
+    s.type("\x1b[<0;5;5M\x1b[<0;5;5m")
+    landed = s.output()[before:]
+    s.close()
+    # Matched on whitespace, not a literal: od's column spacing varies
+    # by platform, and wideboi's renderer may re-space the cells.
+    if not re.search(rb"1b\s+5b\s+3c", landed):
+        fail("a click in a mouse-tracking pane never reached the child")
 
 
 def case_new_column_opens_pane(fail):
@@ -884,6 +952,9 @@ CASES = [
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
     ("shifted keys reach the pane", case_shifted_keys_reach_the_pane),
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
+    ("click focuses the pane under the pointer", case_click_focuses_pane),
+    ("drag copies over OSC 52", case_drag_copies_over_osc52),
+    ("click reaches a mouse-tracking child", case_click_reaches_mouse_tracking_child),
     ("new column opens pane", case_new_column_opens_pane),
     ("cycle width adjusts column", case_cycle_width),
     ("grow and shrink width", case_grow_and_shrink_width),

@@ -246,3 +246,28 @@ width_presets = [10, 80]
 		t.Errorf("expected error for invalid width_presets, got nil")
 	}
 }
+
+// Mouse capture is on unless the file says otherwise. The field is a
+// pointer so an absent key and an explicit false are distinguishable;
+// a plain bool would read an absent key as "off".
+func TestLoadMouse(t *testing.T) {
+	cfg, _, err := config.Load(config.ConfigFlags{}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.MouseEnabled {
+		t.Error("MouseEnabled = false by default, want true")
+	}
+
+	tomlPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlPath, []byte("mouse = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.MouseEnabled {
+		t.Error("MouseEnabled = true with mouse = false in the file")
+	}
+}

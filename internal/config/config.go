@@ -24,7 +24,11 @@ type Config struct {
 	Shell        string              `toml:"shell"`
 	WidthPresets []int               `toml:"width_presets"`
 	Keys         map[string]string   `toml:"keys"`
-	ConfigFile   string              `toml:"-"`
+	// Mouse is a pointer so an absent key reads as the default (on)
+	// rather than as false. Read MouseEnabled, not this.
+	Mouse        *bool  `toml:"mouse"`
+	MouseEnabled bool   `toml:"-"`
+	ConfigFile   string `toml:"-"`
 }
 
 // ConfigFlags contains command-line flag overrides passed into Load.
@@ -112,6 +116,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			if len(fileCfg.Keys) > 0 {
 				cfg.Keys = fileCfg.Keys
 			}
+			if fileCfg.Mouse != nil {
+				cfg.Mouse = fileCfg.Mouse
+			}
 			if len(fileCfg.WidthPresets) > 0 {
 				cfg.WidthPresets = fileCfg.WidthPresets
 			}
@@ -180,6 +187,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if cfg.Shell == "" {
 		cfg.Shell = "/bin/sh"
 	}
+
+	// Mouse
+	cfg.MouseEnabled = cfg.Mouse == nil || *cfg.Mouse
 
 	// Keys
 	bindings, err := keys.BuildBindings(cfg.Keys)

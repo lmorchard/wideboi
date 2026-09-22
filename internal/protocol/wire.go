@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"image"
 	"image/color"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -183,3 +184,45 @@ func (k KeyData) Decode() uv.KeyEvent {
 // IsZero reports whether k carries no key at all, which is how
 // MsgInput distinguishes a raw-bytes send from a key send.
 func (k KeyData) IsZero() bool { return k == KeyData{} }
+
+// EncodeMouse flattens ev for transport to paneID, replacing its screen
+// coordinates with local, which is where the event lands in the pane.
+func EncodeMouse(paneID int, ev uv.MouseEvent, local image.Point) MsgMouse {
+	var kind MouseKind
+	switch ev.(type) {
+	case uv.MouseReleaseEvent:
+		kind = MouseRelease
+	case uv.MouseMotionEvent:
+		kind = MouseMotion
+	case uv.MouseWheelEvent:
+		kind = MouseWheel
+	default:
+		kind = MousePress
+	}
+	m := ev.Mouse()
+	return MsgMouse{
+		PaneID: paneID,
+		Kind:   kind,
+		X:      local.X,
+		Y:      local.Y,
+		Button: int(m.Button),
+		Mod:    int(m.Mod),
+	}
+}
+
+// Decode rebuilds the uv.MouseEvent for the server to feed its
+// emulator. The concrete type matters: vt's SendMouse distinguishes
+// press, release and motion by type assertion.
+func (m MsgMouse) Decode() uv.MouseEvent {
+	mouse := uv.Mouse{X: m.X, Y: m.Y, Button: uv.MouseButton(m.Button), Mod: uv.KeyMod(m.Mod)}
+	switch m.Kind {
+	case MouseRelease:
+		return uv.MouseReleaseEvent(mouse)
+	case MouseMotion:
+		return uv.MouseMotionEvent(mouse)
+	case MouseWheel:
+		return uv.MouseWheelEvent(mouse)
+	default:
+		return uv.MouseClickEvent(mouse)
+	}
+}

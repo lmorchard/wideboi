@@ -16,6 +16,7 @@ import (
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/client"
 	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/hostterm"
@@ -260,6 +261,7 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
 	scr.EnterAltScreen()
+	enableMouse(scr, cfg)
 	if err := t.Start(); err != nil {
 		_ = t.Stop()
 		conn.Close()
@@ -322,6 +324,7 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 				cli.SendResize(ctx, ev.Width, ev.Height)
 
 			case uv.KeyPressEvent:
+				cli.ClearSelection()
 				act := rt.route(ev)
 				switch act.Kind {
 				case routeQuit, routeDetach:
@@ -340,6 +343,13 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 				}
 				cli.SetControlMode(rt.control)
 				cli.SetHelpVisible(rt.help)
+
+			case uv.MouseEvent:
+				if text := cli.HandleMouse(ctx, ev); text != "" {
+					screenLock.Lock()
+					writeClipboard(scr, text)
+					screenLock.Unlock()
+				}
 			}
 
 		case <-frame.C:
@@ -350,6 +360,34 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 			screenLock.Unlock()
 		}
 	}
+}
+
+// enableMouse asks the host terminal to report presses, releases and
+// drags in SGR encoding, unless config turned the mouse off.
+//
+// Drag tracking (DEC 1002), not all-motion (1003): wideboi only needs
+// motion while a button is held, and all-motion would send an event for
+// every cell the pointer crosses. Terminal.Stop's Reset turns tracking
+// back off, so teardown needs nothing extra.
+func enableMouse(scr *uv.TerminalScreen, cfg config.Config) {
+	if !cfg.MouseEnabled {
+		return
+	}
+	scr.SetMouseMode(uv.MouseModeDrag)
+	scr.SetMouseEncoding(uv.MouseEncodingSGR)
+}
+
+// writeClipboard sets the host clipboard over OSC 52, which reaches the
+// terminal the user is sitting at even through SSH -- unlike shelling
+// out to pbcopy, which would copy on whichever machine wideboi runs on.
+//
+// Written straight to the screen's output rather than into a cell:
+// ultraviolet drops OSC sequences from cell content deliberately,
+// because a cell is repainted on every change and a clipboard write
+// must fire exactly once. screenLock must be held.
+func writeClipboard(scr *uv.TerminalScreen, text string) {
+	_, _ = scr.WriteString(ansi.SetSystemClipboard(text))
+	_ = scr.Flush()
 }
 
 func run(cfg config.Config, bindings []keys.Binding) error {
@@ -363,6 +401,7 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
 	scr.EnterAltScreen()
+	enableMouse(scr, cfg)
 	if err := t.Start(); err != nil {
 		_ = t.Stop()
 		return fmt.Errorf("start terminal: %w", err)
@@ -450,6 +489,7 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 				cli.SendResize(ctx, ev.Width, ev.Height)
 
 			case uv.KeyPressEvent:
+				cli.ClearSelection()
 				act := rt.route(ev)
 				switch act.Kind {
 				case routeQuit:
@@ -469,6 +509,15 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 				// router about which mode is active.
 				cli.SetControlMode(rt.control)
 				cli.SetHelpVisible(rt.help)
+
+			case uv.MouseEvent:
+				if text := cli.HandleMouse(ctx, ev); text != "" {
+					screenLock.Lock()
+					if !stopped.Load() {
+						writeClipboard(scr, text)
+					}
+					screenLock.Unlock()
+				}
 			}
 
 		case <-frame.C:

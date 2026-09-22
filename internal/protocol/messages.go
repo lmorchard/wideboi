@@ -51,6 +51,11 @@ type MsgPaneUpdate struct {
 	CursorX       int
 	CursorY       int
 	CursorVisible bool
+	// MouseTracking is true while the pane's child has asked for mouse
+	// events. It rides on the pane update rather than the layout
+	// snapshot because it changes when the child writes bytes, and
+	// writing bytes is what sends a pane update.
+	MouseTracking bool
 }
 
 // PlacementKind says what a placement represents, which the renderer
@@ -91,6 +96,37 @@ type MsgAttach struct {
 // MsgVerb is sent by the client to request a layout navigation or action.
 type MsgVerb struct {
 	Verb VerbType
+}
+
+// MsgFocusPane asks the server to focus a specific pane. A mouse click
+// names its target, unlike the relative focus verbs, so it cannot ride
+// on MsgVerb without giving every other verb a field it ignores.
+type MsgFocusPane struct {
+	PaneID int
+}
+
+// MouseKind says which of uv's mouse event types a MsgMouse carries.
+type MouseKind int
+
+const (
+	MousePress MouseKind = iota
+	MouseRelease
+	MouseMotion
+	MouseWheel
+)
+
+// MsgMouse forwards a mouse event to a pane whose child has enabled
+// mouse tracking. X and Y are pane-local cells, already translated from
+// the screen by the client.
+//
+// Concrete fields rather than uv.MouseEvent: that is an interface, and
+// interfaces cannot cross the wire (TestWireTypesCarryNoInterfaces).
+type MsgMouse struct {
+	PaneID int
+	Kind   MouseKind
+	X, Y   int
+	Button int
+	Mod    int
 }
 
 // MsgInput carries decoded key events or pasted text destined for a
