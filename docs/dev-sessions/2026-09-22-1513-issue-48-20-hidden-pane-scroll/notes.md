@@ -36,3 +36,14 @@
   Same as `scrollX`.
 - Board transitions skipped: the `gh` token lacks `read:project`
   (`gh auth refresh -s read:project,project`).
+
+## PR #73
+
+- Before pushing I removed a stray rapid `.fail` file that my margin-breaking
+  probe had left in `internal/layout/testdata/rapid/`. Check the full diffstat
+  after any "prove it fails" run with rapid.
+- Copilot: one finding. The right `+N` was written into the terminal's last
+  column (LESSONS: never write the last column). This predates the PR in card
+  mode, but the PR spread it to scroll mode. Fixed by shifting it one cell left,
+  and the test now pins the position. Pushed as a normal commit instead of
+  force-pushing, per LESSONS on force-push racing the merge.
