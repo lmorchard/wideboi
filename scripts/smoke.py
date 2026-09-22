@@ -564,6 +564,24 @@ def case_card_layout_toggles(fail):
         fail(f"toggling back landed at column {back_col}, want {scroll_col}")
 
 
+def case_scroll_mode_marks_off_screen_panes(fail):
+    # Issue #48: a pane scrolled fully out of view in scroll mode has no
+    # placement at all. The client counts those and draws "+N" on the
+    # header row. The in-process tests cover the counting; this covers
+    # the marker surviving the renderer onto the wire.
+    s = Session(cols=100, args=["--layout", "scroll"])
+    mark = len(s.output())
+    if b"+1" in s.output():
+        fail("marker drawn before any pane was off-screen")
+    # Three columns do not fit in 100 cells, and focus on the newest
+    # scrolls pane 1 fully off the left edge.
+    s.type("\x02n")
+    landed = s.output()[mark:]
+    s.close()
+    if b"+1" not in landed:
+        fail("no +1 marker for the pane scrolled off the left edge")
+
+
 def case_quit_restores_and_reaps(fail):
     s = Session()
     s.type("echo before-quit\r")
@@ -859,6 +877,7 @@ CASES = [
     ("config file and key remapping", case_config_file_and_key_remapping),
     ("osc133 status drives smart jump", case_osc133_status_drives_smart_jump),
     ("card layout toggles", case_card_layout_toggles),
+    ("scroll mode marks off-screen panes", case_scroll_mode_marks_off_screen_panes),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
     ("status line names the prefix", case_status_line_names_the_prefix),
     ("control mode names every entry at 80 columns", case_control_mode_names_every_entry_at_80_columns),
