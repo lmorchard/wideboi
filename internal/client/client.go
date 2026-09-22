@@ -624,10 +624,9 @@ func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st f
 // hiddenCountsLocked reports how many columns have no placement,
 // split by which side of the focused column they sit on.
 //
-// CardStrategy drops cards that do not fit rather than scrolling them
-// -- scrolling a row of slivers is its own design, parked in
-// issue #20. Dropping them silently is the part worth
-// fixing: a pane that exists and is invisible with nothing to say so
+// Both strategies leave some columns unplaced: CardStrategy the cards
+// outside its window, ScrollStrategy any pane scrolled fully out of
+// view. A pane that exists and is invisible with nothing to say so
 // erodes trust in the layout.
 //
 // Derived here rather than carried on the wire: the client already
@@ -669,32 +668,23 @@ func (c *Client) hiddenCountsLocked(st frameState) (left, right int) {
 	return left, right
 }
 
-// drawHiddenMarkersLocked writes a "+N" on the header row for cards
-// that did not fit, at whichever edge they fell off.
+// drawHiddenMarkersLocked writes a "+N" on the header row for columns
+// that have no placement, at whichever edge they fell off.
 //
-// The header row is already chrome, so no card has to reserve space
-// for this and CardStrategy stays untouched. c.mu must be held.
+// Both strategies drop columns: CardStrategy the cards outside its
+// window, ScrollStrategy any pane scrolled fully out of view (issue
+// #48). The header row is already chrome, so neither has to reserve
+// space for this. c.mu must be held.
 func (c *Client) drawHiddenMarkersLocked(dst uv.Screen, st frameState) {
-	// Card mode only, deliberately.
-	//
-	// ScrollStrategy also drops columns -- it skips any whose Dst is
-	// empty, so a pane scrolled fully out of view has no placement
-	// either, and hiddenCountsLocked finds those too. Marking them
-	// would be defensible and arguably useful, but it changes the
-	// default layout's chrome for every user, which is well outside
-	// what this change is for. Recorded as issue #48, a
-	// follow-up instead.
-	if c.layoutMode != protocol.LayoutCards {
-		return
-	}
-
 	left, right := c.hiddenCountsLocked(st)
 	if left > 0 {
 		compose.WriteStyled(dst, 0, 0, fmt.Sprintf("+%d", left), uv.Style{Attrs: uv.AttrBold})
 	}
 	if right > 0 {
+		// One cell short of the edge: a write to the last column gets
+		// autowrap-toggle escapes spliced into it on the wire.
 		s := fmt.Sprintf("+%d", right)
-		x := c.cols - runeLen(s)
+		x := c.cols - 1 - runeLen(s)
 		if x < 0 {
 			x = 0
 		}

@@ -37,6 +37,7 @@ type Strip struct {
 	columns      []Column
 	focusIndex   int
 	scrollX      int
+	cardFirst    int // CardStrategy's window: index of its leftmost card
 	strategy     Strategy
 	widthPresets []int
 }

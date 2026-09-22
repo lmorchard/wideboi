@@ -75,7 +75,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	focusedW := min(s.columns[focusedIdx].Width, viewportWidth)
 	remaining := max(viewportWidth-focusedW, 0)
 
-	showLeft, showRight := cs.visibleSides(focusedIdx, numCols, remaining)
+	showLeft, showRight := cs.visibleSides(s, remaining)
 	sliverCount := showLeft + showRight
 
 	// Sliver widths, indexed left to right across the whole fan so the
@@ -139,45 +139,49 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 // focused pane.
 //
 // With enough columns the even share rounds below what chrome needs,
-// so only as many as clear MinSliverWidth are shown. The survivors
-// are taken from nearest the focused pane outward -- those are the
-// neighbours you are most likely to want next -- and the rest are
+// so only as many as clear MinSliverWidth are shown and the rest are
 // dropped, where hiddenCountsLocked finds them and the client draws a
 // "+N".
-func (cs CardStrategy) visibleSides(focusedIdx, numCols, remaining int) (left, right int) {
-	availLeft := focusedIdx
-	availRight := numCols - 1 - focusedIdx
-	wanted := availLeft + availRight
+//
+// Which ones survive is a window over the strip that scrolls the way
+// ScrollStrategy's viewport does (issue #20): it is remembered on the
+// Strip and moves only when focus would otherwise get too close to an
+// edge. Re-centring on every move instead meant each focus change
+// reshuffled which cards were on screen, on both sides.
+//
+// "Too close" is a margin of one card when the window holds at least
+// three, so both of the focused pane's neighbours stay visible --
+// those are the ones you are most likely to want next.
+func (cs CardStrategy) visibleSides(s *Strip, remaining int) (left, right int) {
+	numCols := len(s.columns)
+	focusedIdx := s.focusIndex
+	others := numCols - 1
 
-	budget := wanted
+	budget := others
 	if cs.SliverWidth > 0 {
 		// Pinned width: as many as fit whole.
-		budget = min(wanted, remaining/cs.SliverWidth)
-	} else if wanted > 0 && remaining/wanted < MinSliverWidth {
+		budget = remaining / cs.SliverWidth
+	} else if others > 0 && remaining/others < MinSliverWidth {
 		budget = remaining / MinSliverWidth
 	}
-	if budget > wanted {
-		budget = wanted
-	}
+	size := min(budget, others) + 1 // the focused card and its slivers
 
-	// Alternate outward from the focused pane so both neighbours
-	// survive before either side's second card does.
-	for left+right < budget {
-		grew := false
-		if right < availRight {
-			right++
-			grew = true
-			if left+right == budget {
-				break
-			}
-		}
-		if left < availLeft {
-			left++
-			grew = true
-		}
-		if !grew {
-			break
-		}
+	margin := 0
+	if size >= 3 {
+		margin = 1
 	}
-	return left, right
+	lo := max(focusedIdx-margin, 0)
+	hi := min(focusedIdx+margin, numCols-1)
+
+	first := s.cardFirst
+	if lo < first {
+		first = lo
+	}
+	if hi > first+size-1 {
+		first = hi - size + 1
+	}
+	first = max(min(first, numCols-size), 0)
+	s.cardFirst = first
+
+	return focusedIdx - first, first + size - 1 - focusedIdx
 }

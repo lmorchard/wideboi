@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"image"
 	"strings"
 	"testing"
@@ -393,8 +394,8 @@ func cardClientWithColumns(t *testing.T, cols, rows, n, focus int) *Client {
 	return cli
 }
 
-// CardStrategy drops cards that do not fit rather than scrolling them.
-// A pane that exists and is invisible with no indication of it is the
+// CardStrategy shows only a window of the cards when they do not all
+// fit. A pane that exists and is invisible with no indication of it is the
 // kind of thing that quietly erodes trust in the layout -- and with
 // 10-cell slivers this is reachable, not hypothetical.
 func TestHiddenCardsAreCounted(t *testing.T) {
@@ -446,20 +447,48 @@ func TestNoMarkerWhenEverythingFits(t *testing.T) {
 	}
 }
 
-// The marker is card-mode chrome and must not leak into the default
-// layout.
-//
-// Note the reason is NOT that scroll mode keeps every column:
-// ScrollStrategy drops any column whose Dst is empty, so panes
-// scrolled fully out of view have no placement either and
-// hiddenCountsLocked finds them. Marking those is a change to the
-// default layout's chrome for every user, which is out of scope here
-// -- see issue #48.
-func TestScrollModeNeverShowsAMarker(t *testing.T) {
+// Scroll mode drops columns too: ScrollStrategy skips any whose Dst
+// is empty, so a pane scrolled fully out of view has no placement at
+// all. Without a marker it is exactly the silent-invisible-pane problem
+// card mode had -- issue #48.
+func TestScrollModeMarksOffScreenPanes(t *testing.T) {
+	// 14 columns of 30 cells, 31 apiece with the divider, in 60 cells:
+	// focus on the first leaves about twelve fully off the right edge.
 	const cols, rows = 60, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(14),
+		FocusPaneID: 1,
+		Layout:      protocol.LayoutScroll,
+	})
+
+	cli.mu.Lock()
+	_, right := cli.hiddenCountsLocked(cli.frameStateLocked())
+	cli.mu.Unlock()
+	if right == 0 {
+		t.Fatal("fixture should leave panes fully off-screen to the right")
+	}
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr, nil, nil)
+
+	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
+	// Ending one cell short of the edge, not at it: ultraviolet wraps a
+	// write to the last column in autowrap-toggle escapes, which would
+	// split the marker on the wire (docs/LESSONS.md).
+	want := fmt.Sprintf("+%d", right)
+	if got := header[len(header)-1-len(want) : len(header)-1]; got != want {
+		t.Errorf("want %q just inside the right edge, got %q in %q", want, got, header)
+	}
+}
+
+// Nothing off-screen, nothing marked: the default layout's chrome is
+// unchanged for anyone whose panes fit.
+func TestScrollModeNoMarkerWhenEverythingFits(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:     manyColumns(3),
 		FocusPaneID: 1,
 		Layout:      protocol.LayoutScroll,
 	})
@@ -469,7 +498,7 @@ func TestScrollModeNeverShowsAMarker(t *testing.T) {
 
 	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
 	if strings.Contains(header, "+") {
-		t.Errorf("scroll mode drew an overflow marker: %q", header)
+		t.Errorf("marker drawn when every pane fits: %q", header)
 	}
 }
 
