@@ -31,8 +31,10 @@ NAMES = [
     (rb"\x1b\[(\d+);(\d+)H", "CURSOR_TO(r,c)", False),
     (rb"\x1b\[2J", "CLEAR_SCREEN", True),
     (rb"\x1b\[0?m", "SGR_RESET", False),
-    (rb"\x1b\[\?2026h", "SYNC_BEGIN", True),
-    (rb"\x1b\[\?2026l", "SYNC_END", True),
+    # Per-frame since cmd/wideboi/present.go brackets every frame (#72):
+    # the count is how many frames startup took, which is timing.
+    (rb"\x1b\[\?2026h", "SYNC_BEGIN", False),
+    (rb"\x1b\[\?2026l", "SYNC_END", False),
 ]
 
 
