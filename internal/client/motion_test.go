@@ -313,3 +313,68 @@ func TestCollapsingPaneDoesNotPaintOverTheRest(t *testing.T) {
 		}
 	}
 }
+
+func TestRightToLeftMotionNeverShowsABlankFrame(t *testing.T) {
+	const cols, rows = 90, 12
+	cli := newMotionClient(t, cols, rows)
+
+	// Focus 2 (left-to-right from initial focus 1)
+	focusTo(cli, 2)
+	for step := 0; step <= motionFrames; step++ {
+		cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+	}
+
+	// Focus 1 (right-to-left from focus 2)
+	focusTo(cli, 1)
+
+	for step := 0; step <= motionFrames; step++ {
+		scr := newFakeHostScreen(cols, rows)
+		cli.Draw(scr, nil, nil)
+		if blankAbove(scr, rows-1) {
+			t.Fatalf("frame %d of right-to-left transition is blank above the status bar", step)
+		}
+	}
+}
+
+func TestRightToLeftMotionRetainsCardContent(t *testing.T) {
+	const cols, rows = 90, 12
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	focusTo(cli, 1)
+	cli.HandleServerMsg(paneUpdate(1, 60, 10, "PANE-ONE"))
+	cli.HandleServerMsg(paneUpdate(2, 60, 10, "PANE-TWO"))
+	cli.HandleServerMsg(paneUpdate(3, 60, 10, "PANE-THREE"))
+
+	focusTo(cli, 2)
+	for step := 0; step <= motionFrames; step++ {
+		cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+	}
+
+	// Focus 1 (right-to-left from focus 2)
+	focusTo(cli, 1)
+
+	// Verify motion was created
+	cli.mu.Lock()
+	if cli.motion == nil {
+		t.Fatalf("expected motion to be created for right-to-left focus change")
+	}
+
+	// At step 1, Pane 2 is shrinking to a sliver, but should retain PlacementFull
+	// so its content slides away / is occluded rather than instantly vanishing.
+	cli.motion.step = 1
+	placements := cli.motion.at()
+	cli.mu.Unlock()
+
+	foundTwo := false
+	for _, p := range placements {
+		if p.PaneID == 2 {
+			foundTwo = true
+			if p.Kind != protocol.PlacementFull {
+				t.Errorf("contracting card (Pane 2) transitioned to Kind=%v on frame 1, expected PlacementFull", p.Kind)
+			}
+		}
+	}
+
+	if !foundTwo {
+		t.Errorf("Pane 2 not found in interpolated placements")
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"image"
 	"sort"
 
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
@@ -143,12 +144,16 @@ func blend(a, b, meta protocol.PlacementData, t float64) protocol.PlacementData 
 		meta.Src.Min.X, meta.Src.Min.Y,
 		meta.Src.Min.X+dst.Dx(), meta.Src.Min.Y+dst.Dy(),
 	)
+	kind := meta.Kind
+	if t < 1.0 && (a.Kind == protocol.PlacementFull || b.Kind == protocol.PlacementFull) && dst.Dx() >= layout.MinSliverWidth {
+		kind = protocol.PlacementFull
+	}
 	return protocol.PlacementData{
 		PaneID: meta.PaneID,
 		Src:    src,
 		Dst:    dst,
 		Z:      meta.Z,
-		Kind:   meta.Kind,
+		Kind:   kind,
 	}
 }
 
