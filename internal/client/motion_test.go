@@ -372,14 +372,14 @@ func TestRightToLeftMotionRetainsCardContent(t *testing.T) {
 			if p.Kind != protocol.PlacementFull {
 				t.Errorf("contracting card (Pane 2) transitioned to Kind=%v on frame 1, expected PlacementFull", p.Kind)
 			}
-			if p.Z != 1 {
-				t.Errorf("contracting card (Pane 2) transitioned to Z=%v on frame 1, expected 1 to slide over the incoming card", p.Z)
+			if p.Z != 0 {
+				t.Errorf("contracting card (Pane 2) transitioned to Z=%v on frame 1, expected 0 to fall back to natural deck order", p.Z)
 			}
 		}
 		if p.PaneID == 1 {
 			foundOne = true
-			if p.Z != 1 {
-				t.Errorf("expanding card (Pane 1) transitioned to Z=%v on frame 1, expected 1", p.Z)
+			if p.Z != 0 {
+				t.Errorf("expanding card (Pane 1) transitioned to Z=%v on frame 1, expected 0 to fall back to natural deck order", p.Z)
 			}
 		}
 	}

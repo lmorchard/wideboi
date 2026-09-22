@@ -150,7 +150,7 @@ func blend(a, b, meta protocol.PlacementData, t float64) protocol.PlacementData 
 	}
 	z := meta.Z
 	if t < 1.0 {
-		if a.Z > b.Z {
+		if a.Z < b.Z {
 			z = a.Z
 		} else {
 			z = b.Z
