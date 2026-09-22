@@ -28,6 +28,7 @@ found that way, none of which were guessable:
 - `Emulator.Draw` paints only `Touched()` lines and `Screen.Resize` clears `Touched`, so a pane renders blank after a resize until something re-touches it.
 - Writing a wide glyph's placeholder cell explicitly trips `uv.Line.Set`'s partial-overwrite protection and blanks the whole glyph. Advance by each cell's own `Width`.
 - There is no public cursor setter — `setCursor` is unexported.
+- `TerminalScreen.Flush` calls `rend.MoveTo` to position the cursor, but `MoveTo` writes to `rend.buf`, which only flushes to the screen's output buffer on the *next* `TerminalScreen.Render`. Gating render ticks when dirty therefore needs a follow-up tick so cursor moves are not trapped in `rend.buf`.
 
 The `term.Grid` interface exists precisely so upstream surprises stay confined to
 one file. Keep it narrow, and fix upstream gaps behind it rather than forking.

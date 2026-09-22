@@ -60,6 +60,10 @@ type Client struct {
 	helpVisible  bool
 	detachable   bool
 	motion       *motion
+
+	stagingScreen      *offscreenHostScreen
+	lastRenderedScreen *offscreenHostScreen
+	lastHostScreen     HostScreen
 }
 
 // frameStateLocked snapshots the layout state a frame is composed from.
@@ -264,11 +268,120 @@ type HostScreen interface {
 	SetCursorPosition(x, y int)
 }
 
+type offscreenHostScreen struct {
+	compose.Surface
+	cursorShown bool
+	cursorX     int
+	cursorY     int
+}
+
+func newOffscreenHostScreen(cols, rows int) *offscreenHostScreen {
+	return &offscreenHostScreen{
+		Surface: compose.NewSurface(cols, rows),
+	}
+}
+
+func (s *offscreenHostScreen) HideCursor()                { s.cursorShown = false }
+func (s *offscreenHostScreen) ShowCursor()                { s.cursorShown = true }
+func (s *offscreenHostScreen) SetCursorPosition(x, y int) { s.cursorX, s.cursorY = x, y }
+
+func (s *offscreenHostScreen) clear() {
+	s.Surface.Clear()
+	s.cursorShown = false
+	s.cursorX = 0
+	s.cursorY = 0
+}
+
+func (s *offscreenHostScreen) equal(other *offscreenHostScreen) bool {
+	if s == nil || other == nil {
+		return false
+	}
+	if s.cursorShown != other.cursorShown {
+		return false
+	}
+	if s.cursorShown && (s.cursorX != other.cursorX || s.cursorY != other.cursorY) {
+		return false
+	}
+	b1 := s.Bounds()
+	b2 := other.Bounds()
+	if b1 != b2 {
+		return false
+	}
+	w, h := b1.Dx(), b1.Dy()
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			c1 := s.CellAt(x, y)
+			c2 := other.CellAt(x, y)
+			if c1 == c2 {
+				continue
+			}
+			if c1 == nil || c2 == nil {
+				return false
+			}
+			if !c1.Equal(c2) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func copyToHostScreen(src *offscreenHostScreen, dst HostScreen) {
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; {
+			c := src.CellAt(x, y)
+			if c == nil {
+				x++
+				continue
+			}
+			dst.SetCell(x, y, c)
+			width := c.Width
+			if width <= 0 {
+				width = 1
+			}
+			x += width
+		}
+	}
+	if src.cursorShown {
+		dst.SetCursorPosition(src.cursorX, src.cursorY)
+		dst.ShowCursor()
+	} else {
+		dst.HideCursor()
+	}
+}
+
 // Draw composites active pane surfaces, dividers, host cursor, and status bar onto host screen scr.
-func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
+// It returns true if the frame changed and was written to scr, or false if unchanged.
+func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.stagingScreen == nil || c.stagingScreen.Bounds().Dx() != c.cols || c.stagingScreen.Bounds().Dy() != c.rows {
+		c.stagingScreen = newOffscreenHostScreen(c.cols, c.rows)
+	}
+	c.stagingScreen.clear()
+
+	c.drawToScreenLocked(c.stagingScreen, drawPane, cursorInfo)
+
+	targetChanged := scr != c.lastHostScreen
+	if !targetChanged && c.stagingScreen.equal(c.lastRenderedScreen) {
+		return false
+	}
+
+	copyToHostScreen(c.stagingScreen, scr)
+	c.lastHostScreen = scr
+
+	if c.lastRenderedScreen == nil || c.lastRenderedScreen.Bounds().Dx() != c.cols || c.lastRenderedScreen.Bounds().Dy() != c.rows {
+		c.lastRenderedScreen = newOffscreenHostScreen(c.cols, c.rows)
+	}
+	copyToHostScreen(c.stagingScreen, c.lastRenderedScreen)
+
+	return true
+}
+
+func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
 	if c.layerLocked() == layerHelp {
 		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable)
 		scr.HideCursor()

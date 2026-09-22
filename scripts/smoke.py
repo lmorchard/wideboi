@@ -780,8 +780,23 @@ def case_partly_clipped_pane_keeps_full_width(fail):
     s.close()
 
 
+def case_idle_emits_no_bytes(fail):
+    s = Session()
+    if not settle_output(s.drainer, timeout=5.0):
+        fail("wideboi never settled after startup")
+        s.close()
+        return
+    initial_len = len(s.output())
+    time.sleep(0.5)
+    idle_bytes = len(s.output()) - initial_len
+    s.close()
+    if idle_bytes > 0:
+        fail(f"wideboi emitted {idle_bytes} bytes over 0.5s while completely idle")
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
+    ("idle emits no bytes", case_idle_emits_no_bytes),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
     ("shifted keys reach the pane", case_shifted_keys_reach_the_pane),
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
