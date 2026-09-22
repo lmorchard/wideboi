@@ -124,10 +124,10 @@ type MsgScroll struct {
 type LayoutMode int
 
 const (
+	// LayoutCards fans off-screen columns into overlapping cards.
+	LayoutCards LayoutMode = iota
 	// LayoutScroll is the horizontal strip: columns scroll out of view.
-	LayoutScroll LayoutMode = iota
-	// LayoutCards fans off-screen columns into chrome slivers.
-	LayoutCards
+	LayoutScroll
 )
 
 // MsgLayoutSnapshot is sent by the server to update the client on placements, focus, and statuses.

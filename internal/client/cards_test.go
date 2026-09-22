@@ -84,9 +84,9 @@ func TestClientRevertsToScrollLayout(t *testing.T) {
 	}
 }
 
-// The zero value is scroll, so a snapshot from a server that never sets
-// the field behaves exactly as before.
-func TestClientDefaultsToScrollLayout(t *testing.T) {
+// The zero value is cards, so a snapshot from a server that never sets
+// the field gets overlapping cards.
+func TestClientDefaultsToCardsLayout(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
@@ -97,8 +97,8 @@ func TestClientDefaultsToScrollLayout(t *testing.T) {
 	got := sliverCount(cli.placements)
 	cli.mu.Unlock()
 
-	if got != 0 {
-		t.Errorf("default layout produced %d slivers, want 0", got)
+	if got == 0 {
+		t.Errorf("default layout produced %d Z=1 placements, want 1", got)
 	}
 }
 
