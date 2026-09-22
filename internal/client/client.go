@@ -681,8 +681,10 @@ func (c *Client) drawHiddenMarkersLocked(dst uv.Screen, st frameState) {
 		compose.WriteStyled(dst, 0, 0, fmt.Sprintf("+%d", left), uv.Style{Attrs: uv.AttrBold})
 	}
 	if right > 0 {
+		// One cell short of the edge: a write to the last column gets
+		// autowrap-toggle escapes spliced into it on the wire.
 		s := fmt.Sprintf("+%d", right)
-		x := c.cols - runeLen(s)
+		x := c.cols - 1 - runeLen(s)
 		if x < 0 {
 			x = 0
 		}

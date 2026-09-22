@@ -473,9 +473,12 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
+	// Ending one cell short of the edge, not at it: ultraviolet wraps a
+	// write to the last column in autowrap-toggle escapes, which would
+	// split the marker on the wire (docs/LESSONS.md).
 	want := fmt.Sprintf("+%d", right)
-	if !strings.HasSuffix(strings.TrimRight(header, " "), want) {
-		t.Errorf("scroll mode header should end with %q: %q", want, header)
+	if got := header[len(header)-1-len(want) : len(header)-1]; got != want {
+		t.Errorf("want %q just inside the right edge, got %q in %q", want, got, header)
 	}
 }
 
