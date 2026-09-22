@@ -18,6 +18,8 @@ const (
 	// VerbToggleCards switches between the scrolling strip and the
 	// card fan. Appended, not inserted: the value crosses the wire.
 	VerbToggleCards
+	VerbGrowWidth
+	VerbShrinkWidth
 )
 
 // ColumnData describes a column's logical width and height.

@@ -141,8 +141,72 @@ func TestCycleWidthTransitionsPresets(t *testing.T) {
 	s2 := layout.NewStrip()
 	s2.AddColumn(1, 50, 20)
 	s2.CycleWidth()
-	if w, _ := s2.ColumnWidth(1); w != 80 {
-		t.Errorf("from 50: width = %d, want 80", w)
+	if w, _ := s2.ColumnWidth(1); w != 60 {
+		t.Errorf("from 50: width = %d, want 60", w)
+	}
+}
+
+func TestCustomWidthPresets(t *testing.T) {
+	s := layout.NewStrip()
+	s.SetWidthPresets([]int{50, 100, 150})
+	s.AddColumn(1, 40, 20)
+
+	// 40 -> next higher preset is 50
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 50 {
+		t.Errorf("width = %d, want 50", w)
+	}
+	// 50 -> 100
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 100 {
+		t.Errorf("width = %d, want 100", w)
+	}
+	// 100 -> 150
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 150 {
+		t.Errorf("width = %d, want 150", w)
+	}
+	// 150 -> wraps to 50
+	s.CycleWidth()
+	if w, _ := s.ColumnWidth(1); w != 50 {
+		t.Errorf("width = %d, want 50", w)
+	}
+
+	// Empty presets fallback to default
+	s.SetWidthPresets([]int{5, 10}) // below MinColumnWidth (20)
+	presets := s.WidthPresets()
+	if len(presets) != len(layout.DefaultWidthPresets) {
+		t.Fatalf("expected fallback to DefaultWidthPresets, got %v", presets)
+	}
+}
+
+func TestGrowAndShrinkWidth(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 50, 20)
+
+	s.GrowWidth(10)
+	if w, _ := s.ColumnWidth(1); w != 60 {
+		t.Errorf("after GrowWidth(10): width = %d, want 60", w)
+	}
+
+	s.ShrinkWidth(10)
+	if w, _ := s.ColumnWidth(1); w != 50 {
+		t.Errorf("after ShrinkWidth(10): width = %d, want 50", w)
+	}
+
+	// Shrink clamped to MinColumnWidth
+	s.ShrinkWidth(40)
+	if w, _ := s.ColumnWidth(1); w != layout.MinColumnWidth {
+		t.Errorf("after excessive shrink: width = %d, want MinColumnWidth (%d)", w, layout.MinColumnWidth)
+	}
+
+	// Non-positive delta no-ops
+	s.GrowWidth(0)
+	s.GrowWidth(-5)
+	s.ShrinkWidth(0)
+	s.ShrinkWidth(-5)
+	if w, _ := s.ColumnWidth(1); w != layout.MinColumnWidth {
+		t.Errorf("after no-op grow/shrink: width = %d, want %d", w, layout.MinColumnWidth)
 	}
 }
 

@@ -124,6 +124,10 @@ func TestEveryPlainFormMatchesItself(t *testing.T) {
 			return []byte("\x1b[C"), true
 		case "?":
 			return []byte{0x3f}, true
+		case ".":
+			return []byte{0x2e}, true
+		case ",":
+			return []byte{0x2c}, true
 		default:
 			// Single letter
 			if len(name) == 1 && name[0] >= 'a' && name[0] <= 'z' {

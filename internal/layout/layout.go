@@ -26,21 +26,54 @@ type Column struct {
 	Height int // logical pane height in cells
 }
 
+// DefaultWidthPresets is the default cycle sequence when none is configured.
+var DefaultWidthPresets = []int{40, 60, 80}
+
+// MinColumnWidth is the smallest logical column width allowed when shrinking.
+const MinColumnWidth = 20
+
 // Strip manages a horizontal sequence of columns and viewport scrolling.
 type Strip struct {
-	columns    []Column
-	focusIndex int
-	scrollX    int
-	strategy   Strategy
+	columns      []Column
+	focusIndex   int
+	scrollX      int
+	strategy     Strategy
+	widthPresets []int
 }
 
 // NewStrip creates an empty column strip.
 func NewStrip() *Strip {
 	return &Strip{
-		columns:    make([]Column, 0),
-		focusIndex: 0,
-		strategy:   ScrollStrategy{},
+		columns:      make([]Column, 0),
+		focusIndex:   0,
+		strategy:     ScrollStrategy{},
+		widthPresets: append([]int(nil), DefaultWidthPresets...),
 	}
+}
+
+// SetWidthPresets configures the sequence of presets used by CycleWidth.
+// Values <= 0 are filtered out. If the resulting slice is empty,
+// DefaultWidthPresets is used.
+func (s *Strip) SetWidthPresets(presets []int) {
+	valid := make([]int, 0, len(presets))
+	for _, p := range presets {
+		if p >= MinColumnWidth {
+			valid = append(valid, p)
+		}
+	}
+	if len(valid) == 0 {
+		s.widthPresets = append([]int(nil), DefaultWidthPresets...)
+		return
+	}
+	s.widthPresets = valid
+}
+
+// WidthPresets returns a copy of the current width presets.
+func (s *Strip) WidthPresets() []int {
+	if len(s.widthPresets) == 0 {
+		return append([]int(nil), DefaultWidthPresets...)
+	}
+	return append([]int(nil), s.widthPresets...)
 }
 
 // ApplyMode installs the strategy for mode.
@@ -109,21 +142,43 @@ func (s *Strip) FocusRight() {
 	}
 }
 
-// CycleWidth cycles the focused column's width preset (40 -> 60 -> 80 -> 40).
-// Custom spawn widths transition to the next higher preset (e.g. 50 -> 80)
-// or cycle back to 40 (e.g. 99 -> 40).
+// CycleWidth cycles the focused column's width preset.
+// Custom spawn widths transition to the next higher preset
+// or wrap back to the first preset when at or above the maximum preset.
 func (s *Strip) CycleWidth() {
 	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) {
 		return
 	}
+	presets := s.WidthPresets()
 	cur := s.columns[s.focusIndex].Width
-	switch {
-	case cur <= 40:
-		s.columns[s.focusIndex].Width = 60
-	case cur <= 60:
-		s.columns[s.focusIndex].Width = 80
-	default:
-		s.columns[s.focusIndex].Width = 40
+	for _, p := range presets {
+		if p > cur {
+			s.columns[s.focusIndex].Width = p
+			return
+		}
+	}
+	s.columns[s.focusIndex].Width = presets[0]
+}
+
+// GrowWidth increases the focused column's width by delta cells.
+func (s *Strip) GrowWidth(delta int) {
+	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) || delta <= 0 {
+		return
+	}
+	s.columns[s.focusIndex].Width += delta
+}
+
+// ShrinkWidth decreases the focused column's width by delta cells,
+// bounded from below by MinColumnWidth.
+func (s *Strip) ShrinkWidth(delta int) {
+	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) || delta <= 0 {
+		return
+	}
+	cur := s.columns[s.focusIndex].Width
+	if cur-delta < MinColumnWidth {
+		s.columns[s.focusIndex].Width = MinColumnWidth
+	} else {
+		s.columns[s.focusIndex].Width = cur - delta
 	}
 }
 

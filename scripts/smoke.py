@@ -315,6 +315,29 @@ def case_cycle_width(fail):
     s.close()
 
 
+def case_grow_and_shrink_width(fail):
+    s = Session()
+    before_cols = divider_columns(s.output())
+    before_len = len(s.output())
+    # C-b p -> grow width by 10 cells
+    s.type("\x02p")
+    moved_to = divider_columns(s.output()[before_len:]) - before_cols
+    if not moved_to:
+        fail(f"C-b p did not move any column divider off of {sorted(before_cols)}")
+
+    # C-b C-o C-o -> repeated shrink width by 10 cells twice (tests ctrl repeat form!)
+    shrunk_len = len(s.output())
+    s.type("\x02\x0f\x0f")  # \x0f is ctrl+o
+    shrunk_cols = divider_columns(s.output()[shrunk_len:])
+    if not shrunk_cols:
+        fail("C-b C-o C-o did not observe any column dividers after shrink")
+
+    s.type("echo width-adjusted\r")
+    if b"width-adjusted" not in s.output():
+        fail("input failed to reach pane after growing and shrinking width")
+    s.close()
+
+
 def case_prefix_routes_verbs(fail):
     # The whole point of the plan: verbs reachable without the terminal
     # being configured to send Option as Meta.
@@ -826,6 +849,7 @@ CASES = [
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
     ("new column opens pane", case_new_column_opens_pane),
     ("cycle width adjusts column", case_cycle_width),
+    ("grow and shrink width", case_grow_and_shrink_width),
     ("prefix routes verbs", case_prefix_routes_verbs),
     ("control mode is visible and escapable", case_control_mode_is_visible_and_escapable),
     ("ctrl repeat moves two columns", case_ctrl_repeat_moves_two_columns),

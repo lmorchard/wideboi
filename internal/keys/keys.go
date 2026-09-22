@@ -27,6 +27,8 @@ const (
 	ActionNameScrollUp    = "scroll_up"
 	ActionNameNewColumn   = "new_column"
 	ActionNameCycleWidth  = "cycle_width"
+	ActionNameGrowWidth   = "grow_width"
+	ActionNameShrinkWidth = "shrink_width"
 	ActionNameKillPane    = "kill_pane"
 	ActionNameSmartJump   = "smart_jump"
 	ActionNameToggleCards = "toggle_cards"
@@ -126,6 +128,10 @@ var Bindings = []Binding{
 		BarGroup: "n new", Long: "open a new column"},
 	{ActionName: ActionNameCycleWidth, Key: "w", Action: ActionVerb, Verb: protocol.VerbCycleWidth,
 		BarGroup: "w width", Long: "cycle this column's width"},
+	{ActionName: ActionNameShrinkWidth, Key: "o", Action: ActionVerb, Verb: protocol.VerbShrinkWidth,
+		Long: "shrink this column's width"},
+	{ActionName: ActionNameGrowWidth, Key: "p", Action: ActionVerb, Verb: protocol.VerbGrowWidth,
+		Long: "grow this column's width"},
 	{ActionName: ActionNameKillPane, Key: "x", Action: ActionVerb, Verb: protocol.VerbKillPane,
 		BarGroup: "x kill", Long: "kill the focused pane"},
 	{ActionName: ActionNameSmartJump, Key: "a", Action: ActionVerb, Verb: protocol.VerbSmartJump,
@@ -219,6 +225,8 @@ var validActions = map[string]string{
 	ActionNameScrollUp:    ActionNameScrollUp,
 	ActionNameNewColumn:   ActionNameNewColumn,
 	ActionNameCycleWidth:  ActionNameCycleWidth,
+	ActionNameGrowWidth:   ActionNameGrowWidth,
+	ActionNameShrinkWidth: ActionNameShrinkWidth,
 	ActionNameKillPane:    ActionNameKillPane,
 	ActionNameSmartJump:   ActionNameSmartJump,
 	"attn":                ActionNameSmartJump,
@@ -287,7 +295,7 @@ func BuildBindings(custom map[string]string) ([]Binding, error) {
 	for act, key := range custom {
 		canonical, ok := validActions[act]
 		if !ok {
-			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, kill_pane, smart_jump, toggle_cards, help, detach, quit, exit", act)
+			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, kill_pane, smart_jump, toggle_cards, help, detach, quit, exit", act)
 		}
 		k := strings.ToLower(strings.TrimSpace(key))
 		if k == "" {
@@ -359,6 +367,8 @@ func BuildBindings(custom map[string]string) ([]Binding, error) {
 			b.BarGroup = fmt.Sprintf("%s new", b.Key)
 		case ActionNameCycleWidth:
 			b.BarGroup = fmt.Sprintf("%s width", b.Key)
+		case ActionNameGrowWidth, ActionNameShrinkWidth, ActionNameToggleCards:
+			b.BarGroup = ""
 		case ActionNameKillPane:
 			b.BarGroup = fmt.Sprintf("%s kill", b.Key)
 		case ActionNameSmartJump:
@@ -367,8 +377,6 @@ func BuildBindings(custom map[string]string) ([]Binding, error) {
 			b.BarGroup = fmt.Sprintf("%s help", b.Key)
 		case ActionNameDetach:
 			b.BarGroup = fmt.Sprintf("%s detach", b.Key)
-		case ActionNameToggleCards:
-			b.BarGroup = ""
 		case ActionNameQuit:
 			b.BarGroup = fmt.Sprintf("%s quit", b.Key)
 		case ActionNameExit:

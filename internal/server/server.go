@@ -61,6 +61,13 @@ func (s *Server) SetLayout(mode protocol.LayoutMode) {
 	layout.ApplyMode(s.strip, mode)
 }
 
+// SetWidthPresets configures the sequence of presets used by CycleWidth.
+func (s *Server) SetWidthPresets(presets []int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.strip.SetWidthPresets(presets)
+}
+
 // NewServer initializes a Server instance connected via transport.
 func NewServer(tp transport.Transport, shell, cwd string) *Server {
 	if shell == "" {
@@ -216,6 +223,12 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
 			s.strip.CycleWidth()
+			s.resizePanesLocked()
+		case protocol.VerbGrowWidth:
+			s.strip.GrowWidth(10)
+			s.resizePanesLocked()
+		case protocol.VerbShrinkWidth:
+			s.strip.ShrinkWidth(10)
 			s.resizePanesLocked()
 		case protocol.VerbKillPane:
 			focusedID := s.strip.FocusedPaneID()

@@ -217,3 +217,32 @@ func TestLoadDefaultConfigReadErrorNotIgnored(t *testing.T) {
 		t.Error("expected error when default config path is an unreadable directory, got nil")
 	}
 }
+
+func TestLoadWidthPresets(t *testing.T) {
+	tmpDir := t.TempDir()
+	tomlPath := filepath.Join(tmpDir, "config.toml")
+	tomlContent := `
+width_presets = [50, 75, 100]
+`
+	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if len(cfg.WidthPresets) != 3 || cfg.WidthPresets[0] != 50 || cfg.WidthPresets[1] != 75 || cfg.WidthPresets[2] != 100 {
+		t.Errorf("WidthPresets = %v, want [50, 75, 100]", cfg.WidthPresets)
+	}
+
+	// Invalid presets (below 20)
+	invalidToml := `
+width_presets = [10, 80]
+`
+	_ = os.WriteFile(tomlPath, []byte(invalidToml), 0600)
+	_, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err == nil {
+		t.Errorf("expected error for invalid width_presets, got nil")
+	}
+}

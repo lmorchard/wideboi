@@ -16,14 +16,15 @@ import (
 
 // Config represents the resolved, fully-validated configuration for wideboi.
 type Config struct {
-	Socket      string              `toml:"socket"`
-	Layout      string              `toml:"layout"`
-	LayoutMode  protocol.LayoutMode `toml:"-"`
-	Prefix      string              `toml:"prefix"`
-	PrefixLabel string              `toml:"-"`
-	Shell       string              `toml:"shell"`
-	Keys        map[string]string   `toml:"keys"`
-	ConfigFile  string              `toml:"-"`
+	Socket       string              `toml:"socket"`
+	Layout       string              `toml:"layout"`
+	LayoutMode   protocol.LayoutMode `toml:"-"`
+	Prefix       string              `toml:"prefix"`
+	PrefixLabel  string              `toml:"-"`
+	Shell        string              `toml:"shell"`
+	WidthPresets []int               `toml:"width_presets"`
+	Keys         map[string]string   `toml:"keys"`
+	ConfigFile   string              `toml:"-"`
 }
 
 // ConfigFlags contains command-line flag overrides passed into Load.
@@ -111,6 +112,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			if len(fileCfg.Keys) > 0 {
 				cfg.Keys = fileCfg.Keys
 			}
+			if len(fileCfg.WidthPresets) > 0 {
+				cfg.WidthPresets = fileCfg.WidthPresets
+			}
 			cfg.ConfigFile = cfgFile
 		}
 	}
@@ -181,6 +185,13 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	bindings, err := keys.BuildBindings(cfg.Keys)
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("keys configuration: %w", err)
+	}
+
+	// Width presets
+	for _, p := range cfg.WidthPresets {
+		if p < 20 {
+			return Config{}, nil, fmt.Errorf("width_presets: invalid preset %d (must be at least 20)", p)
+		}
 	}
 
 	return cfg, bindings, nil

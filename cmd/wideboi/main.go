@@ -233,6 +233,9 @@ func runServer(cfg config.Config) error {
 
 	srv := server.NewServer(nil, cfg.Shell, cwd)
 	srv.SetLayout(cfg.LayoutMode)
+	if len(cfg.WidthPresets) > 0 {
+		srv.SetWidthPresets(cfg.WidthPresets)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -388,6 +391,9 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 	tp := transport.NewInProcChannel(256)
 	srv := server.NewServer(tp, cfg.Shell, cwd)
 	srv.SetLayout(cfg.LayoutMode)
+	if len(cfg.WidthPresets) > 0 {
+		srv.SetWidthPresets(cfg.WidthPresets)
+	}
 
 	guard := hostterm.NewGuard(func() error {
 		stopped.Store(true)
