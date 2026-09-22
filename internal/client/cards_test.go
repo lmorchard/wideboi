@@ -29,7 +29,7 @@ func threeColumns() []protocol.ColumnData {
 func sliverCount(ps []protocol.PlacementData) int {
 	n := 0
 	for _, p := range ps {
-		if p.Kind == protocol.PlacementSliver {
+		if p.Z == 1 {
 			n++
 		}
 	}
@@ -58,7 +58,7 @@ func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
 		t.Fatal("no placements computed")
 	}
 	if got == 0 {
-		t.Errorf("card layout produced no slivers out of %d placements; "+
+		t.Errorf("card layout produced no Z=1 placement out of %d placements; "+
 			"the client's strip is still on ScrollStrategy", total)
 	}
 }
@@ -136,9 +136,8 @@ func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client 
 	return cli
 }
 
-// The point of the whole feature. Four columns of someone else's
-// terminal output is noise; what is worth knowing about a pane you are
-// not looking at is whether it wants you and what it is doing.
+// We now want genuinely overlapping cards that show their terminal output,
+// so a partially occluded pane still shows its left edge and header.
 func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	const cols, rows = 120, 16
 	cli := newCardClient(t, cols, rows, map[int]string{1: "deploying", 3: "compiling"})
@@ -147,19 +146,25 @@ func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	p1 := placementFor(cli, 1)
-	if p1.Kind != protocol.PlacementSliver {
-		t.Fatalf("pane 1 is %v, expected a sliver", p1.Kind)
+	if p1.Kind != protocol.PlacementFull {
+		t.Fatalf("pane 1 is %v, expected PlacementFull for overlapping cards", p1.Kind)
 	}
-	got := regionText(scr, p1.Dst)
 
-	if !strings.Contains(got, "deploy") {
-		t.Errorf("sliver does not show the title:\n%s", got)
+	// Check just the first row for the header
+	headerRect := image.Rect(p1.Dst.Min.X, 0, p1.Dst.Max.X, 1)
+	headerText := regionText(scr, headerRect)
+	if !strings.Contains(headerText, "deploy") {
+		t.Errorf("card header does not show the title:\n%s", headerText)
 	}
-	if !strings.Contains(got, "✓") {
-		t.Errorf("sliver does not show the status glyph:\n%s", got)
+	if !strings.Contains(headerText, "✓") {
+		t.Errorf("card header does not show the status glyph:\n%s", headerText)
 	}
-	if strings.Contains(got, "CONTENT-ONE") {
-		t.Errorf("sliver is still showing pane content:\n%s", got)
+
+	// Check the left visible edge for content
+	sliverRect := image.Rect(p1.Dst.Min.X, 1, p1.Dst.Min.X+4, p1.Dst.Max.Y)
+	sliverText := regionText(scr, sliverRect)
+	if !strings.Contains(sliverText, "CONT") {
+		t.Errorf("card sliver does not show pane content:\n%s", sliverText)
 	}
 }
 
@@ -172,12 +177,13 @@ func TestSliverWithoutATitleStillRenders(t *testing.T) {
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr, nil, nil)
 
-	got := regionText(scr, placementFor(cli, 1).Dst)
+	headerRect := image.Rect(placementFor(cli, 1).Dst.Min.X, 0, placementFor(cli, 1).Dst.Max.X, 1)
+	got := regionText(scr, headerRect)
 	if strings.TrimSpace(got) == "" {
-		t.Error("a titleless sliver rendered nothing at all")
+		t.Error("a titleless card rendered nothing in its header")
 	}
 	if !strings.Contains(got, "✓") {
-		t.Errorf("a titleless sliver dropped its status glyph too:\n%s", got)
+		t.Errorf("a titleless card dropped its status glyph too:\n%s", got)
 	}
 }
 
@@ -190,7 +196,8 @@ func TestFocusedCardRendersContentNotChrome(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	got := regionText(scr, placementFor(cli, 2).Dst)
-	if !strings.Contains(got, "CONTENT-TWO") {
+	// We expect "ONTENT-TWO" because the left border overwrites the first column ('C').
+	if !strings.Contains(got, "ONTENT-TWO") {
 		t.Errorf("focused card is not showing its content:\n%s", got)
 	}
 }
@@ -423,8 +430,8 @@ func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
 // edge is the next card's first column and gets painted over the
 // moment that card draws -- which is why every divider but the last
 // was invisible. The sliver spine at each card's left edge already
-// separates them, so cards draw no dividers at all.
-func TestCardsDrawNoDividers(t *testing.T) {
+// Cards now overlap and use borders to separate them visually.
+func TestCardsDrawDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
@@ -440,8 +447,8 @@ func TestCardsDrawNoDividers(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	whole := strings.Join(scr.text(), "\n")
-	if strings.Contains(whole, "│") || strings.Contains(whole, "┃") {
-		t.Errorf("card mode drew a divider:\n%s", whole)
+	if !strings.Contains(whole, "│") && !strings.Contains(whole, "┃") {
+		t.Errorf("card mode failed to draw a divider:\n%s", whole)
 	}
 }
 

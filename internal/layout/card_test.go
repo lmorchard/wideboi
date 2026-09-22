@@ -23,22 +23,22 @@ func TestCardStrategyUnit(t *testing.T) {
 		t.Fatalf("got %d placements, want 3", len(placements))
 	}
 
-	// Pane 1 (left sliver): X=[0..4], Z=0
+	// Pane 1 (left card, overlapping): starts at X=0, width=40 (clipped to viewport if necessary), Z=0
 	p1 := placements[0]
-	if p1.PaneID != 1 || p1.Dst != image.Rect(0, 1, 4, 23) || p1.Z != 0 {
-		t.Errorf("p1 = %+v, want Dst (0,1,4,23) Z=0", p1)
+	if p1.PaneID != 1 || p1.Dst != image.Rect(0, 1, 40, 23) || p1.Z != 0 {
+		t.Errorf("p1 = %+v, want Dst (0,1,40,23) Z=0", p1)
 	}
 
-	// Pane 2 (focused card): X=[4..44], Z=1
+	// Pane 2 (focused card): starts at X=4, width=40, Z=1
 	p2 := placements[1]
 	if p2.PaneID != 2 || p2.Dst != image.Rect(4, 1, 44, 23) || p2.Z != 1 {
 		t.Errorf("p2 = %+v, want Dst (4,1,44,23) Z=1", p2)
 	}
 
-	// Pane 3 (right sliver): X=[44..48], Z=0
+	// Pane 3 (right card): starts at X=44, width=40 (clipped to 80), Z=0
 	p3 := placements[2]
-	if p3.PaneID != 3 || p3.Dst != image.Rect(44, 1, 48, 23) || p3.Z != 0 {
-		t.Errorf("p3 = %+v, want Dst (44,1,48,23) Z=0", p3)
+	if p3.PaneID != 3 || p3.Dst != image.Rect(44, 1, 80, 23) || p3.Z != 0 {
+		t.Errorf("p3 = %+v, want Dst (44,1,80,23) Z=0", p3)
 	}
 }
 
