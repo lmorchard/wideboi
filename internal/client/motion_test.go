@@ -209,10 +209,10 @@ func TestCursorHiddenDuringMotion(t *testing.T) {
 // looked arbitrary.
 func TestNoMotionWhenFocusMovesButGeometryDoesNot(t *testing.T) {
 	const cols, rows = 60, 12
-	cli := newTestClientWithTwoPanes(t, cols, rows) // scroll mode, both visible
+	cli := newTestClientWithTwoPanes(t, cols, rows) // both visible
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: twoColumns(), FocusPaneID: 2,
+		Columns: twoColumns(), FocusPaneID: 2, Layout: protocol.LayoutScroll,
 	})
 
 	cli.mu.Lock()

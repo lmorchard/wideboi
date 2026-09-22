@@ -228,7 +228,7 @@ def case_launch_shows_two_panes(fail):
     out = s.output()
     if ALT_SCREEN_ENTER not in out:
         fail("never entered the alt screen")
-    if "│".encode() not in out:
+    if "│".encode() not in out and "┃".encode() not in out:
         fail("no column divider in the first frames")
     if not s.cursor_positions():
         fail("no cursor positioning emitted -- is the cursor being rendered?")

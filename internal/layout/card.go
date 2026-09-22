@@ -98,17 +98,16 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		if w <= 0 || x >= viewportWidth {
 			return
 		}
-		right := min(x+w, viewportWidth)
+		right := min(x+col.Width, viewportWidth)
 		dst := image.Rect(x, 1, right, 1+availHeight)
 		if dst.Empty() {
 			return
 		}
-		kind := protocol.PlacementSliver
-		if z == 1 || dst.Dx() >= col.Width {
-			// Either the focused pane, or a card with room for the
-			// whole thing -- nothing is occluded, so draw content.
-			kind = protocol.PlacementFull
-		}
+
+		// With overlapping cards, every pane is rendered as full content.
+		// It's the z-order and clipping that handles the "sliver" effect.
+		kind := protocol.PlacementFull
+
 		placements = append(placements, Placement{
 			PaneID: col.PaneID,
 			Src:    image.Rect(0, 0, dst.Dx(), availHeight),
@@ -116,7 +115,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			Z:      z,
 			Kind:   kind,
 		})
-		x = dst.Max.X
+		x += w
 	}
 
 	for i := focusedIdx - showLeft; i < focusedIdx; i++ {

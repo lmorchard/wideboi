@@ -113,7 +113,7 @@ func TestParseLayoutRejectsUnknown(t *testing.T) {
 
 func TestParseLayoutAcceptsKnown(t *testing.T) {
 	cases := map[string]protocol.LayoutMode{
-		"":       protocol.LayoutScroll,
+		"":       protocol.LayoutCards,
 		"scroll": protocol.LayoutScroll,
 		"cards":  protocol.LayoutCards,
 	}

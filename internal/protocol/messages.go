@@ -126,7 +126,7 @@ type LayoutMode int
 const (
 	// LayoutScroll is the horizontal strip: columns scroll out of view.
 	LayoutScroll LayoutMode = iota
-	// LayoutCards fans off-screen columns into chrome slivers.
+	// LayoutCards fans off-screen columns into overlapping cards.
 	LayoutCards
 )
 

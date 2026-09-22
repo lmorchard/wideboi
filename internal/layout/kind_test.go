@@ -35,9 +35,8 @@ func TestScrollStrategyNeverEmitsSlivers(t *testing.T) {
 	})
 }
 
-// In a fan, exactly the focused card shows content and every other is
-// chrome.
-func TestCardStrategyMarksSlivers(t *testing.T) {
+// In a fan with genuine overlapping, ALL cards show their content, so they are all Full.
+func TestCardStrategyMarksAllAsFull(t *testing.T) {
 	s := layout.NewStrip()
 	s.AddColumn(1, 40, 22)
 	s.AddColumn(2, 40, 22)
@@ -51,12 +50,8 @@ func TestCardStrategyMarksSlivers(t *testing.T) {
 	}
 
 	for _, p := range placements {
-		want := protocol.PlacementSliver
-		if p.PaneID == 2 {
-			want = protocol.PlacementFull
-		}
-		if p.Kind != want {
-			t.Errorf("pane %d Kind = %v, want %v", p.PaneID, p.Kind, want)
+		if p.Kind != protocol.PlacementFull {
+			t.Errorf("pane %d Kind = %v, want %v", p.PaneID, p.Kind, protocol.PlacementFull)
 		}
 	}
 }
@@ -79,20 +74,11 @@ func TestCardStrategySingleColumnIsFull(t *testing.T) {
 
 // Kind has to survive the conversion, or the client never sees it.
 func TestToProtocolCarriesKind(t *testing.T) {
-	s := layout.NewStrip()
-	s.AddColumn(1, 40, 22)
-	s.AddColumn(2, 40, 22)
-	s.SetStrategy(layout.CardStrategy{SliverWidth: 4})
-	s.FocusPaneID(1)
-
-	data := layout.ToProtocol(s.ComputePlacements(120, 24))
-	var sawSliver bool
-	for _, p := range data {
-		if p.Kind == protocol.PlacementSliver {
-			sawSliver = true
-		}
+	placements := []layout.Placement{
+		{PaneID: 1, Kind: protocol.PlacementSliver},
 	}
-	if !sawSliver {
-		t.Error("ToProtocol dropped Kind: no sliver survived the conversion")
+	data := layout.ToProtocol(placements)
+	if len(data) != 1 || data[0].Kind != protocol.PlacementSliver {
+		t.Error("ToProtocol dropped Kind")
 	}
 }

@@ -29,7 +29,7 @@ func threeColumns() []protocol.ColumnData {
 func sliverCount(ps []protocol.PlacementData) int {
 	n := 0
 	for _, p := range ps {
-		if p.Kind == protocol.PlacementSliver {
+		if p.Z == 1 {
 			n++
 		}
 	}
@@ -58,7 +58,7 @@ func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
 		t.Fatal("no placements computed")
 	}
 	if got == 0 {
-		t.Errorf("card layout produced no slivers out of %d placements; "+
+		t.Errorf("card layout produced no Z=1 placement out of %d placements; "+
 			"the client's strip is still on ScrollStrategy", total)
 	}
 }
@@ -136,9 +136,8 @@ func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client 
 	return cli
 }
 
-// The point of the whole feature. Four columns of someone else's
-// terminal output is noise; what is worth knowing about a pane you are
-// not looking at is whether it wants you and what it is doing.
+// We now want genuinely overlapping cards that show their terminal output,
+// so a partially occluded pane still shows its left edge and header.
 func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	const cols, rows = 120, 16
 	cli := newCardClient(t, cols, rows, map[int]string{1: "deploying", 3: "compiling"})
@@ -147,19 +146,25 @@ func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	p1 := placementFor(cli, 1)
-	if p1.Kind != protocol.PlacementSliver {
-		t.Fatalf("pane 1 is %v, expected a sliver", p1.Kind)
+	if p1.Kind != protocol.PlacementFull {
+		t.Fatalf("pane 1 is %v, expected PlacementFull for overlapping cards", p1.Kind)
 	}
-	got := regionText(scr, p1.Dst)
 
-	if !strings.Contains(got, "deploy") {
-		t.Errorf("sliver does not show the title:\n%s", got)
+	// Check just the first row for the header
+	headerRect := image.Rect(p1.Dst.Min.X, 0, p1.Dst.Max.X, 1)
+	headerText := regionText(scr, headerRect)
+	if !strings.Contains(headerText, "deploy") {
+		t.Errorf("card header does not show the title:\n%s", headerText)
 	}
-	if !strings.Contains(got, "✓") {
-		t.Errorf("sliver does not show the status glyph:\n%s", got)
+	if !strings.Contains(headerText, "✓") {
+		t.Errorf("card header does not show the status glyph:\n%s", headerText)
 	}
-	if strings.Contains(got, "CONTENT-ONE") {
-		t.Errorf("sliver is still showing pane content:\n%s", got)
+
+	// Check the left visible edge for content
+	sliverRect := image.Rect(p1.Dst.Min.X, 1, p1.Dst.Min.X+4, p1.Dst.Max.Y)
+	sliverText := regionText(scr, sliverRect)
+	if !strings.Contains(sliverText, "CONT") {
+		t.Errorf("card sliver does not show pane content:\n%s", sliverText)
 	}
 }
 
@@ -172,12 +177,13 @@ func TestSliverWithoutATitleStillRenders(t *testing.T) {
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr, nil, nil)
 
-	got := regionText(scr, placementFor(cli, 1).Dst)
+	headerRect := image.Rect(placementFor(cli, 1).Dst.Min.X, 0, placementFor(cli, 1).Dst.Max.X, 1)
+	got := regionText(scr, headerRect)
 	if strings.TrimSpace(got) == "" {
-		t.Error("a titleless sliver rendered nothing at all")
+		t.Error("a titleless card rendered nothing in its header")
 	}
 	if !strings.Contains(got, "✓") {
-		t.Errorf("a titleless sliver dropped its status glyph too:\n%s", got)
+		t.Errorf("a titleless card dropped its status glyph too:\n%s", got)
 	}
 }
 
@@ -190,8 +196,61 @@ func TestFocusedCardRendersContentNotChrome(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	got := regionText(scr, placementFor(cli, 2).Dst)
-	if !strings.Contains(got, "CONTENT-TWO") {
+	// We expect "ONTENT-TWO" because the left border overwrites the first column ('C').
+	if !strings.Contains(got, "ONTENT-TWO") {
 		t.Errorf("focused card is not showing its content:\n%s", got)
+	}
+}
+
+// TestHigherZSurfaceWinsAtOverlappingCells proves that when two panes occupy
+// the same physical columns, the higher-Z (focused) pane paints over the lower-Z pane,
+// even when the higher-Z pane appears earlier in slice order.
+func TestHigherZSurfaceWinsAtOverlappingCells(t *testing.T) {
+	const cols, rows = 60, 10
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+
+	// Pane 1 is focused (Z=1).
+	// We directly invoke composeFrameLocked with a slice where Z=1 comes FIRST
+	// and Z=0 comes SECOND, both covering overlapping columns [10..30).
+	pFocused := protocol.PlacementData{
+		PaneID: 1,
+		Src:    image.Rect(0, 0, 30, 10),
+		Dst:    image.Rect(0, 1, 30, 9),
+		Z:      1,
+		Kind:   protocol.PlacementFull,
+	}
+	pBackground := protocol.PlacementData{
+		PaneID: 2,
+		Src:    image.Rect(0, 0, 30, 10),
+		Dst:    image.Rect(10, 1, 40, 9),
+		Z:      0,
+		Kind:   protocol.PlacementFull,
+	}
+
+	st := frameState{
+		placements:  []protocol.PlacementData{pFocused, pBackground},
+		focusPaneID: 1,
+	}
+
+	cli.HandleServerMsg(paneUpdate(1, 30, 10, strings.Repeat("1", 30)))
+	cli.HandleServerMsg(paneUpdate(2, 30, 10, strings.Repeat("2", 30)))
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.mu.Lock()
+	cli.composeFrameLocked(scr, st, nil)
+	cli.mu.Unlock()
+
+	// In the overlap region [10..30) at row 1, Pane 1 (Z=1) must win over Pane 2 (Z=0),
+	// even though Pane 2 was after Pane 1 in st.placements.
+	sampleX := 20
+	c := scr.CellAt(sampleX, 1)
+	if c == nil || c.Content != "1" {
+		got := ""
+		if c != nil {
+			got = c.Content
+		}
+		t.Fatalf("at overlap cell (%d, 1): got %q, want \"1\" (higher-Z pane must paint over lower-Z pane)",
+			sampleX, got)
 	}
 }
 
@@ -273,6 +332,41 @@ func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	// And it must have drawn something inside.
 	if !strings.ContainsAny(regionText(scr, p.Dst), "日") {
 		t.Error("the sliver drew none of the title at all")
+	}
+}
+
+func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
+	const cols, rows = 60, 12
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+
+	p := protocol.PlacementData{
+		PaneID: 7,
+		Src:    image.Rect(0, 0, 15, 10),
+		Dst:    image.Rect(20, 1, 35, 11),
+		Kind:   protocol.PlacementFull,
+		Z:      1,
+	}
+	st := frameState{
+		placements:   []protocol.PlacementData{p},
+		focusPaneID:  7,
+		paneStatuses: map[int]string{7: "»"},
+		// 12 double-width runes: 12 runes but 24 cells, against 15.
+		paneTitles: map[int]string{7: "日本語日本語日本語日本語"},
+	}
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.mu.Lock()
+	cli.composeFrameLocked(scr, st, nil)
+	cli.mu.Unlock()
+
+	// Check row 0 (the header row). Columns outside [20..35) must be blank.
+	for x := 0; x < cols; x++ {
+		inside := x >= 20 && x < 35
+		if !inside {
+			if c := scr.CellAt(x, 0); c != nil && c.Content != "" && c.Content != " " {
+				t.Fatalf("header wrote %q at (%d,0), outside its rect [20..35)", c.Content, x)
+			}
+		}
 	}
 }
 
@@ -423,8 +517,8 @@ func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
 // edge is the next card's first column and gets painted over the
 // moment that card draws -- which is why every divider but the last
 // was invisible. The sliver spine at each card's left edge already
-// separates them, so cards draw no dividers at all.
-func TestCardsDrawNoDividers(t *testing.T) {
+// Cards now overlap and use borders to separate them visually.
+func TestCardsDrawDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
@@ -440,8 +534,8 @@ func TestCardsDrawNoDividers(t *testing.T) {
 	cli.Draw(scr, nil, nil)
 
 	whole := strings.Join(scr.text(), "\n")
-	if strings.Contains(whole, "│") || strings.Contains(whole, "┃") {
-		t.Errorf("card mode drew a divider:\n%s", whole)
+	if !strings.Contains(whole, "│") && !strings.Contains(whole, "┃") {
+		t.Errorf("card mode failed to draw a divider:\n%s", whole)
 	}
 }
 

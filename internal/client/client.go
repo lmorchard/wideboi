@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -459,8 +460,17 @@ func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv
 func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(id int, dst uv.Screen, area image.Rectangle)) *protocol.PlacementData {
 	var focusedPlacement *protocol.PlacementData
 
-	for i := range st.placements {
-		p := &st.placements[i]
+	// Sort placements by Z-order back-to-front for rendering.
+	// We copy the slice so we don't mutate the frameState's slice,
+	// which might be expected to remain in layout order elsewhere.
+	sorted := make([]protocol.PlacementData, len(st.placements))
+	copy(sorted, st.placements)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Z < sorted[j].Z
+	})
+
+	for i := range sorted {
+		p := &sorted[i]
 		if p.PaneID == st.focusPaneID {
 			focusedPlacement = p
 		}
@@ -475,13 +485,17 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 			} else {
 				header = fmt.Sprintf(" [%d]", p.PaneID)
 			}
+			title := st.paneTitles[p.PaneID]
+			if title != "" {
+				header += " " + title
+			}
 			if p.PaneID == st.focusPaneID {
 				header += " ★"
 			}
-			if runeLen(header) < headerW {
-				header += strings.Repeat(" ", headerW-runeLen(header))
+			header = compose.TruncateWidth(dst, header, headerW)
+			if used := compose.StringWidth(dst, header); used < headerW {
+				header += strings.Repeat(" ", headerW-used)
 			}
-			header = truncateRunes(header, headerW)
 
 			if p.PaneID == st.focusPaneID {
 				compose.WriteStyled(dst, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
@@ -503,20 +517,43 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 
 		// Draw column divider on right edge if applicable.
 		// Bold ┃ if adjacent to focused pane, otherwise │.
-		//
-		// Not in card mode. Cards are laid out contiguously, so a
-		// divider at one card's right edge is the next card's first
-		// column and is painted over the moment that card draws --
-		// which is why every card divider but the last was invisible,
-		// and the surviving one sat at the fan's outer edge
-		// separating nothing. Each sliver's spine is the separator.
 		if c.layoutMode != protocol.LayoutCards && p.Dst.Max.X < c.cols {
+			// Find if the adjacent pane in the original slice is focused
+			var adjacentFocused bool
+			for j, orig := range st.placements {
+				if orig.PaneID == p.PaneID {
+					if j+1 < len(st.placements) && st.placements[j+1].PaneID == st.focusPaneID {
+						adjacentFocused = true
+					}
+					break
+				}
+			}
+
 			divider := "│"
-			if p.PaneID == st.focusPaneID || (i+1 < len(st.placements) && st.placements[i+1].PaneID == st.focusPaneID) {
+			if p.PaneID == st.focusPaneID || adjacentFocused {
 				divider = "┃"
 			}
 			for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
 				compose.WriteString(dst, p.Dst.Max.X, y, divider)
+			}
+		}
+
+		if c.layoutMode == protocol.LayoutCards {
+			// For overlapping cards, the left edge is the visible boundary that occludes the card to its left.
+			if p.Dst.Min.X > 0 {
+				divider := "│"
+				if p.PaneID == st.focusPaneID {
+					divider = "┃"
+				}
+				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
+					compose.WriteString(dst, p.Dst.Min.X, y, divider)
+				}
+			}
+			// Additionally, the focused card is the top-most card, so its right edge is also fully visible.
+			if p.PaneID == st.focusPaneID && p.Dst.Max.X < c.cols {
+				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
+					compose.WriteString(dst, p.Dst.Max.X, y, "┃")
+				}
 			}
 		}
 	}

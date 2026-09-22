@@ -96,6 +96,7 @@ func newTestClientWithTwoPanes(t *testing.T, cols, rows int) *Client {
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     twoColumns(),
 		FocusPaneID: 1,
+		Layout:      protocol.LayoutScroll,
 	})
 	cli.HandleServerMsg(paneUpdate(1, 25, 10, "PANE-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 25, 10, "PANE-TWO"))

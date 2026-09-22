@@ -107,10 +107,10 @@ func fatal(err error) {
 // session state.
 func parseLayout(name string) (protocol.LayoutMode, error) {
 	switch name {
-	case "", "scroll":
-		return protocol.LayoutScroll, nil
-	case "cards":
+	case "", "cards":
 		return protocol.LayoutCards, nil
+	case "scroll":
+		return protocol.LayoutScroll, nil
 	default:
 		return 0, fmt.Errorf("WIDEBOI_LAYOUT=%q: want \"scroll\" or \"cards\"", name)
 	}

@@ -206,3 +206,13 @@ func TestTruncateWidthMatchesWriterAdvance(t *testing.T) {
 		}
 	}
 }
+
+func TestStringWidthMeasuresCells(t *testing.T) {
+	s := compose.NewSurface(40, 1)
+	if got := compose.StringWidth(s, "abc"); got != 3 {
+		t.Errorf("StringWidth(\"abc\") = %d, want 3", got)
+	}
+	if got := compose.StringWidth(s, "日本"); got != 4 {
+		t.Errorf("StringWidth(\"日本\") = %d, want 4", got)
+	}
+}
