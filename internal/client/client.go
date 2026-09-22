@@ -60,6 +60,7 @@ type Client struct {
 	controlMode  bool
 	helpVisible  bool
 	detachable   bool
+	bindings     []keys.Binding
 	motion       *motion
 
 	stagingScreen      *offscreenHostScreen
@@ -384,7 +385,7 @@ func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area 
 
 func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
 	if c.layerLocked() == layerHelp {
-		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable)
+		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable, c.bindings)
 		scr.HideCursor()
 		return
 	}
@@ -740,8 +741,12 @@ func (c *Client) currentPlacementsLocked() []protocol.PlacementData {
 // entries are never dropped: with no unprefixed escape hatch, a user who
 // cannot read "q quit" and "esc exit" out of the bar has no way forward
 // except a signal.
-func controlHelp(budget int, detachable bool) string {
-	droppable, essential := keys.BarItems(detachable)
+func controlHelp(budget int, detachable bool, custom ...[]keys.Binding) string {
+	bindings := keys.Bindings
+	if len(custom) > 0 && len(custom[0]) > 0 {
+		bindings = custom[0]
+	}
+	droppable, essential := keys.BarItemsFor(bindings, detachable)
 
 	tail := strings.Join(essential, "  ")
 	used := runeLen(tail)
@@ -770,7 +775,7 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 		budget = 0
 	}
 	if c.controlMode {
-		menu := truncateRunes(controlHelp(budget, c.detachable), budget)
+		menu := truncateRunes(controlHelp(budget, c.detachable, c.bindings), budget)
 		// Pad to the full budget: a partly-inverted row reads as a
 		// rendering glitch, not as a mode.
 		menu += strings.Repeat(" ", budget-runeLen(menu))
@@ -813,6 +818,14 @@ func (c *Client) SetDetachable(on bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.detachable = on
+}
+
+// SetBindings configures custom control-mode bindings for status bar display
+// and the help overlay.
+func (c *Client) SetBindings(b []keys.Binding) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.bindings = b
 }
 
 // SetControlMode switches the client between forwarding keys to the

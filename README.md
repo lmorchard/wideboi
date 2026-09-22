@@ -57,6 +57,73 @@ the doubled prefix still wins: `ctrl+l ctrl+l` sends one literal
 `ctrl+l` to the pane and leaves control mode, rather than moving focus
 right twice.
 
+## Configuration
+
+wideboi reads configuration with the following precedence (highest to lowest):
+
+1. **Command-line flags** (`-l`, `-p`, `-s`, `--shell`)
+2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`)
+3. **Configuration file** (TOML)
+4. **Defaults** (including `$SHELL` or `/bin/sh`)
+
+### Config file
+
+By default, wideboi looks for a config file at:
+
+- `$XDG_CONFIG_HOME/wideboi/config.toml` (typically `~/.config/wideboi/config.toml`)
+
+You can pass a custom config file path using `-c` or `--config`:
+
+```
+wideboi -c /path/to/custom-config.toml
+```
+
+See [`config.example.toml`](config.example.toml) for an annotated example configuration file.
+
+### Key remapping
+
+You can remap control-mode verbs in the `[keys]` table of your `config.toml`:
+
+```toml
+prefix = "ctrl+a"
+layout = "cards"
+
+[keys]
+kill_pane  = "k"
+scroll_up  = "u"
+focus_left = "h"
+```
+
+Rules for key remapping:
+- Keys `i`, `m`, and `[` are reserved by wideboi because their control bytes decode as Tab, Enter, and Escape, which breaks repeat chords.
+- No two actions may be assigned to the same key.
+- Remapped single letters `a-z` automatically receive matching `ctrl+<letter>` repeat chords.
+
+### CLI Flags
+
+```
+Flags:
+  -c, --config <path>    Path to TOML configuration file
+                         (default: $XDG_CONFIG_HOME/wideboi/config.toml)
+  -l, --layout <mode>    Layout strategy: "cards" (default) or "scroll"
+  -p, --prefix <key>     Control mode prefix key: "ctrl+<letter>" or "ctrl+space"
+                         (default: "ctrl+b")
+  -s, --socket <path>    Unix domain socket path
+                         (default: $TMPDIR/wideboi-<uid>/default.sock)
+      --shell <path>     Shell executable to launch in panes
+                         (default: $SHELL or /bin/sh)
+  -v, --version          Print version and exit
+  -h, --help             Show help text and exit
+```
+
+### Environment variables
+
+- `WIDEBOI_LAYOUT`: layout mode (`cards` or `scroll`)
+- `WIDEBOI_PREFIX`: prefix key (`ctrl+<letter>` or `ctrl+space`)
+- `WIDEBOI_SOCK`: unix domain socket path override
+- `WIDEBOI_SHELL`: shell path override (takes precedence over TOML `shell`)
+- `SHELL`: default shell path (used when shell is not set in config)
+
 ## Development
 
     make quick    # the edit loop: fmt, vet, seam boundary, unit tests (~5s)

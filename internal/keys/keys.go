@@ -11,7 +11,30 @@
 // of the seam scripts/seam-check.sh enforces.
 package keys
 
-import "github.com/lmorchard/wideboi/internal/protocol"
+import (
+	"fmt"
+	"strings"
+	"unicode"
+
+	"github.com/lmorchard/wideboi/internal/protocol"
+)
+
+// Canonical action names used in configuration files.
+const (
+	ActionNameFocusLeft   = "focus_left"
+	ActionNameFocusRight  = "focus_right"
+	ActionNameScrollDown  = "scroll_down"
+	ActionNameScrollUp    = "scroll_up"
+	ActionNameNewColumn   = "new_column"
+	ActionNameCycleWidth  = "cycle_width"
+	ActionNameKillPane    = "kill_pane"
+	ActionNameSmartJump   = "smart_jump"
+	ActionNameToggleCards = "toggle_cards"
+	ActionNameHelp        = "help"
+	ActionNameDetach      = "detach"
+	ActionNameQuit        = "quit"
+	ActionNameExit        = "exit"
+)
 
 // Action is what a binding does when it fires. It is deliberately not
 // protocol.VerbType: scrolling, quitting, detaching, help and leaving
@@ -46,6 +69,9 @@ var Reserved = map[string]string{
 
 // Binding is one row of the control-mode table.
 type Binding struct {
+	// ActionName is the canonical name for this action used in configuration.
+	ActionName string
+
 	// Key is the ultraviolet key name for the unmodified form.
 	Key string
 	// Aliases are additional names that fire the same binding, for keys
@@ -88,25 +114,25 @@ type Binding struct {
 
 // Bindings is the table, in status-bar display order.
 var Bindings = []Binding{
-	{Key: "h", Aliases: []string{"left"}, Action: ActionVerb, Verb: protocol.VerbFocusLeft,
+	{ActionName: ActionNameFocusLeft, Key: "h", Aliases: []string{"left"}, Action: ActionVerb, Verb: protocol.VerbFocusLeft,
 		BarGroup: "hjkl move", Long: "focus the column to the left"},
-	{Key: "l", Aliases: []string{"right"}, Action: ActionVerb, Verb: protocol.VerbFocusRight,
+	{ActionName: ActionNameFocusRight, Key: "l", Aliases: []string{"right"}, Action: ActionVerb, Verb: protocol.VerbFocusRight,
 		BarGroup: "hjkl move", Long: "focus the column to the right"},
-	{Key: "j", Action: ActionScroll, Scroll: -10,
+	{ActionName: ActionNameScrollDown, Key: "j", Action: ActionScroll, Scroll: -10,
 		BarGroup: "hjkl move", Long: "scroll this pane's history down"},
-	{Key: "k", Action: ActionScroll, Scroll: 10,
+	{ActionName: ActionNameScrollUp, Key: "k", Action: ActionScroll, Scroll: 10,
 		BarGroup: "hjkl move", Long: "scroll this pane's history up"},
-	{Key: "n", Action: ActionVerb, Verb: protocol.VerbNewColumn,
+	{ActionName: ActionNameNewColumn, Key: "n", Action: ActionVerb, Verb: protocol.VerbNewColumn,
 		BarGroup: "n new", Long: "open a new column"},
-	{Key: "w", Action: ActionVerb, Verb: protocol.VerbCycleWidth,
+	{ActionName: ActionNameCycleWidth, Key: "w", Action: ActionVerb, Verb: protocol.VerbCycleWidth,
 		BarGroup: "w width", Long: "cycle this column's width"},
-	{Key: "x", Action: ActionVerb, Verb: protocol.VerbKillPane,
+	{ActionName: ActionNameKillPane, Key: "x", Action: ActionVerb, Verb: protocol.VerbKillPane,
 		BarGroup: "x kill", Long: "kill the focused pane"},
-	{Key: "a", Action: ActionVerb, Verb: protocol.VerbSmartJump,
+	{ActionName: ActionNameSmartJump, Key: "a", Action: ActionVerb, Verb: protocol.VerbSmartJump,
 		BarGroup: "a attn", Long: "jump to a pane wanting attention"},
-	{Key: "?", Action: ActionHelp,
+	{ActionName: ActionNameHelp, Key: "?", Action: ActionHelp,
 		BarGroup: "? help", Long: "show this help"},
-	{Key: "d", Action: ActionDetach, NeedsDetach: true,
+	{ActionName: ActionNameDetach, Key: "d", Action: ActionDetach, NeedsDetach: true,
 		BarGroup: "d detach", Long: "detach, leaving the session running"},
 	// No BarGroup on purpose: this verb lives in the help overlay
 	// only. The attached bar already totals exactly 77 cells against a
@@ -118,11 +144,11 @@ var Bindings = []Binding{
 	//
 	// NoRepeat because ctrl+c must stay an unknown key that leaves
 	// control mode; see the field's comment.
-	{Key: "c", Action: ActionVerb, Verb: protocol.VerbToggleCards,
+	{ActionName: ActionNameToggleCards, Key: "c", Action: ActionVerb, Verb: protocol.VerbToggleCards,
 		NoRepeat: true, Long: "toggle the card layout"},
-	{Key: "q", Action: ActionQuit, Essential: true,
+	{ActionName: ActionNameQuit, Key: "q", Action: ActionQuit, Essential: true,
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},
-	{Key: "esc", Action: ActionExit, Essential: true,
+	{ActionName: ActionNameExit, Key: "esc", Action: ActionExit, Essential: true,
 		BarGroup: "esc exit", Long: "leave control mode"},
 }
 
@@ -158,12 +184,12 @@ func (b Binding) MatchNames() []string {
 	return out
 }
 
-// BarItems returns the distinct status-bar labels, split into the ones
-// that may be dropped when the terminal is narrow and the ones that may
-// not, both in table order.
-func BarItems(detachable bool) (droppable, essential []string) {
+// BarItemsFor returns the distinct status-bar labels for the given bindings,
+// split into the ones that may be dropped when the terminal is narrow and the
+// ones that may not, both in table order.
+func BarItemsFor(bindings []Binding, detachable bool) (droppable, essential []string) {
 	seen := map[string]bool{}
-	for _, b := range Bindings {
+	for _, b := range bindings {
 		if b.NeedsDetach && !detachable {
 			continue
 		}
@@ -178,4 +204,177 @@ func BarItems(detachable bool) (droppable, essential []string) {
 		}
 	}
 	return droppable, essential
+}
+
+// BarItems returns the distinct status-bar labels for the default Bindings table.
+func BarItems(detachable bool) (droppable, essential []string) {
+	return BarItemsFor(Bindings, detachable)
+}
+
+// validActions is the set of canonical action names and recognized aliases.
+var validActions = map[string]string{
+	ActionNameFocusLeft:   ActionNameFocusLeft,
+	ActionNameFocusRight:  ActionNameFocusRight,
+	ActionNameScrollDown:  ActionNameScrollDown,
+	ActionNameScrollUp:    ActionNameScrollUp,
+	ActionNameNewColumn:   ActionNameNewColumn,
+	ActionNameCycleWidth:  ActionNameCycleWidth,
+	ActionNameKillPane:    ActionNameKillPane,
+	ActionNameSmartJump:   ActionNameSmartJump,
+	"attn":                ActionNameSmartJump,
+	ActionNameToggleCards: ActionNameToggleCards,
+	ActionNameHelp:        ActionNameHelp,
+	ActionNameDetach:      ActionNameDetach,
+	ActionNameQuit:        ActionNameQuit,
+	ActionNameExit:        ActionNameExit,
+}
+
+// validNamedKeys is the set of non-single-character key names produced by ultraviolet.
+var validNamedKeys = map[string]bool{
+	"esc":       true,
+	"enter":     true,
+	"tab":       true,
+	"space":     true,
+	"backspace": true,
+	"delete":    true,
+	"up":        true,
+	"down":      true,
+	"left":      true,
+	"right":     true,
+	"pgup":      true,
+	"pgdown":    true,
+	"home":      true,
+	"end":       true,
+	"insert":    true,
+	"f1":        true,
+	"f2":        true,
+	"f3":        true,
+	"f4":        true,
+	"f5":        true,
+	"f6":        true,
+	"f7":        true,
+	"f8":        true,
+	"f9":        true,
+	"f10":       true,
+	"f11":       true,
+	"f12":       true,
+}
+
+// isValidKeyName reports whether k is a valid key name or character in ultraviolet.
+func isValidKeyName(k string) bool {
+	if validNamedKeys[k] {
+		return true
+	}
+	runes := []rune(k)
+	if len(runes) == 1 {
+		r := runes[0]
+		return unicode.IsPrint(r) && !unicode.IsSpace(r)
+	}
+	return false
+}
+
+// BuildBindings builds and validates a set of control-mode bindings with custom
+// key mappings applied over the default Bindings table.
+func BuildBindings(custom map[string]string) ([]Binding, error) {
+	if len(custom) == 0 {
+		out := make([]Binding, len(Bindings))
+		copy(out, Bindings)
+		return out, nil
+	}
+
+	// 1. Validate custom action names
+	normalized := make(map[string]string, len(custom))
+	for act, key := range custom {
+		canonical, ok := validActions[act]
+		if !ok {
+			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, kill_pane, smart_jump, toggle_cards, help, detach, quit, exit", act)
+		}
+		k := strings.ToLower(strings.TrimSpace(key))
+		if k == "" {
+			return nil, fmt.Errorf("key for action %q cannot be empty", act)
+		}
+		if why, bad := Reserved[k]; bad {
+			return nil, fmt.Errorf("key %q for action %q is reserved: %s", k, act, why)
+		}
+		if !isValidKeyName(k) {
+			if k == "pgdn" {
+				return nil, fmt.Errorf("key %q for action %q is not a recognized key name; did you mean \"pgdown\"?", k, act)
+			}
+			return nil, fmt.Errorf("key %q for action %q is not a recognized key name; must be a single printable character or valid named key (e.g. esc, space, left, right, up, down, pgup, pgdown)", k, act)
+		}
+		normalized[canonical] = k
+	}
+
+	// 2. Clone default bindings and apply new keys
+	out := make([]Binding, len(Bindings))
+	for i, b := range Bindings {
+		out[i] = b
+		if k, ok := normalized[b.ActionName]; ok {
+			out[i].Key = k
+		}
+	}
+
+	// 3. Collision check among all bindings
+	seen := make(map[string]string) // key -> actionName
+	for _, b := range out {
+		if prev, exists := seen[b.Key]; exists {
+			return nil, fmt.Errorf("duplicate key %q assigned to both %q and %q (key collision)", b.Key, prev, b.ActionName)
+		}
+		seen[b.Key] = b.ActionName
+	}
+	// Filter aliases colliding with assigned keys
+	for i := range out {
+		var filteredAliases []string
+		for _, a := range out[i].Aliases {
+			if _, exists := seen[a]; exists {
+				continue
+			}
+			filteredAliases = append(filteredAliases, a)
+		}
+		out[i].Aliases = filteredAliases
+	}
+
+	// 4. Update BarGroup labels dynamically
+	var hKey, jKey, kKey, lKey string
+	for _, b := range out {
+		switch b.ActionName {
+		case ActionNameFocusLeft:
+			hKey = b.Key
+		case ActionNameScrollDown:
+			jKey = b.Key
+		case ActionNameScrollUp:
+			kKey = b.Key
+		case ActionNameFocusRight:
+			lKey = b.Key
+		}
+	}
+	moveGroup := fmt.Sprintf("%s%s%s%s move", hKey, jKey, kKey, lKey)
+
+	for i := range out {
+		b := &out[i]
+		switch b.ActionName {
+		case ActionNameFocusLeft, ActionNameScrollDown, ActionNameScrollUp, ActionNameFocusRight:
+			b.BarGroup = moveGroup
+		case ActionNameNewColumn:
+			b.BarGroup = fmt.Sprintf("%s new", b.Key)
+		case ActionNameCycleWidth:
+			b.BarGroup = fmt.Sprintf("%s width", b.Key)
+		case ActionNameKillPane:
+			b.BarGroup = fmt.Sprintf("%s kill", b.Key)
+		case ActionNameSmartJump:
+			b.BarGroup = fmt.Sprintf("%s attn", b.Key)
+		case ActionNameHelp:
+			b.BarGroup = fmt.Sprintf("%s help", b.Key)
+		case ActionNameDetach:
+			b.BarGroup = fmt.Sprintf("%s detach", b.Key)
+		case ActionNameToggleCards:
+			b.BarGroup = ""
+		case ActionNameQuit:
+			b.BarGroup = fmt.Sprintf("%s quit", b.Key)
+		case ActionNameExit:
+			b.BarGroup = fmt.Sprintf("%s exit", b.Key)
+		}
+	}
+
+	return out, nil
 }

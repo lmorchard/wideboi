@@ -70,6 +70,9 @@ type router struct {
 	// with control, so the bar, the overlay and the router cannot
 	// disagree about which mode is active.
 	help bool
+	// bindings is the active set of control mode bindings. If empty or nil,
+	// defaults to keys.Bindings.
+	bindings []keys.Binding
 }
 
 // route decides what to do with one key press, updating the mode as a
@@ -100,7 +103,11 @@ func (r *router) route(ev uv.KeyPressEvent) route {
 		return route{Kind: routeForward}
 	}
 
-	for _, b := range keys.Bindings {
+	bindings := r.bindings
+	if len(bindings) == 0 {
+		bindings = keys.Bindings
+	}
+	for _, b := range bindings {
 		if b.NeedsDetach && !r.detachable {
 			continue
 		}
