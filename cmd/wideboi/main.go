@@ -295,7 +295,6 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 	frame := time.NewTicker(16 * time.Millisecond)
 	defer frame.Stop()
 
-	var dirtyFrames int
 	for {
 		select {
 		case msg, ok := <-cConn.ServerSendChan():
@@ -346,10 +345,6 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 		case <-frame.C:
 			screenLock.Lock()
 			if cli.Draw(scr, nil, nil) {
-				dirtyFrames = 2
-			}
-			if dirtyFrames > 0 {
-				dirtyFrames--
 				present(scr)
 			}
 			screenLock.Unlock()
@@ -433,7 +428,6 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 	frame := time.NewTicker(16 * time.Millisecond)
 	defer frame.Stop()
 
-	var dirtyFrames int
 	for {
 		select {
 		case msg, ok := <-tp.ServerSend:
@@ -481,10 +475,6 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 			screenLock.Lock()
 			if !stopped.Load() {
 				if cli.Draw(scr, srv.DrawPane, srv.CursorInfo) {
-					dirtyFrames = 2
-				}
-				if dirtyFrames > 0 {
-					dirtyFrames--
 					present(scr)
 				}
 			}
