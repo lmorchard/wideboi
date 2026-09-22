@@ -1,0 +1,58 @@
+# wideboi configuration example
+#
+# Default discovery location:
+#   $XDG_CONFIG_HOME/wideboi/config.toml (usually ~/.config/wideboi/config.toml)
+# Or specify a custom config file path:
+#   wideboi -c /path/to/config.toml
+#
+# Precedence order (highest to lowest):
+#   1. Command-line flags (-l, -p, -s, --shell)
+#   2. Environment variable overrides (WIDEBOI_LAYOUT, WIDEBOI_PREFIX, WIDEBOI_SOCK, WIDEBOI_SHELL)
+#   3. Configuration file (this file)
+#   4. Defaults (including $SHELL or /bin/sh)
+
+# Layout strategy: "cards" (default) or "scroll"
+layout = "cards"
+
+# Prefix key used to enter control mode: "ctrl+<letter>" or "ctrl+space"
+# Note: "ctrl+i", "ctrl+m", and "ctrl+[" are reserved (they decode as Tab, Enter, Escape).
+prefix = "ctrl+b"
+
+# Unix domain socket path for client/server communication.
+# Defaults to $TMPDIR/wideboi-<uid>/default.sock
+# socket = "/path/to/socket.sock"
+
+# Shell executable to spawn in new panes.
+# Defaults to $SHELL, or /bin/sh if $SHELL is empty.
+# shell = "/bin/zsh"
+
+# Key remapping for control mode
+#
+# Remap actions to customize your control-mode shortcuts.
+# Unmentioned actions retain their defaults.
+#
+# Constraints:
+# - Keys "i", "m", and "[" are reserved and cannot be bound (their control
+#   bytes decode as Tab, Enter, and Escape, breaking repeat chords).
+# - No two actions may be bound to the same key (key collision).
+# - Actions bound to single lowercase letters (a-z) automatically get a
+#   matching ctrl repeat chord (e.g. key "x" -> "ctrl+x" repeat).
+[keys]
+# Navigation & Scrolling
+focus_left   = "h"    # Move focus to the left column (aliases: "left")
+focus_right  = "l"    # Move focus to the right column (aliases: "right")
+scroll_down  = "j"    # Scroll focused pane history down (forward in time)
+scroll_up    = "k"    # Scroll focused pane history up (back into history)
+
+# Pane & Column Management
+new_column   = "n"    # Open a new column
+cycle_width  = "w"    # Cycle width of focused column (narrow -> standard -> wide)
+kill_pane    = "x"    # Kill focused pane
+smart_jump   = "a"    # Jump to pane requesting attention (OSC 133 / prompt)
+toggle_cards = "c"    # Toggle cards / scrolling layout (help overlay only)
+
+# Session Controls
+help         = "?"    # Show the control-mode help overlay
+detach       = "d"    # Detach from socket session (leaves session running)
+quit         = "q"    # Quit wideboi and close all panes
+exit         = "esc"  # Exit control mode without performing an action

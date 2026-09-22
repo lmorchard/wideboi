@@ -117,9 +117,10 @@ def prompts_seen(out: bytes) -> int:
 class Session:
     """A running wideboi in a pty, with helpers to type and observe."""
 
-    def __init__(self, cols=100, rows=30, startup=4.0, env=None):
+    def __init__(self, cols=100, rows=30, startup=4.0, env=None, args=None):
         env = {"WIDEBOI_SOCK": NEVER_SOCK, **(env or {})}
-        self.pid, self.fd = spawn_in_pty(["./bin/wideboi"], cols, rows, True, env)
+        cmd = ["./bin/wideboi"] + (args or [])
+        self.pid, self.fd = spawn_in_pty(cmd, cols, rows, True, env)
         self.rows = rows
         with SPAWNED_LOCK:
             SPAWNED.append(self.pid)
@@ -446,6 +447,29 @@ def case_custom_prefix_from_env(fail):
     if b"custom-prefix-pane" not in s.output():
         fail("the configured prefix did not route a verb")
     s.close()
+
+
+def case_config_file_and_key_remapping(fail):
+    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+        f.write('prefix = "ctrl+a"\nlayout = "cards"\n[keys]\nkill_pane = "k"\nscroll_up = "u"\n')
+        cfg_path = f.name
+    try:
+        s = Session(args=["-c", cfg_path])
+        out = s.output()
+        if b"C-a for commands" not in out:
+            fail("status line does not name the configured prefix from config file")
+        s.type("\x01")  # ctrl+a enters control mode
+        out = s.output()
+        if b"k kill" not in out:
+            fail("status line does not show remapped 'k kill'")
+        if b"hjul move" not in out:
+            fail("status line does not show updated movement 'hjul move'")
+        s.close()
+    finally:
+        try:
+            os.unlink(cfg_path)
+        except OSError:
+            pass
 
 
 
@@ -808,6 +832,7 @@ CASES = [
     ("doubled prefix reaches the pane", case_doubled_prefix_reaches_the_pane),
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),
+    ("config file and key remapping", case_config_file_and_key_remapping),
     ("osc133 status drives smart jump", case_osc133_status_drives_smart_jump),
     ("card layout toggles", case_card_layout_toggles),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),

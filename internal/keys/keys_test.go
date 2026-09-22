@@ -278,3 +278,148 @@ func TestToggleCardsIsOnC(t *testing.T) {
 	}
 	t.Error("no binding produces VerbToggleCards")
 }
+
+func TestBuildBindingsDefaults(t *testing.T) {
+	b, err := keys.BuildBindings(nil)
+	if err != nil {
+		t.Fatalf("BuildBindings(nil) error: %v", err)
+	}
+	if len(b) != len(keys.Bindings) {
+		t.Fatalf("got %d bindings, want %d", len(b), len(keys.Bindings))
+	}
+	for i := range b {
+		if b[i].Key != keys.Bindings[i].Key {
+			t.Errorf("binding[%d].Key = %q, want %q", i, b[i].Key, keys.Bindings[i].Key)
+		}
+		if b[i].BarGroup != keys.Bindings[i].BarGroup {
+			t.Errorf("binding[%d].BarGroup = %q, want %q", i, b[i].BarGroup, keys.Bindings[i].BarGroup)
+		}
+	}
+}
+
+func TestBuildBindingsCustomValid(t *testing.T) {
+	// Remap kill_pane to 'k' and scroll_up to 'u'
+	custom := map[string]string{
+		keys.ActionNameKillPane: "k",
+		keys.ActionNameScrollUp: "u",
+	}
+	b, err := keys.BuildBindings(custom)
+	if err != nil {
+		t.Fatalf("BuildBindings failed: %v", err)
+	}
+
+	for _, item := range b {
+		if item.ActionName == keys.ActionNameKillPane {
+			if item.Key != "k" {
+				t.Errorf("kill_pane key = %q, want %q", item.Key, "k")
+			}
+			if item.BarGroup != "k kill" {
+				t.Errorf("kill_pane BarGroup = %q, want %q", item.BarGroup, "k kill")
+			}
+			ctrl, ok := item.CtrlForm()
+			if !ok || ctrl != "ctrl+k" {
+				t.Errorf("kill_pane CtrlForm() = (%q, %v), want (ctrl+k, true)", ctrl, ok)
+			}
+		}
+		if item.ActionName == keys.ActionNameScrollUp {
+			if item.Key != "u" {
+				t.Errorf("scroll_up key = %q, want %q", item.Key, "u")
+			}
+			if item.BarGroup != "hjul move" {
+				t.Errorf("movement BarGroup = %q, want %q", item.BarGroup, "hjul move")
+			}
+		}
+	}
+}
+
+func TestBuildBindingsReservedKeyRejected(t *testing.T) {
+	for reserved := range keys.Reserved {
+		_, err := keys.BuildBindings(map[string]string{
+			keys.ActionNameKillPane: reserved,
+		})
+		if err == nil {
+			t.Errorf("expected error for reserved key %q, got nil", reserved)
+		} else if !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("error for reserved key %q should mention 'reserved', got %v", reserved, err)
+		}
+	}
+}
+
+func TestBuildBindingsDuplicateKeyRejected(t *testing.T) {
+	// 'x' is default for kill_pane, assigning cycle_width to 'x' without moving kill_pane should fail
+	_, err := keys.BuildBindings(map[string]string{
+		keys.ActionNameCycleWidth: "x",
+	})
+	if err == nil {
+		t.Error("expected error for duplicate key 'x', got nil")
+	} else if !strings.Contains(err.Error(), "duplicate") && !strings.Contains(err.Error(), "collision") {
+		t.Errorf("expected duplicate/collision error, got %v", err)
+	}
+}
+
+func TestBuildBindingsUnknownActionRejected(t *testing.T) {
+	_, err := keys.BuildBindings(map[string]string{
+		"nonexistent_action": "z",
+	})
+	if err == nil {
+		t.Error("expected error for unknown action, got nil")
+	} else if !strings.Contains(err.Error(), "unknown action") {
+		t.Errorf("expected error to mention 'unknown action', got %v", err)
+	}
+}
+
+func TestBuildBindingsInvalidKeyNames(t *testing.T) {
+	cases := []struct {
+		key     string
+		wantErr string
+	}{
+		{"pgdn", "did you mean \"pgdown\""},
+		{"not-a-key", "not a recognized key name"},
+		{"ctrl", "not a recognized key name"},
+		{"", "cannot be empty"},
+	}
+
+	for _, tc := range cases {
+		_, err := keys.BuildBindings(map[string]string{
+			keys.ActionNameKillPane: tc.key,
+		})
+		if err == nil {
+			t.Errorf("expected error for key %q, got nil", tc.key)
+		} else if !strings.Contains(err.Error(), tc.wantErr) {
+			t.Errorf("key %q error = %v, want to contain %q", tc.key, err, tc.wantErr)
+		}
+	}
+}
+
+func TestBuildBindingsValidNamedKeysAccepted(t *testing.T) {
+	b, err := keys.BuildBindings(map[string]string{
+		keys.ActionNameScrollDown: "pgdown",
+		keys.ActionNameScrollUp:   "pgup",
+	})
+	if err != nil {
+		t.Fatalf("BuildBindings with valid named keys failed: %v", err)
+	}
+	for _, item := range b {
+		if item.ActionName == keys.ActionNameScrollDown && item.Key != "pgdown" {
+			t.Errorf("scroll_down key = %q, want pgdown", item.Key)
+		}
+	}
+}
+
+func TestBarItemsFor(t *testing.T) {
+	b, err := keys.BuildBindings(map[string]string{
+		keys.ActionNameKillPane: "k",
+		keys.ActionNameScrollUp: "u",
+	})
+	if err != nil {
+		t.Fatalf("BuildBindings failed: %v", err)
+	}
+	droppable, essential := keys.BarItemsFor(b, true)
+	joined := strings.Join(droppable, " ") + " " + strings.Join(essential, " ")
+	if !strings.Contains(joined, "k kill") {
+		t.Errorf("bar items should contain 'k kill', got %q", joined)
+	}
+	if !strings.Contains(joined, "hjul move") {
+		t.Errorf("bar items should contain 'hjul move', got %q", joined)
+	}
+}

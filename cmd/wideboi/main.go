@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -15,7 +17,9 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/client"
+	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/hostterm"
+	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
@@ -27,15 +31,6 @@ const signalExitMargin = 500 * time.Millisecond
 // defaultSocketPath is where `wideboi server` listens, where `wideboi
 // attach` dials, and what a plain `wideboi` probes before deciding
 // whether to start its own session.
-//
-// WIDEBOI_SOCK overrides it outright. The default is machine-global
-// per-uid, so two sessions cannot coexist and anything started while a
-// server is up silently joins that server instead of starting its own.
-// That is a real collision, not just a test one: with a server running,
-// `make smoke` failed 9 cases before this existed.
-//
-// A single escape hatch, deliberately not a design -- see #27 for real
-// session naming and #58 for configuration as a whole.
 func defaultSocketPath() string {
 	if p := os.Getenv("WIDEBOI_SOCK"); p != "" {
 		_ = os.MkdirAll(filepath.Dir(p), 0700)
@@ -55,21 +50,126 @@ var (
 	date    = "unknown"
 )
 
-func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "version", "--version", "-v":
-			fmt.Printf("wideboi %s (%s, built %s)\n", version, commit, date)
-			return
-		case "server":
-			fatal(runServer(defaultSocketPath()))
-			return
-		case "attach":
-			fatal(runAttach(defaultSocketPath()))
-			return
+type cliOptions struct {
+	subcommand string
+	flags      config.ConfigFlags
+	showVer    bool
+	showHelp   bool
+}
+
+func parseCLI(args []string) (cliOptions, error) {
+	var opts cliOptions
+	var flagArgs []string
+	skipNext := false
+
+	for i := 0; i < len(args); i++ {
+		if skipNext {
+			flagArgs = append(flagArgs, args[i])
+			skipNext = false
+			continue
+		}
+		arg := args[i]
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "version" || arg == "help") {
+			opts.subcommand = arg
+			continue
+		}
+		flagArgs = append(flagArgs, arg)
+		if arg == "-c" || arg == "-config" || arg == "--config" ||
+			arg == "-l" || arg == "-layout" || arg == "--layout" ||
+			arg == "-p" || arg == "-prefix" || arg == "--prefix" ||
+			arg == "-s" || arg == "-socket" || arg == "--socket" ||
+			arg == "-shell" || arg == "--shell" {
+			skipNext = true
 		}
 	}
-	fatal(run())
+
+	fs := flag.NewFlagSet("wideboi", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	fs.StringVar(&opts.flags.ConfigFile, "c", "", "path to TOML configuration file")
+	fs.StringVar(&opts.flags.ConfigFile, "config", "", "path to TOML configuration file")
+	fs.StringVar(&opts.flags.Layout, "l", "", "layout strategy: cards or scroll")
+	fs.StringVar(&opts.flags.Layout, "layout", "", "layout strategy: cards or scroll")
+	fs.StringVar(&opts.flags.Prefix, "p", "", "prefix key, e.g. ctrl+b, ctrl+space")
+	fs.StringVar(&opts.flags.Prefix, "prefix", "", "prefix key, e.g. ctrl+b, ctrl+space")
+	fs.StringVar(&opts.flags.Socket, "s", "", "unix domain socket path")
+	fs.StringVar(&opts.flags.Socket, "socket", "", "unix domain socket path")
+	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
+	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
+	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
+	fs.BoolVar(&opts.showHelp, "h", false, "show help and usage information")
+	fs.BoolVar(&opts.showHelp, "help", false, "show help and usage information")
+
+	if err := fs.Parse(flagArgs); err != nil {
+		return opts, err
+	}
+	if opts.subcommand == "version" {
+		opts.showVer = true
+	}
+	if opts.subcommand == "help" {
+		opts.showHelp = true
+	}
+	return opts, nil
+}
+
+func printHelp(w io.Writer) {
+	fmt.Fprintf(w, `Usage:
+  wideboi [flags]            Start an in-process session, or attach if running
+  wideboi [flags] server     Start a background server listening on socket
+  wideboi [flags] attach     Attach a client to a running server
+  wideboi version            Display version information
+  wideboi help               Show this help text
+
+Flags:
+  -c, --config <path>    Path to TOML configuration file
+                         (default: $XDG_CONFIG_HOME/wideboi/config.toml
+                          or ~/.config/wideboi/config.toml)
+  -l, --layout <mode>    Layout strategy: "cards" (default) or "scroll"
+  -p, --prefix <key>     Control mode prefix key: "ctrl+<letter>" or "ctrl+space"
+                         (default: "ctrl+b")
+  -s, --socket <path>    Unix domain socket path
+                         (default: $TMPDIR/wideboi-<uid>/default.sock)
+      --shell <path>     Shell executable to launch in panes
+                         (default: $SHELL or /bin/sh)
+  -v, --version          Print version and exit
+  -h, --help             Show this help text and exit
+
+Environment Variables:
+  WIDEBOI_LAYOUT         Layout mode override ("cards" or "scroll")
+  WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
+  WIDEBOI_SOCK           Socket path override
+  WIDEBOI_SHELL          Shell path override
+  SHELL                  Default shell path (when shell is not set in config)
+`)
+}
+
+func main() {
+	opts, err := parseCLI(os.Args[1:])
+	if err != nil {
+		fatal(err)
+	}
+	if opts.showVer {
+		fmt.Printf("wideboi %s (%s, built %s)\n", version, commit, date)
+		return
+	}
+	if opts.showHelp {
+		printHelp(os.Stdout)
+		return
+	}
+
+	cfg, bindings, err := config.Load(opts.flags, os.Getenv)
+	if err != nil {
+		fatal(err)
+	}
+
+	switch opts.subcommand {
+	case "server":
+		fatal(runServer(cfg))
+	case "attach":
+		fatal(runAttach(cfg, bindings))
+	default:
+		fatal(run(cfg, bindings))
+	}
 }
 
 // fatal reports err on stderr and exits non-zero.
@@ -116,32 +216,23 @@ func parseLayout(name string) (protocol.LayoutMode, error) {
 	}
 }
 
-func runServer(socketPath string) error {
+func runServer(cfg config.Config) error {
 	f, _ := logger.Init("server")
 	if f != nil {
 		defer f.Close()
 	}
-	slog.Info("starting wideboi server", "socketPath", socketPath)
+	slog.Info("starting wideboi server", "socketPath", cfg.Socket)
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
 	cwd, _ := os.Getwd()
 
-	layoutMode, err := parseLayout(os.Getenv("WIDEBOI_LAYOUT"))
-	if err != nil {
-		return err
-	}
-
-	sl, err := transport.NewSocketListener(socketPath)
+	sl, err := transport.NewSocketListener(cfg.Socket)
 	if err != nil {
 		return err
 	}
 	defer sl.Close()
 
-	srv := server.NewServer(nil, shell, cwd)
-	srv.SetLayout(layoutMode)
+	srv := server.NewServer(nil, cfg.Shell, cwd)
+	srv.SetLayout(cfg.LayoutMode)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -151,26 +242,16 @@ func runServer(socketPath string) error {
 	return srv.Run(ctx)
 }
 
-func runAttach(socketPath string) error {
+func runAttach(cfg config.Config, bindings []keys.Binding) error {
 	f, _ := logger.Init("client")
 	if f != nil {
 		defer f.Close()
 	}
-	slog.Info("attaching wideboi client to socket", "socketPath", socketPath)
+	slog.Info("attaching wideboi client to socket", "socketPath", cfg.Socket)
 
-	conn, err := net.Dial("unix", socketPath)
+	conn, err := net.Dial("unix", cfg.Socket)
 	if err != nil {
-		return fmt.Errorf("no wideboi server running at %s (start one with 'wideboi server'): %w", socketPath, err)
-	}
-
-	prefixName := os.Getenv("WIDEBOI_PREFIX")
-	if prefixName == "" {
-		prefixName = defaultPrefix
-	}
-	prefix, prefixLabel, err := parsePrefix(prefixName)
-	if err != nil {
-		conn.Close()
-		return err
+		return fmt.Errorf("no wideboi server running at %s (start one with 'wideboi server'): %w", cfg.Socket, err)
 	}
 
 	t := uv.DefaultTerminal()
@@ -201,9 +282,10 @@ func runAttach(socketPath string) error {
 		width, height = 80, 24
 	}
 
-	cli := client.NewClient(cConn, width, height, prefixLabel)
+	cli := client.NewClient(cConn, width, height, cfg.PrefixLabel)
+	cli.SetBindings(bindings)
 	cli.SetDetachable(true)
-	rt := &router{prefix: prefix, detachable: true}
+	rt := &router{prefix: cfg.Prefix, detachable: true, bindings: bindings}
 
 	cli.Attach(ctx)
 
@@ -273,33 +355,13 @@ func runAttach(socketPath string) error {
 	}
 }
 
-func run() error {
-	sockPath := defaultSocketPath()
-	if conn, err := net.Dial("unix", sockPath); err == nil {
+func run(cfg config.Config, bindings []keys.Binding) error {
+	if conn, err := net.Dial("unix", cfg.Socket); err == nil {
 		conn.Close()
-		return runAttach(sockPath)
+		return runAttach(cfg, bindings)
 	}
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
 	cwd, _ := os.Getwd()
-
-	prefixName := os.Getenv("WIDEBOI_PREFIX")
-	if prefixName == "" {
-		prefixName = defaultPrefix
-	}
-	prefix, prefixLabel, err := parsePrefix(prefixName)
-	if err != nil {
-		return err
-	}
-	// Parse before the alt screen is entered, so a bad value prints
-	// where the user can read it.
-	layoutMode, err := parseLayout(os.Getenv("WIDEBOI_LAYOUT"))
-	if err != nil {
-		return err
-	}
 
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
@@ -324,8 +386,8 @@ func run() error {
 	defer cancel()
 
 	tp := transport.NewInProcChannel(256)
-	srv := server.NewServer(tp, shell, cwd)
-	srv.SetLayout(layoutMode)
+	srv := server.NewServer(tp, cfg.Shell, cwd)
+	srv.SetLayout(cfg.LayoutMode)
 
 	guard := hostterm.NewGuard(func() error {
 		stopped.Store(true)
@@ -353,8 +415,9 @@ func run() error {
 		width, height = 80, 24
 	}
 
-	cli := client.NewClient(tp, width, height, prefixLabel)
-	rt := &router{prefix: prefix}
+	cli := client.NewClient(tp, width, height, cfg.PrefixLabel)
+	cli.SetBindings(bindings)
+	rt := &router{prefix: cfg.Prefix, bindings: bindings}
 
 	go func() {
 		_ = srv.Run(ctx)

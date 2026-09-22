@@ -153,3 +153,32 @@ func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
 		t.Errorf("attached status line omits %q: %q", "d detach", got)
 	}
 }
+
+func TestCustomBindingsInControlHelpAndHelpLines(t *testing.T) {
+	custom, err := keys.BuildBindings(map[string]string{
+		keys.ActionNameKillPane: "k",
+		keys.ActionNameScrollUp: "u",
+	})
+	if err != nil {
+		t.Fatalf("BuildBindings: %v", err)
+	}
+
+	c := NewClient(nil, 80, 24, "C-b")
+	c.SetBindings(custom)
+	c.SetDetachable(true)
+	c.SetControlMode(true)
+
+	status, _ := c.statusLineLocked(79)
+	if !strings.Contains(status, "k kill") {
+		t.Errorf("status line should contain 'k kill', got: %q", status)
+	}
+	if !strings.Contains(status, "hjul move") {
+		t.Errorf("status line should contain 'hjul move', got: %q", status)
+	}
+
+	lines := helpLines("C-b", true, custom)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "k     kill the focused pane") {
+		t.Errorf("help lines should contain 'k     kill the focused pane', got: %q", joined)
+	}
+}

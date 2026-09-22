@@ -15,10 +15,14 @@ import (
 // The prefix is passed in rather than hardcoded: WIDEBOI_PREFIX exists,
 // and someone who changed it is exactly the person most likely to open
 // this.
-func helpLines(prefixLabel string, detachable bool) []string {
+func helpLines(prefixLabel string, detachable bool, custom ...[]keys.Binding) []string {
+	bindings := keys.Bindings
+	if len(custom) > 0 && len(custom[0]) > 0 {
+		bindings = custom[0]
+	}
 	lines := []string{"control mode", ""}
 
-	for _, b := range keys.Bindings {
+	for _, b := range bindings {
 		if b.NeedsDetach && !detachable {
 			continue
 		}
@@ -46,12 +50,12 @@ func helpLines(prefixLabel string, detachable bool) []string {
 // The box never touches the last column: ultraviolet brackets a write
 // there with autowrap toggles, which splits the text across escape
 // sequences on the wire. See docs/LESSONS.md.
-func drawHelpOverlay(scr uv.Screen, cols, rows int, prefixLabel string, detachable bool) {
+func drawHelpOverlay(scr uv.Screen, cols, rows int, prefixLabel string, detachable bool, custom ...[]keys.Binding) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
 
-	lines := helpLines(prefixLabel, detachable)
+	lines := helpLines(prefixLabel, detachable, custom...)
 
 	inner := 0
 	for _, l := range lines {
