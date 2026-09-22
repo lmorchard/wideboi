@@ -147,13 +147,26 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		if m.Button != uv.MouseLeft {
 			break
 		}
-		if p.PaneID != c.focusPaneID {
-			out = append(out, protocol.MsgFocusPane{PaneID: p.PaneID})
-		}
+		unfocused := p.PaneID != c.focusPaneID
 		// No wideboi selection over a child that wants the mouse; the
 		// terminal's own bypass modifier still selects natively there.
 		if cp != nil && !tracking {
-			c.sel = &selection{paneID: cp.PaneID, dst: cp.Dst, bounds: c.visibleRectLocked(cp, pt), anchor: pt, cursor: pt, dragging: true}
+			// Focus waits for the release, and happens only if the
+			// pointer did not move. Focusing now would re-deal the
+			// layout mid-drag -- the card slides to the front, the text
+			// moves out from under the pointer -- and dragging to copy
+			// from a background pane without disturbing anything is
+			// worth keeping.
+			c.sel = &selection{
+				paneID: cp.PaneID, dst: cp.Dst, bounds: c.visibleRectLocked(cp, pt),
+				anchor: pt, cursor: pt, dragging: true, focusOnClick: unfocused,
+			}
+			break
+		}
+		// Headers, slivers and tracking children cannot start a
+		// selection, so there is nothing to wait for.
+		if unfocused {
+			out = append(out, protocol.MsgFocusPane{PaneID: p.PaneID})
 		}
 
 	case uv.MouseMotionEvent:
@@ -171,6 +184,9 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		case c.sel.anchor == c.sel.cursor:
 			// A click, not a drag. Copying one character on every
 			// click-to-focus would clobber the clipboard constantly.
+			if c.sel.focusOnClick {
+				out = append(out, protocol.MsgFocusPane{PaneID: c.sel.paneID})
+			}
 			c.sel = nil
 		case c.lastRenderedScreen != nil:
 			copyText = c.sel.text(c.lastRenderedScreen)
@@ -224,6 +240,10 @@ type selection struct {
 	dst, bounds    image.Rectangle
 	anchor, cursor image.Point
 	dragging       bool
+	// focusOnClick is set when the press landed on an unfocused pane:
+	// if it turns out to be a click rather than a drag, the release
+	// focuses that pane.
+	focusOnClick bool
 }
 
 func clampPt(pt image.Point, r image.Rectangle) image.Point {

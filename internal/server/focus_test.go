@@ -42,14 +42,14 @@ func TestFocusPaneIgnoresUnknownPane(t *testing.T) {
 func TestMouseMessageQueuesForNamedPane(t *testing.T) {
 	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
 	p := s.panes[2]
-	p.mice = make(chan uv.MouseEvent, 1)
+	p.input = make(chan uv.Event, 1)
 
 	s.handleClientMsg(context.Background(), protocol.MsgMouse{
 		PaneID: 2, Kind: protocol.MouseRelease, X: 4, Y: 5, Button: int(uv.MouseLeft),
 	})
 
 	select {
-	case ev := <-p.mice:
+	case ev := <-p.input:
 		rel, ok := ev.(uv.MouseReleaseEvent)
 		if !ok {
 			t.Fatalf("queued %T, want uv.MouseReleaseEvent", ev)

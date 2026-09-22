@@ -65,6 +65,22 @@ Rebase, then rerun `make check` 4×.
   lost (for example, while the help overlay was up) left the grab set, and the
   next press was dropped. A press now always clears the grab first.
 
+## Copilot review (PR #78), all three addressed
+
+- **(High) A release could be dropped behind a flood of drag motion.** Fixed: motion
+  is dropped once the input queue is half full, leaving room for presses, releases
+  and keys. Full delivery can't be guaranteed if the child stops reading, because
+  the pty writer drops bytes on its timeout anyway.
+- **(Medium) A drag on an unfocused pane was cleared mid-drag** by the focus change
+  it caused. Fixed by deferring focus to the release, and only for a click. A drag
+  selects without focusing, which also keeps copying from a background card
+  possible. This changes the spec's "the same press also focuses it"; the spec is
+  updated.
+- **(Medium) Keys and mouse events could be reordered** by two channels drained in
+  one `select`. Fixed: a single `input chan uv.Event` queue.
+- Pushed as a normal commit rather than a force-push, per LESSONS ("Once a PR is
+  handed over for review, stop force-pushing").
+
 ## Flakes observed (not caused by this branch, as far as I can tell)
 
 - This branch, Phase 3: `unmodified verb exits control mode` failed 1 of 5

@@ -45,6 +45,12 @@ func press(x, y int) uv.MouseEvent {
 	return uv.MouseClickEvent{X: x, Y: y, Button: uv.MouseLeft}
 }
 
+// click presses and releases on the same cell.
+func click(cli *Client, x, y int) {
+	cli.HandleMouse(context.Background(), press(x, y))
+	cli.HandleMouse(context.Background(), release(x, y))
+}
+
 func focusRequests(msgs []transport.ClientMessage) []int {
 	var ids []int
 	for _, m := range msgs {
@@ -62,7 +68,7 @@ func TestClickFocusesPaneUnderPointer(t *testing.T) {
 		t.Fatal("pane 2 has no placement; fixture is wrong")
 	}
 
-	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, p2.Dst.Min.Y+2))
+	click(cli, p2.Dst.Min.X+2, p2.Dst.Min.Y+2)
 
 	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
 		t.Errorf("focus requests = %v, want [2]", got)
@@ -86,7 +92,7 @@ func TestClickOnFocusedPaneSendsNothing(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p1 := placementFor(cli, 1)
 
-	cli.HandleMouse(context.Background(), press(p1.Dst.Min.X+2, p1.Dst.Min.Y+2))
+	click(cli, p1.Dst.Min.X+2, p1.Dst.Min.Y+2)
 
 	if got := focusRequests(sent(ch)); len(got) != 0 {
 		t.Errorf("focus requests = %v, want none", got)
@@ -110,12 +116,12 @@ func TestClickHitsTopmostCard(t *testing.T) {
 		t.Fatalf("fixture wants pane 2 above pane 1: z1=%d z2=%d", p1.Z, p2.Z)
 	}
 
-	cli.HandleMouse(context.Background(), press(overlap.Min.X, overlap.Min.Y+1))
+	click(cli, overlap.Min.X, overlap.Min.Y+1)
 	if got := focusRequests(sent(ch)); len(got) != 0 {
 		t.Errorf("click on overlap sent focus %v; pane 2 is on top and already focused", got)
 	}
 
-	cli.HandleMouse(context.Background(), press(p1.Dst.Min.X, p1.Dst.Min.Y+1))
+	click(cli, p1.Dst.Min.X, p1.Dst.Min.Y+1)
 	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 1 {
 		t.Errorf("click on pane 1's visible edge sent %v, want [1]", got)
 	}
@@ -635,5 +641,37 @@ func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 	defer cli.mu.Unlock()
 	if cli.sel == nil {
 		t.Error("an unchanged layout cleared a card selection")
+	}
+}
+
+// Dragging to copy from a background pane must not bring it forward:
+// focusing on press would re-deal the layout mid-drag, moving the text
+// out from under the pointer and throwing the selection away. Content
+// clicks therefore focus on release, and only if the pointer did not
+// move.
+func TestDragOnUnfocusedPaneSelectsWithoutFocusing(t *testing.T) {
+	cli, ch, _ := newSelectClient(t)
+	d := placementFor(cli, 2).Dst
+
+	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+8, d.Min.Y))
+
+	if got != "NEIGHBOUR" {
+		t.Errorf("copied %q, want %q", got, "NEIGHBOUR")
+	}
+	if f := focusRequests(sent(ch)); len(f) != 0 {
+		t.Errorf("a drag on an unfocused pane sent focus %v", f)
+	}
+}
+
+// The header is not content and cannot start a selection, so there is
+// no reason to wait for the release there.
+func TestHeaderPressFocusesImmediately(t *testing.T) {
+	cli, ch := newMouseClient(t)
+	p2 := placementFor(cli, 2)
+
+	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
+
+	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
+		t.Errorf("focus requests after header press = %v, want [2]", got)
 	}
 }

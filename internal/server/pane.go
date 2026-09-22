@@ -42,8 +42,9 @@ type Pane struct {
 	// race is real, not theoretical.
 	resizeMu sync.Mutex
 
-	keys    chan uv.KeyEvent
-	mice    chan uv.MouseEvent
+	// input is keys and mouse events for the child, in one queue so
+	// they reach it in the order the user produced them.
+	input   chan uv.Event
 	dropped atomic.Uint64
 
 	closed    chan struct{}
@@ -87,8 +88,7 @@ func NewPane(id int, argv []string, cols, rows int, dir string) (*Pane, error) {
 		grid:   term.NewVT(cols, rows),
 		cols:   cols,
 		rows:   rows,
-		keys:   make(chan uv.KeyEvent, keyQueueDepth),
-		mice:   make(chan uv.MouseEvent, keyQueueDepth),
+		input:  make(chan uv.Event, keyQueueDepth),
 		closed: make(chan struct{}),
 	}, nil
 }
@@ -153,10 +153,13 @@ func (p *Pane) Start(onExit func()) {
 		}()
 		for {
 			select {
-			case k := <-p.keys:
-				p.grid.SendKey(k)
-			case m := <-p.mice:
-				p.grid.SendMouse(m)
+			case ev := <-p.input:
+				switch ev := ev.(type) {
+				case uv.KeyEvent:
+					p.grid.SendKey(ev)
+				case uv.MouseEvent:
+					p.grid.SendMouse(ev)
+				}
 			case <-p.closed:
 				return
 			}
@@ -167,7 +170,7 @@ func (p *Pane) Start(onExit func()) {
 // SendKey queues a decoded key event for the pane's child.
 func (p *Pane) SendKey(k uv.KeyEvent) {
 	select {
-	case p.keys <- k:
+	case p.input <- k:
 	default:
 		p.dropped.Add(1)
 	}
@@ -177,9 +180,19 @@ func (p *Pane) SendKey(k uv.KeyEvent) {
 // writer's goroutine because vt's SendMouse, like SendKey, writes to an
 // io.Pipe and blocks until the pty-writer reads -- calling it inline
 // under s.mu would stall the server behind a slow child.
+//
+// Motion is dropped once the queue is half full. It is the one event
+// that is safe to lose -- the next motion supersedes it -- and a fast
+// drag produces a flood of it, which must not crowd out the release
+// that ends the drag. A child that never sees button-up believes the
+// button is still held.
 func (p *Pane) SendMouse(m uv.MouseEvent) {
+	if _, ok := m.(uv.MouseMotionEvent); ok && len(p.input) >= cap(p.input)/2 {
+		p.dropped.Add(1)
+		return
+	}
 	select {
-	case p.mice <- m:
+	case p.input <- m:
 	default:
 		p.dropped.Add(1)
 	}

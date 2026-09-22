@@ -110,7 +110,7 @@ func TestCloseDoesNotHangOnWedgedResize(t *testing.T) {
 		grid:   grid,
 		cols:   10,
 		rows:   10,
-		keys:   make(chan uv.KeyEvent, keyQueueDepth),
+		input:  make(chan uv.Event, keyQueueDepth),
 		closed: make(chan struct{}),
 	}
 

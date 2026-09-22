@@ -47,7 +47,10 @@ See `research.md`. Load-bearing facts:
 4. **Drag to select and copy on release.** In a pane whose child doesn't track
    the mouse:
    - A left press in the content rect anchors a selection. If the pane wasn't
-     focused, the same press also focuses it.
+     focused, it gets focus on release, and only if the pointer didn't move (a
+     click). A drag on an unfocused pane selects without focusing it. *(Changed
+     after Copilot review: focusing on press re-dealt the layout mid-drag and
+     threw the selection away.)*
    - Dragging extends the selection, clamped to the content rect where it
      started (the rect it had at press time). A pane never selects across into
      its neighbour.
