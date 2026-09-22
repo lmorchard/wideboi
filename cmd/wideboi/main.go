@@ -360,8 +360,7 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 			}
 			if dirtyFrames > 0 {
 				dirtyFrames--
-				scr.Render()
-				_ = scr.Flush()
+				present(scr)
 			}
 			screenLock.Unlock()
 		}
@@ -535,8 +534,7 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 				}
 				if dirtyFrames > 0 {
 					dirtyFrames--
-					scr.Render()
-					_ = scr.Flush()
+					present(scr)
 				}
 			}
 			screenLock.Unlock()
