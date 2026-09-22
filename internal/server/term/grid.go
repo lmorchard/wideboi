@@ -8,6 +8,7 @@ package term
 import (
 	"image"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -145,9 +146,9 @@ type vtGrid struct {
 	// title is written from the emulator's parse path (inside Write)
 	// and read from the broadcast path, so it is atomic for the same
 	// reason cursorVisible is.
-	title        atomic.Pointer[string]
-	sawOSC133    atomic.Bool
-	scrollOffset atomic.Int32
+	title                  atomic.Pointer[string]
+	sawAuthoritativeStatus atomic.Bool
+	scrollOffset           atomic.Int32
 
 	// idleTimeout is how long Status waits before the fallback calls a
 	// pane idle. Zero means DefaultIdleTimeout; resolved in Status
@@ -253,7 +254,7 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 			}
 		default:
 			// Unrecognised. Let vt log it as unhandled, and leave
-			// sawOSC133 clear -- the latch also disables the activity
+			// sawAuthoritativeStatus clear -- the latch also disables the activity
 			// fallback in Write and the idle timeout in Status, and
 			// one malformed sequence should not switch those off
 			// permanently.
@@ -261,7 +262,49 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 		}
 
 		g.status.Store(int32(st))
-		g.sawOSC133.Store(true)
+		g.sawAuthoritativeStatus.Store(true)
+		return true
+	})
+
+	g.em.RegisterOscHandler(9, func(data []byte) bool {
+		// ConEmu / Windows Terminal progress reporting protocol:
+		//   ESC ] 9 ; 4 ; <state> [; <progress>] BEL
+		// x/vt hands the handler the full payload, e.g. "9;4;3;".
+		// Non-progress OSC 9 sequences (such as iTerm2 notifications)
+		// and malformed sequences leave sawAuthoritativeStatus untouched.
+		parts := strings.Split(string(data), ";")
+		if len(parts) < 3 || parts[1] != "4" {
+			return false
+		}
+
+		// State 1 is normal progress and requires a progress value.
+		if parts[2] == "1" && (len(parts) < 4 || parts[3] == "") {
+			return false
+		}
+		// If a progress value is present in parts[3], it must be an integer 0..100.
+		if len(parts) > 3 && parts[3] != "" {
+			pct, err := strconv.Atoi(parts[3])
+			if err != nil || pct < 0 || pct > 100 {
+				return false
+			}
+		}
+
+		var st PaneStatus
+		switch parts[2] {
+		case "0":
+			st = StatusDone
+		case "1", "3":
+			st = StatusWorking
+		case "2":
+			st = StatusFailed
+		case "4":
+			st = StatusNeedsInput
+		default:
+			return false
+		}
+
+		g.status.Store(int32(st))
+		g.sawAuthoritativeStatus.Store(true)
 		return true
 	})
 
@@ -275,7 +318,7 @@ func (g *vtGrid) Write(p []byte) (int, error) {
 	defer g.writeResizeMu.Unlock()
 	now := time.Now()
 	g.lastWriteTime.Store(&now)
-	if !g.sawOSC133.Load() {
+	if !g.sawAuthoritativeStatus.Load() {
 		g.status.Store(int32(StatusWorking))
 	}
 	return g.em.Write(p)
@@ -291,7 +334,7 @@ func (g *vtGrid) Title() string {
 
 func (g *vtGrid) Status() PaneStatus {
 	st := PaneStatus(g.status.Load())
-	if !g.sawOSC133.Load() && st == StatusWorking {
+	if !g.sawAuthoritativeStatus.Load() && st == StatusWorking {
 		idle := g.idleTimeout
 		if idle <= 0 {
 			idle = DefaultIdleTimeout

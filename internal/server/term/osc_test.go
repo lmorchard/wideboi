@@ -64,6 +64,149 @@ func TestOSC133DrivesPaneStatus(t *testing.T) {
 	}
 }
 
+// OSC 9;4 is the ConEmu / Windows Terminal progress reporting protocol,
+// which coding agents (such as Claude Code) emit during turns.
+func TestOSC9ProgressDrivesPaneStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+		want    term.PaneStatus
+	}{
+		// 0 is clear / turn completed.
+		{"turn end (clear with trailing semicolon)", "\x1b]9;4;0;\x07", term.StatusDone},
+		{"turn end (clear bare)", "\x1b]9;4;0\x07", term.StatusDone},
+
+		// 1 is normal progress with percentage.
+		{"progress percentage", "\x1b]9;4;1;45\x07", term.StatusWorking},
+
+		// 2 is error / failed.
+		{"turn error with code", "\x1b]9;4;2;1\x07", term.StatusFailed},
+		{"turn error bare", "\x1b]9;4;2\x07", term.StatusFailed},
+
+		// 3 is indeterminate / busy (turn start in Claude Code).
+		{"turn start (busy/indeterminate with trailing semicolon)", "\x1b]9;4;3;\x07", term.StatusWorking},
+		{"turn start (busy/indeterminate bare)", "\x1b]9;4;3\x07", term.StatusWorking},
+
+		// 4 is warning / paused.
+		{"warning / paused with progress", "\x1b]9;4;4;50\x07", term.StatusNeedsInput},
+		{"warning / paused bare", "\x1b]9;4;4\x07", term.StatusNeedsInput},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := term.NewVT(20, 5)
+			defer g.Close()
+
+			if _, err := g.Write([]byte(tc.payload)); err != nil {
+				t.Fatalf("Write(%q): %v", tc.payload, err)
+			}
+			if got := g.Status(); got != tc.want {
+				t.Errorf("Status() after %q = %v, want %v", tc.payload, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMalformedOSC9LeavesTheIdleFallbackArmed(t *testing.T) {
+	const idle = 100 * time.Millisecond
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{"non-progress OSC 9", "\x1b]9;desktop notification\x07"},
+		{"unrecognised state", "\x1b]9;4;Z\x07"},
+		{"empty state", "\x1b]9;4;\x07"},
+		{"truncated 9;4", "\x1b]9;4\x07"},
+		{"state 1 without progress", "\x1b]9;4;1\x07"},
+		{"state 1 with non-integer progress", "\x1b]9;4;1;abc\x07"},
+		{"state 1 with negative progress", "\x1b]9;4;1;-10\x07"},
+		{"state 1 with progress over 100", "\x1b]9;4;1;101\x07"},
+		{"other state with invalid progress", "\x1b]9;4;2;invalid\x07"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := term.NewVTWithIdleTimeout(20, 5, idle)
+			defer g.Close()
+
+			if _, err := g.Write([]byte(tc.payload)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if got := g.Status(); got != term.StatusWorking {
+				t.Fatalf("Status() = %v immediately after a write, want %v", got, term.StatusWorking)
+			}
+
+			time.Sleep(idle + 50*time.Millisecond)
+
+			if got := g.Status(); got != term.StatusIdle {
+				t.Errorf("Status() = %v after idle window, want %v -- payload %q latched authoritative status",
+					got, term.StatusIdle, tc.payload)
+			}
+		})
+	}
+}
+
+// TestValidOSC9ArmsTheAuthoritativeLatch asserts that receiving a valid OSC 9;4
+// progress sequence latches authoritative status mode, permanently disabling
+// the idle decay fallback.
+func TestValidOSC9ArmsTheAuthoritativeLatch(t *testing.T) {
+	const idle = 100 * time.Millisecond
+	g := term.NewVTWithIdleTimeout(20, 5, idle)
+	defer g.Close()
+
+	if _, err := g.Write([]byte("\x1b]9;4;3;\x07")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if got := g.Status(); got != term.StatusWorking {
+		t.Fatalf("Status() immediately after 9;4;3 = %v, want %v", got, term.StatusWorking)
+	}
+
+	// Wait past the idle timeout; authoritative mode must prevent decay to Idle.
+	time.Sleep(idle + 50*time.Millisecond)
+
+	if got := g.Status(); got != term.StatusWorking {
+		t.Errorf("Status() after idle window = %v, want %v (latch was not armed by valid 9;4)",
+			got, term.StatusWorking)
+	}
+}
+
+func TestOSC9And133Interleaving(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	// 1. Shell prompt (OSC 133;A) -> NeedsInput
+	if _, err := g.Write([]byte("\x1b]133;A\x07")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != term.StatusNeedsInput {
+		t.Fatalf("Status() after 133;A = %v, want %v", got, term.StatusNeedsInput)
+	}
+
+	// 2. Agent turn starts (OSC 9;4;3) -> Working
+	if _, err := g.Write([]byte("\x1b]9;4;3;\x07")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != term.StatusWorking {
+		t.Fatalf("Status() after 9;4;3; = %v, want %v", got, term.StatusWorking)
+	}
+
+	// 3. Agent turn ends (OSC 9;4;0) -> Done
+	if _, err := g.Write([]byte("\x1b]9;4;0;\x07")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != term.StatusDone {
+		t.Fatalf("Status() after 9;4;0; = %v, want %v", got, term.StatusDone)
+	}
+
+	// 4. Shell next prompt (OSC 133;A) -> NeedsInput (last writer wins)
+	if _, err := g.Write([]byte("\x1b]133;A\x07")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != term.StatusNeedsInput {
+		t.Fatalf("Status() after second 133;A = %v, want %v", got, term.StatusNeedsInput)
+	}
+}
+
 // sawOSC133 gates two fallbacks: the activity heuristic in Write and
 // the idle timeout in Status. It used to latch at the top of the
 // handler, before any matching, so a single unrecognised 133 payload
