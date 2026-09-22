@@ -83,6 +83,30 @@ func TestServerVerbHandling(t *testing.T) {
 		t.Fatalf("expected 2 placements after NewColumn verb, got %d", len(snap.Placements))
 	}
 
+	// Test GrowWidth verb
+	focusedID := snap.FocusPaneID
+	initialCols, _, ok := srv.PaneSize(focusedID)
+	if !ok {
+		t.Fatalf("pane %d not found", focusedID)
+	}
+
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbGrowWidth})
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	grownCols, _, ok := srv.PaneSize(focusedID)
+	if !ok || grownCols != initialCols+10 {
+		t.Errorf("after VerbGrowWidth: cols = %d, want %d", grownCols, initialCols+10)
+	}
+
+	// Test ShrinkWidth verb
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbShrinkWidth})
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	shrunkCols, _, ok := srv.PaneSize(focusedID)
+	if !ok || shrunkCols != initialCols {
+		t.Errorf("after VerbShrinkWidth: cols = %d, want %d", shrunkCols, initialCols)
+	}
+
 	_ = srv.Close()
 }
 

@@ -26,6 +26,10 @@ prefix = "ctrl+b"
 # Defaults to $SHELL, or /bin/sh if $SHELL is empty.
 # shell = "/bin/zsh"
 
+# Width presets (in columns) cycled by cycle_width ('w').
+# Each preset must be at least 20 columns.
+# width_presets = [40, 60, 80]
+
 # Key remapping for control mode
 #
 # Remap actions to customize your control-mode shortcuts.
@@ -46,7 +50,9 @@ scroll_up    = "k"    # Scroll focused pane history up (back into history)
 
 # Pane & Column Management
 new_column   = "n"    # Open a new column
-cycle_width  = "w"    # Cycle width of focused column (narrow -> standard -> wide)
+cycle_width  = "w"    # Cycle width of focused column across presets
+shrink_width = "o"    # Shrink focused column width by 10 cells (overlay only)
+grow_width   = "p"    # Grow focused column width by 10 cells (overlay only)
 kill_pane    = "x"    # Kill focused pane
 smart_jump   = "a"    # Jump to pane requesting attention (OSC 133 / prompt)
 toggle_cards = "c"    # Toggle cards / scrolling layout (help overlay only)
