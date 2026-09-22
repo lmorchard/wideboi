@@ -42,7 +42,7 @@ from ptylib import (
 # -- whether the first frame beats the server's opening snapshot is a
 # race, and a reattach usually loses it, painting "pane 0" once before
 # the real focus arrives.
-from smoke import focus_pane_id
+from smoke import EMPTY_SYNC_UPDATE, focus_pane_id
 
 BIN = "./bin/wideboi"
 COLS, ROWS = 80, 24
@@ -364,9 +364,26 @@ def case_attached_client_idle_emits_no_bytes(fail):
         srv.stop()
 
 
+def case_attached_client_presents_no_empty_frames(fail):
+    """The attach frame loop is a separate copy of smoke's, so it needs
+    its own check that a frame is presented only when it changed (#77).
+    See EMPTY_SYNC_UPDATE in smoke.py for the signature."""
+    srv = Server()
+    try:
+        c = Client()
+        c.type(b"echo attach-busy-frames\r")
+        n = c.output().count(EMPTY_SYNC_UPDATE)
+        if n:
+            fail(f"{n} empty synchronized updates written -- a frame was presented with nothing changed")
+        c.kill()
+    finally:
+        srv.stop()
+
+
 CASES = [
     ("attach renders pane content over the socket", case_attach_renders_pane_content),
     ("attached client emits no bytes while idle", case_attached_client_idle_emits_no_bytes),
+    ("attached client presents no empty frames", case_attached_client_presents_no_empty_frames),
     ("styled output does not kill the connection", case_styled_output_does_not_kill_the_connection),
     ("attached control mode offers detach", case_attached_control_mode_offers_detach),
     ("detach leaves the session running", case_detach_leaves_the_session_running),

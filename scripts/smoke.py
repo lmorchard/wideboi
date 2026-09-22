@@ -859,9 +859,28 @@ def case_idle_emits_no_bytes(fail):
         fail(f"wideboi emitted {idle_bytes} bytes over 0.5s while completely idle")
 
 
+# A synchronized update with nothing in it but the cursor-visibility
+# wrapper Flush puts around every write. present() draws a frame and its
+# cursor move inside one bracket, so a bracket this empty is a present
+# with nothing to present -- what the old dirtyFrames follow-up tick
+# wrote after every change (#77). A real frame cannot produce it: with
+# the cursor shown, copyToHostScreen's own show precedes the bracket.
+EMPTY_SYNC_UPDATE = b"\x1b[?2026h\x1b[?25h\x1b[?25l\x1b[?2026l"
+
+
+def case_no_empty_frames(fail):
+    s = Session()
+    s.type("echo busy-frames\r")
+    n = s.output().count(EMPTY_SYNC_UPDATE)
+    if n:
+        fail(f"{n} empty synchronized updates written -- a frame was presented with nothing changed")
+    s.close()
+
+
 CASES = [
     ("launch shows two panes and a cursor", case_launch_shows_two_panes),
     ("idle emits no bytes", case_idle_emits_no_bytes),
+    ("no empty frames", case_no_empty_frames),
     ("typing reaches the focused pane", case_typing_reaches_the_focused_pane),
     ("shifted keys reach the pane", case_shifted_keys_reach_the_pane),
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
