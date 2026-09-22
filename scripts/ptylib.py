@@ -70,17 +70,6 @@ class Drainer:
         return needle in self.output()
 
 
-# Cursor show/hide, which wideboi emits every frame whether or not
-# anything changed: cmd/wideboi/main.go renders and flushes on an
-# unconditional 16ms tick, and the renderer wraps each frame in a
-# hide/show pair. That is ~62 pairs a second, so the pty is never
-# quiet and waiting for silence waits forever.
-#
-# Excluded from the change metric only. output() is untouched, so
-# cursor_visible and every existing assertion still see these bytes.
-_FRAME_NOISE = re.compile(rb"\x1b\[\?25[hl]")
-
-
 def settle_output(drainer: "Drainer", timeout: float, quiet: float = 0.25,
                   poll: float = 0.01) -> bool:
     """Waits until the drained output has been unchanged for `quiet`
@@ -95,7 +84,7 @@ def settle_output(drainer: "Drainer", timeout: float, quiet: float = 0.25,
     short on a slower machine.
     """
     def size() -> int:
-        return len(_FRAME_NOISE.sub(b"", drainer.output()))
+        return len(drainer.output())
 
     deadline = time.monotonic() + timeout
     last, last_change = size(), time.monotonic()

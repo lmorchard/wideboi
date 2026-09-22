@@ -210,6 +210,7 @@ func runAttach(socketPath string) error {
 	frame := time.NewTicker(16 * time.Millisecond)
 	defer frame.Stop()
 
+	var dirtyFrames int
 	for {
 		select {
 		case msg, ok := <-cConn.ServerSendChan():
@@ -259,9 +260,14 @@ func runAttach(socketPath string) error {
 
 		case <-frame.C:
 			screenLock.Lock()
-			cli.Draw(scr, nil, nil)
-			scr.Render()
-			_ = scr.Flush()
+			if cli.Draw(scr, nil, nil) {
+				dirtyFrames = 2
+			}
+			if dirtyFrames > 0 {
+				dirtyFrames--
+				scr.Render()
+				_ = scr.Flush()
+			}
 			screenLock.Unlock()
 		}
 	}
@@ -359,6 +365,7 @@ func run() error {
 	frame := time.NewTicker(16 * time.Millisecond)
 	defer frame.Stop()
 
+	var dirtyFrames int
 	for {
 		select {
 		case msg, ok := <-tp.ServerSend:
@@ -405,9 +412,14 @@ func run() error {
 		case <-frame.C:
 			screenLock.Lock()
 			if !stopped.Load() {
-				cli.Draw(scr, srv.DrawPane, srv.CursorInfo)
-				scr.Render()
-				_ = scr.Flush()
+				if cli.Draw(scr, srv.DrawPane, srv.CursorInfo) {
+					dirtyFrames = 2
+				}
+				if dirtyFrames > 0 {
+					dirtyFrames--
+					scr.Render()
+					_ = scr.Flush()
+				}
 			}
 			screenLock.Unlock()
 		}

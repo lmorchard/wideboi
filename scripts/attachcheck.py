@@ -345,8 +345,28 @@ def case_server_reaps_its_panes_on_signal(fail):
         fail(f"server left descendants alive after SIGTERM: {srv.leaked}")
 
 
+def case_attached_client_idle_emits_no_bytes(fail):
+    """Verifies that wideboi attach emits 0 bytes to its pty while completely idle."""
+    srv = Server()
+    try:
+        c = Client()
+        if not settle_output(c.drainer, timeout=5.0):
+            fail("attached client never settled after startup")
+            c.kill()
+            return
+        initial_len = len(c.output())
+        time.sleep(0.5)
+        idle_bytes = len(c.output()) - initial_len
+        if idle_bytes > 0:
+            fail(f"attached client emitted {idle_bytes} bytes over 0.5s while idle")
+        c.kill()
+    finally:
+        srv.stop()
+
+
 CASES = [
     ("attach renders pane content over the socket", case_attach_renders_pane_content),
+    ("attached client emits no bytes while idle", case_attached_client_idle_emits_no_bytes),
     ("styled output does not kill the connection", case_styled_output_does_not_kill_the_connection),
     ("attached control mode offers detach", case_attached_control_mode_offers_detach),
     ("detach leaves the session running", case_detach_leaves_the_session_running),
