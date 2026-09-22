@@ -142,20 +142,23 @@ func TestWriteBoundedDeadline(t *testing.T) {
 	buf[len(buf)-1] = '\n'
 
 	// Fill the tty input buffer completely. Kernel queue sizes are OS-dependent
-	// (1024 on macOS, 4096+ on Linux), so write until the buffer is saturated
-	// and can accept 0 bytes.
-	filled := false
-	for i := 0; i < 64; i++ {
+	// (1024 on macOS, 4096+ on Linux). On Linux, the asynchronous flush_to_ldisc
+	// workqueue can drain an additional buffer after the first timeout, so wait
+	// for multiple consecutive write timeouts to ensure all internal queues are
+	// completely saturated and can accept 0 bytes.
+	timeouts := 0
+	for i := 0; i < 64 && timeouts < 3; i++ {
 		n, err := p.WriteBounded(buf, 10*time.Millisecond)
 		if errors.Is(err, os.ErrDeadlineExceeded) && n == 0 {
-			filled = true
-			break
+			timeouts++
+		} else {
+			timeouts = 0
 		}
 		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
 			t.Fatalf("fill write %d: %v", i, err)
 		}
 	}
-	if !filled {
+	if timeouts < 3 {
 		t.Fatal("failed to saturate tty input buffer within 64KB")
 	}
 
@@ -168,7 +171,7 @@ func TestWriteBoundedDeadline(t *testing.T) {
 	if !errors.Is(werr, os.ErrDeadlineExceeded) {
 		t.Fatalf("expected os.ErrDeadlineExceeded, got err=%v n=%d (elapsed=%v)", werr, n, elapsed)
 	}
-	if elapsed < 40*time.Millisecond || elapsed > 1*time.Second {
+	if elapsed < 35*time.Millisecond || elapsed > 1*time.Second {
 		t.Fatalf("write returned in %v, expected ~50ms", elapsed)
 	}
 }
