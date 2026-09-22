@@ -148,11 +148,19 @@ func blend(a, b, meta protocol.PlacementData, t float64) protocol.PlacementData 
 	if t < 1.0 && (a.Kind == protocol.PlacementFull || b.Kind == protocol.PlacementFull) && dst.Dx() >= layout.MinSliverWidth {
 		kind = protocol.PlacementFull
 	}
+	z := meta.Z
+	if t < 1.0 {
+		if a.Z > b.Z {
+			z = a.Z
+		} else {
+			z = b.Z
+		}
+	}
 	return protocol.PlacementData{
 		PaneID: meta.PaneID,
 		Src:    src,
 		Dst:    dst,
-		Z:      meta.Z,
+		Z:      z,
 		Kind:   kind,
 	}
 }

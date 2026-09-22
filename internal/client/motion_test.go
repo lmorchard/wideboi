@@ -365,16 +365,29 @@ func TestRightToLeftMotionRetainsCardContent(t *testing.T) {
 	cli.mu.Unlock()
 
 	foundTwo := false
+	foundOne := false
 	for _, p := range placements {
 		if p.PaneID == 2 {
 			foundTwo = true
 			if p.Kind != protocol.PlacementFull {
 				t.Errorf("contracting card (Pane 2) transitioned to Kind=%v on frame 1, expected PlacementFull", p.Kind)
 			}
+			if p.Z != 1 {
+				t.Errorf("contracting card (Pane 2) transitioned to Z=%v on frame 1, expected 1 to slide over the incoming card", p.Z)
+			}
+		}
+		if p.PaneID == 1 {
+			foundOne = true
+			if p.Z != 1 {
+				t.Errorf("expanding card (Pane 1) transitioned to Z=%v on frame 1, expected 1", p.Z)
+			}
 		}
 	}
 
 	if !foundTwo {
 		t.Errorf("Pane 2 not found in interpolated placements")
+	}
+	if !foundOne {
+		t.Errorf("Pane 1 not found in interpolated placements")
 	}
 }
