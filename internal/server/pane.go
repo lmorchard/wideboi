@@ -43,6 +43,7 @@ type Pane struct {
 	resizeMu sync.Mutex
 
 	keys    chan uv.KeyEvent
+	mice    chan uv.MouseEvent
 	dropped atomic.Uint64
 
 	closed    chan struct{}
@@ -87,6 +88,7 @@ func NewPane(id int, argv []string, cols, rows int, dir string) (*Pane, error) {
 		cols:   cols,
 		rows:   rows,
 		keys:   make(chan uv.KeyEvent, keyQueueDepth),
+		mice:   make(chan uv.MouseEvent, keyQueueDepth),
 		closed: make(chan struct{}),
 	}, nil
 }
@@ -153,6 +155,8 @@ func (p *Pane) Start(onExit func()) {
 			select {
 			case k := <-p.keys:
 				p.grid.SendKey(k)
+			case m := <-p.mice:
+				p.grid.SendMouse(m)
 			case <-p.closed:
 				return
 			}
@@ -164,6 +168,18 @@ func (p *Pane) Start(onExit func()) {
 func (p *Pane) SendKey(k uv.KeyEvent) {
 	select {
 	case p.keys <- k:
+	default:
+		p.dropped.Add(1)
+	}
+}
+
+// SendMouse queues a mouse event for the pane's child. It rides the key
+// writer's goroutine because vt's SendMouse, like SendKey, writes to an
+// io.Pipe and blocks until the pty-writer reads -- calling it inline
+// under s.mu would stall the server behind a slow child.
+func (p *Pane) SendMouse(m uv.MouseEvent) {
+	select {
+	case p.mice <- m:
 	default:
 		p.dropped.Add(1)
 	}
@@ -293,6 +309,7 @@ func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 		CursorX:       cp.X,
 		CursorY:       cp.Y,
 		CursorVisible: p.CursorVisible(),
+		MouseTracking: p.grid.MouseTracking(),
 	}
 }
 

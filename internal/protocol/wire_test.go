@@ -11,6 +11,8 @@ import (
 var wireTypes = []any{
 	MsgAttach{},
 	MsgVerb{},
+	MsgFocusPane{},
+	MsgMouse{},
 	MsgInput{},
 	MsgResize{},
 	MsgScroll{},

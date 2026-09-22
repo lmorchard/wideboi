@@ -254,6 +254,14 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		}
 		needBroadcast = true
 
+	case protocol.MsgFocusPane:
+		// Guarded: the pane may have closed between the client's draw
+		// and the click.
+		if _, ok := s.panes[m.PaneID]; ok {
+			s.strip.FocusPaneID(m.PaneID)
+			needBroadcast = true
+		}
+
 	case protocol.MsgInput:
 		if p, ok := s.panes[m.PaneID]; ok {
 			if len(m.Data) > 0 {
@@ -261,6 +269,11 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			} else if !m.Key.IsZero() {
 				p.SendKey(m.Key.Decode())
 			}
+		}
+
+	case protocol.MsgMouse:
+		if p, ok := s.panes[m.PaneID]; ok {
+			p.SendMouse(m.Decode())
 		}
 
 	case protocol.MsgScroll:

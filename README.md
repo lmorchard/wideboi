@@ -57,6 +57,32 @@ the doubled prefix still wins: `ctrl+l ctrl+l` sends one literal
 `ctrl+l` to the pane and leaves control mode, rather than moving focus
 right twice.
 
+## Mouse
+
+wideboi captures the mouse by default:
+
+- **Click** a pane, its header, or a card to focus it.
+- **Wheel** scrolls the history of whichever pane is under the pointer,
+  without moving focus.
+- **Drag** inside a pane to select text. The selection stays inside the
+  pane you started in, and releasing the button copies it to your
+  clipboard.
+
+Copying uses OSC 52, so it lands on the clipboard of the machine you are
+sitting at, even when wideboi is running over SSH. Your terminal has to
+allow it: in iTerm2, turn on *Settings → General → Selection →
+Applications in terminal may access clipboard*. Inside tmux, set
+`set -g set-clipboard on`.
+
+Programs that ask for the mouse themselves, like `vim` with `mouse=a` or
+`htop`, get it: clicks, drags and the wheel over the focused pane go to
+the program. The click that focuses such a pane is not passed on. To
+select text in one of these panes, use your terminal's own selection
+bypass (usually `Shift`-drag, or `Option`-drag in macOS terminals).
+
+To leave the mouse to your terminal entirely, put `mouse = false` in your
+config file.
+
 ## Configuration
 
 wideboi reads configuration with the following precedence (highest to lowest):

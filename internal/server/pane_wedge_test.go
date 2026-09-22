@@ -60,6 +60,8 @@ func (g *blockingGrid) Write(p []byte) (int, error)     { return len(p), nil }
 func (g *blockingGrid) Read(p []byte) (int, error)      { return 0, nil }
 func (g *blockingGrid) SendKey(uv.KeyEvent)             {}
 func (g *blockingGrid) SendText(string)                 {}
+func (g *blockingGrid) MouseTracking() bool             { return false }
+func (g *blockingGrid) SendMouse(uv.MouseEvent)         {}
 func (g *blockingGrid) CursorPosition() image.Point     { return image.Point{} }
 func (g *blockingGrid) CursorVisible() bool             { return false }
 func (g *blockingGrid) Status() term.PaneStatus         { return term.StatusIdle }

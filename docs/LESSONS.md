@@ -341,6 +341,22 @@ was 14 failures in 15 runs.
 changed, on scheduling, or on the race detector. `make race` does this; ad-hoc
 runs must too.
 
+## A red check leaves a broken binary behind
+
+The smoke and attach suites run `./bin/wideboi`, not the source. Proving a
+new smoke case can fail means breaking the code, rebuilding, and watching it
+go red. Then restoring the source is only half of the undo. Until the next
+`make build`, every run tests the sabotaged binary.
+
+It cost a round once already. Four straight "28 passed, 1 failed" runs looked
+like a flake in the new case, and they were really the deliberately broken
+build. `make check` rebuilds, which is why it came back green and made the
+standalone runs look even more like a timing problem.
+
+**Restore and rebuild in the same command as the break**, and treat any
+standalone `scripts/smoke.py` result as suspect until you know which binary
+it ran.
+
 ## The shape of your test fixture is part of your coverage
 
 Every reflow test in this repo wrote exactly **one line** of content. With one

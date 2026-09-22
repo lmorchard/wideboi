@@ -15,6 +15,7 @@ import (
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
 
@@ -67,6 +68,16 @@ type Grid interface {
 	// visibility mode (DECTCEM) changes, and defaults to true because a
 	// freshly started shell has not hidden it yet.
 	CursorVisible() bool
+
+	// MouseTracking reports whether the child has asked for mouse
+	// events -- any of DEC 9, 1000, 1002 or 1003 set. Tracked from vt's
+	// mode callbacks, the same way CursorVisible is.
+	MouseTracking() bool
+
+	// SendMouse encodes a mouse event in the child's requested mode and
+	// writes it to the child. Like SendKey it writes to an io.Pipe and
+	// blocks until something reads.
+	SendMouse(m uv.MouseEvent)
 
 	// Title reports the pane's terminal title, or "" if the child has
 	// never set one. OSC 0/1/2; x/vt parses it either way, this just
@@ -140,6 +151,9 @@ func (s PaneStatus) Glyph() string {
 type vtGrid struct {
 	em            *vt.SafeEmulator
 	cursorVisible atomic.Bool
+	// mouseModes is a bitmask of the child's mouse tracking modes that
+	// are currently set; see mouseModeBits.
+	mouseModes    atomic.Uint32
 	status        atomic.Int32
 	lastWriteTime atomic.Pointer[time.Time]
 
@@ -216,6 +230,11 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 		// and a summary of the turn into it -- which makes it the
 		// most informative thing a card sliver can show.
 		Title: func(s string) { g.title.Store(&s) },
+		// vt already honours these modes in SendMouse; wideboi needs
+		// them too, to know whether a click in this pane belongs to the
+		// child or to its own selection.
+		EnableMode:  func(m ansi.Mode) { g.trackMouseMode(m, true) },
+		DisableMode: func(m ansi.Mode) { g.trackMouseMode(m, false) },
 	})
 
 	g.em.RegisterOscHandler(133, func(data []byte) bool {
@@ -360,6 +379,43 @@ func (g *vtGrid) SendKey(k uv.KeyEvent) {
 }
 
 func (g *vtGrid) SendText(text string) { g.em.SendText(text) }
+
+// mouseModeBits maps each DEC mouse tracking mode to its bit in
+// vtGrid.mouseModes. A bitmask rather than a bool because a child can
+// set several at once, and clearing one leaves the others in force.
+// Encodings (1006 SGR and friends) are deliberately absent: they say
+// how to report, not whether to.
+var mouseModeBits = map[ansi.DECMode]uint32{
+	ansi.ModeMouseX10:         1 << 0,
+	ansi.ModeMouseNormal:      1 << 1,
+	ansi.ModeMouseButtonEvent: 1 << 2,
+	ansi.ModeMouseAnyEvent:    1 << 3,
+}
+
+func (g *vtGrid) trackMouseMode(m ansi.Mode, on bool) {
+	dm, ok := m.(ansi.DECMode)
+	if !ok {
+		return
+	}
+	bit, ok := mouseModeBits[dm]
+	if !ok {
+		return
+	}
+	for {
+		old := g.mouseModes.Load()
+		next := old &^ bit
+		if on {
+			next = old | bit
+		}
+		if g.mouseModes.CompareAndSwap(old, next) {
+			return
+		}
+	}
+}
+
+func (g *vtGrid) MouseTracking() bool { return g.mouseModes.Load() != 0 }
+
+func (g *vtGrid) SendMouse(m uv.MouseEvent) { g.em.SendMouse(m) }
 
 // Resize changes the emulator's dimensions, reflowing the visible screen
 // so narrowing does not destroy text.

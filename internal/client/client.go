@@ -62,6 +62,11 @@ type Client struct {
 	detachable   bool
 	bindings     []keys.Binding
 	motion       *motion
+	sel          *selection
+	// mouseTracking is which panes' children have asked for mouse
+	// events, from MsgPaneUpdate. grab is a drag being forwarded to one.
+	mouseTracking map[int]bool
+	grab          *mouseGrab
 
 	stagingScreen      *offscreenHostScreen
 	lastRenderedScreen *offscreenHostScreen
@@ -146,6 +151,9 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		c.focusPaneID = m.FocusPaneID
 		c.paneStatuses = m.PaneStatuses
 		c.paneTitles = m.PaneTitles
+		if c.sel != nil && !c.selectionStillPlacedLocked() {
+			c.sel = nil
+		}
 
 		// Animate whenever the geometry moved, not only on a focus
 		// change: opening and killing a column re-deal the fan too.
@@ -189,6 +197,11 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 				delete(c.mirrors, id)
 			}
 		}
+		for id := range c.mouseTracking {
+			if !activeIDs[id] {
+				delete(c.mouseTracking, id)
+			}
+		}
 
 	case protocol.MsgPaneUpdate:
 		slog.Debug("received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
@@ -222,6 +235,10 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			pt:      image.Pt(m.CursorX, m.CursorY),
 			visible: m.CursorVisible,
 		}
+		if c.mouseTracking == nil {
+			c.mouseTracking = make(map[int]bool)
+		}
+		c.mouseTracking[m.PaneID] = m.MouseTracking
 	}
 }
 
@@ -401,6 +418,7 @@ func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv
 	}
 
 	focusedPlacement := c.composeFrameLocked(scr, st, drawPane)
+	c.drawSelectionLocked(scr)
 	c.drawStatusBarLocked(scr)
 
 	// The cursor belongs to a pane that is sliding, so its position
