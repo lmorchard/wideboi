@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -196,8 +197,18 @@ func TestLoadConfigExampleToml(t *testing.T) {
 	if cfg.Prefix != "ctrl+b" {
 		t.Errorf("expected prefix ctrl+b, got %s", cfg.Prefix)
 	}
-	if len(bindings) == 0 {
-		t.Error("expected non-empty bindings from config.example.toml")
+	// The example lists every action with its defaults, so it must load
+	// exactly the default table. A setting replaces all of an action's
+	// keys, so an example that forgets an alias silently drops it.
+	if !reflect.DeepEqual(bindings, keys.Bindings) {
+		for i := range min(len(bindings), len(keys.Bindings)) {
+			if !reflect.DeepEqual(bindings[i], keys.Bindings[i]) {
+				t.Errorf("config.example.toml binding %d = %+v, want the default %+v", i, bindings[i], keys.Bindings[i])
+			}
+		}
+		if len(bindings) != len(keys.Bindings) {
+			t.Errorf("config.example.toml loads %d bindings, want %d", len(bindings), len(keys.Bindings))
+		}
 	}
 }
 
@@ -315,5 +326,56 @@ func TestLoadLogLevel(t *testing.T) {
 
 	if _, _, err := config.Load(config.ConfigFlags{}, env(map[string]string{"WIDEBOI_LOG_LEVEL": "verbose"})); err == nil {
 		t.Error("an unknown WIDEBOI_LOG_LEVEL was accepted")
+	}
+}
+
+func loadToml(t *testing.T, content string) ([]keys.Binding, error) {
+	t.Helper()
+	tomlPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, bindings, err := config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	return bindings, err
+}
+
+func TestLoadTomlKeyLists(t *testing.T) {
+	bindings, err := loadToml(t, "[keys]\nfocus_left = [\"h\", \"g\"]\ndetach = []\n")
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	var sawLeft bool
+	for _, b := range bindings {
+		switch b.ActionName {
+		case keys.ActionNameFocusLeft:
+			sawLeft = true
+			if b.Key != "h" || !reflect.DeepEqual(b.Aliases, []string{"g"}) {
+				t.Errorf("focus_left Key=%q Aliases=%q, want h and [g]", b.Key, b.Aliases)
+			}
+		case keys.ActionNameDetach:
+			t.Error("detach is still bound after detach = []")
+		}
+	}
+	if !sawLeft {
+		t.Error("focus_left is missing")
+	}
+}
+
+func TestLoadTomlKeysRejectsNonStrings(t *testing.T) {
+	for _, content := range []string{
+		"[keys]\nkill_pane = 5\n",
+		"[keys]\nkill_pane = [\"x\", 5]\n",
+	} {
+		_, err := loadToml(t, content)
+		if err == nil || !strings.Contains(err.Error(), "kill_pane") {
+			t.Errorf("%q: err = %v, want one naming kill_pane", content, err)
+		}
+	}
+}
+
+func TestLoadTomlQuitUnbound(t *testing.T) {
+	_, err := loadToml(t, "[keys]\nquit = []\n")
+	if err == nil || !strings.Contains(err.Error(), "cannot be unbound") {
+		t.Errorf("err = %v, want one saying quit cannot be unbound", err)
 	}
 }

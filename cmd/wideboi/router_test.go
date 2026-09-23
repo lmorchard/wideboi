@@ -106,36 +106,34 @@ func TestControlModeTable(t *testing.T) {
 
 			// Ctrl-modified: act, and stay -- except the terminal verbs,
 			// where staying is meaningless because the client is leaving.
-			name, hasCtrl := b.CtrlForm()
-			if !hasCtrl {
-				continue
+			for _, name := range b.CtrlForms() {
+				t.Run(name, func(t *testing.T) {
+					r := &router{prefix: "ctrl+b", control: true, detachable: detachable}
+					got := r.route(keyNamed(t, name))
+					if hidden {
+						if got.Kind != routeIgnore || r.control {
+							t.Errorf("hidden binding %s: got %+v control=%v", name, got, r.control)
+						}
+						return
+					}
+					assertAction(t, b, got)
+					switch b.Action {
+					case keys.ActionQuit, keys.ActionDetach:
+						// ctrl+q and ctrl+d are exactly q and d: staying is
+						// meaningless when the client is leaving, so the
+						// modifier must not make the mode sticky here the
+						// way it does for every other verb.
+						if r.control {
+							t.Errorf("%s stayed in control mode; ctrl+%s must behave exactly as %s",
+								name, b.Key, b.Key)
+						}
+					default:
+						if !r.control {
+							t.Errorf("%s did not stay in control mode", name)
+						}
+					}
+				})
 			}
-			t.Run(b.Key+"/ctrl", func(t *testing.T) {
-				r := &router{prefix: "ctrl+b", control: true, detachable: detachable}
-				got := r.route(keyNamed(t, name))
-				if hidden {
-					if got.Kind != routeIgnore || r.control {
-						t.Errorf("hidden binding %s: got %+v control=%v", name, got, r.control)
-					}
-					return
-				}
-				assertAction(t, b, got)
-				switch b.Action {
-				case keys.ActionQuit, keys.ActionDetach:
-					// ctrl+q and ctrl+d are exactly q and d: staying is
-					// meaningless when the client is leaving, so the
-					// modifier must not make the mode sticky here the
-					// way it does for every other verb.
-					if r.control {
-						t.Errorf("%s stayed in control mode; ctrl+%s must behave exactly as %s",
-							name, b.Key, b.Key)
-					}
-				default:
-					if !r.control {
-						t.Errorf("%s did not stay in control mode", name)
-					}
-				}
-			})
 		}
 	}
 }
@@ -350,4 +348,34 @@ func keyNamed(t *testing.T, name string) uv.KeyPressEvent {
 	}
 	t.Fatalf("keyNamed does not know how to build %q", name)
 	return uv.KeyPressEvent{}
+}
+
+func customRouter(t *testing.T, custom map[string][]string) *router {
+	t.Helper()
+	b, err := keys.BuildBindings(custom)
+	if err != nil {
+		t.Fatalf("BuildBindings: %v", err)
+	}
+	return &router{prefix: "ctrl+b", control: true, bindings: b}
+}
+
+func TestCustomAliasAndItsCtrlFormFire(t *testing.T) {
+	custom := map[string][]string{keys.ActionNameFocusLeft: {"h", "g"}}
+
+	r := customRouter(t, custom)
+	if got := r.route(key('g')); got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft || r.control {
+		t.Errorf("g: got %+v control=%v, want FocusLeft and out of control mode", got, r.control)
+	}
+
+	r = customRouter(t, custom)
+	if got := r.route(ctrl('g')); got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft || !r.control {
+		t.Errorf("ctrl+g: got %+v control=%v, want FocusLeft and still in control mode", got, r.control)
+	}
+}
+
+func TestReplacedDefaultAliasIsUnknown(t *testing.T) {
+	r := customRouter(t, map[string][]string{keys.ActionNameFocusLeft: {"h"}})
+	if got := r.route(uv.KeyPressEvent{Code: uv.KeyLeft}); got.Kind != routeIgnore || r.control {
+		t.Errorf("left: got %+v control=%v, want an unknown key that leaves control mode", got, r.control)
+	}
 }

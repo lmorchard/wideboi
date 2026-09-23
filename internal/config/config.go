@@ -25,7 +25,7 @@ type Config struct {
 	PrefixLabel  string              `toml:"-"`
 	Shell        string              `toml:"shell"`
 	WidthPresets []int               `toml:"width_presets"`
-	Keys         map[string]string   `toml:"keys"`
+	Keys         map[string]any      `toml:"keys"`
 	// Mouse is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read MouseEnabled, not this.
 	Mouse        *bool `toml:"mouse"`
@@ -210,7 +210,11 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	cfg.MouseEnabled = cfg.Mouse == nil || *cfg.Mouse
 
 	// Keys
-	bindings, err := keys.BuildBindings(cfg.Keys)
+	lists, err := keyLists(cfg.Keys)
+	if err != nil {
+		return Config{}, nil, fmt.Errorf("keys configuration: %w", err)
+	}
+	bindings, err := keys.BuildBindings(lists)
 	if err != nil {
 		return Config{}, nil, fmt.Errorf("keys configuration: %w", err)
 	}
@@ -244,4 +248,29 @@ func parsePrefix(name string) (prefix, label string, err error) {
 		}
 	}
 	return "", "", fmt.Errorf("prefix %q: want \"ctrl+<a-z>\" or \"ctrl+space\"", name)
+}
+
+// keyLists turns the decoded [keys] table into one key list per action.
+// A string is a one-key list; an empty list unbinds the action.
+func keyLists(raw map[string]any) (map[string][]string, error) {
+	out := make(map[string][]string, len(raw))
+	for act, v := range raw {
+		switch v := v.(type) {
+		case string:
+			out[act] = []string{v}
+		case []any:
+			list := make([]string, 0, len(v))
+			for _, e := range v {
+				s, ok := e.(string)
+				if !ok {
+					return nil, fmt.Errorf("action %q: list entries must be quoted key names, got %v", act, e)
+				}
+				list = append(list, s)
+			}
+			out[act] = list
+		default:
+			return nil, fmt.Errorf("action %q: want a key name or a list of key names, got %v", act, v)
+		}
+	}
+	return out, nil
 }

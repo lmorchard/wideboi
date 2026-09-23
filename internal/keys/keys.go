@@ -221,27 +221,27 @@ func digitBindings() []Binding {
 		Long: "focus the last column", HelpGroup: digitHelp, HelpKey: "0-9"})
 }
 
-// CtrlForm returns the ultraviolet key name for this binding's repeat
-// form and whether it has one.
+// CtrlForms returns the ultraviolet key name of the repeat form for
+// every key on this binding that has one.
 //
 // Only single lowercase letters outside Reserved do. "esc" is a named
 // key with no ctrl encoding, and "?" needs a shift on every layout, so
 // ctrl+? is not a combination terminals reliably produce.
-func (b Binding) CtrlForm() (string, bool) {
+func (b Binding) CtrlForms() []string {
 	if b.NoRepeat {
-		return "", false
+		return nil
 	}
-	if len(b.Key) != 1 {
-		return "", false
+	var out []string
+	for _, k := range b.MatchNames() {
+		if len(k) != 1 || k[0] < 'a' || k[0] > 'z' {
+			continue
+		}
+		if _, bad := Reserved[k]; bad {
+			continue
+		}
+		out = append(out, "ctrl+"+k)
 	}
-	c := b.Key[0]
-	if c < 'a' || c > 'z' {
-		return "", false
-	}
-	if _, bad := Reserved[b.Key]; bad {
-		return "", false
-	}
-	return "ctrl+" + b.Key, true
+	return out
 }
 
 // MatchNames returns every name the unmodified form answers to, ready to
@@ -334,6 +334,43 @@ var validNamedKeys = map[string]bool{
 	"f12":       true,
 }
 
+// validateKey normalizes one configured key for act and checks it can be bound.
+func validateKey(act, key string) (string, error) {
+	k := strings.ToLower(strings.TrimSpace(key))
+	if k == "" {
+		return "", fmt.Errorf("key for action %q cannot be empty", act)
+	}
+	if why, bad := Reserved[k]; bad {
+		return "", fmt.Errorf("key %q for action %q is reserved: %s", k, act, why)
+	}
+	if !isValidKeyName(k) {
+		if k == "pgdn" {
+			return "", fmt.Errorf("key %q for action %q is not a recognized key name; did you mean \"pgdown\"?", k, act)
+		}
+		return "", fmt.Errorf("key %q for action %q is not a recognized key name; must be a single printable character or valid named key (e.g. esc, space, left, right, up, down, pgup, pgdown)", k, act)
+	}
+	return k, nil
+}
+
+// collisionError explains a key held by two bindings. At least one of
+// them was configured -- the default table has no collisions
+// (TestTableIsWellFormed) -- and the hint names the one that was not.
+func collisionError(key, a, b string, configured map[string][]string) error {
+	_, aSet := configured[a]
+	_, bSet := configured[b]
+	if aSet == bSet {
+		return fmt.Errorf("duplicate key %q assigned to both %q and %q", key, a, b)
+	}
+	mine, other := a, b
+	if bSet {
+		mine, other = b, a
+	}
+	if _, remappable := validActions[other]; !remappable {
+		return fmt.Errorf("duplicate key %q for %q: %q holds it and cannot be remapped", key, mine, other)
+	}
+	return fmt.Errorf("duplicate key %q for %q: %q holds it by default; remap %s too", key, mine, other, other)
+}
+
 // isValidKeyName reports whether k is a valid key name or character in ultraviolet.
 func isValidKeyName(k string) bool {
 	if validNamedKeys[k] {
@@ -349,63 +386,80 @@ func isValidKeyName(k string) bool {
 
 // BuildBindings builds and validates a set of control-mode bindings with custom
 // key mappings applied over the default Bindings table.
-func BuildBindings(custom map[string]string) ([]Binding, error) {
+//
+// Each entry replaces every default key of its action, aliases included.
+// The first key is the primary -- the one the bar and help show -- and
+// the rest are aliases. An empty list unbinds the action.
+func BuildBindings(custom map[string][]string) ([]Binding, error) {
 	if len(custom) == 0 {
 		out := make([]Binding, len(Bindings))
 		copy(out, Bindings)
 		return out, nil
 	}
 
-	// 1. Validate custom action names
-	normalized := make(map[string]string, len(custom))
-	for act, key := range custom {
+	// 1. Validate custom action names and keys
+	normalized := make(map[string][]string, len(custom))
+	for act, ks := range custom {
 		canonical, ok := validActions[act]
 		if !ok {
 			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, move_left, move_right, kill_pane, smart_jump, focus_last, toggle_cards, help, detach, quit, exit", act)
 		}
-		k := strings.ToLower(strings.TrimSpace(key))
-		if k == "" {
-			return nil, fmt.Errorf("key for action %q cannot be empty", act)
+		if canonical == ActionNameQuit && len(ks) == 0 {
+			return nil, fmt.Errorf("action %q cannot be unbound: it is the only way to end the session", act)
 		}
-		if why, bad := Reserved[k]; bad {
-			return nil, fmt.Errorf("key %q for action %q is reserved: %s", k, act, why)
-		}
-		if !isValidKeyName(k) {
-			if k == "pgdn" {
-				return nil, fmt.Errorf("key %q for action %q is not a recognized key name; did you mean \"pgdown\"?", k, act)
+		norm := make([]string, 0, len(ks))
+		for _, key := range ks {
+			k, err := validateKey(act, key)
+			if err != nil {
+				return nil, err
 			}
-			return nil, fmt.Errorf("key %q for action %q is not a recognized key name; must be a single printable character or valid named key (e.g. esc, space, left, right, up, down, pgup, pgdown)", k, act)
+			if slices.Contains(norm, k) {
+				return nil, fmt.Errorf("key %q is listed twice for action %q", k, act)
+			}
+			norm = append(norm, k)
 		}
-		normalized[canonical] = k
+		normalized[canonical] = norm
 	}
 
-	// 2. Clone default bindings and apply new keys
-	out := make([]Binding, len(Bindings))
-	for i, b := range Bindings {
-		out[i] = b
-		if k, ok := normalized[b.ActionName]; ok {
-			out[i].Key = k
+	// 2. Clone default bindings, replacing the keys of configured ones
+	out := make([]Binding, 0, len(Bindings))
+	for _, b := range Bindings {
+		if ks, ok := normalized[b.ActionName]; ok {
+			if len(ks) == 0 {
+				continue // unbound
+			}
+			b.Key = ks[0]
+			b.Aliases = nil
+			if len(ks) > 1 {
+				b.Aliases = slices.Clone(ks[1:])
+			}
+		}
+		out = append(out, b)
+	}
+
+	// A help group's line describes all of its members ("left / right"),
+	// so once one is unbound the survivors fall back to their own Long.
+	for _, ub := range Bindings {
+		if ks, ok := normalized[ub.ActionName]; !ok || len(ks) > 0 || ub.HelpGroup == "" {
+			continue
+		}
+		for i := range out {
+			if out[i].HelpGroup == ub.HelpGroup {
+				out[i].HelpGroup = ""
+				out[i].HelpKey = ""
+			}
 		}
 	}
 
-	// 3. Collision check among all bindings
+	// 3. Collision check across every key of every binding
 	seen := make(map[string]string) // key -> actionName
 	for _, b := range out {
-		if prev, exists := seen[b.Key]; exists {
-			return nil, fmt.Errorf("duplicate key %q assigned to both %q and %q (key collision)", b.Key, prev, b.ActionName)
-		}
-		seen[b.Key] = b.ActionName
-	}
-	// Filter aliases colliding with assigned keys
-	for i := range out {
-		var filteredAliases []string
-		for _, a := range out[i].Aliases {
-			if _, exists := seen[a]; exists {
-				continue
+		for _, k := range b.MatchNames() {
+			if prev, exists := seen[k]; exists {
+				return nil, collisionError(k, prev, b.ActionName, normalized)
 			}
-			filteredAliases = append(filteredAliases, a)
+			seen[k] = b.ActionName
 		}
-		out[i].Aliases = filteredAliases
 	}
 
 	// 4. Update BarGroup labels dynamically

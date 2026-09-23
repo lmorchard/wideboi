@@ -1,6 +1,7 @@
 package keys_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -92,25 +93,31 @@ func TestNoBindingUsesAReservedLetter(t *testing.T) {
 // router will match against agrees with it.
 func TestEveryCtrlFormMatchesItsRealByte(t *testing.T) {
 	var d uv.EventDecoder
-	for _, b := range keys.Bindings {
-		name, ok := b.CtrlForm()
-		if !ok {
-			continue
-		}
-		raw := []byte{b.Key[0] - 0x60} // ctrl+<letter> is the letter minus 0x60
-		n, ev := d.Decode(raw)
-		if n == 0 {
-			t.Errorf("%s: decoder consumed nothing from %#v", name, raw)
-			continue
-		}
-		kp, isKey := ev.(uv.KeyPressEvent)
-		if !isKey {
-			t.Errorf("%s: %#v decoded to %T, not a key press", name, raw, ev)
-			continue
-		}
-		if !kp.MatchString(name) {
-			t.Errorf("%s: the byte %#v decodes as %q, which does not match %q -- "+
-				"this binding would silently never fire", name, raw, kp.String(), name)
+	assertCtrlFormsMatchRealBytes(t, &d, keys.Bindings)
+}
+
+// assertCtrlFormsMatchRealBytes decodes the byte a terminal sends for
+// each ctrl form and asserts the router's name for it agrees.
+func assertCtrlFormsMatchRealBytes(t *testing.T, d *uv.EventDecoder, bindings []keys.Binding) {
+	t.Helper()
+	for _, b := range bindings {
+		for _, name := range b.CtrlForms() {
+			letter := name[len("ctrl+"):]
+			raw := []byte{letter[0] - 0x60} // ctrl+<letter> is the letter minus 0x60
+			n, ev := d.Decode(raw)
+			if n == 0 {
+				t.Errorf("%s: decoder consumed nothing from %#v", name, raw)
+				continue
+			}
+			kp, isKey := ev.(uv.KeyPressEvent)
+			if !isKey {
+				t.Errorf("%s: %#v decoded to %T, not a key press", name, raw, ev)
+				continue
+			}
+			if !kp.MatchString(name) {
+				t.Errorf("%s: the byte %#v decodes as %q, which does not match %q -- "+
+					"this binding would silently never fire", name, raw, kp.String(), name)
+			}
 		}
 	}
 }
@@ -277,7 +284,7 @@ func TestToggleCardsIsOnC(t *testing.T) {
 				t.Error("card toggle allows a repeat form; ctrl+c must stay an " +
 					"unknown key that leaves control mode")
 			}
-			if _, ok := b.CtrlForm(); ok {
+			if len(b.CtrlForms()) > 0 {
 				t.Error("card toggle still produces a ctrl form")
 			}
 			if b.Long == "" {
@@ -309,9 +316,9 @@ func TestBuildBindingsDefaults(t *testing.T) {
 
 func TestBuildBindingsCustomValid(t *testing.T) {
 	// Remap kill_pane to 'k' and scroll_up to 'e'
-	custom := map[string]string{
-		keys.ActionNameKillPane: "k",
-		keys.ActionNameScrollUp: "e",
+	custom := map[string][]string{
+		keys.ActionNameKillPane: {"k"},
+		keys.ActionNameScrollUp: {"e"},
 	}
 	b, err := keys.BuildBindings(custom)
 	if err != nil {
@@ -326,9 +333,8 @@ func TestBuildBindingsCustomValid(t *testing.T) {
 			if item.BarGroup != "k kill" {
 				t.Errorf("kill_pane BarGroup = %q, want %q", item.BarGroup, "k kill")
 			}
-			ctrl, ok := item.CtrlForm()
-			if !ok || ctrl != "ctrl+k" {
-				t.Errorf("kill_pane CtrlForm() = (%q, %v), want (ctrl+k, true)", ctrl, ok)
+			if got := item.CtrlForms(); !slices.Equal(got, []string{"ctrl+k"}) {
+				t.Errorf("kill_pane CtrlForms() = %q, want [ctrl+k]", got)
 			}
 		}
 		if item.ActionName == keys.ActionNameScrollUp {
@@ -344,7 +350,7 @@ func TestBuildBindingsCustomValid(t *testing.T) {
 
 // The reorder verbs are remappable like any other.
 func TestBuildBindingsRemapsMoveVerbs(t *testing.T) {
-	b, err := keys.BuildBindings(map[string]string{keys.ActionNameMoveLeft: "e"})
+	b, err := keys.BuildBindings(map[string][]string{keys.ActionNameMoveLeft: {"e"}})
 	if err != nil {
 		t.Fatalf("BuildBindings failed: %v", err)
 	}
@@ -357,8 +363,8 @@ func TestBuildBindingsRemapsMoveVerbs(t *testing.T) {
 
 func TestBuildBindingsReservedKeyRejected(t *testing.T) {
 	for reserved := range keys.Reserved {
-		_, err := keys.BuildBindings(map[string]string{
-			keys.ActionNameKillPane: reserved,
+		_, err := keys.BuildBindings(map[string][]string{
+			keys.ActionNameKillPane: {reserved},
 		})
 		if err == nil {
 			t.Errorf("expected error for reserved key %q, got nil", reserved)
@@ -370,8 +376,8 @@ func TestBuildBindingsReservedKeyRejected(t *testing.T) {
 
 func TestBuildBindingsDuplicateKeyRejected(t *testing.T) {
 	// 'x' is default for kill_pane, assigning cycle_width to 'x' without moving kill_pane should fail
-	_, err := keys.BuildBindings(map[string]string{
-		keys.ActionNameCycleWidth: "x",
+	_, err := keys.BuildBindings(map[string][]string{
+		keys.ActionNameCycleWidth: {"x"},
 	})
 	if err == nil {
 		t.Error("expected error for duplicate key 'x', got nil")
@@ -383,7 +389,7 @@ func TestBuildBindingsDuplicateKeyRejected(t *testing.T) {
 // Digits are fixed, but they still hold their keys: remapping another
 // action onto one is a collision, not a silent shadow.
 func TestBuildBindingsRejectsRemapOntoADigit(t *testing.T) {
-	_, err := keys.BuildBindings(map[string]string{keys.ActionNameKillPane: "1"})
+	_, err := keys.BuildBindings(map[string][]string{keys.ActionNameKillPane: {"1"}})
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Errorf("remapping kill_pane onto 1: err = %v, want a duplicate-key error", err)
 	}
@@ -412,8 +418,8 @@ func TestDigitsFocusColumnsByPosition(t *testing.T) {
 }
 
 func TestBuildBindingsUnknownActionRejected(t *testing.T) {
-	_, err := keys.BuildBindings(map[string]string{
-		"nonexistent_action": "z",
+	_, err := keys.BuildBindings(map[string][]string{
+		"nonexistent_action": {"z"},
 	})
 	if err == nil {
 		t.Error("expected error for unknown action, got nil")
@@ -434,8 +440,8 @@ func TestBuildBindingsInvalidKeyNames(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		_, err := keys.BuildBindings(map[string]string{
-			keys.ActionNameKillPane: tc.key,
+		_, err := keys.BuildBindings(map[string][]string{
+			keys.ActionNameKillPane: {tc.key},
 		})
 		if err == nil {
 			t.Errorf("expected error for key %q, got nil", tc.key)
@@ -446,9 +452,9 @@ func TestBuildBindingsInvalidKeyNames(t *testing.T) {
 }
 
 func TestBuildBindingsValidNamedKeysAccepted(t *testing.T) {
-	b, err := keys.BuildBindings(map[string]string{
-		keys.ActionNameScrollDown: "pgdown",
-		keys.ActionNameScrollUp:   "pgup",
+	b, err := keys.BuildBindings(map[string][]string{
+		keys.ActionNameScrollDown: {"pgdown"},
+		keys.ActionNameScrollUp:   {"pgup"},
 	})
 	if err != nil {
 		t.Fatalf("BuildBindings with valid named keys failed: %v", err)
@@ -461,9 +467,9 @@ func TestBuildBindingsValidNamedKeysAccepted(t *testing.T) {
 }
 
 func TestBarItemsFor(t *testing.T) {
-	b, err := keys.BuildBindings(map[string]string{
-		keys.ActionNameKillPane: "k",
-		keys.ActionNameScrollUp: "e",
+	b, err := keys.BuildBindings(map[string][]string{
+		keys.ActionNameKillPane: {"k"},
+		keys.ActionNameScrollUp: {"e"},
 	})
 	if err != nil {
 		t.Fatalf("BuildBindings failed: %v", err)
@@ -476,4 +482,114 @@ func TestBarItemsFor(t *testing.T) {
 	if !strings.Contains(joined, "hjel move") {
 		t.Errorf("bar items should contain 'hjel move', got %q", joined)
 	}
+}
+
+// find returns the binding for action, or false if it is unbound.
+func find(bindings []keys.Binding, action string) (keys.Binding, bool) {
+	for _, b := range bindings {
+		if b.ActionName == action {
+			return b, true
+		}
+	}
+	return keys.Binding{}, false
+}
+
+func mustBuild(t *testing.T, custom map[string][]string) []keys.Binding {
+	t.Helper()
+	b, err := keys.BuildBindings(custom)
+	if err != nil {
+		t.Fatalf("BuildBindings(%v) failed: %v", custom, err)
+	}
+	return b
+}
+
+func wantBuildError(t *testing.T, custom map[string][]string, want string) {
+	t.Helper()
+	_, err := keys.BuildBindings(custom)
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("BuildBindings(%v): err = %v, want one containing %q", custom, err, want)
+	}
+}
+
+// The first key is the primary; the rest are aliases, and every one
+// of them that is a letter gets a repeat chord.
+func TestBuildBindingsListSetsPrimaryAndAliases(t *testing.T) {
+	b, ok := find(mustBuild(t, map[string][]string{keys.ActionNameFocusLeft: {"h", "g"}}), keys.ActionNameFocusLeft)
+	if !ok {
+		t.Fatal("focus_left is missing")
+	}
+	if b.Key != "h" || !slices.Equal(b.Aliases, []string{"g"}) {
+		t.Errorf("focus_left Key=%q Aliases=%q, want h and [g]", b.Key, b.Aliases)
+	}
+	if got := b.CtrlForms(); !slices.Equal(got, []string{"ctrl+h", "ctrl+g"}) {
+		t.Errorf("focus_left CtrlForms() = %q, want [ctrl+h ctrl+g]", got)
+	}
+}
+
+// Setting an action replaces all of its defaults, the arrow included.
+func TestBuildBindingsSettingReplacesDefaultAliases(t *testing.T) {
+	b, _ := find(mustBuild(t, map[string][]string{keys.ActionNameFocusLeft: {"h"}}), keys.ActionNameFocusLeft)
+	if b.Aliases != nil {
+		t.Errorf("focus_left Aliases = %q, want none: the setting replaces the default left arrow", b.Aliases)
+	}
+}
+
+func TestBuildBindingsEmptyListUnbinds(t *testing.T) {
+	b := mustBuild(t, map[string][]string{keys.ActionNameDetach: {}})
+	if _, ok := find(b, keys.ActionNameDetach); ok {
+		t.Error("detach is still bound after detach = []")
+	}
+	droppable, _ := keys.BarItemsFor(b, true)
+	if slices.Contains(droppable, "d detach") {
+		t.Error("the bar still offers d detach after detach = []")
+	}
+}
+
+// An unknown key already leaves control mode, so exit loses nothing.
+func TestBuildBindingsEmptyListUnbindsExit(t *testing.T) {
+	if _, ok := find(mustBuild(t, map[string][]string{keys.ActionNameExit: {}}), keys.ActionNameExit); ok {
+		t.Error("exit is still bound after exit = []")
+	}
+}
+
+func TestBuildBindingsQuitCannotBeUnbound(t *testing.T) {
+	wantBuildError(t, map[string][]string{keys.ActionNameQuit: {}}, "cannot be unbound")
+}
+
+func TestBuildBindingsKeyListedTwice(t *testing.T) {
+	wantBuildError(t, map[string][]string{keys.ActionNameFocusLeft: {"h", "h"}}, "listed twice")
+}
+
+// Formerly the alias was dropped silently and the left arrow quietly
+// changed meaning.
+func TestBuildBindingsAliasCollidesWithDefault(t *testing.T) {
+	wantBuildError(t, map[string][]string{keys.ActionNameNewColumn: {"n", "left"}},
+		`"focus_left" holds it by default; remap focus_left too`)
+}
+
+func TestBuildBindingsAliasCollidesWithDigit(t *testing.T) {
+	wantBuildError(t, map[string][]string{keys.ActionNameKillPane: {"x", "1"}}, "cannot be remapped")
+}
+
+func TestBuildBindingsFreedDefaultCanBeTaken(t *testing.T) {
+	b, _ := find(mustBuild(t, map[string][]string{
+		keys.ActionNameFocusLeft: {"h"},
+		keys.ActionNameNewColumn: {"n", "left"},
+	}), keys.ActionNameNewColumn)
+	if !slices.Equal(b.MatchNames(), []string{"n", "left"}) {
+		t.Errorf("new_column MatchNames() = %q, want [n left]", b.MatchNames())
+	}
+}
+
+func TestBuildBindingsMoveGroupSkipsUnbound(t *testing.T) {
+	b, _ := find(mustBuild(t, map[string][]string{keys.ActionNameScrollDown: {}}), keys.ActionNameFocusLeft)
+	if b.BarGroup != "hkl move" {
+		t.Errorf("move BarGroup = %q, want %q", b.BarGroup, "hkl move")
+	}
+}
+
+// Aliases' repeat chords get the same real-byte check as the defaults'.
+func TestCustomCtrlFormsMatchTheirRealBytes(t *testing.T) {
+	var d uv.EventDecoder
+	assertCtrlFormsMatchRealBytes(t, &d, mustBuild(t, map[string][]string{keys.ActionNameFocusLeft: {"h", "g"}}))
 }

@@ -47,16 +47,24 @@ prefix = "ctrl+b"
 # Remap actions to customize your control-mode shortcuts.
 # Unmentioned actions retain their defaults.
 #
+# A value is one key ("h"), a list of keys (["h", "left"]), or an empty
+# list ([]) to unbind the action. Setting an action replaces ALL of its
+# default keys, so list every key you want to keep. The first key in a
+# list is the one the status bar and help overlay show.
+#
 # Constraints:
 # - Keys "i", "m", and "[" are reserved and cannot be bound (their control
 #   bytes decode as Tab, Enter, and Escape, breaking repeat chords).
-# - No two actions may be bound to the same key (key collision).
-# - Actions bound to single lowercase letters (a-z) automatically get a
-#   matching ctrl repeat chord (e.g. key "x" -> "ctrl+x" repeat).
+# - No two actions may share a key, even if the other action is left at
+#   its defaults: remap it too.
+# - quit cannot be unbound; it is the only way to end the session.
+# - Every single lowercase letter (a-z) bound to an action gets a matching
+#   ctrl repeat chord (e.g. key "x" -> "ctrl+x" repeat), except toggle_cards:
+#   repeating a toggle only undoes it.
 [keys]
 # Navigation & Scrolling
-focus_left   = "h"    # Move focus to the left column (aliases: "left")
-focus_right  = "l"    # Move focus to the right column (aliases: "right")
+focus_left   = ["h", "left"]   # Move focus to the left column
+focus_right  = ["l", "right"]  # Move focus to the right column
 scroll_down  = "j"    # Scroll focused pane history down (forward in time)
 scroll_up    = "k"    # Scroll focused pane history up (back into history)
 
