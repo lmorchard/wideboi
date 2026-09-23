@@ -120,6 +120,35 @@ while it starts. The result was an intermittent "planted job never appeared",
 and `attach-check` was spending about half its runtime waiting on zsh. Anything
 the harness starts off a pty needs the same pin (`attachcheck.bin_env`).
 
+## Change-only sends trade self-healing for bookkeeping
+
+Until #85 the server resent every pane to every client on each 33ms frame.
+That was wasteful, and it also repaired every dropped or out-of-order update
+a frame later without anyone having to think about it. Sending only on change
+removed that. Three things now carry the guarantee instead, and each one fails
+silently as a stale pane:
+
+- **Every mutation path bumps `Grid.Generation`.** A path that changes cells,
+  cursor, mouse mode, size or scroll offset without bumping never reaches a
+  client until something unrelated changes that pane.
+- **Every layout snapshot forces a full resend.** The client prunes mirrors of
+  panes that aren't placed, and replaces a mirror that a placement outgrew
+  with a blank one. An "unchanged" pane can therefore be missing on the client.
+- **Pane broadcasts are serialized (`paneSendMu`).** Several goroutines
+  broadcast. Two overlapping rounds could deliver an older render last while
+  recording the newer generation.
+
+Delivery is tracked per client (`paneGens`), recorded only when `SendServer`
+accepts. There is deliberately no periodic full resend: it would hide a missing
+bump.
+
+A missing bump also hides from a quick manual check. Typing into an idle pane
+flips its status to Working, and that status snapshot forces every pane to be
+resent, so the first keystroke always arrives however broken the generation
+is. The first version of the wire test had exactly this blind spot and passed
+with `Write`'s bump deleted. Test a mutation path while the pane is already
+busy (`TestIdleSessionStopsSendingPaneUpdates` types twice for this reason).
+
 ## Reviews verify code against the plan — and one author wrote both
 
 Model selection that worked: cheap models where the plan contains the complete

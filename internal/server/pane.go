@@ -326,6 +326,9 @@ func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 	}
 }
 
+// Generation reports the grid's change counter; see term.Grid.Generation.
+func (p *Pane) Generation() uint64 { return p.grid.Generation() }
+
 func (p *Pane) ScrollbackLen() int         { return p.grid.ScrollbackLen() }
 func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }
 func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }

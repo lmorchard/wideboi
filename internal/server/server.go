@@ -39,6 +39,21 @@ type Server struct {
 	lastStatuses map[int]string
 	lastTitles   map[int]string
 
+	// paneGens records, per client, the grid generation each pane was
+	// at in the last update that client accepted. The frame tick sends a
+	// pane only to clients whose record is missing or behind, so a new
+	// client gets everything and a dropped update is retried for the
+	// client that missed it. See broadcastPaneUpdates.
+	paneGens map[transport.Transport]map[int]uint64
+
+	// paneSendMu serializes broadcastPaneUpdates. The Run loop, every
+	// client's message loop (via broadcastLayout) and onPaneExit all
+	// broadcast, and two overlapping rounds could deliver an older
+	// render last while recording the newer generation, leaving that
+	// client stale with nothing left to trigger a resend. Taken before
+	// s.mu, never while holding it.
+	paneSendMu sync.Mutex
+
 	// layout is the session's strategy mode, shared with every client.
 	layout protocol.LayoutMode
 
@@ -213,6 +228,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 		}
 	}
 	s.transports = out
+	delete(s.paneGens, tp)
 }
 
 // Run executes the main server event loop, processing client messages and polling descendants.
@@ -242,7 +258,7 @@ func (s *Server) Run(ctx context.Context) error {
 			// broadcast, so only send one separately when it did
 			// not fire.
 			if !s.broadcastLayoutIfStatusChanged(ctx) {
-				s.broadcastPaneUpdates(ctx)
+				s.broadcastPaneUpdates(ctx, false)
 			}
 		case <-ticker.C:
 			s.pollDescendants()
@@ -638,12 +654,13 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	}
 	// Call outside s.mu: broadcastLayout takes it itself. It is also
 	// what marks the glyph set delivered -- deliberately not done
-	// here. A status broadcast is edge-triggered, so unlike the 33ms
-	// pane updates it does not self-heal: if this snapshot is dropped
-	// (SendServer returns false on a full buffer) and we had already
-	// recorded the set as sent, the client would stay stale until some
-	// later, unrelated status change. Leaving lastStatuses untouched
-	// on a failed send makes the next tick retry.
+	// here. A status broadcast is edge-triggered: if this snapshot is
+	// dropped (SendServer returns false on a full buffer) and we had
+	// already recorded the set as sent, the client would stay stale
+	// until some later, unrelated status change. Leaving lastStatuses
+	// untouched on a failed send makes the next tick retry. Pane
+	// updates have the same problem and solve it per client instead;
+	// see paneGens.
 	s.broadcastLayout(ctx)
 	return true
 }
@@ -690,21 +707,97 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 		s.mu.Unlock()
 	}
 
-	s.broadcastPaneUpdates(ctx)
+	s.broadcastPaneUpdates(ctx, true)
 }
 
-func (s *Server) broadcastPaneUpdates(ctx context.Context) {
-	s.mu.Lock()
-	updates := make([]protocol.MsgPaneUpdate, 0, len(s.panes))
-	for _, p := range s.panes {
-		updates = append(updates, p.UpdateMessage())
+// broadcastPaneUpdates sends each pane to every client that has not
+// accepted its current generation. force sends every pane to every
+// client: broadcastLayout needs that, because a snapshot can prune a
+// client's mirror or replace it with a blank one (client.go, the
+// MsgLayoutSnapshot case), so an unchanged pane must still be resent
+// after one.
+func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
+	s.paneSendMu.Lock()
+	defer s.paneSendMu.Unlock()
+
+	type outgoing struct {
+		update protocol.MsgPaneUpdate
+		gen    uint64
+		to     []transport.Transport
 	}
+	s.mu.Lock()
 	tps := append([]transport.Transport{}, s.transports...)
+	var out []outgoing
+	for id, p := range s.panes {
+		// Read before rendering. A write landing in between leaves
+		// the recorded generation behind the content, so the next
+		// tick resends: one update too many, never one too few.
+		gen := p.Generation()
+		var to []transport.Transport
+		for _, tp := range tps {
+			last, ok := s.paneGens[tp][id]
+			if force || !ok || last != gen {
+				to = append(to, tp)
+			}
+		}
+		if len(to) > 0 {
+			out = append(out, outgoing{update: p.UpdateMessage(), gen: gen, to: to})
+		}
+	}
 	s.mu.Unlock()
 
-	for _, update := range updates {
-		for _, tp := range tps {
-			tp.SendServer(ctx, update)
+	type result struct {
+		tp       transport.Transport
+		id       int
+		gen      uint64
+		accepted bool
+	}
+	var results []result
+	for _, o := range out {
+		for _, tp := range o.to {
+			results = append(results, result{tp, o.update.PaneID, o.gen, tp.SendServer(ctx, o.update)})
+		}
+	}
+
+	// Runs even when nothing was sent, so records for exited panes go
+	// when the last pane does.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	present := make(map[transport.Transport]bool, len(s.transports))
+	for _, tp := range s.transports {
+		present[tp] = true
+	}
+	if s.paneGens == nil {
+		s.paneGens = make(map[transport.Transport]map[int]uint64)
+	}
+	for _, r := range results {
+		// A client dropped mid-send must not be re-added, and a pane
+		// that exited mid-send has nothing left to track.
+		if !present[r.tp] {
+			continue
+		}
+		if _, ok := s.panes[r.id]; !ok {
+			continue
+		}
+		if !r.accepted {
+			// Forget rather than leave alone: a forced resend goes to
+			// clients whose record may already equal gen, and leaving
+			// that in place would mean no later tick retries it.
+			delete(s.paneGens[r.tp], r.id)
+			continue
+		}
+		m := s.paneGens[r.tp]
+		if m == nil {
+			m = make(map[int]uint64)
+			s.paneGens[r.tp] = m
+		}
+		m[r.id] = r.gen
+	}
+	for _, m := range s.paneGens {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
 		}
 	}
 }
@@ -858,6 +951,7 @@ func (s *Server) Close() error {
 		s.mu.Lock()
 		tps := s.transports
 		s.transports = nil
+		s.paneGens = nil
 		s.owner = nil
 		s.mu.Unlock()
 		for _, tp := range tps {

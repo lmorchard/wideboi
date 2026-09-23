@@ -337,3 +337,59 @@ func TestPrintableInputRoundTrips(t *testing.T) {
 		g.Close()
 	}
 }
+
+// The server resends a pane only when its generation has moved (#85), so
+// a mutation that fails to advance it leaves every client stale.
+func TestGenerationAdvancesOnWrite(t *testing.T) {
+	g := term.NewVT(10, 3)
+	defer g.Close()
+	before := g.Generation()
+	if _, err := g.Write([]byte("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if g.Generation() == before {
+		t.Error("Write did not advance the generation")
+	}
+}
+
+func TestGenerationAdvancesOnResizeOnlyWhenTheSizeChanges(t *testing.T) {
+	g := term.NewVT(10, 3)
+	defer g.Close()
+	before := g.Generation()
+	g.Resize(10, 3)
+	if g.Generation() != before {
+		t.Error("a same-size Resize advanced the generation")
+	}
+	g.Resize(8, 3)
+	if g.Generation() == before {
+		t.Error("Resize did not advance the generation")
+	}
+}
+
+func TestGenerationAdvancesOnScrollOnlyWhenTheOffsetMoves(t *testing.T) {
+	g := term.NewVT(10, 3)
+	defer g.Close()
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(g, "%d\r\n", i)
+	}
+	if g.ScrollbackLen() < 2 {
+		t.Fatalf("fixture produced %d scrollback lines, need >= 2", g.ScrollbackLen())
+	}
+	steps := []struct {
+		offset int
+		moves  bool
+	}{
+		{0, false}, // already at the bottom
+		{2, true},
+		{2, false},  // unchanged
+		{-5, true},  // clamps to 0, which is a move from 2
+		{-1, false}, // clamps to 0 again
+	}
+	for _, st := range steps {
+		before := g.Generation()
+		g.SetScrollOffset(st.offset)
+		if moved := g.Generation() != before; moved != st.moves {
+			t.Errorf("SetScrollOffset(%d): generation moved=%v, want %v", st.offset, moved, st.moves)
+		}
+	}
+}

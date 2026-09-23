@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -183,5 +184,102 @@ func TestParseLayoutAcceptsKnown(t *testing.T) {
 		if got != want {
 			t.Errorf("parseLayout(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+// An idle session must go quiet on the wire. Before #85 the server sent
+// every pane to every client each 33ms frame whether or not it had
+// changed, so no quiet second ever came. Change-only sends must still
+// deliver a change, which the second half checks.
+func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
+	// Not t.TempDir: this test's name makes that path longer than the
+	// 104 bytes darwin allows a unix socket.
+	dir, err := os.MkdirTemp("", "wb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sockPath := filepath.Join(dir, "s.sock")
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.ListenSocket(ctx, sl)
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("net.Dial failed: %v", err)
+	}
+	cc := transport.NewClientSocketConn(conn, 256)
+	cc.RunPumps(ctx)
+	defer cc.Close()
+	cli := client.NewClient(cc, 80, 24, "C-b")
+	cli.Attach(ctx)
+
+	// waitQuiet reports whether a stretch of `quiet` with no
+	// MsgPaneUpdate arrives before `ceiling`. Every message still goes
+	// through the client, so the focus pane is known for SendInput.
+	waitQuiet := func(quiet, ceiling time.Duration) bool {
+		deadline := time.After(ceiling)
+		timer := time.NewTimer(quiet)
+		defer timer.Stop()
+		for {
+			select {
+			case msg := <-cc.ServerSendChan():
+				cli.HandleServerMsg(msg)
+				if _, ok := msg.(protocol.MsgPaneUpdate); ok {
+					timer.Reset(quiet)
+				}
+			case <-timer.C:
+				return true
+			case <-deadline:
+				return false
+			}
+		}
+	}
+	// The ceiling covers shell startup and the Working->Idle status
+	// decay at ~3s, whose snapshot forces one more round of updates.
+	if !waitQuiet(time.Second, 8*time.Second) {
+		t.Fatal("an idle session never went a full second without a MsgPaneUpdate")
+	}
+
+	// Typing into an idle pane flips its status to Working, and that
+	// status snapshot forces every pane to be resent -- which would
+	// deliver the keystroke even if Write never advanced the generation.
+	// So the first key only wakes the pane. The second is typed well
+	// inside the ~3s idle decay, with nothing left to change status, so
+	// it has to come through on the generation alone.
+	awaitUpdate := func(key string) (afterSnapshot bool) {
+		deadline := time.After(3 * time.Second)
+		for {
+			select {
+			case msg := <-cc.ServerSendChan():
+				cli.HandleServerMsg(msg)
+				switch msg.(type) {
+				case protocol.MsgLayoutSnapshot:
+					afterSnapshot = true
+				case protocol.MsgPaneUpdate:
+					return afterSnapshot
+				}
+			case <-deadline:
+				t.Fatalf("typing %q produced no MsgPaneUpdate", key)
+			}
+		}
+	}
+	cli.SendInput(ctx, []byte("x"))
+	awaitUpdate("x")
+	if !waitQuiet(300*time.Millisecond, 2*time.Second) {
+		t.Fatal("the pane never settled after the first keystroke")
+	}
+	cli.SendInput(ctx, []byte("y"))
+	if awaitUpdate("y") {
+		t.Fatal("a layout snapshot preceded the second keystroke's update, so this run cannot show the generation delivered it")
 	}
 }

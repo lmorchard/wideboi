@@ -23,6 +23,7 @@ import (
 type statusGrid struct {
 	status atomic.Int32
 	title  atomic.Pointer[string]
+	gen    atomic.Uint64
 }
 
 func newStatusGrid(st term.PaneStatus) *statusGrid {
@@ -34,6 +35,12 @@ func newStatusGrid(st term.PaneStatus) *statusGrid {
 func (g *statusGrid) set(st term.PaneStatus) { g.status.Store(int32(st)) }
 
 func (g *statusGrid) setTitle(s string) { g.title.Store(&s) }
+
+// bump stands in for a write: anything that changes what a pane update
+// would carry.
+func (g *statusGrid) bump() { g.gen.Add(1) }
+
+func (g *statusGrid) Generation() uint64 { return g.gen.Load() }
 
 func (g *statusGrid) Title() string {
 	if t := g.title.Load(); t != nil {
