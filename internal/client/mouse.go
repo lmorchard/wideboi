@@ -193,7 +193,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 			}
 			c.sel = nil
 		case c.lastRenderedScreen != nil:
-			copyText = c.sel.text(c.lastRenderedScreen)
+			copyText = c.selectionText(c.lastRenderedScreen)
 		}
 
 	case uv.MouseWheelEvent:
@@ -286,31 +286,60 @@ func (s *selection) rowSpan(y int) (x0, x1 int, ok bool) {
 	return x0, x1, true
 }
 
-// text reads the selected cells from scr: one line per row, trailing
-// blanks trimmed, joined with "\n".
+// selectionText reads the selected cells from scr: one line per row, trailing
+// blanks trimmed. It joins rows with "\n" unless a row's last cell in the
+// pane's uncomposed mirror is non-blank (a heuristic for soft wrap).
 //
 // Not compose.Text, which emits one rune per cell. This advances by
 // each cell's Width, so a wide glyph contributes its content once and
 // its placeholder cell nothing.
-func (s *selection) text(scr uv.Screen) string {
-	start, end := s.ordered()
+func (c *Client) selectionText(scr uv.Screen) string {
+	if c.sel == nil {
+		return ""
+	}
+	start, end := c.sel.ordered()
 	lines := make([]string, 0, end.Y-start.Y+1)
 	for y := start.Y; y <= end.Y; y++ {
-		x0, x1, _ := s.rowSpan(y)
+		x0, x1, _ := c.sel.rowSpan(y)
 		var b strings.Builder
 		for x := x0; x <= x1; {
-			c := scr.CellAt(x, y)
-			if c == nil || c.Content == "" {
+			cell := scr.CellAt(x, y)
+			if cell == nil || cell.Content == "" {
 				b.WriteByte(' ')
 				x++
 				continue
 			}
-			b.WriteString(c.Content)
-			x += max(c.Width, 1)
+			b.WriteString(cell.Content)
+			x += max(cell.Width, 1)
 		}
 		lines = append(lines, strings.TrimRight(b.String(), " "))
 	}
-	return strings.Join(lines, "\n")
+
+	var result strings.Builder
+	m := c.mirrors[c.sel.paneID]
+
+	for i, line := range lines {
+		result.WriteString(line)
+		if i < len(lines)-1 {
+			y := start.Y + i
+			wrap := false
+			if m != nil {
+				localY := y - c.sel.dst.Min.Y
+				localX := c.sel.dst.Dx() - 1
+
+				if localY >= 0 && localY < m.Rows && localX >= 0 && localX < m.Cols {
+					lastCell := m.Surface.CellAt(localX, localY)
+					if lastCell != nil && lastCell.Content != "" && lastCell.Content != " " {
+						wrap = true
+					}
+				}
+			}
+			if !wrap {
+				result.WriteString("\n")
+			}
+		}
+	}
+	return result.String()
 }
 
 // drawSelectionLocked inverts the selected cells over a composed frame.
