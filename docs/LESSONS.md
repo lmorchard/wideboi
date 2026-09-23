@@ -98,6 +98,18 @@ removed. A detached, ownerless server has no terminal left to take it down,
 so it lives until `kill-session`, a `q`, or a signal, and it arms the same
 guard to reap on that signal.
 
+**A `ps` walk by parent pid cannot see a process whose parent has died.** It
+is reparented to launchd (pid 1) at once, and from then on no walk from a pane
+root reaches it: not the 1s background poll, not `ptyx.Kill`'s snapshot. So a
+double-forked or `setsid` escapee planted in a test is out of reach of *every*
+walk. A test that plants one fails before and after any change to when or
+where the walk runs, which makes it useless as proof of such a change. #83's
+test plan fell into exactly this, and the fix it proposed (moving Close's
+final poll) turned out to duplicate `Kill`'s walk (#87). Before planning a
+reaper change, ask whether the process in question is still in the tree at
+the moment the walk runs. If it is not, the fix needs a different mechanism
+(#88), not a better-timed walk.
+
 ## The harness's environment pin only covers what it starts on a pty
 
 `ptylib.spawn_in_pty` pins `SHELL`, `TERM` and `PS1`. attachcheck starts
@@ -503,3 +515,17 @@ does not. Both parallelism failures above were fixed rather than tuned around
 once the repeat runs pointed at them — a fixed `time.sleep` before an
 assertion, and a startup wait that returned before the thing being waited for
 existed.
+
+## `verify-exit` reports your own detached session as a stray
+
+`scripts/ptycheck.py`'s stray scan scopes by parentage: a copy of
+`bin/wideboi` whose parent is pid 1 counts as leaked, because that is what an
+orphan looks like. A detached session server also has pid 1 as its parent. So
+if you have a session running from this checkout's `bin/wideboi` while
+`make check` runs, every `verify-exit` case fails with the same
+`wideboi server --owner-fd 3` pid, and every other assertion passes.
+
+Before blaming the branch, check the stray's start time against the run's. A
+server that predates the run is yours: end that session and rerun. Don't
+loosen the scan. The ppid-1 rule is the only thing that catches a real
+orphan.
