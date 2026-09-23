@@ -58,7 +58,7 @@ plausible-looking geometry change — see `internal/server/status_test.go:187`,
 ## Working here
 
     make quick    # the edit loop: fmt, vet, seam, go tests. ~5s
-    make check    # the gate: adds race, exit contract, smoke, attach. ~12s
+    make check    # the gate: adds race, exit contract, smoke, attach. ~50s
 
 `make check` is parallel by default (`CHECK_JOBS=1` for serial). It is cheap now
 — there is no reason to skip it before pushing.

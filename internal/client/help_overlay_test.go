@@ -164,7 +164,7 @@ func TestHelpOutranksMotion(t *testing.T) {
 
 	cli.SetHelpVisible(true)
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	got := strings.Join(scr.text(), "\n")
 	if !strings.Contains(got, "control mode") {

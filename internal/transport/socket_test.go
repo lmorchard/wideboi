@@ -115,3 +115,30 @@ func TestSocketListenerAndConnRoundTrip(t *testing.T) {
 	clientConn.Close()
 	srvConn.Close()
 }
+
+// Closing a server-side connection must release a broadcast stuck on
+// its full queue. Otherwise one stalled client -- a peer that stopped
+// reading, so the write pump stopped draining -- parks the server's Run
+// loop inside SendServer forever, and a server that has finished
+// shutting down never exits.
+func TestServerSendReturnsOnceClosed(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer theirs.Close()
+	// No pumps: nothing drains ServerSend, as with a stuck write pump.
+	sc := transport.NewServerSocketConn(ours, 1)
+	sc.SendServer(context.Background(), protocol.MsgPaneClosed{PaneID: 1})
+
+	done := make(chan bool, 1)
+	go func() { done <- sc.SendServer(context.Background(), protocol.MsgPaneClosed{PaneID: 2}) }()
+	time.Sleep(50 * time.Millisecond)
+	_ = sc.Close()
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Error("SendServer reported queueing a message on a closed connection")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendServer stayed blocked after Close")
+	}
+}

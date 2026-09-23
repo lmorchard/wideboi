@@ -81,6 +81,33 @@ Known parked gaps, recorded with reasoning in the v1 spec: a root that exits
 before `Kill` leaves escapees unsignalled, and `ps -axo` parsing is unverified on
 Linux.
 
+Since #25 every session runs in a separate `wideboi server`, so the guarantee
+crosses a process boundary and has to be stated more carefully: **nothing
+outlives the client that started the session, unless that client detached.**
+There are two routes, and each one covers what the other can't:
+
+- A signal to the owner sends `MsgShutdown` and waits for the server to hang
+  up, which it does only after reaping. The order is still reap, then restore
+  the terminal, then re-raise.
+- An owner that dies without running any code (SIGKILL) is caught by the
+  server: the owner's socketpair reaches EOF with no `MsgDetach` before it.
+
+That second route is quick enough to satisfy `verify-exit` on its own, so
+ptycheck cannot see whether the first one ran. It does fail when both are
+removed. A detached, ownerless server has no terminal left to take it down,
+so it lives until `kill-session`, a `q`, or a signal, and it arms the same
+guard to reap on that signal.
+
+## The harness's environment pin only covers what it starts on a pty
+
+`ptylib.spawn_in_pty` pins `SHELL`, `TERM` and `PS1`. attachcheck starts
+`wideboi server` with a plain `Popen` instead, and nothing pinned that
+environment, so its panes ran the developer's own login shell: a themed zsh,
+whose prompt has no `$` and whose line editor sometimes drops text typed
+while it starts. The result was an intermittent "planted job never appeared",
+and `attach-check` was spending about half its runtime waiting on zsh. Anything
+the harness starts off a pty needs the same pin (`attachcheck.bin_env`).
+
 ## Reviews verify code against the plan — and one author wrote both
 
 Model selection that worked: cheap models where the plan contains the complete
@@ -130,7 +157,7 @@ The failure had three properties that together cost three fix attempts:
 2. **The error surfaced on a pump goroutine**, which did `if err != nil {
    return }` and closed the connection. From the client that is EOF, which is
    also exactly what a clean detach looks like. Exit 0, no message.
-3. **No unit test could see it.** `make smoke` only ever runs the in-process
+3. **No unit test could see it.** `make smoke` only ever ran the in-process
    binary, so nothing it asserts is ever serialised. A wire format that cannot
    encode a coloured cell passed the entire suite.
 

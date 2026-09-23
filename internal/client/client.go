@@ -373,7 +373,7 @@ func copyToHostScreen(src *offscreenHostScreen, dst HostScreen) {
 
 // Draw composites active pane surfaces, dividers, host cursor, and status bar onto host screen scr.
 // It returns true if the frame changed and was written to scr, or false if unchanged.
-func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) bool {
+func (c *Client) Draw(scr HostScreen) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -382,7 +382,7 @@ func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area 
 	}
 	c.stagingScreen.clear()
 
-	c.drawToScreenLocked(c.stagingScreen, drawPane, cursorInfo)
+	c.drawToScreenLocked(c.stagingScreen)
 
 	targetChanged := scr != c.lastHostScreen
 	if !targetChanged && c.stagingScreen.equal(c.lastRenderedScreen) {
@@ -400,7 +400,7 @@ func (c *Client) Draw(scr HostScreen, drawPane func(id int, dst uv.Screen, area 
 	return true
 }
 
-func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv.Screen, area image.Rectangle), cursorInfo func(id int) (image.Point, bool)) {
+func (c *Client) drawToScreenLocked(scr HostScreen) {
 	if c.layerLocked() == layerHelp {
 		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable, c.bindings)
 		scr.HideCursor()
@@ -417,7 +417,7 @@ func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv
 		}
 	}
 
-	focusedPlacement := c.composeFrameLocked(scr, st, drawPane)
+	focusedPlacement := c.composeFrameLocked(scr, st)
 	c.drawSelectionLocked(scr)
 	c.drawStatusBarLocked(scr)
 
@@ -442,9 +442,7 @@ func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv
 	case focusedPlacement != nil:
 		var cp image.Point
 		var visible bool
-		if cursorInfo != nil {
-			cp, visible = cursorInfo(c.focusPaneID)
-		} else if info, ok := c.cursorInfos[c.focusPaneID]; ok {
+		if info, ok := c.cursorInfos[c.focusPaneID]; ok {
 			cp, visible = info.pt, info.visible
 		}
 		fx := focusedPlacement.Dst.Min.X + cp.X - focusedPlacement.Src.Min.X
@@ -476,7 +474,7 @@ func (c *Client) drawToScreenLocked(scr HostScreen, drawPane func(id int, dst uv
 //
 // Taking st rather than reading c directly is what lets a wipe compose
 // the frame it is animating away from. c.mu must be held.
-func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(id int, dst uv.Screen, area image.Rectangle)) *protocol.PlacementData {
+func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.PlacementData {
 	var focusedPlacement *protocol.PlacementData
 
 	// Sort placements by Z-order back-to-front for rendering.
@@ -526,8 +524,6 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState, drawPane func(
 		switch {
 		case p.Kind == protocol.PlacementSliver:
 			c.drawSliverLocked(dst, p, st)
-		case drawPane != nil:
-			drawPane(p.PaneID, dst, p.Dst)
 		default:
 			if mirror, ok := c.mirrors[p.PaneID]; ok {
 				compose.Blit(dst, mirror.Surface, p.Dst)

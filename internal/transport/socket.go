@@ -78,6 +78,8 @@ func init() {
 	gob.Register(protocol.MsgInput{})
 	gob.Register(protocol.MsgResize{})
 	gob.Register(protocol.MsgScroll{})
+	gob.Register(protocol.MsgShutdown{})
+	gob.Register(protocol.MsgDetach{})
 	gob.Register(protocol.MsgLayoutSnapshot{})
 	gob.Register(protocol.MsgPaneClosed{})
 }
@@ -160,6 +162,11 @@ type ServerSocketConn struct {
 	ServerSend chan ServerMessage
 	encoder    *gob.Encoder
 	decoder    *gob.Decoder
+	// closed is shut by Close, so a SendServer blocked on a full
+	// queue is released rather than waiting on a write pump that has
+	// stopped draining.
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
 // NewServerSocketConn wraps a server-side net.Conn with buffered channels.
@@ -173,6 +180,7 @@ func NewServerSocketConn(conn net.Conn, bufSize int) *ServerSocketConn {
 		ServerSend: make(chan ServerMessage, bufSize),
 		encoder:    gob.NewEncoder(conn),
 		decoder:    gob.NewDecoder(conn),
+		closed:     make(chan struct{}),
 	}
 }
 
@@ -183,7 +191,9 @@ func (sc *ServerSocketConn) RunPumps(ctx context.Context) {
 }
 
 func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
-	defer sc.conn.Close()
+	// Close, not conn.Close: once this pump is gone nothing drains
+	// ServerSend, so anyone blocked sending to it must be let go.
+	defer sc.Close()
 	for {
 		select {
 		case <-ctx.Done():
@@ -216,11 +226,21 @@ func (sc *ServerSocketConn) readLoop(ctx context.Context) {
 	}
 }
 
-// SendServer sends a server message over the socket connection.
+// SendServer sends a server message over the socket connection. It
+// gives up once the connection is closed: a client that stopped reading
+// must not be able to park the server's broadcast loop -- and with it a
+// server that has otherwise finished shutting down -- forever.
 func (sc *ServerSocketConn) SendServer(ctx context.Context, msg ServerMessage) bool {
+	select {
+	case <-sc.closed:
+		return false
+	default:
+	}
 	select {
 	case sc.ServerSend <- msg:
 		return true
+	case <-sc.closed:
+		return false
 	case <-ctx.Done():
 		return false
 	}
@@ -241,8 +261,10 @@ func (sc *ServerSocketConn) ServerSendChan() <-chan ServerMessage {
 	return sc.ServerSend
 }
 
-// Close closes the underlying network connection.
+// Close closes the underlying network connection and releases any
+// SendServer blocked on it.
 func (sc *ServerSocketConn) Close() error {
+	sc.closeOnce.Do(func() { close(sc.closed) })
 	return sc.conn.Close()
 }
 

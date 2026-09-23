@@ -9,11 +9,16 @@ import (
 
 var Log *slog.Logger = slog.Default()
 
+// Path is where component's log lives. Exposed so an error can point at
+// the log of a process whose stderr goes nowhere.
+func Path(component string) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()), component+".log")
+}
+
 // Init initializes file-based structured logging for component ("server" or "client").
 func Init(component string) (*os.File, error) {
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
-	_ = os.MkdirAll(dir, 0700)
-	logPath := filepath.Join(dir, fmt.Sprintf("%s.log", component))
+	logPath := Path(component)
+	_ = os.MkdirAll(filepath.Dir(logPath), 0700)
 
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {

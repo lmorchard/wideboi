@@ -23,10 +23,15 @@ and then asserts all of:
     restored first, and only then did the process die by the signal.
 
  3. Every process wideboi had spawned before the signal is gone
-    afterwards -- the pane shells AND a background job deliberately
-    planted in one of them. This is the leaked-pane check, and it is
-    invisible to the stray-binary scan below, because a leaked pane is
-    a lingering SHELL, not a second wideboi.
+    afterwards -- the `wideboi server` it owns its session through, that
+    server's pane shells, AND a background job deliberately planted in
+    one of them. The server, and with it the panes, are separate
+    processes now (#25), so this is also the check that killing the
+    owning client ends the session rather than orphaning it.
+
+    This is the leaked-pane check, and it is invisible to the
+    stray-binary scan below, because a leaked pane is a lingering SHELL,
+    not a second wideboi.
 
     The planted job is what gives this assertion teeth, and it is worth
     being explicit about why. Snapshotting the pane shells alone is not
@@ -70,7 +75,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_EXIT, Drainer, spawn_in_pty, descendants, pane_children, ps_rows, still_alive,
-    wait_for_exit, force_cleanup, parse_size, parse_signal,
+    server_child, wait_for_exit, force_cleanup, parse_size, parse_signal,
 )
 
 ESCAPEE_SLEEP = "987654"
@@ -144,15 +149,15 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     print(f"--- size={label} signal={signal.Signals(sig).name} ---")
 
     argv = [os.path.abspath(binary)]
-    # Never created: a plain wideboi attaches to whatever answers this
-    # socket, and an unrelated server on the default path would leave
-    # this child with no panes of its own -- the run then fails at
-    # "expected 2 pane children" before reaching any signal assertion.
-    # Same reasoning as smoke.py's NEVER_SOCK.
-    never_sock = os.path.join(tempfile.gettempdir(),
-                              f"wideboi-never-ptycheck-{os.getpid()}.sock")
+    # Private to this run. A plain wideboi attaches to whatever answers
+    # its socket, and an unrelated server on the default path would
+    # leave this child with no session of its own. Nothing is listening
+    # here, so it spawns a server that binds it -- and that server must
+    # remove it again on the way out, which is asserted below.
+    sock = os.path.join(tempfile.gettempdir(),
+                        f"wideboi-ptycheck-{os.getpid()}.sock")
     pid, master_fd = spawn_in_pty(argv, cols, rows, set_winsize,
-                                  {"WIDEBOI_SOCK": never_sock})
+                                  {"WIDEBOI_SOCK": sock})
 
     drainer = Drainer(master_fd)
     drainer.start()
@@ -173,8 +178,10 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
         # startup_delay is the ceiling, so a fast machine still gets
         # through in a fraction of it.
         deadline = time.monotonic() + startup_delay
+        srv = None
         while time.monotonic() < deadline:
-            if len(pane_children(pid)) >= 2:
+            srv = srv or server_child(pid)
+            if srv is not None and len(pane_children(srv)) >= 2:
                 break
             time.sleep(0.02)
 
@@ -189,7 +196,10 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
         # Snapshot what wideboi has spawned, while it is still alive to
         # be walked. This has to happen before the signal: afterwards
         # anything leaked has reparented and is unfindable.
-        shells = pane_children(pid)
+        if srv is None:
+            print("FAIL: wideboi never spawned its server")
+            return False
+        shells = pane_children(srv)
         if len(shells) < 2:
             print(f"FAIL: expected 2 pane children before signalling, found {len(shells)}: {shells}")
             return False
@@ -203,7 +213,8 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
                 return False
             tracked = shells + [escapee]
         else:
-            tracked = shells
+            tracked = list(shells)
+        tracked.append((srv, "wideboi server"))
 
         print(f"     tracking {len(tracked)} pid(s): {[t for t, _ in tracked]}")
 
@@ -276,6 +287,18 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
         ok = False
     elif tracked:
         print(f"OK: all {len(tracked)} process(es) wideboi spawned were reaped")
+
+    # The server removes its socket as the last thing it does. A corpse
+    # left here means it never ran its teardown.
+    deadline = time.monotonic() + 2.0
+    while os.path.exists(sock) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    if os.path.exists(sock):
+        print(f"FAIL: the server's socket was left behind at {sock}")
+        os.remove(sock)
+        ok = False
+    else:
+        print("OK: the server removed its socket")
 
     strays = find_stray_wideboi(argv[0], own_pid=pid)
     if strays:
