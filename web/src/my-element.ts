@@ -1,103 +1,112 @@
 import { LitElement, html, css } from 'lit';
-import { customElement, state } from 'lit/decorators.js';
+import { customElement, query } from 'lit/decorators.js';
 import { create } from "@bufbuild/protobuf";
 import { WideboiClient } from './client';
+import { GridRenderer } from './renderer';
 import type { ServerEnvelope } from './gen/wideboi_pb';
-import { ClientEnvelopeSchema, MsgAttachSchema } from './gen/wideboi_pb';
+import { ClientEnvelopeSchema, MsgAttachSchema, MsgResizeSchema } from './gen/wideboi_pb';
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
   static styles = css`
     :host {
       display: block;
-      font-family: monospace;
-      padding: 1rem;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
       background: #1e1e1e;
-      color: #d4d4d4;
-      min-height: 100vh;
     }
-    .status {
-      margin-bottom: 1rem;
-      padding: 0.5rem;
-      background: #2d2d2d;
-      border-radius: 4px;
-    }
-    .connected { color: #4ec9b0; }
-    .disconnected { color: #f48771; }
-    .log {
-      white-space: pre-wrap;
-      font-size: 12px;
-      max-height: 80vh;
-      overflow-y: auto;
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
     }
   `;
 
-  @state()
-  private connected = false;
-
-  @state()
-  private log: string[] = [];
+  @query('canvas')
+  private canvas!: HTMLCanvasElement;
 
   private client: WideboiClient;
+  private renderer?: GridRenderer;
+  private resizeObserver: ResizeObserver;
 
   constructor() {
     super();
-    // Assuming server runs on localhost:8080/ws
-    this.client = new WideboiClient('ws://127.0.0.1:8080/ws');
+    
+    // Default fallback, should probably be configurable
+    const wsUrl = `ws://${window.location.hostname}:8080/ws`;
+    this.client = new WideboiClient(wsUrl);
     
     this.client.onConnect = () => {
-      this.connected = true;
-      this.addLog('Connected to server');
-      
-      // Send attach message using Protobuf classes
-      const attachMsg = create(ClientEnvelopeSchema, {
-        payload: {
-          case: 'attach',
-          value: create(MsgAttachSchema, { cols: 80, rows: 24 })
-        }
-      });
-      this.client.send(attachMsg);
-      this.addLog('Sent MsgAttach (80x24)');
-    };
-
-    this.client.onDisconnect = () => {
-      this.connected = false;
-      this.addLog('Disconnected from server');
+      console.log('Connected to server');
+      this.sendAttach();
     };
 
     this.client.onMessage = (env: ServerEnvelope) => {
+      if (!this.renderer) return;
+
       if (env.payload.case === 'layoutSnapshot') {
-        this.addLog(`Received LayoutSnapshot: ${env.payload.value.columns.length} columns`);
+        this.renderer.handleLayoutSnapshot(env.payload.value);
       } else if (env.payload.case === 'paneUpdate') {
-        const update = env.payload.value;
-        this.addLog(`Received PaneUpdate for ID ${update.paneId}: ${update.cols}x${update.rows}`);
-      } else if (env.payload.case === 'paneClosed') {
-        this.addLog(`Received PaneClosed for ID ${env.payload.value.paneId}`);
+        this.renderer.handlePaneUpdate(env.payload.value);
       }
     };
+
+    this.resizeObserver = new ResizeObserver((entries) => {
+      if (!this.renderer) return;
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        this.renderer.resize(width, height);
+        
+        // Let the server know our new dimensions in cells
+        if (this.client) {
+            const size = this.renderer.getGridSize();
+            const resizeMsg = create(ClientEnvelopeSchema, {
+                payload: {
+                  case: 'resize',
+                  value: create(MsgResizeSchema, { cols: size.cols, rows: size.rows })
+                }
+            });
+            this.client.send(resizeMsg);
+        }
+      }
+    });
+  }
+
+  private sendAttach() {
+     if (!this.renderer) return;
+     const size = this.renderer.getGridSize();
+     const attachMsg = create(ClientEnvelopeSchema, {
+        payload: {
+          case: 'attach',
+          value: create(MsgAttachSchema, { cols: size.cols, rows: size.rows })
+        }
+      });
+      this.client.send(attachMsg);
   }
 
   firstUpdated() {
+    this.renderer = new GridRenderer(this.canvas);
+    this.resizeObserver.observe(this.canvas);
+    
+    // Initial size
+    const rect = this.canvas.getBoundingClientRect();
+    this.renderer.resize(rect.width, rect.height);
+    
+    this.renderer.start();
     this.client.connect();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.resizeObserver.disconnect();
+    if (this.renderer) {
+      this.renderer.stop();
+    }
     this.client.disconnect();
   }
 
-  private addLog(msg: string) {
-    this.log = [...this.log, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-50);
-  }
-
   render() {
-    return html`
-      <div class="status ${this.connected ? 'connected' : 'disconnected'}">
-        Status: ${this.connected ? 'Connected' : 'Disconnected'}
-      </div>
-      <div class="log">
-        ${this.log.join('\n')}
-      </div>
-    `;
+    return html`<canvas></canvas>`;
   }
 }
