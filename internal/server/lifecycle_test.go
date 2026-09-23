@@ -22,7 +22,6 @@ func newBareServer(tps ...transport.Transport) *Server {
 	return &Server{
 		strip:      layout.NewStrip(),
 		panes:      make(map[int]*Pane),
-		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 		transports: tps,
 	}
@@ -200,14 +199,50 @@ func TestCloseStopsListeningBeforeReaping(t *testing.T) {
 		t.Fatalf("NewSocketListener: %v", err)
 	}
 	defer sl.Close()
-	s := NewServer(nil, "/bin/sh", "")
+
+	// Real panes whose root outlives the hangup, so Close waits out its
+	// whole grace: the root ignores SIGHUP and never reads its terminal.
+	// An interactive shell would exit at once and leave no window to
+	// observe. exec makes the root sleep itself, our direct child, so
+	// cleanup signals exactly the pids this test spawned.
+	root := filepath.Join(dir, "root.sh")
+	if err := os.WriteFile(root, []byte("#!/bin/sh\ntrap '' HUP\n: > \"$0.ready.$$\"\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, root, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.ListenSocket(ctx, sl)
-
-	// Real panes, so the reap takes its real time: /bin/sh ignores
-	// SIGTERM and burns the whole grace.
 	s.handleClientMsg(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+
+	s.mu.Lock()
+	var roots []*os.Process
+	for _, p := range s.panes {
+		roots = append(roots, p.pty.Cmd.Process)
+	}
+	s.mu.Unlock()
+	if len(roots) == 0 {
+		t.Fatal("attach spawned no panes; the ordering check would be vacuous")
+	}
+	defer func() {
+		for _, r := range roots {
+			_ = r.Kill()
+		}
+	}()
+
+	// The hangup must not beat the trap: wait until every root has set
+	// it and marked itself ready.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ready, _ := filepath.Glob(root + ".ready.*")
+		if len(ready) >= len(roots) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d pane roots got ready", len(ready), len(roots))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	closed := make(chan struct{})
 	go func() {
@@ -215,7 +250,7 @@ func TestCloseStopsListeningBeforeReaping(t *testing.T) {
 		close(closed)
 	}()
 
-	deadline := time.Now().Add(CloseGrace / 2)
+	deadline = time.Now().Add(CloseGrace / 2)
 	for {
 		c, err := net.Dial("unix", sock)
 		if err != nil {

@@ -19,7 +19,6 @@ import (
 type Pane struct {
 	Master *os.File
 	Cmd    *exec.Cmd
-	PGID   int
 
 	// done closes when the child has been reaped. Exactly one goroutine
 	// ever calls Wait, because a second call fails.
@@ -80,12 +79,9 @@ func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
 	}
 	master := os.NewFile(uintptr(newFd), rawMaster.Name())
 
-	// Setsid makes the child a session and group leader, so its pgid is
-	// its own pid.
 	p := &Pane{
 		Master: master,
 		Cmd:    cmd,
-		PGID:   cmd.Process.Pid,
 		done:   make(chan struct{}),
 	}
 
@@ -124,7 +120,7 @@ func (p *Pane) WriteBounded(b []byte, timeout time.Duration) (int, error) {
 	return p.Master.Write(b)
 }
 
-// Close releases the PTY master. It does not stop the child; see Kill.
+// Close releases the PTY master. Hangup is the teardown path.
 func (p *Pane) Close() error {
 	return p.Master.Close()
 }

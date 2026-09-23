@@ -6,9 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +26,6 @@ type Server struct {
 	shell      string
 	cwd        string
 	transports []transport.Transport
-	escapees   map[int]string // Tracked descendant PIDs for teardown, to their ps start time
 	stopCh     chan struct{}
 	closeOnce  sync.Once
 
@@ -106,7 +102,6 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		shell:      shell,
 		cwd:        cwd,
 		transports: make([]transport.Transport, 0),
-		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 	}
 	if tp != nil {
@@ -226,9 +221,6 @@ func (s *Server) Run(ctx context.Context) error {
 		go s.handleClientConnLoop(ctx, tp)
 	}
 
-	ticker := time.NewTicker(1000 * time.Millisecond)
-	defer ticker.Stop()
-
 	frameTicker := time.NewTicker(33 * time.Millisecond)
 	defer frameTicker.Stop()
 
@@ -245,8 +237,6 @@ func (s *Server) Run(ctx context.Context) error {
 			if !s.broadcastLayoutIfStatusChanged(ctx) {
 				s.broadcastPaneUpdates(ctx, false)
 			}
-		case <-ticker.C:
-			s.pollDescendants()
 		}
 	}
 }
@@ -804,107 +794,6 @@ func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	return cols, rows, true
 }
 
-// procEntry is one row of readProcTable: a process's parent and its start
-// time, as ps prints it. The start time is compared, never parsed.
-type procEntry struct {
-	ppid  int
-	start string
-}
-
-// readProcTable snapshots every running process with one ps call.
-//
-// LC_ALL=C pins lstart's format, which parseProcTable depends on.
-func readProcTable() (map[int]procEntry, error) {
-	cmd := exec.Command("ps", "-axo", "pid=,ppid=,lstart=")
-	cmd.Env = append(os.Environ(), "LC_ALL=C")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	return parseProcTable(string(out)), nil
-}
-
-// procTableFields is a row's exact shape: pid, ppid, and lstart's five
-// words ("Wed Sep 23 10:37:01 2026").
-const procTableFields = 7
-
-// parseProcTable reads ps output into a table, dropping any row that is
-// not exactly procTableFields fields. Close SIGKILLs by what this reads,
-// so a row it cannot read exactly is dropped, never guessed at: a shifted
-// column once turned every process started that day into an "escapee"
-// with a matching start time. If ps's format drifts, every row is dropped
-// and the poll records nothing, which fails as a leak and not a kill.
-func parseProcTable(out string) map[int]procEntry {
-	table := make(map[int]procEntry)
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != procTableFields {
-			continue
-		}
-		pid, err1 := strconv.Atoi(fields[0])
-		ppid, err2 := strconv.Atoi(fields[1])
-		if err1 == nil && err2 == nil {
-			table[pid] = procEntry{ppid: ppid, start: strings.Join(fields[2:], " ")}
-		}
-	}
-	return table
-}
-
-// pollDescendantsLocked walks ps to maintain a list of active descendant
-// PIDs, each keyed to its start time. It also prunes entries that exited,
-// or whose PID now has a different start time: the OS recycles PIDs, and
-// Close SIGKILLs whatever this set holds (#89).
-func (s *Server) pollDescendantsLocked() {
-	pids := make([]int, 0, len(s.panes))
-	for _, p := range s.panes {
-		if pid := p.pty.PID(); pid > 0 {
-			pids = append(pids, pid)
-		}
-	}
-	if len(pids) == 0 && len(s.escapees) == 0 {
-		return
-	}
-
-	table, err := readProcTable()
-	if err != nil {
-		return
-	}
-
-	for pid, start := range s.escapees {
-		if e, ok := table[pid]; !ok || e.start != start {
-			delete(s.escapees, pid)
-		}
-	}
-
-	kids := make(map[int][]int)
-	for pid, e := range table {
-		kids[e.ppid] = append(kids[e.ppid], pid)
-	}
-
-	stack := make([]int, 0, len(pids))
-	for _, root := range pids {
-		stack = append(stack, kids[root]...)
-	}
-
-	seen := make(map[int]struct{})
-	for len(stack) > 0 {
-		curr := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if _, ok := seen[curr]; ok {
-			continue
-		}
-		seen[curr] = struct{}{}
-		s.escapees[curr] = table[curr].start
-		stack = append(stack, kids[curr]...)
-	}
-}
-
-func (s *Server) pollDescendants() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pollDescendantsLocked()
-}
-
 // stoppingLocked reports whether Close has begun. s.mu must be held; it
 // is what orders this against Close's snapshot of panes and transports.
 func (s *Server) stoppingLocked() bool {
@@ -916,8 +805,8 @@ func (s *Server) stoppingLocked() bool {
 	}
 }
 
-// Close terminates all panes concurrently, cleans up escapee processes,
-// and then hangs up on every client.
+// Close hangs up all panes concurrently, and then hangs up on every
+// client.
 func (s *Server) Close() error {
 	var closeErr error
 	s.closeOnce.Do(func() {
@@ -925,10 +814,10 @@ func (s *Server) Close() error {
 		close(s.stopCh)
 		sl := s.listener
 		s.mu.Unlock()
-		// Stop answering first. The reap below takes seconds, and a
-		// `wideboi` that dialled in during it would attach to a
-		// session about to hang up on it; with the socket gone, it
-		// starts a fresh one instead.
+		// Stop answering first. The hangup below can take up to the
+		// pane grace, and a `wideboi` that dialled in during it would
+		// attach to a session about to hang up on it; with the socket
+		// gone, it starts a fresh one instead.
 		if sl != nil {
 			_ = sl.Close()
 		}
@@ -939,14 +828,6 @@ func (s *Server) Close() error {
 			panesToClose = append(panesToClose, p)
 		}
 		s.panes = make(map[int]*Pane)
-		// No final pollDescendantsLocked here: each pane's Close walks
-		// its own live tree (ptyx.Kill's snapshot), so a poll now
-		// would find nothing that walk misses. s.escapees is for what
-		// the background poll saw before it left the tree (#83).
-		escapees := make(map[int]string, len(s.escapees))
-		for pid, start := range s.escapees {
-			escapees[pid] = start
-		}
 		s.mu.Unlock()
 
 		var wg sync.WaitGroup
@@ -966,24 +847,10 @@ func (s *Server) Close() error {
 		}
 		wg.Wait()
 
-		// Signal only escapees still running as the process that was
-		// recorded. A PID whose start time has changed was recycled and
-		// is not ours; if ps fails, nothing can be verified and nothing
-		// is signalled, since killing a stranger is worse than a leak.
-		// A PID reused within the same second as its predecessor's
-		// start still matches: lstart has one-second resolution.
-		if table, err := readProcTable(); err == nil {
-			for pid, start := range escapees {
-				if e, ok := table[pid]; ok && e.start == start {
-					_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
-				}
-			}
-		}
-
 		// Hang up on every client last. For a client waiting on a
 		// shutdown, the closed connection is the only acknowledgement
-		// it gets, so it must not arrive until the reaping above has
-		// finished.
+		// it gets, so it must not arrive until the panes above have
+		// been hung up.
 		s.mu.Lock()
 		tps := s.transports
 		s.transports = nil

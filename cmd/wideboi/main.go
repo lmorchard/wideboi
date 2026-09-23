@@ -259,9 +259,9 @@ func runServer(cfg config.Config, ownerFD int) error {
 	}
 
 	// The server is responsible for its panes, and there is no
-	// terminal to restore: teardown is the whole job. Without this, SIGTERM took Go's default disposition,
-	// srv.Close never ran, and a nohup'd job in a pane outlived the
-	// server.
+	// terminal to restore: teardown is the whole job. Without this,
+	// SIGTERM took Go's default disposition and srv.Close never ran,
+	// which left the socket file behind.
 	var signalled atomic.Bool
 	guard := hostterm.NewGuard(func() error {
 		signalled.Store(true)
@@ -372,7 +372,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 		// An owner's session dies with it, unless the connection has
 		// already ended -- a detach, a quit, or the server hanging up.
 		// Shut it down *before* restoring the terminal, and wait: the
-		// panes are then reaped before this process re-raises, which
+		// panes are then hung up before this process re-raises, which
 		// is the order verify-exit asserts. If the ceiling passes,
 		// restore and exit anyway; the server still sees our EOF with
 		// no detach before it, and ends the session itself.
