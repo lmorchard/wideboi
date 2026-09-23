@@ -36,7 +36,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty, wait_for_exit, force_cleanup,
-    descendants, server_child, settle_output, still_alive,
+    descendants, ps_rows, server_child, settle_output, still_alive,
 )
 # focus_pane_id reads the status line the way the diffing renderer
 # actually writes it: the "focus: [pane N" literal appears only in the
@@ -621,6 +621,42 @@ def case_server_reaps_its_panes_on_signal(fail):
                 pass
 
 
+def case_server_reaps_a_reparented_escapee(fail):
+    """A job whose parent shell exited is reparented to init/launchd, so
+    no walk down from a pane's root reaches it. It still holds the pane's
+    pty as its controlling tty, and teardown has to find it by that
+    (#88). nohup keeps the hang-up from doing the reaper's job."""
+    srv = Server()
+    tag = "987654"
+    escapee = None
+    try:
+        c = Client()
+        if focus_pane_id(c.output(), ROWS) is None:
+            fail("client never attached; teardown assertion would be vacuous")
+        deadline = time.monotonic() + 5.0
+        while prompts_seen(c.output()) < 1 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        c.type(f"sh -c 'nohup sleep {tag} >/dev/null 2>&1 & exit'\r".encode())
+        deadline = time.monotonic() + 5.0
+        while escapee is None and time.monotonic() < deadline:
+            for pid, ppid, cmd in ps_rows():
+                if f"sleep {tag}" in cmd and ppid == 1:
+                    escapee = pid
+            time.sleep(0.1)
+        if escapee is None:
+            fail("planted job never reparented to pid 1; the leak "
+                 "assertion would be vacuous")
+        c.kill()
+    finally:
+        srv.stop()
+    if escapee is not None and still_alive([escapee], 1.0):
+        fail(f"server left a reparented escapee alive after SIGTERM: {escapee}")
+        try:
+            os.kill(escapee, signal.SIGKILL)
+        except OSError:
+            pass
+
+
 def kill_session() -> subprocess.CompletedProcess:
     return subprocess.run([BIN, "kill-session"], capture_output=True,
                           timeout=15, env=bin_env())
@@ -722,6 +758,7 @@ CASES = [
     ("a second server refuses to steal the socket", case_second_server_refuses_to_steal_the_socket),
     ("attach without a server says so", case_attach_without_a_server_says_so),
     ("server reaps its panes on signal", case_server_reaps_its_panes_on_signal),
+    ("server reaps a reparented escapee", case_server_reaps_a_reparented_escapee),
     ("kill-session ends the session", case_kill_session_ends_the_session),
     ("kill-session without a server says so", case_kill_session_without_a_server_says_so),
     ("plain wideboi offers detach", case_plain_wideboi_offers_detach),
