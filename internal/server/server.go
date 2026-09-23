@@ -862,7 +862,16 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux) {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
-		CheckOrigin:     func(r *http.Request) bool { return true },
+		CheckOrigin: func(r *http.Request) bool {
+			// Security: Prevent malicious cross-origin websites from connecting to the local terminal.
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // Direct connections (like wscat or curl) are allowed
+			}
+			return origin == "http://127.0.0.1:5173" || origin == "http://localhost:5173" ||
+				origin == "http://127.0.0.1:8080" || origin == "http://localhost:8080" ||
+				origin == "http://127.0.0.1:8081" || origin == "http://localhost:8081"
+		},
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
