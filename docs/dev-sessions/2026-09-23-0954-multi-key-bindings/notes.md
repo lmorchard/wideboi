@@ -51,3 +51,52 @@
 - Process slip: first squash was soft-reset onto an origin/main that had gained
   #98 without rebasing, so the pushed commit deleted LICENSE. Caught in the
   diffstat before the PR opened; redone from the pre-squash commit.
+
+## Retrospective
+
+**Built (PR #99, merged as c6ebe9a).** `[keys]` values are a string, a list,
+or `[]`. A setting replaces all of an action's defaults; the first key is
+primary (the only one shown), the rest are aliases; every a-z key gets a ctrl
+repeat except on NoRepeat bindings; `quit = []` is an error, `exit = []` is not;
+a clash is an error even against defaults, with a hint naming the action to
+remap. The silent alias filter is gone.
+
+**Scope drift.** One addition, from review: unbinding half of a help pair now
+demotes the survivor to its own line. Everything else shipped as specced.
+
+**Surprises.**
+- Arrow keys already worked for focus left/right. The kickoff question was
+  really "can I configure extras", not "make arrows work"; checking before
+  proposing avoided building something that existed.
+- Replace semantics silently broke `config.example.toml`, which lists every
+  action with its defaults. Found while writing the spec, not in testing, and
+  the example-equals-defaults DeepEqual test now makes it structural.
+- go-toml v2 decodes arrays into `[]any` under `map[string]any` cleanly; no
+  custom unmarshaller needed.
+
+**Misses.**
+- The spec reasoned about how unbinding affects the *bar* (move group label)
+  but not the *help overlay's shared group lines*. Copilot caught
+  `focus_right = []` leaving "focus the column left / right". Next time a
+  change removes members from anything grouped, check every consumer of the
+  group, not just the one in front of me. Added to docs/LESSONS.md.
+- Squashed onto an origin/main that had just gained #98 without rebasing, so the
+  first push deleted LICENSE. pr.md step 4 warns about exactly this; I ran the
+  fetch, saw "1", and squashed anyway. Caught in the diffstat before the PR
+  opened. The check works only if a nonzero count stops the line.
+- First draft of the new help test asserted "left / right" absent anywhere;
+  y/u's line says it legitimately. Seeing it red for the right reason first
+  (missing own line) is what made the second failure obviously a test bug.
+
+**Workflow friction.** None worth changing. The documentarian pass paid for
+itself: the unknown-key-leaves-control-mode fact settled `exit = []` with
+evidence instead of memory, and the full test/script inventory made the plan's
+call-site conversion mechanical.
+
+**Memory candidates.**
+- Saved during the session: `attn` + `smart_jump` both set resolves by map order.
+- Cross-project (journal): in zsh, a variable named `path` is tied to `PATH`.
+
+**Skill candidates.**
+- dev-session pr.md step 4 could say it outright: "if the count is nonzero,
+  STOP and rebase; do not soft-reset". It already implies it; I read past it.
