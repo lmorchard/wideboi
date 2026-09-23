@@ -193,6 +193,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			if len(fileCfg.WidthPresets) > 0 {
 				cfg.WidthPresets = fileCfg.WidthPresets
 			}
+			if fileCfg.Websocket != "" {
+				cfg.Websocket = fileCfg.Websocket
+			}
 			if fileCfg.LogLevelName != "" {
 				cfg.LogLevelName = fileCfg.LogLevelName
 			}

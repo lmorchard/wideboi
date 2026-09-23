@@ -57,19 +57,22 @@ layout = "scroll"
 prefix = "ctrl+a"
 socket = "/tmp/toml.sock"
 shell = "/bin/tomlsh"
+websocket = ":8080"
 `
 	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	env := map[string]string{
-		"WIDEBOI_LAYOUT": "cards",
-		"WIDEBOI_PREFIX": "ctrl+p",
+		"WIDEBOI_LAYOUT":    "cards",
+		"WIDEBOI_PREFIX":    "ctrl+p",
+		"WIDEBOI_WEBSOCKET": ":8081",
 	}
 
 	flags := config.ConfigFlags{
 		ConfigFile: tomlPath,
 		Prefix:     "ctrl+k",
+		Websocket:  ":8082",
 	}
 
 	cfg, _, err := config.Load(flags, mockEnv(env))
@@ -92,9 +95,25 @@ shell = "/bin/tomlsh"
 	if cfg.Socket != "/tmp/toml.sock" {
 		t.Errorf("Socket = %q, want '/tmp/toml.sock' from TOML", cfg.Socket)
 	}
+
+	flagsNoOverride := config.ConfigFlags{ConfigFile: tomlPath}
+	cfgNoOverride, _, _ := config.Load(flagsNoOverride, mockEnv(nil))
+	if cfgNoOverride.Websocket != ":8080" {
+		t.Errorf("Websocket = %q, want ':8080' from TOML when no env/flag", cfgNoOverride.Websocket)
+	}
+
+	cfgEnvOverride, _, _ := config.Load(flagsNoOverride, mockEnv(env))
+	if cfgEnvOverride.Websocket != ":8081" {
+		t.Errorf("Websocket = %q, want ':8081' from env when no flag", cfgEnvOverride.Websocket)
+	}
+
 	// Shell: from TOML "/bin/tomlsh"
 	if cfg.Shell != "/bin/tomlsh" {
 		t.Errorf("Shell = %q, want '/bin/tomlsh' from TOML", cfg.Shell)
+	}
+	// Websocket: flag overrides env and TOML
+	if cfg.Websocket != ":8082" {
+		t.Errorf("Websocket = %q, want ':8082' from flag", cfg.Websocket)
 	}
 }
 

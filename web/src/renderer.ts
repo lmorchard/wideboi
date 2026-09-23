@@ -70,8 +70,8 @@ export class GridRenderer {
     };
   }
 
-  public getPaneAt(cellX: number, cellY: number): number {
-    if (!this.layout) return 0;
+  public getPaneHit(cellX: number, cellY: number): { paneID: number, placement?: PlacementData } {
+    if (!this.layout) return { paneID: 0 };
 
     // Check placements in reverse z-order (front to back)
     for (let i = this.placements.length - 1; i >= 0; i--) {
@@ -80,10 +80,10 @@ export class GridRenderer {
 
         if (cellX >= p.Dst.Min.X && cellX < p.Dst.Max.X && 
             cellY >= p.Dst.Min.Y && cellY < p.Dst.Max.Y) {
-            return p.PaneID;
+            return { paneID: p.PaneID, placement: p };
         }
     }
-    return 0;
+    return { paneID: 0 };
   }
 
 	public getFocusedPaneId(): number {
@@ -137,8 +137,8 @@ export class GridRenderer {
       
       for (; startIdx > 0 && availWidth > 0; ) {
           const prevW = this.layout.Columns[startIdx - 1].Width;
-          if (availWidth - prevW >= 0) {
-              availWidth -= prevW;
+          if (availWidth - (prevW + 1) >= 0) {
+              availWidth -= (prevW + 1);
               startIdx--;
           } else {
               break;
@@ -155,7 +155,6 @@ export class GridRenderer {
           if (currentX >= w) break;
           
           let drawW = paneW;
-          if (currentX + drawW < w) drawW -= 1; // Leave 1 col for divider
           if (currentX + drawW > w) {
               drawW = w - currentX;
           }
@@ -173,7 +172,7 @@ export class GridRenderer {
               Z: 0,
               Kind: 0
           });
-          currentX += paneW;
+          currentX += paneW + 1;
       }
       
       this.placements = places;

@@ -216,7 +216,7 @@ export class WideboiApp extends LitElement {
       if (e.target instanceof HTMLInputElement) return; 
 
       // Intercept the default prefix (ctrl+b) locally to drive verbs.
-      // 1 = VerbFocusLeft, 2 = VerbFocusRight, 3 = VerbNewColumn, 5 = VerbKillPane, 7 = VerbToggleCards
+      // 1 = VerbFocusLeft, 2 = VerbFocusRight, 3 = VerbNewColumn, 5 = VerbKillPane
       if (e.ctrlKey && e.key === 'b') {
         this.inPrefixMode = true;
         e.preventDefault();
@@ -241,7 +241,6 @@ export class WideboiApp extends LitElement {
           case 'w': verb = 4; break;  // CycleWidth
           case 'x': verb = 5; break;  // KillPane
           case 'a': verb = 6; break;  // SmartJump
-          case 't': verb = 7; break;  // ToggleCards
           case 'p': verb = 8; break;  // GrowWidth
           case 'o': verb = 9; break;  // ShrinkWidth
           case 'y': verb = 10; break; // MoveLeft
@@ -254,7 +253,7 @@ export class WideboiApp extends LitElement {
           
           // If they held Ctrl while pressing the key (e.g. Ctrl-b, then held Ctrl and pressed 'l'),
           // stay in prefix mode so they can repeat it.
-          // Note: ToggleCards ('t') and KillPane ('x') do not repeat in the CLI.
+          // Note: KillPane ('x') does not repeat in the CLI.
           const isRepeatable = (verb === 1 || verb === 2 || verb === 8 || verb === 9 || verb === 10 || verb === 11);
           if (!(e.ctrlKey && isRepeatable)) {
              this.inPrefixMode = false;
@@ -282,15 +281,26 @@ export class WideboiApp extends LitElement {
         IsRepeat: e.repeat
       };
 
+      let data = "";
       if (e.key === "Enter") { keyData.Code = 13; keyData.Text = "\r"; }
-      if (e.key === "Backspace") { keyData.Code = 127; keyData.Text = "\x7f"; }
-      if (e.key === "Escape") { keyData.Code = 27; keyData.Text = "\x1b"; }
-      if (e.key === "Tab") { keyData.Code = 9; keyData.Text = "\t"; }
+      else if (e.key === "Backspace") { keyData.Code = 127; keyData.Text = "\x7f"; }
+      else if (e.key === "Escape") { keyData.Code = 27; keyData.Text = "\x1b"; }
+      else if (e.key === "Tab") { keyData.Code = 9; keyData.Text = "\t"; }
+      else if (e.key === "ArrowUp") { data = "\x1b[A"; }
+      else if (e.key === "ArrowDown") { data = "\x1b[B"; }
+      else if (e.key === "ArrowRight") { data = "\x1b[C"; }
+      else if (e.key === "ArrowLeft") { data = "\x1b[D"; }
+      else if (e.key === "Home") { data = "\x1b[H"; }
+      else if (e.key === "End") { data = "\x1b[F"; }
+      else if (e.key === "PageUp") { data = "\x1b[5~"; }
+      else if (e.key === "PageDown") { data = "\x1b[6~"; }
+      else if (e.key === "Insert") { data = "\x1b[2~"; }
+      else if (e.key === "Delete") { data = "\x1b[3~"; }
 
       const inputMsg = {
         PaneID: this.renderer.getFocusedPaneId(),
         Key: keyData,
-        Data: ""
+        Data: data ? btoa(data) : "" // MsgInput Data is []byte so JSON might expect base64? Let's check!
       };
       
       this.client.send('MsgInput', inputMsg);
@@ -304,15 +314,19 @@ export class WideboiApp extends LitElement {
       if (!this.connected || !this.renderer || !this.client) return;
       
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      const paneID = this.renderer.getPaneAt(x, y);
+      const hit = this.renderer.getPaneHit(x, y);
       
-      if (paneID > 0) {
-        this.client.send('MsgFocusPane', { PaneID: paneID });
+      if (hit.paneID > 0 && hit.placement) {
+        this.client.send('MsgFocusPane', { PaneID: hit.paneID });
+        
+        const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
+        const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
+        
         this.client.send('MsgMouse', {
-            PaneID: paneID,
+            PaneID: hit.paneID,
             Kind: 0, 
-            X: x,
-            Y: y,
+            X: localX,
+            Y: localY,
             Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
             Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
         });
@@ -322,13 +336,37 @@ export class WideboiApp extends LitElement {
     this.canvas.addEventListener('mouseup', (e) => {
       if (!this.connected || !this.renderer || !this.client) return;
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      const paneID = this.renderer.getPaneAt(x, y);
-      if (paneID > 0) {
+      const hit = this.renderer.getPaneHit(x, y);
+      if (hit.paneID > 0 && hit.placement) {
+        const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
+        const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
+        
         this.client.send('MsgMouse', {
-            PaneID: paneID,
+            PaneID: hit.paneID,
             Kind: 1, 
-            X: x,
-            Y: y,
+            X: localX,
+            Y: localY,
+            Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
+            Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
+        });
+      }
+    });
+
+    this.canvas.addEventListener('mousemove', (e) => {
+      if (!this.connected || !this.renderer || !this.client) return;
+      if (e.buttons === 0) return; // Only send drags
+      
+      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
+      const hit = this.renderer.getPaneHit(x, y);
+      if (hit.paneID > 0 && hit.placement) {
+        const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
+        const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
+        
+        this.client.send('MsgMouse', {
+            PaneID: hit.paneID,
+            Kind: 2, 
+            X: localX,
+            Y: localY,
             Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
             Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
         });

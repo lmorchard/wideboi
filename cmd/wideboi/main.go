@@ -299,14 +299,19 @@ func runServer(cfg config.Config, ownerFD int) error {
 		srv.ListenWebSocket(ctx, mux)
 
 		httpSrv = &http.Server{
-			Addr:    cfg.Websocket,
 			Handler: mux,
+		}
+
+		wsListener, err := net.Listen("tcp", cfg.Websocket)
+		if err != nil {
+			slog.Error("cannot listen on websocket address", "err", err)
+			return err
 		}
 
 		go func() {
 			fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws\n", cfg.Websocket)
 			slog.Info("websocket server listening", "addr", cfg.Websocket)
-			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("websocket server failed", "err", err)
 			}
 		}()
