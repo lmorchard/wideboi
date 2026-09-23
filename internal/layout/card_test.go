@@ -29,23 +29,47 @@ func TestCardStrategyUnit(t *testing.T) {
 		t.Errorf("p1 = %+v, want Dst (0,1,40,23) Z=0", p1)
 	}
 
-	// Pane 2 (focused card): starts at X=4, width=40, Z=1
+	// Pane 2 (focused card): content from X=4, width=40, Z=1. Its
+	// border is at X=3, the last cell of pane 1's slot.
 	p2 := placements[1]
 	if p2.PaneID != 2 || p2.Dst != image.Rect(4, 1, 44, 23) || p2.Z != 1 {
 		t.Errorf("p2 = %+v, want Dst (4,1,44,23) Z=1", p2)
 	}
 
-	// Pane 3 (right card): starts at X=44, width=40 (clipped to 80), Z=0
+	// Pane 3 (right card): its border at X=44, the first cell of its
+	// own slot; content from X=45, clipped to 80, Z=0
 	p3 := placements[2]
-	if p3.PaneID != 3 || p3.Dst != image.Rect(44, 1, 80, 23) || p3.Z != 0 {
-		t.Errorf("p3 = %+v, want Dst (44,1,80,23) Z=0", p3)
+	if p3.PaneID != 3 || p3.Dst != image.Rect(45, 1, 80, 23) || p3.Z != 0 {
+		t.Errorf("p3 = %+v, want Dst (45,1,80,23) Z=0", p3)
+	}
+}
+
+// The focused card's border must not cost the slivers a cell of
+// budget. Charging it there meant a narrow fan with room for exactly one
+// sliver showed none, leaving the spare columns dead.
+func TestFocusedCardBorderDoesNotCrowdOutASliver(t *testing.T) {
+	s := layout.NewStrip()
+	for i := 1; i <= 3; i++ {
+		s.AddColumn(i, 60, 20)
+	}
+	s.SetStrategy(layout.CardStrategy{})
+	s.FocusPaneID(2)
+
+	// 4 spare columns: exactly one MinSliverWidth sliver. Twice, so the
+	// window the first call remembers is the one the second starts from.
+	for range 2 {
+		if got := len(s.ComputePlacements(64, 24)); got != 2 {
+			t.Fatalf("got %d placements, want the focused card and one sliver", got)
+		}
 	}
 }
 
 func TestCardStrategyPropertyInvariants(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		s, initialWidths := genStrip(t)
-		s.SetStrategy(layout.CardStrategy{SliverWidth: 4})
+		// 0 is production's proportional shares; 4 pins them.
+		sw := rapid.SampledFrom([]int{0, 4}).Draw(t, "sliverWidth")
+		s.SetStrategy(layout.CardStrategy{SliverWidth: sw})
 
 		vw := rapid.IntRange(30, 200).Draw(t, "viewportWidth")
 		vh := rapid.IntRange(5, 60).Draw(t, "viewportHeight")
@@ -69,6 +93,21 @@ func TestCardStrategyPropertyInvariants(t *testing.T) {
 		}
 		if focusedP.Dst.Min.X < 0 || focusedP.Dst.Max.X > vw {
 			t.Fatalf("focused pane Dst X %v outside viewport [0, %d]", focusedP.Dst, vw)
+		}
+
+		// Invariant: the focused card shows all of its content. A card
+		// away from the left edge has its border in the cell before its
+		// Dst, and none of those borders may land on the focused card.
+		focusedW, _ := s.ColumnWidth(focusedID)
+		if got, want := focusedP.Dst.Dx(), min(focusedW, vw); got != want {
+			t.Fatalf("focused pane shows %d columns, want %d", got, want)
+		}
+		for _, p := range placements {
+			if border := p.Dst.Min.X - 1; p.Dst.Min.X > 0 &&
+				border >= focusedP.Dst.Min.X && border < focusedP.Dst.Max.X {
+				t.Fatalf("pane %d's border at %d lands inside the focused card %v",
+					p.PaneID, border, focusedP.Dst)
+			}
 		}
 
 		// Invariant 4: Logical column width remains unchanged

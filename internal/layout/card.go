@@ -20,10 +20,17 @@ const MinSliverWidth = 4
 // the focused pane.
 //
 // The focused pane keeps its own width and the rest divide whatever
-// is left, so the fan always spans the viewport. No divider columns
-// are reserved: every sliver draws a spine at its own left edge,
-// which is the separator -- reserving one as ScrollStrategy does
-// would cost a cell per card for no visible gain.
+// is left, so the fan always spans the viewport.
+//
+// Every card but the leftmost has a border in the cell just before its
+// Dst, and the client draws it at Dst.Min.X-1. It used to be painted
+// over the card's own first column, which hid column 0 of every pane
+// in the fan and put the border glyph into anything copied from it.
+//
+// A sliver's border is the first cell of its own slot. The focused
+// card's is the last cell of its left neighbour's, so the focused card
+// keeps its whole width without costing the slivers any budget: charged
+// there, it could decide that no sliver fits at all.
 type CardStrategy struct {
 	// SliverWidth, when positive, forces every sliver to this width
 	// instead of an even share. Tests use it to pin geometry; nothing
@@ -94,12 +101,18 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	x := 0
 	sliverIdx := 0
 
-	place := func(col Column, w int, z int) {
+	// ownBorder is whether the card's border takes the first cell of
+	// its own slot. The focused card's lives in the slot before it.
+	place := func(col Column, w int, z int, ownBorder bool) {
 		if w <= 0 || x >= viewportWidth {
 			return
 		}
-		right := min(x+col.Width, viewportWidth)
-		dst := image.Rect(x, 1, right, 1+availHeight)
+		left := x
+		if ownBorder && left > 0 {
+			left++ // past the border
+		}
+		right := min(left+col.Width, viewportWidth)
+		dst := image.Rect(left, 1, right, 1+availHeight)
 		if dst.Empty() {
 			return
 		}
@@ -120,15 +133,15 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 
 	for i := focusedIdx - showLeft; i < focusedIdx; i++ {
 		col := s.columns[i]
-		place(col, widthOf(sliverIdx, col), 0)
+		place(col, widthOf(sliverIdx, col), 0, true)
 		sliverIdx++
 	}
 
-	place(s.columns[focusedIdx], focusedW, 1)
+	place(s.columns[focusedIdx], focusedW, 1, false)
 
 	for i := focusedIdx + 1; i <= focusedIdx+showRight; i++ {
 		col := s.columns[i]
-		place(col, widthOf(sliverIdx, col), 0)
+		place(col, widthOf(sliverIdx, col), 0, true)
 		sliverIdx++
 	}
 

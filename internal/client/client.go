@@ -513,8 +513,10 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			focusedPlacement = p
 		}
 
-		// Draw 1-row pane header bar at Y = 0
-		headerW := p.Dst.Dx()
+		// Draw 1-row pane header bar at Y = 0, across the card's border
+		// cell too, so the header row has no gap in it.
+		frame := c.frameLocked(*p)
+		headerW := frame.Dx()
 		if headerW > 0 {
 			glyph := st.paneStatuses[p.PaneID]
 			header := fmt.Sprintf(" [%d]", p.PaneID)
@@ -537,9 +539,9 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			}
 
 			if p.PaneID == st.focusPaneID {
-				compose.WriteStyled(dst, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
+				compose.WriteStyled(dst, frame.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
 			} else {
-				compose.WriteString(dst, p.Dst.Min.X, 0, header)
+				compose.WriteString(dst, frame.Min.X, 0, header)
 			}
 		}
 
@@ -576,14 +578,16 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 		}
 
 		if c.layoutMode == protocol.LayoutCards {
-			// For overlapping cards, the left edge is the visible boundary that occludes the card to its left.
-			if p.Dst.Min.X > 0 {
+			// For overlapping cards, the left edge is the visible boundary
+			// that occludes the card to its left. It goes in the border
+			// cell layout leaves before Dst, not over the card's content.
+			if frame.Min.X < p.Dst.Min.X {
 				divider := "│"
 				if p.PaneID == st.focusPaneID {
 					divider = "┃"
 				}
 				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-					compose.WriteString(dst, p.Dst.Min.X, y, divider)
+					compose.WriteString(dst, frame.Min.X, y, divider)
 				}
 			}
 			// Additionally, the focused card is the top-most card, so its right edge is also fully visible.
@@ -752,6 +756,18 @@ func (c *Client) currentPlacementsLocked() []protocol.PlacementData {
 		return c.motion.at()
 	}
 	return c.placements
+}
+
+// frameLocked is the screen rect p occupies: its Dst plus, in the card
+// fan, the border cell layout.CardStrategy leaves just left of it. Hit
+// testing and occlusion use this; content and selection stay in Dst.
+// c.mu must be held.
+func (c *Client) frameLocked(p protocol.PlacementData) image.Rectangle {
+	r := p.Dst
+	if c.layoutMode == protocol.LayoutCards && r.Min.X > 0 {
+		r.Min.X--
+	}
+	return r
 }
 
 // controlHelp returns as much of the control-mode menu as fits in budget

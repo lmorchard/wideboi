@@ -32,11 +32,28 @@ func coveredWidth(ps []layout.Placement) int {
 	return maxX
 }
 
-// gaps reports any column in [0, upTo) that no placement covers.
+// frameStart is the first cell a card covers: its border, the cell
+// before Dst, for every card but the leftmost.
+func frameStart(p layout.Placement) int {
+	return max(p.Dst.Min.X-1, 0)
+}
+
+// slotStart is where a card's share of the fan begins. A sliver's
+// border is the first cell of its own slot; the focused card's is the
+// last cell of the slot before it.
+func slotStart(p layout.Placement) int {
+	if p.Z == 1 {
+		return p.Dst.Min.X
+	}
+	return frameStart(p)
+}
+
+// gaps reports any column in [0, upTo) that no card's content or
+// border covers.
 func gaps(ps []layout.Placement, upTo int) []int {
 	covered := make([]bool, upTo)
 	for _, p := range ps {
-		for x := p.Dst.Min.X; x < p.Dst.Max.X && x < upTo; x++ {
+		for x := frameStart(p); x < p.Dst.Max.X && x < upTo; x++ {
 			covered[x] = true
 		}
 	}
@@ -70,7 +87,7 @@ func TestCardsFillTheViewport(t *testing.T) {
 	}
 	wantStarts := []int{0, 10, 70, 80}
 	for i, want := range wantStarts {
-		if got := ps[i].Dst.Min.X; got != want {
+		if got := slotStart(ps[i]); got != want {
 			t.Errorf("pane %d starts at %d, want %d", ps[i].PaneID, got, want)
 		}
 	}
@@ -82,12 +99,12 @@ func TestCardShareRemainderIsDistributed(t *testing.T) {
 	s := stripOf(4, 60, 2)
 	ps := s.ComputePlacements(91, 24) // 91-60 = 31 over 3 slivers
 
-	// In overlapping card layout, the sliver share is reflected in the start coordinates:
-	// 31 remainder distributed over 3 slivers gives shares 11, 10, 10,
-	// so the placement starts are 0, 11, 71, 81.
+	// In overlapping card layout, the sliver share is reflected in the
+	// slot starts: 31 remainder distributed over 3 slivers gives shares
+	// 11, 10, 10, so the slots start at 0, 11, 71, 81.
 	wantStarts := []int{0, 11, 71, 81}
 	for i, want := range wantStarts {
-		if got := ps[i].Dst.Min.X; got != want {
+		if got := slotStart(ps[i]); got != want {
 			t.Errorf("pane %d starts at column %d, want %d", ps[i].PaneID, got, want)
 		}
 	}
