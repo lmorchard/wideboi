@@ -6,7 +6,7 @@ there.
 
 Status: v1. Working, and rough in places — see the [open issues](https://github.com/lmorchard/wideboi/issues) for what is known and parked.
 
-<video src="./docs/wideboi-2.mp4" width="100%" controls></video>
+<video src="https://github.com/lmorchard/wideboi/raw/refs/heads/main/docs/wideboi-2.mp4" width="100%" controls></video>
 
 ## Build and run
 
