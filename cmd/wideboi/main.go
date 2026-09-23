@@ -400,13 +400,6 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
-	scr.EnterAltScreen()
-	enableMouse(scr, cfg)
-	if err := t.Start(); err != nil {
-		_ = t.Stop()
-		conn.Close()
-		return fmt.Errorf("start terminal: %w", err)
-	}
 
 	var (
 		screenLock sync.Mutex
@@ -415,6 +408,8 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		// hungUp: the connection is over, so there is nothing left
 		// to tell the server.
 		hungUp atomic.Bool
+		// started: the terminal is initialized and in alt-screen.
+		started atomic.Bool
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -440,11 +435,16 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		if owner && !hungUp.Load() {
 			late = !hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
 		}
+
+		var err error
 		screenLock.Lock()
 		defer screenLock.Unlock()
-		scr.ExitAltScreen()
-		_ = scr.Flush()
-		err := t.Stop()
+		if started.Load() {
+			scr.ExitAltScreen()
+			_ = scr.Flush()
+			err = t.Stop()
+		}
+
 		if late {
 			fmt.Fprintf(os.Stderr, "wideboi: server did not confirm shutdown within %s\n", shutdownCeiling)
 		}
@@ -477,8 +477,12 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 
 	cli.Attach(ctx)
 
-	frame := time.NewTicker(16 * time.Millisecond)
-	defer frame.Stop()
+	var frame *time.Ticker
+	defer func() {
+		if frame != nil {
+			frame.Stop()
+		}
+	}()
 
 	var (
 		// gotMsg: the server has said anything at all. An owner's
@@ -486,6 +490,9 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		// spawned never got going.
 		gotMsg bool
 	)
+	var events <-chan uv.Event
+	var frameC <-chan time.Time
+
 	for {
 		select {
 		case msg, ok := <-cConn.ServerSendChan():
@@ -510,10 +517,29 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				slog.Info("server closed the connection")
 				return nil
 			}
-			gotMsg = true
+			if !gotMsg {
+				gotMsg = true
+				screenLock.Lock()
+				if !stopped.Load() {
+					scr.EnterAltScreen()
+					enableMouse(scr, cfg)
+					if err := t.Start(); err != nil {
+						scr.ExitAltScreen()
+						_ = scr.Flush()
+						_ = t.Stop()
+						screenLock.Unlock()
+						return fmt.Errorf("start terminal: %w", err)
+					}
+					started.Store(true)
+					events = t.Events()
+					frame = time.NewTicker(16 * time.Millisecond)
+					frameC = frame.C
+				}
+				screenLock.Unlock()
+			}
 			cli.HandleServerMsg(msg)
 
-		case ev := <-t.Events():
+		case ev := <-events:
 			switch ev := ev.(type) {
 			case uv.WindowSizeEvent:
 				screenLock.Lock()
@@ -587,7 +613,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				}
 			}
 
-		case <-frame.C:
+		case <-frameC:
 			screenLock.Lock()
 			if !stopped.Load() {
 				if cli.Draw(scr) {
