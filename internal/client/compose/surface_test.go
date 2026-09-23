@@ -14,7 +14,7 @@ func TestBlitPlacesSurfaceAtOffset(t *testing.T) {
 	compose.WriteString(src, 0, 0, "hello")
 
 	dst := compose.NewSurface(12, 3)
-	compose.Blit(dst, src, image.Rect(3, 1, 8, 2))
+	compose.Blit(dst, src, src.Bounds(), image.Rect(3, 1, 8, 2))
 
 	got := compose.Text(dst, dst.Bounds())
 	want := []string{
@@ -31,7 +31,7 @@ func TestBlitClipsToDestination(t *testing.T) {
 
 	dst := compose.NewSurface(10, 1)
 	// Only four columns of room.
-	compose.Blit(dst, src, image.Rect(0, 0, 4, 1))
+	compose.Blit(dst, src, image.Rect(0, 0, 4, 1), image.Rect(0, 0, 4, 1))
 
 	got := compose.Text(dst, dst.Bounds())
 	want := []string{"abcd      "}
@@ -45,8 +45,8 @@ func TestBlitLaterDrawsCoverEarlierOnes(t *testing.T) {
 	compose.WriteString(over, 0, 0, "OOO")
 
 	dst := compose.NewSurface(8, 1)
-	compose.Blit(dst, under, image.Rect(0, 0, 6, 1))
-	compose.Blit(dst, over, image.Rect(2, 0, 5, 1))
+	compose.Blit(dst, under, image.Rect(0, 0, 6, 1), image.Rect(0, 0, 6, 1))
+	compose.Blit(dst, over, image.Rect(0, 0, 3, 1), image.Rect(2, 0, 5, 1))
 
 	got := compose.Text(dst, dst.Bounds())
 	// Column 5 is outside blit 2's dest rect (cols 2-4), so it keeps the

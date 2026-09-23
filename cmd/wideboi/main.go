@@ -66,7 +66,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "cleanup" || arg == "version" || arg == "help") {
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "version" || arg == "help") {
 			opts.subcommand = arg
 			continue
 		}
@@ -126,7 +126,6 @@ func printHelp(w io.Writer) {
   wideboi [flags] attach     Attach a client to a running server
   wideboi [flags] kill-session
                              End the session: close every pane and stop the server
-  wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
   wideboi help               Show this help text
@@ -188,8 +187,6 @@ func main() {
 		fatal(runAttach(cfg, bindings))
 	case "kill-session":
 		fatal(runKillSession(cfg))
-	case "cleanup":
-		fatal(runCleanup(os.Stdout, config.SessionDir()))
 	case "ls":
 		fatal(runList(os.Stdout))
 	default:
