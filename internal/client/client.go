@@ -1037,8 +1037,8 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	c.transport.SendClient(ctx, protocol.MsgResize{Cols: cols, Rows: rows})
 }
 
-// FocusPaneID returns current focused pane ID.
-func (c *Client) FocusPaneID() int {
+// FocusedPaneID returns current focused pane ID.
+func (c *Client) FocusedPaneID() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.focusPaneID

@@ -53,7 +53,7 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 		t.Fatal("timeout waiting for client 1 initial message")
 	}
 
-	if cli1.FocusPaneID() == 0 {
+	if cli1.FocusedPaneID() == 0 {
 		t.Fatal("client 1 FocusPaneID should be set after snapshot")
 	}
 
@@ -92,8 +92,8 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 		}
 	}
 
-	if cli2.FocusPaneID() != cli1.FocusPaneID() {
-		t.Errorf("reattached client FocusPaneID=%d, want %d", cli2.FocusPaneID(), cli1.FocusPaneID())
+	if cli2.FocusedPaneID() != cli1.FocusedPaneID() {
+		t.Errorf("reattached client FocusPaneID=%d, want %d", cli2.FocusedPaneID(), cli1.FocusedPaneID())
 	}
 
 	cConn2.Close()

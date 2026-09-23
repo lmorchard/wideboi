@@ -459,20 +459,7 @@ func (s *Server) removePaneLocked(id int) {
 // Be precise about what that buys, because it is less than it looks.
 // It stops THIS call from being the thing that holds s.mu forever. It
 // does NOT rescue the Run loop, which still blocks inside the wedged
-// Resize; only other goroutines gain from the release. And it does not
-// make srv.Close() unblockable in general: broadcastLayoutLocked runs on
-// the very next line still under s.mu, and transport.SendServer is a
-// buffered channel send that blocks once the client stops draining
-// ServerSend and the 256-deep buffer fills, bounded only by a context
-// main cancels AFTER guard.Stop() -- which is where srv.Close() itself
-// lives. Reachable path: a child stops reading stdin -> the pty-writer
-// parks -> the reply pipe fills -> vtGrid.Write parks holding se.mu ->
-// the main loop parks in Draw -> ServerSend stops being drained -> the
-// Run loop blocks in SendServer holding s.mu -> srv.Close() waits
-// forever. Hard to reach and pre-existing. Hoisting SendServer out of
-// s.mu would be a behaviour change, so the residual is recorded in
-// issue #38 alongside the parked bounded-write item, which is
-// its real fix.
+// Resize; only other goroutines gain from the release.
 //
 // That release also means two resizePanesLocked calls can now overlap --
 // this one and, e.g., the one onPaneExit runs for a different pane's
@@ -780,9 +767,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 // hold that lock for an unbounded time (see Pane.Close's doc comment).
 // Holding s.mu across the call would park it, and with it the Run loop
 // and srv.Close(), on the same wedge this pattern exists to avoid
-// elsewhere. It removes one way to hold s.mu forever, not every way --
-// see resizePanesLocked for the SendServer-under-s.mu residual that
-// survives this discipline.
+// elsewhere.
 func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	s.mu.Lock()
 	p, ok := s.panes[id]

@@ -31,7 +31,7 @@ func TestClientCalculatesPlacementsLocallyFromColumns(t *testing.T) {
 
 	cli.SendResize(ctx, 120, 30)
 
-	if cli.FocusPaneID() != 1 {
-		t.Errorf("FocusPaneID = %d, want 1", cli.FocusPaneID())
+	if cli.FocusedPaneID() != 1 {
+		t.Errorf("FocusPaneID = %d, want 1", cli.FocusedPaneID())
 	}
 }
