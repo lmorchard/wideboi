@@ -1,4 +1,4 @@
-import type { ColorData } from './gen/wideboi_pb';
+import type { ColorData } from './protocol';
 
 // Default xterm 256 color palette
 const ANSI_COLORS = [
@@ -22,14 +22,14 @@ const ANSI_COLORS = [
 export function decodeColor(color: ColorData | undefined, isBg: boolean): string {
   if (!color) return isBg ? '#1e1e1e' : '#d4d4d4'; // Default VSCode-ish theme
 
-  switch (color.kind) {
+  switch (color.Kind) {
     case 0: // COLOR_NONE
       return isBg ? '#1e1e1e' : '#d4d4d4';
     case 1: // COLOR_BASIC
     case 2: // COLOR_INDEXED
-      return ANSI_COLORS[color.index] || (isBg ? '#1e1e1e' : '#d4d4d4');
+      return ANSI_COLORS[color.Index] || (isBg ? '#1e1e1e' : '#d4d4d4');
     case 3: // COLOR_RGBA
-      return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
+      return `rgba(${color.R}, ${color.G}, ${color.B}, ${color.A / 255})`;
     default:
       return isBg ? '#1e1e1e' : '#d4d4d4';
   }

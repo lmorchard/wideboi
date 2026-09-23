@@ -1,10 +1,8 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, query } from 'lit/decorators.js';
-import { create } from "@bufbuild/protobuf";
 import { WideboiClient } from './client';
 import { GridRenderer } from './renderer';
-import type { ServerEnvelope } from './gen/wideboi_pb';
-import { ClientEnvelopeSchema, MsgAttachSchema, MsgResizeSchema } from './gen/wideboi_pb';
+import type { WSEnvelope } from './protocol';
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
@@ -33,7 +31,6 @@ export class WideboiApp extends LitElement {
   constructor() {
     super();
     
-    // Default fallback, should probably be configurable
     const wsUrl = `ws://${window.location.hostname}:8080/ws`;
     this.client = new WideboiClient(wsUrl);
     
@@ -42,13 +39,13 @@ export class WideboiApp extends LitElement {
       this.sendAttach();
     };
 
-    this.client.onMessage = (env: ServerEnvelope) => {
+    this.client.onMessage = (env: WSEnvelope) => {
       if (!this.renderer) return;
 
-      if (env.payload.case === 'layoutSnapshot') {
-        this.renderer.handleLayoutSnapshot(env.payload.value);
-      } else if (env.payload.case === 'paneUpdate') {
-        this.renderer.handlePaneUpdate(env.payload.value);
+      if (env.t === 'MsgLayoutSnapshot') {
+        this.renderer.handleLayoutSnapshot(env.p);
+      } else if (env.t === 'MsgPaneUpdate') {
+        this.renderer.handlePaneUpdate(env.p);
       }
     };
 
@@ -58,16 +55,9 @@ export class WideboiApp extends LitElement {
         const { width, height } = entry.contentRect;
         this.renderer.resize(width, height);
         
-        // Let the server know our new dimensions in cells
         if (this.client) {
             const size = this.renderer.getGridSize();
-            const resizeMsg = create(ClientEnvelopeSchema, {
-                payload: {
-                  case: 'resize',
-                  value: create(MsgResizeSchema, { cols: size.cols, rows: size.rows })
-                }
-            });
-            this.client.send(resizeMsg);
+            this.client.send('MsgResize', { Cols: size.cols, Rows: size.rows });
         }
       }
     });
@@ -76,20 +66,13 @@ export class WideboiApp extends LitElement {
   private sendAttach() {
      if (!this.renderer) return;
      const size = this.renderer.getGridSize();
-     const attachMsg = create(ClientEnvelopeSchema, {
-        payload: {
-          case: 'attach',
-          value: create(MsgAttachSchema, { cols: size.cols, rows: size.rows })
-        }
-      });
-      this.client.send(attachMsg);
+     this.client.send('MsgAttach', { Cols: size.cols, Rows: size.rows });
   }
 
   firstUpdated() {
     this.renderer = new GridRenderer(this.canvas);
     this.resizeObserver.observe(this.canvas);
     
-    // Initial size
     const rect = this.canvas.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
     

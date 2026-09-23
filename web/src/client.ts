@@ -1,12 +1,10 @@
-import { fromBinary, toBinary } from "@bufbuild/protobuf";
-import type { ClientEnvelope, ServerEnvelope } from "./gen/wideboi_pb";
-import { ServerEnvelopeSchema, ClientEnvelopeSchema } from "./gen/wideboi_pb";
+import type { WSEnvelope } from "./protocol";
 
 export class WideboiClient {
   private ws: WebSocket | null = null;
   private url: string;
   
-  public onMessage?: (envelope: ServerEnvelope) => void;
+  public onMessage?: (envelope: WSEnvelope) => void;
   public onConnect?: () => void;
   public onDisconnect?: () => void;
 
@@ -16,7 +14,6 @@ export class WideboiClient {
 
   public connect() {
     this.ws = new WebSocket(this.url);
-    this.ws.binaryType = "arraybuffer"; // Important: we want ArrayBuffer for protobuf
 
     this.ws.onopen = () => {
       console.log("[WideboiClient] Connected to", this.url);
@@ -34,32 +31,25 @@ export class WideboiClient {
     };
 
     this.ws.onmessage = (event: MessageEvent) => {
-      if (!(event.data instanceof ArrayBuffer)) {
-        console.warn("[WideboiClient] Expected binary frame, got text");
-        return;
-      }
-
       try {
-        const bytes = new Uint8Array(event.data);
-        const envelope = fromBinary(ServerEnvelopeSchema, bytes);
-        
+        const envelope = JSON.parse(event.data) as WSEnvelope;
         if (this.onMessage) {
           this.onMessage(envelope);
         }
       } catch (err) {
-        console.error("[WideboiClient] Failed to decode protobuf message:", err);
+        console.error("[WideboiClient] Failed to decode JSON message:", err);
       }
     };
   }
 
-  public send(envelope: ClientEnvelope) {
+  public send(type: string, payload: any) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn("[WideboiClient] Cannot send, not connected");
       return;
     }
     
-    const bytes = toBinary(ClientEnvelopeSchema, envelope);
-    this.ws.send(bytes);
+    const env: WSEnvelope = { t: type, p: payload };
+    this.ws.send(JSON.stringify(env));
   }
 
   public disconnect() {

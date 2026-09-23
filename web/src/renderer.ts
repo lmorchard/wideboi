@@ -1,4 +1,4 @@
-import { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData } from './gen/wideboi_pb';
+import type { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData, Rectangle } from './protocol';
 import { decodeColor } from './colors';
 
 export class GridRenderer {
@@ -9,6 +9,7 @@ export class GridRenderer {
 
   private panes = new Map<number, MsgPaneUpdate>();
   private layout: MsgLayoutSnapshot | null = null;
+  private placements: PlacementData[] = [];
   
   private animationFrameId = 0;
 
@@ -35,10 +36,11 @@ export class GridRenderer {
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
     this.layout = snapshot;
+    this.recomputePlacements();
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
-    this.panes.set(update.paneId, update);
+    this.panes.set(update.PaneID, update);
   }
 
   public resize(width: number, height: number) {
@@ -50,12 +52,12 @@ export class GridRenderer {
     
     this.ctx.scale(dpr, dpr);
     this.measureFont();
+    this.recomputePlacements();
   }
 
   public getGridSize(): { cols: number, rows: number } {
     if (this.cellWidth === 0 || this.cellHeight === 0) return { cols: 80, rows: 24 };
     
-    // Reverse engineer device CSS pixels to cols/rows
     const width = parseInt(this.canvas.style.width || "0", 10);
     const height = parseInt(this.canvas.style.height || "0", 10);
     
@@ -72,38 +74,99 @@ export class GridRenderer {
     this.cellWidth = Math.max(metrics.width, 1);
     this.cellHeight = 14 * 1.2; // approx line height
   }
+  
+  // Re-implements ScrollStrategy from Go
+  private recomputePlacements() {
+      if (!this.layout) return;
+      
+      const grid = this.getGridSize();
+      const availHeight = Math.max(grid.rows - 2, 1);
+      const w = grid.cols;
+      
+      let focusIdx = -1;
+      for (let i = 0; i < this.layout.Columns.length; i++) {
+          if (this.layout.Columns[i].PaneID === this.layout.FocusPaneID) {
+              focusIdx = i;
+              break;
+          }
+      }
+      
+      let startIdx = Math.max(focusIdx, 0);
+      if (startIdx >= this.layout.Columns.length) {
+          this.placements = [];
+          return;
+      }
+      
+      let availWidth = w;
+      availWidth -= this.layout.Columns[startIdx].Width;
+      
+      for (; startIdx > 0 && availWidth > 0; ) {
+          const prevW = this.layout.Columns[startIdx - 1].Width;
+          if (availWidth - prevW >= 0) {
+              availWidth -= prevW;
+              startIdx--;
+          } else {
+              break;
+          }
+      }
+      
+      const places: PlacementData[] = [];
+      let currentX = 0;
+      
+      for (let i = startIdx; i < this.layout.Columns.length; i++) {
+          const c = this.layout.Columns[i];
+          const paneW = c.Width;
+          
+          if (currentX >= w) break;
+          
+          let drawW = paneW;
+          if (currentX + drawW > w) {
+              drawW = w - currentX;
+          }
+          
+          const dst: Rectangle = { Min: {X: currentX, Y: 1}, Max: {X: currentX+drawW, Y: 1+availHeight} };
+          
+          // Src
+          const srcY = dst.Min.Y - 1;
+          const src: Rectangle = { Min: {X: 0, Y: srcY}, Max: {X: drawW, Y: srcY + (dst.Max.Y - dst.Min.Y)} };
+          
+          places.push({
+              PaneID: c.PaneID,
+              Src: src,
+              Dst: dst,
+              Z: 0,
+              Kind: 0
+          });
+          currentX += paneW;
+      }
+      
+      this.placements = places;
+  }
 
   private draw() {
-    // Clear background
     this.ctx.fillStyle = '#1e1e1e';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     if (!this.layout) return;
 
-    // Placements are ordered by Z-index by the server, but let's sort just in case
-    const placements = [...this.layout.placements].sort((a, b) => a.z - b.z);
-
-    for (const p of placements) {
+    for (const p of this.placements) {
       this.drawPlacement(p);
     }
   }
 
   private drawPlacement(p: PlacementData) {
-    const pane = this.panes.get(p.paneId);
+    const pane = this.panes.get(p.PaneID);
     if (!pane) return;
-    if (!p.src || !p.dst) return;
 
-    const srcMinX = p.src.minX;
-    const srcMinY = p.src.minY;
-    const dstMinX = p.dst.minX;
-    const dstMinY = p.dst.minY;
-    const dx = p.dst.maxX - p.dst.minX;
-    const dy = p.dst.maxY - p.dst.minY;
+    const srcMinX = p.Src.Min.X;
+    const srcMinY = p.Src.Min.Y;
+    const dstMinX = p.Dst.Min.X;
+    const dstMinY = p.Dst.Min.Y;
+    const dx = p.Dst.Max.X - p.Dst.Min.X;
+    const dy = p.Dst.Max.Y - p.Dst.Min.Y;
 
-    // Save context for clipping
     this.ctx.save();
     
-    // Set clipping region to Dst
     this.ctx.beginPath();
     this.ctx.rect(
       dstMinX * this.cellWidth, 
@@ -113,62 +176,56 @@ export class GridRenderer {
     );
     this.ctx.clip();
 
-    // Set font again (context state might change)
     this.ctx.font = '14px monospace';
     this.ctx.textBaseline = 'top';
 
-    // Draw the pane content offset by (Dst.Min - Src.Min)
     const offsetX = dstMinX - srcMinX;
     const offsetY = dstMinY - srcMinY;
 
-    for (let y = 0; y < pane.lines.length; y++) {
+    for (let y = 0; y < pane.Lines.length; y++) {
       const screenY = y + offsetY;
-      // Skip rendering lines outside the clip bounds vertically to save CPU
       if (screenY < dstMinY || screenY >= dstMinY + dy) continue;
 
-      const line = pane.lines[y];
+      const line = pane.Lines[y];
       let x = 0;
-      for (const cell of line.cells) {
+      for (const cell of line) {
         const screenX = x + offsetX;
         
-        // Only draw if within horizontal bounds
         if (screenX >= dstMinX && screenX < dstMinX + dx) {
-          const bg = decodeColor(cell.style?.bg, true);
-          const fg = decodeColor(cell.style?.fg, false);
+          const bg = decodeColor(cell.Style?.Bg, true);
+          const fg = decodeColor(cell.Style?.Fg, false);
           
           if (bg !== '#1e1e1e') {
             this.ctx.fillStyle = bg;
             this.ctx.fillRect(
               screenX * this.cellWidth, 
               screenY * this.cellHeight, 
-              this.cellWidth * (cell.width || 1), 
+              this.cellWidth * (cell.Width || 1), 
               this.cellHeight
             );
           }
 
-          if (cell.content && cell.content !== ' ') {
+          if (cell.Content && cell.Content !== ' ') {
             this.ctx.fillStyle = fg;
-            // Handle bold attributes (AttrBold = 1 << 0)
-            const isBold = (cell.style?.attrs ?? 0) & 1;
+            const isBold = (cell.Style?.Attrs ?? 0) & 1;
             this.ctx.font = `${isBold ? 'bold ' : ''}14px monospace`;
             this.ctx.fillText(
-              cell.content, 
+              cell.Content, 
               screenX * this.cellWidth, 
               screenY * this.cellHeight
             );
           }
         }
-        x += (cell.width || 1);
+        x += (cell.Width || 1);
       }
     }
 
-    // Draw Cursor
-    if (pane.cursorVisible && this.layout?.focusPaneId === pane.paneId) {
-      const curX = pane.cursorX + offsetX;
-      const curY = pane.cursorY + offsetY;
+    if (pane.CursorVisible && this.layout?.FocusPaneID === pane.PaneID) {
+      const curX = pane.CursorX + offsetX;
+      const curY = pane.CursorY + offsetY;
       
       if (curX >= dstMinX && curX < dstMinX + dx && curY >= dstMinY && curY < dstMinY + dy) {
-        this.ctx.fillStyle = '#d4d4d4'; // Cursor color
+        this.ctx.fillStyle = '#d4d4d4';
         this.ctx.fillRect(
           curX * this.cellWidth, 
           curY * this.cellHeight, 
@@ -176,18 +233,17 @@ export class GridRenderer {
           this.cellHeight
         );
         
-        // Invert text under cursor
-        if (curY < pane.lines.length) {
+        if (curY < pane.Lines.length) {
             let cx = 0;
             let targetCell = null;
-            for(const cell of pane.lines[curY].cells) {
-                if (cx === pane.cursorX) { targetCell = cell; break; }
-                cx += (cell.width || 1);
+            for(const cell of pane.Lines[curY]) {
+                if (cx === pane.CursorX) { targetCell = cell; break; }
+                cx += (cell.Width || 1);
             }
-            if (targetCell && targetCell.content && targetCell.content !== ' ') {
-                this.ctx.fillStyle = '#1e1e1e'; // inverted
+            if (targetCell && targetCell.Content && targetCell.Content !== ' ') {
+                this.ctx.fillStyle = '#1e1e1e';
                 this.ctx.fillText(
-                    targetCell.content,
+                    targetCell.Content,
                     curX * this.cellWidth,
                     curY * this.cellHeight
                 );
@@ -198,8 +254,7 @@ export class GridRenderer {
 
     this.ctx.restore();
     
-    // Draw borders or sliver chrome if this is a sliver placement (Split 4 stuff, but basic implementation here)
-    if (p.kind === 1) { // PLACEMENT_SLIVER
+    if (p.Kind === 1) { 
        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
        this.ctx.fillRect(
            dstMinX * this.cellWidth,
@@ -207,7 +262,6 @@ export class GridRenderer {
            dx * this.cellWidth,
            dy * this.cellHeight
        );
-       // Border
        this.ctx.strokeStyle = '#555';
        this.ctx.strokeRect(
            dstMinX * this.cellWidth,
