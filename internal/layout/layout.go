@@ -34,12 +34,15 @@ const MinColumnWidth = 20
 
 // Strip manages a horizontal sequence of columns and viewport scrolling.
 type Strip struct {
-	columns      []Column
-	focusIndex   int
-	scrollX      int
-	cardFirst    int // CardStrategy's window: index of its leftmost card
-	strategy     Strategy
-	widthPresets []int
+	columns    []Column
+	focusIndex int
+	scrollX    int
+	cardFirst  int // CardStrategy's window: index of its leftmost card
+	// lastFocusPaneID is the pane focused before the current one, for
+	// FocusLast. 0 means none. Recorded by noteFocusFrom.
+	lastFocusPaneID int
+	strategy        Strategy
+	widthPresets    []int
 }
 
 // NewStrip creates an empty column strip.
@@ -118,6 +121,8 @@ func (s *Strip) FocusedPaneID() int {
 
 // AddColumn inserts a new column after the current focus and shifts focus to it.
 func (s *Strip) AddColumn(paneID int, width, height int) {
+	prev := s.FocusedPaneID()
+	defer s.noteFocusFrom(prev)
 	col := Column{PaneID: paneID, Width: width, Height: height}
 	if len(s.columns) == 0 {
 		s.columns = append(s.columns, col)
@@ -131,6 +136,8 @@ func (s *Strip) AddColumn(paneID int, width, height int) {
 
 // FocusLeft moves focus one column to the left.
 func (s *Strip) FocusLeft() {
+	prev := s.FocusedPaneID()
+	defer s.noteFocusFrom(prev)
 	if s.focusIndex > 0 {
 		s.focusIndex--
 	}
@@ -138,6 +145,8 @@ func (s *Strip) FocusLeft() {
 
 // FocusRight moves focus one column to the right.
 func (s *Strip) FocusRight() {
+	prev := s.FocusedPaneID()
+	defer s.noteFocusFrom(prev)
 	if s.focusIndex < len(s.columns)-1 {
 		s.focusIndex++
 	}
@@ -183,8 +192,59 @@ func (s *Strip) ShrinkWidth(delta int) {
 	}
 }
 
+// MoveLeft swaps the focused column with its left neighbour. Focus
+// follows the column, and its width travels with it: nothing is resized,
+// because a pane's logical width is its column's width (the no-shrink
+// premise), and a move changes neither.
+func (s *Strip) MoveLeft() {
+	i := s.focusIndex
+	if i <= 0 || i >= len(s.columns) {
+		return
+	}
+	s.columns[i-1], s.columns[i] = s.columns[i], s.columns[i-1]
+	s.focusIndex = i - 1
+}
+
+// MoveRight is MoveLeft's mirror.
+func (s *Strip) MoveRight() {
+	i := s.focusIndex
+	if i < 0 || i >= len(s.columns)-1 {
+		return
+	}
+	s.columns[i+1], s.columns[i] = s.columns[i], s.columns[i+1]
+	s.focusIndex = i + 1
+}
+
+// noteFocusFrom records prev as the last-focused pane if focus has
+// actually moved off it. Every focus mutation calls it, so FocusLast
+// covers keys, clicks, attention jumps and digit jumps alike -- all of
+// them end in one of those methods.
+func (s *Strip) noteFocusFrom(prev int) {
+	if prev != 0 && prev != s.FocusedPaneID() {
+		s.lastFocusPaneID = prev
+	}
+}
+
+// FocusLast focuses the previously focused pane, which makes the pane
+// being left the new previous one: doing it twice is a round trip.
+func (s *Strip) FocusLast() {
+	if s.lastFocusPaneID != 0 {
+		s.FocusPaneID(s.lastFocusPaneID)
+	}
+}
+
+// LastFocusPaneID reports the previously focused pane, or 0 for none.
+func (s *Strip) LastFocusPaneID() int {
+	return s.lastFocusPaneID
+}
+
 // KillPane removes the specified pane from the strip and adjusts focus.
+// The focus shift a removal causes is not recorded for FocusLast, and a
+// record naming the dead pane is forgotten: there is nothing to go back to.
 func (s *Strip) KillPane(paneID int) {
+	if s.lastFocusPaneID == paneID {
+		s.lastFocusPaneID = 0
+	}
 	for i, c := range s.columns {
 		if c.PaneID == paneID {
 			s.columns = append(s.columns[:i], s.columns[i+1:]...)
@@ -232,6 +292,8 @@ func AvailHeight(viewportHeight int) int {
 
 // FocusPaneID sets focus to the column containing paneID if it exists.
 func (s *Strip) FocusPaneID(paneID int) {
+	prev := s.FocusedPaneID()
+	defer s.noteFocusFrom(prev)
 	for i, c := range s.columns {
 		if c.PaneID == paneID {
 			s.focusIndex = i

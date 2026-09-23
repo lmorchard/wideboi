@@ -500,6 +500,49 @@ def case_ctrl_repeat_moves_two_columns(fail):
     s.close()
 
 
+def case_move_column_reorders(fail):
+    # Startup is columns [1, 2], focus 1. Two new columns make
+    # [1, 3, 4, 2] with focus on 4 (a new column lands right after the
+    # focused one). C-y moves 4 left and stays in control mode; the
+    # plain y moves it again and leaves: [4, 1, 3, 2], focus still 4,
+    # because focus follows the card.
+    #
+    # The focus check alone would pass after zero, one or two moves.
+    # The position jump below tells all three apart: position 2 is
+    # pane 1 after two moves, 4 after one, 3 after none.
+    s = Session(cols=100, rows=30)
+    s.type("\x02n", settle=1.2)
+    s.type("\x02n", settle=1.2)
+    s.type("\x02\x19y")  # C-b C-y y
+    if focus_pane_id(s.output(), s.rows) != 4:
+        fail(f"focus did not follow the moved card: got pane {focus_pane_id(s.output(), s.rows)}")
+    s.type("\x02" "2")   # position 2
+    if focus_pane_id(s.output(), s.rows) != 1:
+        fail(f"position 2 is pane {focus_pane_id(s.output(), s.rows)}, want 1 -- "
+             "4 for one move, 3 for none")
+    s.close()
+
+
+def case_digit_and_last_pane_jumps(fail):
+    # Startup: columns [1, 2], focus 1. Every assertion reads the status
+    # line through focus_pane_id -- only wideboi emits it -- never text
+    # the keystrokes might have echoed.
+    s = Session()
+    s.type("\x02l")      # focus right -> 2
+    if focus_pane_id(s.output(), s.rows) != 2:
+        fail(f"C-b l did not reach pane 2: got {focus_pane_id(s.output(), s.rows)}")
+    s.type("\x02\t")     # previous pane -> 1
+    if focus_pane_id(s.output(), s.rows) != 1:
+        fail(f"C-b tab did not flip back to pane 1: got {focus_pane_id(s.output(), s.rows)}")
+    s.type("\x02" "0")   # last column -> 2
+    if focus_pane_id(s.output(), s.rows) != 2:
+        fail(f"C-b 0 did not reach the last column: got {focus_pane_id(s.output(), s.rows)}")
+    s.type("\x02" "1")   # first column -> 1
+    if focus_pane_id(s.output(), s.rows) != 1:
+        fail(f"C-b 1 did not reach the first column: got {focus_pane_id(s.output(), s.rows)}")
+    s.close()
+
+
 def case_doubled_prefix_reaches_the_pane(fail):
     # Without this there is no way to type the prefix byte at all, and
     # readline's backward-char becomes unreachable in every pane.
@@ -554,7 +597,7 @@ def case_custom_prefix_from_env(fail):
 
 def case_config_file_and_key_remapping(fail):
     with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
-        f.write('prefix = "ctrl+a"\nlayout = "cards"\n[keys]\nkill_pane = "k"\nscroll_up = "u"\n')
+        f.write('prefix = "ctrl+a"\nlayout = "cards"\n[keys]\nkill_pane = "k"\nscroll_up = "e"\n')
         cfg_path = f.name
     try:
         s = Session(args=["-c", cfg_path])
@@ -565,8 +608,8 @@ def case_config_file_and_key_remapping(fail):
         out = s.output()
         if b"k kill" not in out:
             fail("status line does not show remapped 'k kill'")
-        if b"hjul move" not in out:
-            fail("status line does not show updated movement 'hjul move'")
+        if b"hjel move" not in out:
+            fail("status line does not show updated movement 'hjel move'")
         s.close()
     finally:
         try:
@@ -770,7 +813,8 @@ def case_help_overlay_opens_and_any_key_dismisses(fail):
     out = s.output()
     if b"hold ctrl to stay in control mode" not in out:
         fail("? did not raise the help overlay")
-    if b"scroll this pane's history up" not in out:
+    # j and k share one overlay line since #80/#74 (TestHelpOverlayFitsAt80x24).
+    if b"scroll this pane's history down / up" not in out:
         fail("the overlay does not describe the bindings")
 
     before = len(s.output())
@@ -973,6 +1017,8 @@ CASES = [
     ("prefix routes verbs", case_prefix_routes_verbs),
     ("control mode is visible and escapable", case_control_mode_is_visible_and_escapable),
     ("ctrl repeat moves two columns", case_ctrl_repeat_moves_two_columns),
+    ("move column reorders", case_move_column_reorders),
+    ("digit and last-pane jumps", case_digit_and_last_pane_jumps),
     ("doubled prefix reaches the pane", case_doubled_prefix_reaches_the_pane),
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),

@@ -20,6 +20,9 @@ const (
 	VerbToggleCards
 	VerbGrowWidth
 	VerbShrinkWidth
+	VerbMoveLeft
+	VerbMoveRight
+	VerbFocusLast
 )
 
 // ColumnData describes a column's logical width and height.

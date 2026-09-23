@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -157,7 +158,7 @@ func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
 func TestCustomBindingsInControlHelpAndHelpLines(t *testing.T) {
 	custom, err := keys.BuildBindings(map[string]string{
 		keys.ActionNameKillPane: "k",
-		keys.ActionNameScrollUp: "u",
+		keys.ActionNameScrollUp: "e",
 	})
 	if err != nil {
 		t.Fatalf("BuildBindings: %v", err)
@@ -172,13 +173,65 @@ func TestCustomBindingsInControlHelpAndHelpLines(t *testing.T) {
 	if !strings.Contains(status, "k kill") {
 		t.Errorf("status line should contain 'k kill', got: %q", status)
 	}
-	if !strings.Contains(status, "hjul move") {
-		t.Errorf("status line should contain 'hjul move', got: %q", status)
+	if !strings.Contains(status, "hjel move") {
+		t.Errorf("status line should contain 'hjel move', got: %q", status)
 	}
 
 	lines := helpLines("C-b", true, custom)
 	joined := strings.Join(lines, "\n")
 	if !strings.Contains(joined, "k     kill the focused pane") {
 		t.Errorf("help lines should contain 'k     kill the focused pane', got: %q", joined)
+	}
+}
+
+// Ten digit rows would swamp the overlay; they share one line.
+func TestHelpGroupsCollapseToOneLine(t *testing.T) {
+	lines := helpLines("C-b", true)
+	digits := 0
+	for _, l := range lines {
+		if strings.HasPrefix(l, "0-9 ") {
+			digits++
+		}
+		for n := 1; n <= 9; n++ {
+			if strings.HasPrefix(l, fmt.Sprintf("%d ", n)) {
+				t.Errorf("digit %d has its own overlay line: %q", n, l)
+			}
+		}
+	}
+	if digits != 1 {
+		t.Errorf("found %d \"0-9\" lines, want 1:\n%s", digits, strings.Join(lines, "\n"))
+	}
+}
+
+// Without a HelpKey, a group's label is its members' keys, so it stays
+// right when a user remaps one of them.
+func TestHelpGroupLabelIsItsKeys(t *testing.T) {
+	table := []keys.Binding{
+		{Key: "e", Long: "one", HelpGroup: "do the pair"},
+		{Key: "u", Long: "two", HelpGroup: "do the pair"},
+		{Key: "x", Long: "kill it"},
+	}
+	lines := helpLines("C-b", true, table)
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "e/u   do the pair") {
+		t.Errorf("want a joined \"e/u\" group line, got:\n%s", joined)
+	}
+	if strings.Count(joined, "do the pair") != 1 {
+		t.Errorf("group printed more than once:\n%s", joined)
+	}
+	if !strings.Contains(joined, "x     kill it") {
+		t.Errorf("ungrouped row lost:\n%s", joined)
+	}
+}
+
+// The real table, remapped: a grouped line names the key the user chose.
+func TestRemappedPairKeepsItsGroupLabel(t *testing.T) {
+	custom, err := keys.BuildBindings(map[string]string{keys.ActionNameFocusLeft: "e"})
+	if err != nil {
+		t.Fatalf("BuildBindings: %v", err)
+	}
+	joined := strings.Join(helpLines("C-b", true, custom), "\n")
+	if !strings.Contains(joined, "e/l   focus the column left / right") {
+		t.Errorf("remapped focus pair not labelled e/l:\n%s", joined)
 	}
 }

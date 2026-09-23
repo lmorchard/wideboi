@@ -41,6 +41,9 @@ type frameState struct {
 	focusPaneID  int
 	paneStatuses map[int]string
 	paneTitles   map[int]string
+	// positions is each pane's 1-based column position, which is what
+	// the digit keys index. A pane missing from it gets no number.
+	positions map[int]int
 }
 
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
@@ -82,7 +85,19 @@ func (c *Client) frameStateLocked() frameState {
 		focusPaneID:  c.focusPaneID,
 		paneStatuses: c.paneStatuses,
 		paneTitles:   c.paneTitles,
+		positions:    c.positionsLocked(),
 	}
+}
+
+// positionsLocked maps each pane to its 1-based column position.
+// c.mu must be held.
+func (c *Client) positionsLocked() map[int]int {
+	ids := c.strip.PaneIDs()
+	pos := make(map[int]int, len(ids))
+	for i, id := range ids {
+		pos[id] = i + 1
+	}
+	return pos
 }
 
 // NewClient initializes a Client instance. prefixLabel is the short
@@ -499,11 +514,12 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 		headerW := p.Dst.Dx()
 		if headerW > 0 {
 			glyph := st.paneStatuses[p.PaneID]
-			var header string
+			header := fmt.Sprintf(" [%d]", p.PaneID)
+			if pos := st.positions[p.PaneID]; pos > 0 {
+				header = fmt.Sprintf(" %d [%d]", pos, p.PaneID)
+			}
 			if glyph != "" && glyph != " " {
-				header = fmt.Sprintf(" [%d] %s", p.PaneID, glyph)
-			} else {
-				header = fmt.Sprintf(" [%d]", p.PaneID)
+				header += " " + glyph
 			}
 			title := st.paneTitles[p.PaneID]
 			if title != "" {
@@ -882,6 +898,26 @@ func truncateRunes(s string, n int) string {
 // SendVerb forwards a layout action request to the server.
 func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
 	c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v})
+}
+
+// FocusColumn focuses the n'th column from the left, or the rightmost
+// for keys.LastColumn. It resolves against this client's strip and sends
+// the same MsgFocusPane a click sends, so the server's guard against a
+// pane that closed in the meantime covers it too. Out of range is a
+// no-op.
+func (c *Client) FocusColumn(ctx context.Context, n int) {
+	c.mu.Lock()
+	ids := c.strip.PaneIDs()
+	c.mu.Unlock()
+
+	i := n - 1
+	if n == keys.LastColumn {
+		i = len(ids) - 1
+	}
+	if i < 0 || i >= len(ids) {
+		return
+	}
+	c.transport.SendClient(ctx, protocol.MsgFocusPane{PaneID: ids[i]})
 }
 
 // SendKey forwards a decoded key event for the focused pane to the server.

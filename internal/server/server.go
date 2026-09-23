@@ -292,6 +292,15 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		case protocol.VerbShrinkWidth:
 			s.strip.ShrinkWidth(10)
 			s.resizePanesLocked()
+		case protocol.VerbMoveLeft:
+			s.strip.MoveLeft()
+		case protocol.VerbMoveRight:
+			// Neither move calls resizePanesLocked, for the same
+			// reason VerbToggleCards does not: order is presentation,
+			// and a column's width goes wherever the column goes.
+			s.strip.MoveRight()
+		case protocol.VerbFocusLast:
+			s.strip.FocusLast()
 		case protocol.VerbKillPane:
 			focusedID := s.strip.FocusedPaneID()
 			if focusedID > 0 {

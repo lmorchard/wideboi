@@ -526,6 +526,8 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 					cli.SendVerb(ctx, act.Verb)
 				case routeScroll:
 					cli.SendScroll(ctx, act.Scroll)
+				case routeFocusColumn:
+					cli.FocusColumn(ctx, act.Column)
 				case routeForward:
 					cli.SendKey(ctx, uv.KeyEvent(ev))
 				case routeIgnore:

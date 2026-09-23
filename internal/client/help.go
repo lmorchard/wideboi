@@ -22,11 +22,24 @@ func helpLines(prefixLabel string, detachable bool, custom ...[]keys.Binding) []
 	}
 	lines := []string{"control mode", ""}
 
+	done := map[string]bool{}
 	for _, b := range bindings {
 		if b.NeedsDetach && !detachable {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%-4s  %s", b.Key, b.Long))
+		if b.HelpGroup == "" {
+			lines = append(lines, fmt.Sprintf("%-4s  %s", b.Key, b.Long))
+			continue
+		}
+		if done[b.HelpGroup] {
+			continue
+		}
+		done[b.HelpGroup] = true
+		label := b.HelpKey
+		if label == "" {
+			label = strings.Join(helpGroupKeys(bindings, b.HelpGroup), "/")
+		}
+		lines = append(lines, fmt.Sprintf("%-4s  %s", label, b.HelpGroup))
 	}
 
 	lines = append(lines,
@@ -37,6 +50,17 @@ func helpLines(prefixLabel string, detachable bool, custom ...[]keys.Binding) []
 		"any key closes this",
 	)
 	return lines
+}
+
+// helpGroupKeys returns the key of every binding in group, in table order.
+func helpGroupKeys(bindings []keys.Binding, group string) []string {
+	var out []string
+	for _, b := range bindings {
+		if b.HelpGroup == group {
+			out = append(out, b.Key)
+		}
+	}
+	return out
 }
 
 // drawHelpOverlay paints a bordered box centred on scr.

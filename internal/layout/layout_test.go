@@ -285,3 +285,136 @@ func TestLayoutPropertyInvariants(t *testing.T) {
 		}
 	})
 }
+
+// A move swaps the focused column with its neighbour, focus follows the
+// column, and the width travels with it: order is presentation, and a
+// pane's logical width is its column's width wherever the column sits.
+func TestMoveLeftAndRightSwapWithNeighbourAndKeepFocus(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20)
+	s.AddColumn(2, 50, 20)
+	s.AddColumn(3, 60, 20) // focus on 3
+
+	steps := []struct {
+		move func()
+		want []int
+	}{
+		{s.MoveLeft, []int{1, 3, 2}},
+		{s.MoveLeft, []int{3, 1, 2}},
+		{s.MoveLeft, []int{3, 1, 2}}, // left edge: no-op
+		{s.MoveRight, []int{1, 3, 2}},
+		{s.MoveRight, []int{1, 2, 3}},
+		{s.MoveRight, []int{1, 2, 3}}, // right edge: no-op
+	}
+	for i, st := range steps {
+		st.move()
+		got := s.PaneIDs()
+		if !equalInts(got, st.want) {
+			t.Fatalf("step %d: PaneIDs() = %v, want %v", i, got, st.want)
+		}
+		if f := s.FocusedPaneID(); f != 3 {
+			t.Fatalf("step %d: focus = %d, want 3 (focus follows the column)", i, f)
+		}
+		if w, _ := s.ColumnWidth(3); w != 60 {
+			t.Fatalf("step %d: ColumnWidth(3) = %d, want 60", i, w)
+		}
+	}
+
+	empty := layout.NewStrip()
+	empty.MoveLeft()
+	empty.MoveRight()
+	if empty.ColCount() != 0 {
+		t.Fatalf("moves on an empty strip changed it")
+	}
+}
+
+// FocusLast returns to the previous pane, and the pane it leaves becomes
+// the new previous one, so pressing it twice is a round trip.
+func TestFocusLastTogglesBetweenTwoPanes(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20)
+	s.AddColumn(2, 40, 20)
+	s.AddColumn(3, 40, 20) // focus 3
+
+	s.FocusPaneID(1)
+	s.FocusLast()
+	if got := s.FocusedPaneID(); got != 3 {
+		t.Fatalf("after FocusLast: focus = %d, want 3", got)
+	}
+	s.FocusLast()
+	if got := s.FocusedPaneID(); got != 1 {
+		t.Fatalf("after second FocusLast: focus = %d, want 1", got)
+	}
+}
+
+// Every way focus can move feeds the record -- keys, clicks, attention
+// jumps and digit jumps all end in one of these.
+func TestFocusLastTracksEveryFocusMove(t *testing.T) {
+	for name, move := range map[string]func(*layout.Strip){
+		"FocusLeft":   func(s *layout.Strip) { s.FocusLeft() },
+		"FocusRight":  func(s *layout.Strip) { s.FocusRight() },
+		"FocusPaneID": func(s *layout.Strip) { s.FocusPaneID(3) },
+		"AddColumn":   func(s *layout.Strip) { s.AddColumn(4, 40, 20) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := layout.NewStrip()
+			s.AddColumn(1, 40, 20)
+			s.AddColumn(2, 40, 20)
+			s.AddColumn(3, 40, 20)
+			s.FocusPaneID(2)
+
+			move(s)
+
+			if got := s.LastFocusPaneID(); got != 2 {
+				t.Errorf("LastFocusPaneID() = %d, want 2", got)
+			}
+		})
+	}
+}
+
+// Nothing that leaves the focused pane where it was may overwrite the
+// record: not a move at an edge, not re-focusing the same pane, not an
+// unknown ID, and not reordering (the focused pane is the same pane).
+func TestFocusLastIgnoresNoOpsAndMoves(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20)
+	s.AddColumn(2, 40, 20)
+	s.FocusPaneID(1) // record: 2
+	// Ordered: after MoveRight, pane 1 is no longer at the left edge.
+	for _, step := range []struct {
+		name string
+		noop func()
+	}{
+		{"FocusLeft at edge", s.FocusLeft},
+		{"same pane", func() { s.FocusPaneID(1) }},
+		{"unknown pane", func() { s.FocusPaneID(99) }},
+		{"MoveRight", s.MoveRight},
+		{"MoveLeft", s.MoveLeft},
+	} {
+		step.noop()
+		if got := s.LastFocusPaneID(); got != 2 {
+			t.Errorf("%s: LastFocusPaneID() = %d, want 2", step.name, got)
+		}
+	}
+}
+
+// A dead pane cannot be returned to. Kill clears the record rather than
+// leaving tab to silently do nothing forever.
+func TestKillingLastFocusedPaneForgetsIt(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20)
+	s.AddColumn(2, 40, 20)
+	s.AddColumn(3, 40, 20)
+	s.FocusPaneID(1)
+	s.FocusPaneID(3) // record: 1
+
+	s.KillPane(1)
+
+	if got := s.LastFocusPaneID(); got != 0 {
+		t.Errorf("LastFocusPaneID() after killing it = %d, want 0", got)
+	}
+	s.FocusLast()
+	if got := s.FocusedPaneID(); got != 3 {
+		t.Errorf("FocusLast with no record moved focus to %d", got)
+	}
+}
