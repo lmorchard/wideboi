@@ -145,13 +145,18 @@ layout = "cards"
 [keys]
 kill_pane  = "k"
 scroll_up  = "e"
-focus_left = "h"
+focus_left = ["h", "left"]   # several keys: the first is shown in the bar
+detach     = []              # unbind
 ```
 
 Rules for key remapping:
+- A value is one key, a list of keys, or `[]` to unbind the action.
+- Setting an action replaces all of its default keys, including the arrow keys on `focus_left` and `focus_right`. List every key you want to keep.
+- The first key in a list is the one the status bar and help overlay show.
+- `quit` cannot be unbound: it is the only way to end the session.
 - Keys `i`, `m`, and `[` are reserved by wideboi because their control bytes decode as Tab, Enter, and Escape, which breaks repeat chords.
-- No two actions may be assigned to the same key.
-- Remapped single letters `a-z` automatically receive matching `ctrl+<letter>` repeat chords.
+- No two actions may share a key, even when the other action is left at its defaults. The error names the other action so you can remap it too.
+- Every single letter `a-z` bound to an action gets a matching `ctrl+<letter>` repeat chord, except on `toggle_cards`: repeating a toggle only undoes it, and `ctrl+c` stays a way out of control mode.
 - The digit keys `0`-`9` are fixed and cannot be remapped, or used for another action.
 
 ### CLI Flags

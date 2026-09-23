@@ -156,9 +156,9 @@ func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
 }
 
 func TestCustomBindingsInControlHelpAndHelpLines(t *testing.T) {
-	custom, err := keys.BuildBindings(map[string]string{
-		keys.ActionNameKillPane: "k",
-		keys.ActionNameScrollUp: "e",
+	custom, err := keys.BuildBindings(map[string][]string{
+		keys.ActionNameKillPane: {"k"},
+		keys.ActionNameScrollUp: {"e"},
 	})
 	if err != nil {
 		t.Fatalf("BuildBindings: %v", err)
@@ -226,12 +226,47 @@ func TestHelpGroupLabelIsItsKeys(t *testing.T) {
 
 // The real table, remapped: a grouped line names the key the user chose.
 func TestRemappedPairKeepsItsGroupLabel(t *testing.T) {
-	custom, err := keys.BuildBindings(map[string]string{keys.ActionNameFocusLeft: "e"})
+	custom, err := keys.BuildBindings(map[string][]string{keys.ActionNameFocusLeft: {"e"}})
 	if err != nil {
 		t.Fatalf("BuildBindings: %v", err)
 	}
 	joined := strings.Join(helpLines("C-b", true, custom), "\n")
 	if !strings.Contains(joined, "e/l   focus the column left / right") {
 		t.Errorf("remapped focus pair not labelled e/l:\n%s", joined)
+	}
+}
+
+func TestHelpShowsOnlyPrimaryAndOmitsUnbound(t *testing.T) {
+	custom, err := keys.BuildBindings(map[string][]string{
+		keys.ActionNameNewColumn: {"n", "enter"},
+		keys.ActionNameDetach:    {},
+	})
+	if err != nil {
+		t.Fatalf("BuildBindings: %v", err)
+	}
+	text := strings.Join(helpLines("C-b", true, custom), "\n")
+	if !strings.Contains(text, "n     open a new column") {
+		t.Errorf("help lacks the primary-key line for new_column:\n%s", text)
+	}
+	for _, absent := range []string{"enter", "detach"} {
+		if strings.Contains(text, absent) {
+			t.Errorf("help mentions %q:\n%s", absent, text)
+		}
+	}
+}
+
+// A pair's shared line names both directions, so once one is unbound the
+// survivor must fall back to its own description.
+func TestUnbindingHalfAPairDropsTheSharedLine(t *testing.T) {
+	custom, err := keys.BuildBindings(map[string][]string{keys.ActionNameFocusRight: {}})
+	if err != nil {
+		t.Fatalf("BuildBindings: %v", err)
+	}
+	text := strings.Join(helpLines("C-b", true, custom), "\n")
+	if !strings.Contains(text, "h     focus the column to the left") {
+		t.Errorf("help lacks focus_left's own line:\n%s", text)
+	}
+	if strings.Contains(text, "focus the column left / right") {
+		t.Errorf("help still advertises the unbound direction:\n%s", text)
 	}
 }

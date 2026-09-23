@@ -115,7 +115,7 @@ func (r *router) route(ev uv.KeyPressEvent) route {
 		if b.NeedsDetach && !r.detachable {
 			continue
 		}
-		if name, ok := b.CtrlForm(); ok && ev.MatchString(name) {
+		if forms := b.CtrlForms(); len(forms) > 0 && ev.MatchString(forms...) {
 			return r.fire(b, true)
 		}
 		if ev.MatchString(b.MatchNames()...) {

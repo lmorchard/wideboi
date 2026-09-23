@@ -618,6 +618,28 @@ def case_config_file_and_key_remapping(fail):
             pass
 
 
+def case_config_key_list_alias_moves_focus(fail):
+    # A list entry's second key is an alias; typing it must move focus.
+    # Startup focuses pane 1 on the left, as case_click_focuses_pane
+    # relies on, so focus_right has somewhere to go.
+    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+        f.write('[keys]\nfocus_right = ["l", "g"]\n')
+        cfg_path = f.name
+    try:
+        s = Session(args=["-c", cfg_path])
+        before = focus_pane_id(s.output(), s.rows)
+        s.type("\x02g")  # C-b g -> the alias for focus_right
+        after = focus_pane_id(s.output(), s.rows)
+        s.close()
+        if before is None or after is None:
+            fail("no focus-pane-id observed around the alias")
+            return
+        if after == before:
+            fail(f"alias g for focus_right left focus on pane {before}")
+    finally:
+        os.unlink(cfg_path)
+
+
 
 # The OSC 133 case is back, and asserts through focus_pane_id.
 #
@@ -1023,6 +1045,7 @@ CASES = [
     ("reclaimed control keys pass through", case_reclaimed_control_keys_pass_through),
     ("custom prefix from env", case_custom_prefix_from_env),
     ("config file and key remapping", case_config_file_and_key_remapping),
+    ("config key list alias moves focus", case_config_key_list_alias_moves_focus),
     ("osc133 status drives smart jump", case_osc133_status_drives_smart_jump),
     ("card layout toggles", case_card_layout_toggles),
     ("scroll mode marks off-screen panes", case_scroll_mode_marks_off_screen_panes),
