@@ -403,6 +403,8 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 
 	var (
 		screenLock sync.Mutex
+		// cConnLock serializes teardown/reconnect swaps of cConn
+		cConnLock sync.Mutex
 		// stopped: a signal's teardown has begun, so stop drawing.
 		stopped atomic.Bool
 		// hungUp: the connection is over, so there is nothing left
@@ -433,7 +435,10 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		// no detach before it, and ends the session itself.
 		var late bool
 		if owner && !hungUp.Load() {
-			late = !hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
+			cConnLock.Lock()
+			currentConn := cConn
+			cConnLock.Unlock()
+			late = !hangUp(ctx, currentConn, protocol.MsgShutdown{}, shutdownCeiling)
 		}
 
 		var err error
@@ -494,8 +499,12 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	var frameC <-chan time.Time
 
 	for {
+		cConnLock.Lock()
+		currentConn := cConn
+		cConnLock.Unlock()
+
 		select {
-		case msg, ok := <-cConn.ServerSendChan():
+		case msg, ok := <-currentConn.ServerSendChan():
 			if !ok {
 				hungUp.Store(true)
 				awaitReRaise()
@@ -505,7 +514,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				// to look exactly the same from here and so hid a
 				// defect that killed every session on the first
 				// coloured cell a child printed.
-				if err := cConn.Err(); err != nil {
+				if err := currentConn.Err(); err != nil {
 					return fmt.Errorf("connection to wideboi server failed: %w", err)
 				}
 				if owner && !gotMsg {
@@ -534,11 +543,14 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 
 				// Close the old transport pumps and swap in the new one.
 				// The transport handles stopping its own writeLoop when Close is called.
-				cConn.Close()
+				currentConn.Close()
 
+				cConnLock.Lock()
 				cConn = transport.NewClientSocketConn(reconnectConn, 256)
 				cConn.RunPumps(ctx)
 				cli.SetTransport(cConn)
+				cConnLock.Unlock()
+
 				cli.Attach(ctx)
 				continue
 			}
@@ -583,7 +595,10 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					// Waiting for the hang-up makes sure the detach
 					// was read before our socket closes.
 					slog.Info("client detaching")
-					if !hangUp(ctx, cConn, protocol.MsgDetach{}, detachCeiling) {
+					cConnLock.Lock()
+					hConn := cConn
+					cConnLock.Unlock()
+					if !hangUp(ctx, hConn, protocol.MsgDetach{}, detachCeiling) {
 						slog.Warn("server did not acknowledge the detach", "ceiling", detachCeiling)
 					}
 					hungUp.Store(true)
