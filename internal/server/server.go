@@ -811,7 +811,10 @@ func (s *Server) Close() error {
 			panesToClose = append(panesToClose, p)
 		}
 		s.panes = make(map[int]*Pane)
-		s.pollDescendantsLocked()
+		// No final pollDescendantsLocked here: each pane's Close walks
+		// its own live tree (ptyx.Kill's snapshot), so a poll now
+		// would find nothing that walk misses. s.escapees is for what
+		// the background poll saw before it left the tree (#83).
 		escapees := make([]int, 0, len(s.escapees))
 		for pid := range s.escapees {
 			escapees = append(escapees, pid)
