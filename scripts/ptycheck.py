@@ -102,8 +102,17 @@ def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
         # the process we reaped spawned another copy of itself. A live
         # parent that is not us belongs to somebody else's run.
         if ppid == own_pid or ppid == 1 or ppid not in live:
-            strays.append(f"pid={pid} ppid={ppid} command={command.strip()}")
-    return strays
+            strays.append((pid, ppid, command))
+
+    if strays:
+        # Before reporting, give any strays orphaned onto init a moment to
+        # exit. A sibling ptycheck run's server takes a moment to reap after
+        # its owner is signalled (reparenting to 1), and if we scan in that
+        # window we see it as ppid=1. (Issue #102)
+        alive_pids = set(still_alive([pid for pid, _, _ in strays], within=2.0))
+        strays = [(pid, ppid, cmd) for pid, ppid, cmd in strays if pid in alive_pids]
+
+    return [f"pid={pid} ppid={ppid} command={command.strip()}" for pid, ppid, command in strays]
 
 
 def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
