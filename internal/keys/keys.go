@@ -13,6 +13,8 @@ package keys
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -29,8 +31,11 @@ const (
 	ActionNameCycleWidth  = "cycle_width"
 	ActionNameGrowWidth   = "grow_width"
 	ActionNameShrinkWidth = "shrink_width"
+	ActionNameMoveLeft    = "move_left"
+	ActionNameMoveRight   = "move_right"
 	ActionNameKillPane    = "kill_pane"
 	ActionNameSmartJump   = "smart_jump"
+	ActionNameFocusLast   = "focus_last"
 	ActionNameToggleCards = "toggle_cards"
 	ActionNameHelp        = "help"
 	ActionNameDetach      = "detach"
@@ -57,7 +62,14 @@ const (
 	ActionHelp
 	// ActionExit leaves control mode without doing anything else.
 	ActionExit
+	// ActionFocusColumn focuses the column at position Column, counting
+	// from 1 at the left.
+	ActionFocusColumn
 )
+
+// LastColumn is Column's value for "the rightmost column, however many
+// there are".
+const LastColumn = -1
 
 // Reserved names the letters that can never carry a binding, and why.
 // Their control bytes are already spoken for by keys every terminal
@@ -86,6 +98,9 @@ type Binding struct {
 	// Scroll is the offset delta when Action is ActionScroll. Positive
 	// moves back into history; internal/server/term clamps both ends.
 	Scroll int
+	// Column is the 1-based position ActionFocusColumn focuses, or
+	// LastColumn.
+	Column int
 
 	// BarGroup is the status-bar label. Bindings sharing a group collapse
 	// into one entry, which is how h/j/k/l occupy nine cells rather than
@@ -93,6 +108,13 @@ type Binding struct {
 	BarGroup string
 	// Long is the help overlay's one-line description.
 	Long string
+	// HelpGroup collapses bindings into one help-overlay line, the way
+	// BarGroup does for the status bar, and is that line's text.
+	HelpGroup string
+	// HelpKey overrides the key label on a HelpGroup's line. Without it
+	// the label is the members' keys joined with "/", which stays right
+	// when a user remaps one of them.
+	HelpKey string
 
 	// NeedsDetach hides the binding unless the client reached its server
 	// over a socket. An in-process wideboi owns its panes, so detaching
@@ -114,28 +136,47 @@ type Binding struct {
 	NoRepeat bool
 }
 
+// Help-overlay lines shared by pairs of bindings. The overlay has to fit
+// at 80x24 (TestHelpOverlayFitsAt80x24), and one line per pair is what
+// keeps it there. Each group's order matches its label: h/l, j/k, o/p, y/u.
+const (
+	helpFocus  = "focus the column left / right"
+	helpScroll = "scroll this pane's history down / up"
+	helpWidth  = "shrink / grow this column's width"
+	helpMove   = "move this column left / right"
+)
+
 // Bindings is the table, in status-bar display order.
-var Bindings = []Binding{
+var Bindings = slices.Concat([]Binding{
 	{ActionName: ActionNameFocusLeft, Key: "h", Aliases: []string{"left"}, Action: ActionVerb, Verb: protocol.VerbFocusLeft,
-		BarGroup: "hjkl move", Long: "focus the column to the left"},
+		BarGroup: "hjkl move", Long: "focus the column to the left", HelpGroup: helpFocus},
 	{ActionName: ActionNameFocusRight, Key: "l", Aliases: []string{"right"}, Action: ActionVerb, Verb: protocol.VerbFocusRight,
-		BarGroup: "hjkl move", Long: "focus the column to the right"},
+		BarGroup: "hjkl move", Long: "focus the column to the right", HelpGroup: helpFocus},
 	{ActionName: ActionNameScrollDown, Key: "j", Action: ActionScroll, Scroll: -10,
-		BarGroup: "hjkl move", Long: "scroll this pane's history down"},
+		BarGroup: "hjkl move", Long: "scroll this pane's history down", HelpGroup: helpScroll},
 	{ActionName: ActionNameScrollUp, Key: "k", Action: ActionScroll, Scroll: 10,
-		BarGroup: "hjkl move", Long: "scroll this pane's history up"},
+		BarGroup: "hjkl move", Long: "scroll this pane's history up", HelpGroup: helpScroll},
 	{ActionName: ActionNameNewColumn, Key: "n", Action: ActionVerb, Verb: protocol.VerbNewColumn,
 		BarGroup: "n new", Long: "open a new column"},
 	{ActionName: ActionNameCycleWidth, Key: "w", Action: ActionVerb, Verb: protocol.VerbCycleWidth,
 		BarGroup: "w width", Long: "cycle this column's width"},
 	{ActionName: ActionNameShrinkWidth, Key: "o", Action: ActionVerb, Verb: protocol.VerbShrinkWidth,
-		Long: "shrink this column's width"},
+		Long: "shrink this column's width", HelpGroup: helpWidth},
 	{ActionName: ActionNameGrowWidth, Key: "p", Action: ActionVerb, Verb: protocol.VerbGrowWidth,
-		Long: "grow this column's width"},
+		Long: "grow this column's width", HelpGroup: helpWidth},
+	{ActionName: ActionNameMoveLeft, Key: "y", Action: ActionVerb, Verb: protocol.VerbMoveLeft,
+		Long: "move this column left", HelpGroup: helpMove},
+	{ActionName: ActionNameMoveRight, Key: "u", Action: ActionVerb, Verb: protocol.VerbMoveRight,
+		Long: "move this column right", HelpGroup: helpMove},
 	{ActionName: ActionNameKillPane, Key: "x", Action: ActionVerb, Verb: protocol.VerbKillPane,
 		BarGroup: "x kill", Long: "kill the focused pane"},
 	{ActionName: ActionNameSmartJump, Key: "a", Action: ActionVerb, Verb: protocol.VerbSmartJump,
 		BarGroup: "a attn", Long: "jump to a pane wanting attention"},
+	// tab has no ctrl form -- CtrlForm wants a single letter, and ctrl+i
+	// decodes as tab anyway -- and repeating a toggle only bounces.
+	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
+		Long: "focus the previously focused pane"},
+}, digitBindings(), []Binding{
 	{ActionName: ActionNameHelp, Key: "?", Action: ActionHelp,
 		BarGroup: "? help", Long: "show this help"},
 	{ActionName: ActionNameDetach, Key: "d", Action: ActionDetach, NeedsDetach: true,
@@ -156,6 +197,28 @@ var Bindings = []Binding{
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},
 	{ActionName: ActionNameExit, Key: "esc", Action: ActionExit, Essential: true,
 		BarGroup: "esc exit", Long: "leave control mode"},
+})
+
+// digitHelp is the one overlay line all ten digit bindings share.
+const digitHelp = "focus a column by position, 0 the last"
+
+// digitBindings returns 1-9, focusing the column at that position from
+// the left, and 0 for the last one. Positions rather than pane IDs: IDs
+// are never reused, so after a few kills they no longer fit in a digit.
+//
+// These have no ActionName in validActions, so they cannot be remapped;
+// BuildBindings' collision check still stops another action landing on
+// one.
+func digitBindings() []Binding {
+	out := make([]Binding, 0, 10)
+	for n := 1; n <= 9; n++ {
+		out = append(out, Binding{ActionName: fmt.Sprintf("focus_column_%d", n),
+			Key: strconv.Itoa(n), Action: ActionFocusColumn, Column: n,
+			Long: fmt.Sprintf("focus column %d", n), HelpGroup: digitHelp, HelpKey: "0-9"})
+	}
+	return append(out, Binding{ActionName: "focus_column_last",
+		Key: "0", Action: ActionFocusColumn, Column: LastColumn,
+		Long: "focus the last column", HelpGroup: digitHelp, HelpKey: "0-9"})
 }
 
 // CtrlForm returns the ultraviolet key name for this binding's repeat
@@ -227,9 +290,12 @@ var validActions = map[string]string{
 	ActionNameCycleWidth:  ActionNameCycleWidth,
 	ActionNameGrowWidth:   ActionNameGrowWidth,
 	ActionNameShrinkWidth: ActionNameShrinkWidth,
+	ActionNameMoveLeft:    ActionNameMoveLeft,
+	ActionNameMoveRight:   ActionNameMoveRight,
 	ActionNameKillPane:    ActionNameKillPane,
 	ActionNameSmartJump:   ActionNameSmartJump,
 	"attn":                ActionNameSmartJump,
+	ActionNameFocusLast:   ActionNameFocusLast,
 	ActionNameToggleCards: ActionNameToggleCards,
 	ActionNameHelp:        ActionNameHelp,
 	ActionNameDetach:      ActionNameDetach,
@@ -295,7 +361,7 @@ func BuildBindings(custom map[string]string) ([]Binding, error) {
 	for act, key := range custom {
 		canonical, ok := validActions[act]
 		if !ok {
-			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, kill_pane, smart_jump, toggle_cards, help, detach, quit, exit", act)
+			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, move_left, move_right, kill_pane, smart_jump, focus_last, toggle_cards, help, detach, quit, exit", act)
 		}
 		k := strings.ToLower(strings.TrimSpace(key))
 		if k == "" {

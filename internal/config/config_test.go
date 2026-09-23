@@ -103,7 +103,7 @@ func TestLoadTomlKeysRemapping(t *testing.T) {
 	tomlContent := `
 [keys]
 kill_pane = "k"
-scroll_up = "u"
+scroll_up = "e"
 `
 	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0600); err != nil {
 		t.Fatal(err)
@@ -119,8 +119,8 @@ scroll_up = "u"
 		if b.ActionName == keys.ActionNameKillPane && b.Key != "k" {
 			t.Errorf("kill_pane key = %q, want k", b.Key)
 		}
-		if b.ActionName == keys.ActionNameScrollUp && b.Key != "u" {
-			t.Errorf("scroll_up key = %q, want u", b.Key)
+		if b.ActionName == keys.ActionNameScrollUp && b.Key != "e" {
+			t.Errorf("scroll_up key = %q, want e", b.Key)
 		}
 	}
 }

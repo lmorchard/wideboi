@@ -1,6 +1,8 @@
 package client
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,9 +12,29 @@ import (
 
 // The overlay documents the table, so it must document all of it. A
 // binding missing from here is a binding a user cannot discover.
+//
+// A grouped binding is documented by its group's line rather than its
+// own Long, so for those the check is that the exact group line is
+// there and names the key -- through the joined label, or through a
+// HelpKey that stands for the whole group ("0-9").
 func TestHelpLinesNameEveryBinding(t *testing.T) {
-	joined := strings.Join(helpLines("C-b", true), "\n")
+	lines := helpLines("C-b", true)
+	joined := strings.Join(lines, "\n")
 	for _, b := range keys.Bindings {
+		if b.HelpGroup != "" {
+			label := b.HelpKey
+			if label == "" {
+				label = strings.Join(helpGroupKeys(keys.Bindings, b.HelpGroup), "/")
+				if !slices.Contains(strings.Split(label, "/"), b.Key) {
+					t.Errorf("group label %q does not name %q", label, b.Key)
+				}
+			}
+			want := fmt.Sprintf("%-4s  %s", label, b.HelpGroup)
+			if !slices.Contains(lines, want) {
+				t.Errorf("overlay omits %q's group line %q", b.Key, want)
+			}
+			continue
+		}
 		if !strings.Contains(joined, b.Long) {
 			t.Errorf("overlay omits the description of %q: %q", b.Key, b.Long)
 		}
@@ -182,5 +204,25 @@ func TestHelpOutranksMotion(t *testing.T) {
 	cli.mu.Unlock()
 	if step != 0 {
 		t.Errorf("animation advanced to step %d while the overlay was up", step)
+	}
+}
+
+// The overlay is the only place overlay-only bindings are discoverable,
+// so it must not clip on the most common small terminal. It sat at
+// exactly 24 rows before #80 and #74 added four lines; grouping pairs is
+// what made room. drawHelpOverlay never touches the last column, hence
+// 79 wide.
+func TestHelpOverlayFitsAt80x24(t *testing.T) {
+	for _, detachable := range []bool{true, false} {
+		lines := helpLines("C-b", detachable)
+		if h := len(lines) + 2; h > 24 { // + top and bottom border
+			t.Errorf("detachable=%v: overlay is %d rows, 24 available:\n%s",
+				detachable, h, strings.Join(lines, "\n"))
+		}
+		for _, l := range lines {
+			if w := runeLen(l) + 4; w > 79 { // + border and padding
+				t.Errorf("line %q is %d wide, 79 available", l, w)
+			}
+		}
 	}
 }

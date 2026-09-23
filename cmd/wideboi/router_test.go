@@ -159,6 +159,10 @@ func assertAction(t *testing.T, b keys.Binding, got route) {
 		if got.Kind != routeDetach {
 			t.Errorf("%q: got %+v, want routeDetach", b.Key, got)
 		}
+	case keys.ActionFocusColumn:
+		if got.Kind != routeFocusColumn || got.Column != b.Column {
+			t.Errorf("%q: got %+v, want focus column %d", b.Key, got, b.Column)
+		}
 	case keys.ActionHelp, keys.ActionExit:
 		if got.Kind != routeIgnore {
 			t.Errorf("%q: got %+v, want routeIgnore", b.Key, got)
@@ -171,7 +175,7 @@ func assertAction(t *testing.T, b keys.Binding, got route) {
 // not evidence you meant a key that does not exist.
 func TestUnknownKeysExitControlModeWithAnyModifier(t *testing.T) {
 	cases := []uv.KeyPressEvent{
-		key('z'), key('5'),
+		key('z'), key('g'), // 5 was here until the digits were bound
 		{Code: 'g', Mod: uv.ModCtrl},
 		{Code: 'z', Mod: uv.ModCtrl},
 		ctrl('c'),
@@ -335,6 +339,8 @@ func keyNamed(t *testing.T, name string) uv.KeyPressEvent {
 		return uv.KeyPressEvent{Code: uv.KeyEscape}
 	case "?":
 		return uv.KeyPressEvent{Code: '?', Text: "?"}
+	case "tab":
+		return uv.KeyPressEvent{Code: uv.KeyTab}
 	}
 	if rest, ok := strings.CutPrefix(name, "ctrl+"); ok && len(rest) == 1 {
 		return uv.KeyPressEvent{Code: rune(rest[0]), Mod: uv.ModCtrl}

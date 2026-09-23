@@ -50,11 +50,18 @@ without doing anything. For the full list, press `?` in control mode.
 | `w` | cycle this column's width |
 | `x` | kill the focused pane |
 | `a` | jump to a pane wanting attention |
+| `1`–`9` / `0` | focus the column at that position from the left / the last column |
+| `tab` | focus the previously focused pane |
+| `y` / `u` | move this column one place left / right |
 | `?` | show the full help overlay |
 | `d` | detach, leaving the session running |
 | `q` | end the session: close every pane and stop the server |
 | `esc` | leave control mode |
 | `ctrl+b` | send a literal `ctrl+b` to the pane, and leave control mode |
+
+Each pane's header starts with its position, then its ID in brackets:
+` 2 [7]` is the second column from the left, pane 7. The digit keys go by
+position, so a column you move with `y` / `u` renumbers.
 
 `ctrl+b` is the only key wideboi keeps for itself. Everything else goes
 to the focused pane, including `ctrl+c`, `ctrl+q`, `ctrl+w`, `ctrl+l`
@@ -137,7 +144,7 @@ layout = "cards"
 
 [keys]
 kill_pane  = "k"
-scroll_up  = "u"
+scroll_up  = "e"
 focus_left = "h"
 ```
 
@@ -145,6 +152,7 @@ Rules for key remapping:
 - Keys `i`, `m`, and `[` are reserved by wideboi because their control bytes decode as Tab, Enter, and Escape, which breaks repeat chords.
 - No two actions may be assigned to the same key.
 - Remapped single letters `a-z` automatically receive matching `ctrl+<letter>` repeat chords.
+- The digit keys `0`-`9` are fixed and cannot be remapped, or used for another action.
 
 ### CLI Flags
 

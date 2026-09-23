@@ -61,6 +61,10 @@ func TestTableIsWellFormed(t *testing.T) {
 			if b.Scroll == 0 {
 				t.Errorf("%q is ActionScroll with a zero delta, which does nothing", b.Key)
 			}
+		case keys.ActionFocusColumn:
+			if (b.Column < 1 || b.Column > 9) && b.Column != keys.LastColumn {
+				t.Errorf("%q is ActionFocusColumn with Column %d; want 1-9 or LastColumn", b.Key, b.Column)
+			}
 		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit:
 		default:
 			t.Errorf("%q has unknown Action %v", b.Key, b.Action)
@@ -124,13 +128,15 @@ func TestEveryPlainFormMatchesItself(t *testing.T) {
 			return []byte("\x1b[C"), true
 		case "?":
 			return []byte{0x3f}, true
+		case "tab":
+			return []byte{0x09}, true
 		case ".":
 			return []byte{0x2e}, true
 		case ",":
 			return []byte{0x2c}, true
 		default:
-			// Single letter
-			if len(name) == 1 && name[0] >= 'a' && name[0] <= 'z' {
+			// Single letter or digit
+			if len(name) == 1 && (name[0] >= 'a' && name[0] <= 'z' || name[0] >= '0' && name[0] <= '9') {
 				return []byte{name[0]}, true
 			}
 			return nil, false
@@ -302,10 +308,10 @@ func TestBuildBindingsDefaults(t *testing.T) {
 }
 
 func TestBuildBindingsCustomValid(t *testing.T) {
-	// Remap kill_pane to 'k' and scroll_up to 'u'
+	// Remap kill_pane to 'k' and scroll_up to 'e'
 	custom := map[string]string{
 		keys.ActionNameKillPane: "k",
-		keys.ActionNameScrollUp: "u",
+		keys.ActionNameScrollUp: "e",
 	}
 	b, err := keys.BuildBindings(custom)
 	if err != nil {
@@ -326,12 +332,25 @@ func TestBuildBindingsCustomValid(t *testing.T) {
 			}
 		}
 		if item.ActionName == keys.ActionNameScrollUp {
-			if item.Key != "u" {
-				t.Errorf("scroll_up key = %q, want %q", item.Key, "u")
+			if item.Key != "e" {
+				t.Errorf("scroll_up key = %q, want %q", item.Key, "e")
 			}
-			if item.BarGroup != "hjul move" {
-				t.Errorf("movement BarGroup = %q, want %q", item.BarGroup, "hjul move")
+			if item.BarGroup != "hjel move" {
+				t.Errorf("movement BarGroup = %q, want %q", item.BarGroup, "hjel move")
 			}
+		}
+	}
+}
+
+// The reorder verbs are remappable like any other.
+func TestBuildBindingsRemapsMoveVerbs(t *testing.T) {
+	b, err := keys.BuildBindings(map[string]string{keys.ActionNameMoveLeft: "e"})
+	if err != nil {
+		t.Fatalf("BuildBindings failed: %v", err)
+	}
+	for _, item := range b {
+		if item.ActionName == keys.ActionNameMoveLeft && item.Key != "e" {
+			t.Errorf("move_left key = %q, want %q", item.Key, "e")
 		}
 	}
 }
@@ -358,6 +377,37 @@ func TestBuildBindingsDuplicateKeyRejected(t *testing.T) {
 		t.Error("expected error for duplicate key 'x', got nil")
 	} else if !strings.Contains(err.Error(), "duplicate") && !strings.Contains(err.Error(), "collision") {
 		t.Errorf("expected duplicate/collision error, got %v", err)
+	}
+}
+
+// Digits are fixed, but they still hold their keys: remapping another
+// action onto one is a collision, not a silent shadow.
+func TestBuildBindingsRejectsRemapOntoADigit(t *testing.T) {
+	_, err := keys.BuildBindings(map[string]string{keys.ActionNameKillPane: "1"})
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("remapping kill_pane onto 1: err = %v, want a duplicate-key error", err)
+	}
+}
+
+// Ten digit rows, one per key, 1-9 by position and 0 for the last.
+func TestDigitsFocusColumnsByPosition(t *testing.T) {
+	want := map[string]int{"0": keys.LastColumn}
+	for n := 1; n <= 9; n++ {
+		want[string(rune('0'+n))] = n
+	}
+	got := map[string]int{}
+	for _, b := range keys.Bindings {
+		if b.Action == keys.ActionFocusColumn {
+			got[b.Key] = b.Column
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("digit bindings = %v, want %v", got, want)
+	}
+	for k, n := range want {
+		if got[k] != n {
+			t.Errorf("key %q focuses column %d, want %d", k, got[k], n)
+		}
 	}
 }
 
@@ -413,7 +463,7 @@ func TestBuildBindingsValidNamedKeysAccepted(t *testing.T) {
 func TestBarItemsFor(t *testing.T) {
 	b, err := keys.BuildBindings(map[string]string{
 		keys.ActionNameKillPane: "k",
-		keys.ActionNameScrollUp: "u",
+		keys.ActionNameScrollUp: "e",
 	})
 	if err != nil {
 		t.Fatalf("BuildBindings failed: %v", err)
@@ -423,7 +473,7 @@ func TestBarItemsFor(t *testing.T) {
 	if !strings.Contains(joined, "k kill") {
 		t.Errorf("bar items should contain 'k kill', got %q", joined)
 	}
-	if !strings.Contains(joined, "hjul move") {
-		t.Errorf("bar items should contain 'hjul move', got %q", joined)
+	if !strings.Contains(joined, "hjel move") {
+		t.Errorf("bar items should contain 'hjel move', got %q", joined)
 	}
 }
