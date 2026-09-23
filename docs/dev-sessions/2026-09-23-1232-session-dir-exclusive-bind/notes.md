@@ -32,3 +32,47 @@
 ### Copilot review (#107)
 - **Fixed:** `Config.Session` was decoded from TOML but never resolved, so `Load` returned it empty. `applySessionLayer` now keeps it in step with `Socket` (the name, or empty when a path won; `default` by default), and the layering test asserts it.
 - **Fixed:** the named-sessions attachcheck case always deleted its short `/tmp` dir, even on failure. `private_run_dir` gained a `parent` argument, and the case uses it, so a failure keeps its logs like every other run dir.
+
+## Retrospective
+
+### Recap
+Shipped as #107 (squash `438391b`), closing #27 and #86. #26 was scoped out at the start with a comment recording why: its protocol-version premise was stale, and reconnect conflicts with the owner-EOF teardown guarantee. What landed:
+- A lifetime `flock` on `<socket>.lock`, with a probe under it for pre-lock servers.
+- Exit code 3, and an owner that redials and attaches when its spawned server loses.
+- `-L`/`WIDEBOI_SESSION`/`session`, with per-layer name-or-path resolution.
+- `wideboi ls`.
+- Logs beside the socket, and pty suites that keep a failed run's dir.
+
+### Scope drift
+- **Logs came into scope in brainstorm.** Les chose per-session logs over my "leave shared, file a follow-up". That was right, but the spec didn't foresee the ripple: once logs sit beside the socket, the suites' private run dirs are where the logs live, so deleting them at exit throws away the evidence. That produced `ptylib.private_run_dir`/`run_main` and edits to four scripts. It was the least-planned code in the PR.
+- **The probe didn't fully go away.** The spec said "the dial probe goes away". The self-review brought it back under the lock to protect servers from pre-lock binaries.
+- **`Config.Session`** was added for TOML decode and never resolved. Copilot caught it. The spec said the field was "as configured" and never decided whether anything should read it.
+
+### Surprises
+- `defaultSocketPath()` in `main.go` was dead code; `config.DefaultSocketPath` was the live one.
+- attachcheck imports `smoke`, so smoke's module-level `RUNTIME_DIR` is created as an import side effect. That shaped the run-dir helper.
+- The losing owner paints a local "focus: pane 0" frame before its doomed connection ends, and drops keys typed during the switch-over. The first race test typed into whichever client happened to be `a`.
+- macOS has no `timeout(1)`. A before-fix run was silently skipped once because of it.
+- Something (a hook, presumably) rewrote prose in `plan.md` on disk (contractions). My exact-text checkbox-tick scripts then failed, and Phase 4 was committed without its ticks and amended.
+
+### Workflow friction
+- **Ticking checkboxes by full-line match is brittle.** Match on the `- [ ]` prefix plus a short, stable fragment instead.
+- **Manual verification boxes for TUI behaviour never got ticked in-session.** I ran every scriptable "manual" check myself and recorded the evidence. The four that need a human at a terminal went into the PR test plan instead. That was fine for this project, but the plan still shows them unchecked; worth deciding whether the PR test plan is the canonical place.
+- **The research subagent paid off.** It found the dead code, the shared-log fact and the lack of any locking before brainstorm, and three of the brainstorm questions came straight from it.
+
+### Misses
+- **"What about participants that predate the new arbiter?"** When the spec replaced the probe with a lock, nobody asked what happens with a live server that doesn't take the lock. The self-review caught it before the PR, but it belonged in brainstorm. It's now a LESSONS rule.
+- **An exported field with no reader.** When adding a field to a decoded struct, decide in the spec whether `Load` resolves it or it stays decode-only.
+
+### What worked
+- Proving each test failed first caught real things twice: the flaky race-test draft (2/4), and the before-fix `ls` run that hadn't actually run.
+- The flake was diagnosed by instrumenting the failure message (is the marker on `a`? which client is the loser?), not by raising a ceiling. Every failure turned out to be "`a` is the loser", which pointed straight at the test's design, not the product.
+
+### Left open (not filed)
+- Keys typed into a losing owner during its ~100ms switch-over are dropped.
+- Old `$TMPDIR/wideboi-<uid>/{server,client}.log` files are no longer written or removed.
+
+### Memory / skill candidates
+- Project memory: the main checkout carries other agents' uncommitted work (websocket transport, `fix_client.go`, and more), so do everything in worktrees and never branch, pull or stash there.
+- dev-session skill: brainstorm's research questions could include a "legacy participants" prompt, alongside "generic consumers": *when this replaces a mechanism, what already-running or older peers won't follow the new one?*
+- dev-session skill: tick checkboxes by prefix plus a stable fragment, not the full line.
