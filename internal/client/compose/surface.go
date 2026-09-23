@@ -22,79 +22,9 @@ func NewSurface(cols, rows int) Surface {
 	return uv.NewScreenBuffer(cols, rows)
 }
 
-// Blit draws src into dst. srcRect defines the crop region of src,
-// and dstRect defines where it lands on dst. They must be the same size.
-// Anything outside dstRect or dst's bounds is clipped. Wide glyphs split
-// by the boundary are omitted to avoid clobbering neighboring panes.
-func Blit(dst uv.Screen, src Surface, srcRect, dstRect image.Rectangle) {
-	bounds := dst.Bounds()
-	dstClip := dstRect.Intersect(bounds)
-	if dstClip.Empty() {
-		return
-	}
-
-	// Calculate the offset between src and dst coordinates.
-	// dstX = srcX - srcRect.Min.X + dstRect.Min.X
-	// srcX = dstX - dstRect.Min.X + srcRect.Min.X
-	offX := srcRect.Min.X - dstRect.Min.X
-	offY := srcRect.Min.Y - dstRect.Min.Y
-
-	for y := dstClip.Min.Y; y < dstClip.Max.Y; y++ {
-		srcY := y + offY
-		for x := dstClip.Min.X; x < dstClip.Max.X; {
-			srcX := x + offX
-			c := src.CellAt(srcX, srcY)
-			if c == nil {
-				x++
-				continue
-			}
-
-			w := c.Width
-			if w <= 0 {
-				// Mid-glyph start: the crop started on the second half of a wide glyph.
-				// Omit it, but preserve its background style to avoid transparent holes.
-				// Do not use dst.SetCell here because ultraviolet will also blank the
-				// previous cell if we are partially overwriting it. Just mutate the cell
-				// struct in place.
-
-				// The continuation cell of a wide glyph does not carry the style itself.
-				// We must look up the style from the start of the glyph (srcX-1).
-				bgStyle := c.Style
-				if orig := src.CellAt(srcX-1, srcY); orig != nil {
-					bgStyle = orig.Style
-				}
-
-				if dstCell := dst.CellAt(x, y); dstCell != nil {
-					blank := uv.NewCell(dst.WidthMethod(), " ")
-					blank.Style = bgStyle
-					*dstCell = *blank
-				}
-				x++
-				continue
-			}
-
-			if c.IsZero() {
-				x++
-				continue
-			}
-
-			if x+w > dstClip.Max.X {
-				// Mid-glyph end: the wide glyph sticks out of the crop rectangle.
-				// Omit it, but preserve its background style.
-				if dstCell := dst.CellAt(x, y); dstCell != nil {
-					blank := uv.NewCell(dst.WidthMethod(), " ")
-					blank.Style = c.Style
-					*dstCell = *blank
-				}
-				break
-			}
-
-			// Copy the cell to avoid holding a pointer into the live emulator buffer.
-			cCopy := *c
-			dst.SetCell(x, y, &cCopy)
-			x += w
-		}
-	}
+// Blit draws src into dst at dest, clipping anything outside dest.
+func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
+	src.Draw(dst, dest)
 }
 
 // WriteString writes plain unstyled text into s starting at (x, y).

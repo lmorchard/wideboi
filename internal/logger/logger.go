@@ -53,7 +53,7 @@ func Path(socket, component string) string {
 
 // Init initializes file-based structured logging to path, recording
 // level and above.
-func Init(path string, level slog.Level) (*os.File, error) {
+func Init(path string, level slog.Level, teeToConsole bool) (*os.File, error) {
 	_ = os.MkdirAll(filepath.Dir(path), 0700)
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
@@ -61,7 +61,12 @@ func Init(path string, level slog.Level) (*os.File, error) {
 		return nil, err
 	}
 
-	Log = slog.New(newHandler(f, level))
+	var w io.Writer = f
+	if teeToConsole {
+		w = io.MultiWriter(f, os.Stderr)
+	}
+
+	Log = slog.New(newHandler(w, level))
 	slog.SetDefault(Log)
 	return f, nil
 }

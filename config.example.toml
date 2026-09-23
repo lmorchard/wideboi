@@ -26,6 +26,10 @@ prefix = "ctrl+b"
 # Unix domain socket path for client/server communication, instead of a session name.
 # socket = "/path/to/socket.sock"
 
+# Address to bind the WebSocket server for the Web Client.
+# E.g. ":8080" or "127.0.0.1:8080". Defaults to empty (disabled).
+# websocket = ":8080"
+
 # Shell executable to spawn in new panes.
 # Defaults to $SHELL, or /bin/sh if $SHELL is empty.
 # shell = "/bin/zsh"

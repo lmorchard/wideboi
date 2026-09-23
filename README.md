@@ -138,12 +138,28 @@ bypass (usually `Shift`-drag, or `Option`-drag in macOS terminals).
 To leave the mouse to your terminal entirely, put `mouse = false` in your
 config file.
 
+## Web Client
+
+wideboi includes a browser-based client that uses an HTML5 Canvas to render your terminal windows securely over a WebSocket connection.
+
+To enable the web client, you must explicitly opt-in to the WebSocket server when starting a background session:
+
+```bash
+wideboi server --websocket :8080
+```
+
+*Or via environment variable: `WIDEBOI_WEBSOCKET=":8080"`*
+
+Once the server is running, the Web Client allows you to view and interact with your terminal multiplexer natively in any modern browser.
+
+> Note: The Vite + Lit Web UI is currently hosted in the `web/` directory and requires running `npm run dev` to serve the static assets locally during development (see [Issue #126](https://github.com/lmorchard/wideboi/issues/126)).
+
 ## Configuration
 
 wideboi reads configuration with the following precedence (highest to lowest):
 
-1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`)
-2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`)
+1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`)
+2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`, `WIDEBOI_WEBSOCKET`)
 3. **Configuration file** (TOML)
 4. **Defaults** (including `$SHELL` or `/bin/sh`)
 
