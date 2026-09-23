@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/gorilla/websocket"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -853,4 +855,35 @@ func (s *Server) Close() error {
 		}
 	})
 	return closeErr
+}
+
+// ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
+func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux) {
+	upgrader := &websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin:     func(r *http.Request) bool { return true },
+	}
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			slog.Debug("websocket upgrade failed", "err", err)
+			return
+		}
+
+		sConn := transport.NewWebSocketServerConn(conn, 256)
+		sConn.RunPumps(ctx)
+
+		s.mu.Lock()
+		if s.stoppingLocked() {
+			s.mu.Unlock()
+			_ = sConn.Close()
+			return
+		}
+		s.transports = append(s.transports, sConn)
+		s.mu.Unlock()
+
+		go s.handleClientConnLoop(ctx, sConn)
+	})
 }

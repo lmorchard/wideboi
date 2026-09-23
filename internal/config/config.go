@@ -19,7 +19,8 @@ import (
 
 // Config represents the resolved, fully-validated configuration for wideboi.
 type Config struct {
-	Socket string `toml:"socket"`
+	Socket    string `toml:"socket"`
+	Websocket string `toml:"websocket"`
 	// Session is the resolved session name, or empty when a socket path
 	// was chosen instead. Socket is what is used.
 	Session      string              `toml:"session"`
@@ -47,6 +48,7 @@ type ConfigFlags struct {
 	Prefix     string
 	Socket     string
 	Session    string
+	Websocket  string
 	Shell      string
 }
 
@@ -140,11 +142,12 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	// serves as the baseline default when not configured in TOML. WIDEBOI_SHELL
 	// is the wideboi-specific environment override that takes precedence over TOML.
 	cfg := Config{
-		Layout:  "cards",
-		Prefix:  "ctrl+b",
-		Socket:  DefaultSocketPath(),
-		Session: "default",
-		Shell:   getenv("SHELL"),
+		Layout:    "cards",
+		Prefix:    "ctrl+b",
+		Socket:    DefaultSocketPath(),
+		Session:   "default",
+		Shell:     getenv("SHELL"),
+		Websocket: "",
 	}
 	if cfg.Shell == "" {
 		cfg.Shell = "/bin/sh"
@@ -201,6 +204,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if envLayout := getenv("WIDEBOI_LAYOUT"); envLayout != "" {
 		cfg.Layout = envLayout
 	}
+	if envWS := getenv("WIDEBOI_WEBSOCKET"); envWS != "" {
+		cfg.Websocket = envWS
+	}
 	if envPrefix := getenv("WIDEBOI_PREFIX"); envPrefix != "" {
 		cfg.Prefix = envPrefix
 	}
@@ -217,6 +223,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	// 4. Command line flags
 	if flags.Layout != "" {
 		cfg.Layout = flags.Layout
+	}
+	if flags.Websocket != "" {
+		cfg.Websocket = flags.Websocket
 	}
 	if flags.Prefix != "" {
 		cfg.Prefix = flags.Prefix

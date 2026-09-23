@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -66,7 +67,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "version" || arg == "help") {
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "cleanup" || arg == "version" || arg == "help") {
 			opts.subcommand = arg
 			continue
 		}
@@ -99,6 +100,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Socket, "socket", "", "unix domain socket path")
 	fs.StringVar(&opts.flags.Session, "L", "", "session name")
 	fs.StringVar(&opts.flags.Session, "session", "", "session name")
+	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \":8080\")")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
@@ -126,6 +128,7 @@ func printHelp(w io.Writer) {
   wideboi [flags] attach     Attach a client to a running server
   wideboi [flags] kill-session
                              End the session: close every pane and stop the server
+  wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
   wideboi help               Show this help text
@@ -140,6 +143,7 @@ Flags:
   -L, --session <name>   Session to start or attach to (default: "default");
                          its socket is $TMPDIR/wideboi-<uid>/<name>.sock
   -s, --socket <path>    Unix domain socket path, instead of a session name
+      --websocket <addr> Address for WebSocket server (e.g. ":8080")
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
   -v, --version          Print version and exit
@@ -149,6 +153,7 @@ Environment Variables:
   WIDEBOI_LAYOUT         Starting layout for this client ("cards" or "scroll")
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SESSION        Session name override
+  WIDEBOI_WEBSOCKET      Address for WebSocket server (e.g. ":8080")
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
@@ -187,6 +192,8 @@ func main() {
 		fatal(runAttach(cfg, bindings))
 	case "kill-session":
 		fatal(runKillSession(cfg))
+	case "cleanup":
+		fatal(runCleanup(os.Stdout, config.SessionDir()))
 	case "ls":
 		fatal(runList(os.Stdout))
 	default:
@@ -219,7 +226,7 @@ func fatal(err error) {
 // the inherited connection of the plain wideboi that spawned this
 // server and owns the session; see spawnServer.
 func runServer(cfg config.Config, ownerFD int) error {
-	f, _ := logger.Init(logger.Path(cfg.Socket, "server"), cfg.LogLevel)
+	f, _ := logger.Init(logger.Path(cfg.Socket, "server"), cfg.LogLevel, true)
 	if f != nil {
 		defer f.Close()
 	}
@@ -286,7 +293,30 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 	srv.ListenSocket(ctx, sl)
 
+	var httpSrv *http.Server
+	if cfg.Websocket != "" {
+		mux := http.NewServeMux()
+		srv.ListenWebSocket(ctx, mux)
+
+		httpSrv = &http.Server{
+			Addr:    cfg.Websocket,
+			Handler: mux,
+		}
+
+		go func() {
+			fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws\n", cfg.Websocket)
+			slog.Info("websocket server listening", "addr", cfg.Websocket)
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("websocket server failed", "err", err)
+			}
+		}()
+	}
+
 	err = srv.Run(ctx)
+	if httpSrv != nil {
+		_ = httpSrv.Shutdown(context.Background())
+	}
+
 	// Run returns as soon as Close begins, and the guard's Close is
 	// one way that happens. Let it finish and re-raise rather than
 	// exit 0 underneath it. (Before the deferred Stop runs, signalled
@@ -392,7 +422,7 @@ func serverExitCode(exited <-chan int, ceiling time.Duration) int {
 // a death that runs no code at all -- unless it detached first.
 func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, serverExit <-chan int) error {
 	owner := serverExit != nil
-	f, _ := logger.Init(logger.Path(cfg.Socket, "client"), cfg.LogLevel)
+	f, _ := logger.Init(logger.Path(cfg.Socket, "client"), cfg.LogLevel, false)
 	if f != nil {
 		defer f.Close()
 	}
