@@ -22,13 +22,15 @@ const MinSliverWidth = 4
 // The focused pane keeps its own width and the rest divide whatever
 // is left, so the fan always spans the viewport.
 //
-// Every card but the leftmost has a border in the first cell of its
-// slot, and its Dst starts one cell after it: the client draws the
-// border at Dst.Min.X-1. It used to be painted over the card's own
-// first column, which hid column 0 of every pane in the fan and put
-// the border glyph into anything copied from it. A sliver's border
-// comes out of its own share; the focused card's is one extra cell,
-// since it keeps its whole width.
+// Every card but the leftmost has a border in the cell just before its
+// Dst, and the client draws it at Dst.Min.X-1. It used to be painted
+// over the card's own first column, which hid column 0 of every pane
+// in the fan and put the border glyph into anything copied from it.
+//
+// A sliver's border is the first cell of its own slot. The focused
+// card's is the last cell of its left neighbour's, so the focused card
+// keeps its whole width without costing the slivers any budget: charged
+// there, it could decide that no sliver fits at all.
 type CardStrategy struct {
 	// SliverWidth, when positive, forces every sliver to this width
 	// instead of an even share. Tests use it to pin geometry; nothing
@@ -80,14 +82,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	focusedW := min(s.columns[focusedIdx].Width, viewportWidth)
 	remaining := max(viewportWidth-focusedW, 0)
 
-	// A focused card with cards to its left needs a cell for its
-	// border. Take it out of the slivers' budget before deciding how
-	// many fit, then give it back if none turn out to be on the left.
-	border := min(focusedIdx, 1)
-	showLeft, showRight := cs.visibleSides(s, max(remaining-border, 0))
-	if showLeft > 0 {
-		remaining -= border
-	}
+	showLeft, showRight := cs.visibleSides(s, remaining)
 	sliverCount := showLeft + showRight
 
 	// Sliver widths, indexed left to right across the whole fan so the
@@ -106,12 +101,14 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	x := 0
 	sliverIdx := 0
 
-	place := func(col Column, w int, z int) {
+	// ownBorder is whether the card's border takes the first cell of
+	// its own slot. The focused card's lives in the slot before it.
+	place := func(col Column, w int, z int, ownBorder bool) {
 		if w <= 0 || x >= viewportWidth {
 			return
 		}
 		left := x
-		if left > 0 {
+		if ownBorder && left > 0 {
 			left++ // past the border
 		}
 		right := min(left+col.Width, viewportWidth)
@@ -136,19 +133,15 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 
 	for i := focusedIdx - showLeft; i < focusedIdx; i++ {
 		col := s.columns[i]
-		place(col, widthOf(sliverIdx, col), 0)
+		place(col, widthOf(sliverIdx, col), 0, true)
 		sliverIdx++
 	}
 
-	focusedSlot := focusedW
-	if x > 0 {
-		focusedSlot++ // its border
-	}
-	place(s.columns[focusedIdx], focusedSlot, 1)
+	place(s.columns[focusedIdx], focusedW, 1, false)
 
 	for i := focusedIdx + 1; i <= focusedIdx+showRight; i++ {
 		col := s.columns[i]
-		place(col, widthOf(sliverIdx, col), 0)
+		place(col, widthOf(sliverIdx, col), 0, true)
 		sliverIdx++
 	}
 

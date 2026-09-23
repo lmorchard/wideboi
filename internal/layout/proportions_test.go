@@ -32,10 +32,20 @@ func coveredWidth(ps []layout.Placement) int {
 	return maxX
 }
 
-// slotStart is where a card's slot begins: its border cell, the one
+// frameStart is the first cell a card covers: its border, the cell
 // before Dst, for every card but the leftmost.
-func slotStart(p layout.Placement) int {
+func frameStart(p layout.Placement) int {
 	return max(p.Dst.Min.X-1, 0)
+}
+
+// slotStart is where a card's share of the fan begins. A sliver's
+// border is the first cell of its own slot; the focused card's is the
+// last cell of the slot before it.
+func slotStart(p layout.Placement) int {
+	if p.Z == 1 {
+		return p.Dst.Min.X
+	}
+	return frameStart(p)
 }
 
 // gaps reports any column in [0, upTo) that no card's content or
@@ -43,7 +53,7 @@ func slotStart(p layout.Placement) int {
 func gaps(ps []layout.Placement, upTo int) []int {
 	covered := make([]bool, upTo)
 	for _, p := range ps {
-		for x := slotStart(p); x < p.Dst.Max.X && x < upTo; x++ {
+		for x := frameStart(p); x < p.Dst.Max.X && x < upTo; x++ {
 			covered[x] = true
 		}
 	}
@@ -57,8 +67,7 @@ func gaps(ps []layout.Placement, upTo int) []int {
 }
 
 // Les's worked example: a 90-cell window with a 60-cell focused pane
-// and three others gives each of them about (90-60)/3 = 10. The focused
-// card's own border costs one cell, so the shares are 10, 10 and 9.
+// and three others gives each of them (90-60)/3 = 10.
 //
 // The fixed DefaultSliverWidth this replaces knew nothing about the
 // viewport, so the fan simply stopped partway across -- a 120-column
@@ -76,7 +85,7 @@ func TestCardsFillTheViewport(t *testing.T) {
 	if g := gaps(ps, 90); len(g) > 0 {
 		t.Errorf("columns left uncovered: %v", g)
 	}
-	wantStarts := []int{0, 10, 71, 81}
+	wantStarts := []int{0, 10, 70, 80}
 	for i, want := range wantStarts {
 		if got := slotStart(ps[i]); got != want {
 			t.Errorf("pane %d starts at %d, want %d", ps[i].PaneID, got, want)
@@ -88,21 +97,20 @@ func TestCardsFillTheViewport(t *testing.T) {
 // time rather than truncated, or the fan stops short of the edge.
 func TestCardShareRemainderIsDistributed(t *testing.T) {
 	s := stripOf(4, 60, 2)
-	ps := s.ComputePlacements(92, 24) // 92-60-1 = 31 over 3 slivers
+	ps := s.ComputePlacements(91, 24) // 91-60 = 31 over 3 slivers
 
 	// In overlapping card layout, the sliver share is reflected in the
-	// slot starts: 31 cells, after the focused card's border, over 3
-	// slivers gives shares 11, 10, 10, so the slots start at 0, 11, 72
-	// and 82.
-	wantStarts := []int{0, 11, 72, 82}
+	// slot starts: 31 remainder distributed over 3 slivers gives shares
+	// 11, 10, 10, so the slots start at 0, 11, 71, 81.
+	wantStarts := []int{0, 11, 71, 81}
 	for i, want := range wantStarts {
 		if got := slotStart(ps[i]); got != want {
 			t.Errorf("pane %d starts at column %d, want %d", ps[i].PaneID, got, want)
 		}
 	}
 
-	if got := coveredWidth(ps); got != 92 {
-		t.Errorf("fan reaches column %d, want 92", got)
+	if got := coveredWidth(ps); got != 91 {
+		t.Errorf("fan reaches column %d, want 91", got)
 	}
 }
 
