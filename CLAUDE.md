@@ -35,8 +35,9 @@ Curating those is a human job.
 **A pane's width is independent of whether it is visible.** Open more panes and
 the viewport scrolls; nothing already on screen gets squeezed. This is the whole
 point of the project, and it is the invariant most likely to be broken by a
-plausible-looking geometry change — see `internal/server/status_test.go:187`,
-`internal/server/server.go:240`, `internal/layout/layout.go:247`.
+plausible-looking geometry change — see `TestReservedToggleVerbChangesNothing`
+in `internal/server/status_test.go`, `internal/server/server.go:240`,
+`internal/layout/layout.go:247`.
 
 ## Architecture, in four facts
 
@@ -48,9 +49,9 @@ plausible-looking geometry change — see `internal/server/status_test.go:187`,
 - **The server ships cell data, not PTY bytes** (`internal/protocol.CellData`).
   A wire format that cannot encode a styled cell passes every in-process test
   and dies on the first coloured prompt over a socket.
-- **Placements are computed client-side** (`internal/client`), from the columns
-  the server broadcasts. The server still computes some of its own — that
-  duplication is issue #47.
+- **Placements and layout mode are client-side** (`internal/client`). The
+  server broadcasts columns and focus and computes no placements (#47); each
+  client picks and toggles its own layout (#92).
 - **Layout is a pure core** (`internal/layout`) with `Strategy` implementations
   for the scrolling strip and the card fan. Geometry logic belongs there, not in
   the client or the server.
@@ -70,7 +71,8 @@ Use the `dev-session` skill for anything beyond a small fix; artifacts land in
 ## Testing conventions that will surprise you
 
 - **The pty harness pins its environment on purpose.** `scripts/ptylib.py` forces
-  `SHELL`, `TERM`, `PS1` *and* the child's signal dispositions, each because an
+  `SHELL`, `TERM`, `PS1`, the layout (no `WIDEBOI_LAYOUT`, an empty config
+  home) *and* the child's signal dispositions, each because an
   assertion depends on it and each with a comment saying which. If a test seems
   to care about the environment, that is why — do not relax the assertion, pin
   the thing.

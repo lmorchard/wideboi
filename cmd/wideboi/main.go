@@ -133,7 +133,7 @@ Flags:
   -c, --config <path>    Path to TOML configuration file
                          (default: $XDG_CONFIG_HOME/wideboi/config.toml
                           or ~/.config/wideboi/config.toml)
-  -l, --layout <mode>    Layout strategy: "cards" (default) or "scroll"
+  -l, --layout <mode>    Starting layout for this client: "cards" (default) or "scroll"
   -p, --prefix <key>     Control mode prefix key: "ctrl+<letter>" or "ctrl+space"
                          (default: "ctrl+b")
   -s, --socket <path>    Unix domain socket path
@@ -144,7 +144,7 @@ Flags:
   -h, --help             Show this help text and exit
 
 Environment Variables:
-  WIDEBOI_LAYOUT         Layout mode override ("cards" or "scroll")
+  WIDEBOI_LAYOUT         Starting layout for this client ("cards" or "scroll")
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
@@ -205,29 +205,6 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
-// parseLayout maps WIDEBOI_LAYOUT onto a mode.
-//
-// An unknown value is an error rather than a silent fallback. A typo
-// that quietly starts the wrong layout is the same defect shape as the
-// pgdn binding that shipped dead: an unmatchable config value looks
-// exactly like an absent one, so nothing ever tells you. See
-// docs/LESSONS.md, "A binding nobody typed is a binding nobody
-// verified."
-//
-// Only the halves that own a server read this. An attaching client
-// takes the mode from the server's snapshot, because layout is shared
-// session state.
-func parseLayout(name string) (protocol.LayoutMode, error) {
-	switch name {
-	case "", "cards":
-		return protocol.LayoutCards, nil
-	case "scroll":
-		return protocol.LayoutScroll, nil
-	default:
-		return 0, fmt.Errorf("WIDEBOI_LAYOUT=%q: want \"scroll\" or \"cards\"", name)
-	}
-}
-
 // runServer serves the session on cfg.Socket. ownerFD, when not -1, is
 // the inherited connection of the plain wideboi that spawned this
 // server and owns the session; see spawnServer.
@@ -277,7 +254,6 @@ func runServer(cfg config.Config, ownerFD int) error {
 	if ownerConn != nil {
 		srv.SetOwner(ownerConn)
 	}
-	srv.SetLayout(cfg.LayoutMode)
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
 	}
@@ -434,6 +410,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 	}
 
 	cli := client.NewClient(cConn, width, height, cfg.PrefixLabel)
+	cli.SetLayoutMode(cfg.LayoutMode)
 	cli.SetBindings(bindings)
 	cli.SetDetachable(true)
 	rt := &router{prefix: cfg.Prefix, detachable: true, bindings: bindings}
@@ -524,6 +501,8 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 					return nil
 				case routeVerb:
 					cli.SendVerb(ctx, act.Verb)
+				case routeToggleLayout:
+					cli.ToggleLayout()
 				case routeScroll:
 					cli.SendScroll(ctx, act.Scroll)
 				case routeFocusColumn:

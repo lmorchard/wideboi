@@ -3,7 +3,6 @@ package transport
 import (
 	"bytes"
 	"encoding/gob"
-	"image"
 	"image/color"
 	"reflect"
 	"testing"
@@ -157,7 +156,6 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgDetach{},
 		protocol.MsgLayoutSnapshot{
 			Columns:      []protocol.ColumnData{{PaneID: 1, Width: 40, Height: 22}},
-			Placements:   []protocol.PlacementData{{PaneID: 1, Src: image.Rect(0, 0, 40, 22), Dst: image.Rect(0, 1, 40, 23), Z: 0}},
 			FocusPaneID:  1,
 			PaneStatuses: map[int]string{1: "»"},
 		},

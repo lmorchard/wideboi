@@ -38,6 +38,9 @@ const (
 	// routeFocusColumn focuses a column by position. The client
 	// resolves it, because the client's strip knows the order.
 	routeFocusColumn
+	// routeToggleLayout flips this client's layout. The client does it
+	// alone; nothing is sent (#92).
+	routeToggleLayout
 )
 
 // route is what the router decided about one key event. It describes an
@@ -146,6 +149,10 @@ func (r *router) fire(b keys.Binding, sticky bool) route {
 	case keys.ActionFocusColumn:
 		// Digits have no ctrl form, so sticky is always false here.
 		return route{Kind: routeFocusColumn, Column: b.Column}
+	case keys.ActionToggleLayout:
+		// NoRepeat, so sticky is always false: toggles once and leaves,
+		// as it did when it was a verb.
+		return route{Kind: routeToggleLayout}
 	case keys.ActionQuit:
 		// ctrl+q is exactly q: "quit but stay in control mode" is not a
 		// thing, because the client is leaving.

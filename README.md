@@ -52,6 +52,7 @@ without doing anything. For the full list, press `?` in control mode.
 | `a` | jump to a pane wanting attention |
 | `1`–`9` / `0` | focus the column at that position from the left / the last column |
 | `tab` | focus the previously focused pane |
+| `c` | switch this terminal between the card fan and the scrolling strip |
 | `y` / `u` | move this column one place left / right |
 | `?` | show the full help overlay |
 | `d` | detach, leaving the session running |
@@ -62,6 +63,11 @@ without doing anything. For the full list, press `?` in control mode.
 Each pane's header starts with its position, then its ID in brackets:
 ` 2 [7]` is the second column from the left, pane 7. The digit keys go by
 position, so a column you move with `y` / `u` renumbers.
+
+Layout is per client: `c` flips only the terminal you press it in, and
+every attach starts from your configured layout (`--layout`,
+`WIDEBOI_LAYOUT` or `layout` in the config file; cards by default). The
+status bar shows which one you are in, right before the `ctrl+b` hint.
 
 `ctrl+b` is the only key wideboi keeps for itself. Everything else goes
 to the focused pane, including `ctrl+c`, `ctrl+q`, `ctrl+w`, `ctrl+l`
@@ -165,7 +171,7 @@ Rules for key remapping:
 Flags:
   -c, --config <path>    Path to TOML configuration file
                          (default: $XDG_CONFIG_HOME/wideboi/config.toml)
-  -l, --layout <mode>    Layout strategy: "cards" (default) or "scroll"
+  -l, --layout <mode>    Starting layout for this client: "cards" (default) or "scroll"
   -p, --prefix <key>     Control mode prefix key: "ctrl+<letter>" or "ctrl+space"
                          (default: "ctrl+b")
   -s, --socket <path>    Unix domain socket path
@@ -178,7 +184,7 @@ Flags:
 
 ### Environment variables
 
-- `WIDEBOI_LAYOUT`: layout mode (`cards` or `scroll`)
+- `WIDEBOI_LAYOUT`: starting layout for this client (`cards` or `scroll`)
 - `WIDEBOI_PREFIX`: prefix key (`ctrl+<letter>` or `ctrl+space`)
 - `WIDEBOI_SOCK`: unix domain socket path override
 - `WIDEBOI_SHELL`: shell path override (takes precedence over TOML `shell`)

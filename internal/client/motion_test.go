@@ -30,12 +30,13 @@ func newMotionClient(t *testing.T, cols, rows int) *Client {
 }
 
 // focusTo moves focus by replaying a layout snapshot, which is what
-// the server sends and what arms an animation.
+// the server sends and what arms an animation. The client is put in
+// card mode first; setting the mode it is already in changes nothing.
 func focusTo(cli *Client, paneID int) {
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
 		FocusPaneID: paneID,
-		Layout:      protocol.LayoutCards,
 	})
 }
 
@@ -143,7 +144,7 @@ func TestNoMotionWhenPlacementsAreUnchanged(t *testing.T) {
 	cli := newMotionClient(t, cols, rows)
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 1, Layout: protocol.LayoutCards,
+		Columns: threeColumns(), FocusPaneID: 1,
 		PaneStatuses: map[int]string{1: "»"},
 	})
 
@@ -211,8 +212,9 @@ func TestNoMotionWhenFocusMovesButGeometryDoesNot(t *testing.T) {
 	const cols, rows = 60, 12
 	cli := newTestClientWithTwoPanes(t, cols, rows) // both visible
 
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: twoColumns(), FocusPaneID: 2, Layout: protocol.LayoutScroll,
+		Columns: twoColumns(), FocusPaneID: 2,
 	})
 
 	cli.mu.Lock()
@@ -249,7 +251,7 @@ func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
 	// broadcastLayoutIfStatusChanged sends while a pane is working.
 	for i := 0; i < 3; i++ {
 		cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-			Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
+			Columns: threeColumns(), FocusPaneID: 2,
 			PaneStatuses: map[int]string{2: "»"},
 		})
 	}

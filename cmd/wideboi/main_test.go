@@ -156,37 +156,6 @@ func TestKillSessionShutsDownAServer(t *testing.T) {
 	}
 }
 
-// A typo in WIDEBOI_LAYOUT must be an error, not a silent fallback to
-// the default. An unmatchable config value that looks exactly like an
-// absent one is how the pgdn binding shipped dead -- see
-// docs/LESSONS.md, "A binding nobody typed is a binding nobody
-// verified."
-func TestParseLayoutRejectsUnknown(t *testing.T) {
-	for _, name := range []string{"card", "Cards", "fan", "scrolling"} {
-		if _, err := parseLayout(name); err == nil {
-			t.Errorf("parseLayout(%q) accepted an unknown value; want an error", name)
-		}
-	}
-}
-
-func TestParseLayoutAcceptsKnown(t *testing.T) {
-	cases := map[string]protocol.LayoutMode{
-		"":       protocol.LayoutCards,
-		"scroll": protocol.LayoutScroll,
-		"cards":  protocol.LayoutCards,
-	}
-	for name, want := range cases {
-		got, err := parseLayout(name)
-		if err != nil {
-			t.Errorf("parseLayout(%q): %v", name, err)
-			continue
-		}
-		if got != want {
-			t.Errorf("parseLayout(%q) = %v, want %v", name, got, want)
-		}
-	}
-}
-
 // An idle session must go quiet on the wire. Before #85 the server sent
 // every pane to every client each 33ms frame whether or not it had
 // changed, so no quiet second ever came. Change-only sends must still

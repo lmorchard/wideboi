@@ -3,6 +3,7 @@
 package protocol
 
 import (
+	"fmt"
 	"image"
 )
 
@@ -15,8 +16,9 @@ const (
 	VerbCycleWidth
 	VerbKillPane
 	VerbSmartJump
-	// VerbToggleCards switches between the scrolling strip and the
-	// card fan. Appended, not inserted: the value crosses the wire.
+	// VerbToggleCards is reserved. Layout is client-local since #92, so
+	// no client sends it and the server ignores it; the slot stays so
+	// the verbs after it keep their wire values.
 	VerbToggleCards
 	VerbGrowWidth
 	VerbShrinkWidth
@@ -165,13 +167,10 @@ type MsgDetach struct{}
 // it happens only after the reaping has finished.
 type MsgShutdown struct{}
 
-// LayoutMode is which Strategy the session is using.
-//
-// Shared session state, like focus: two clients of different sizes
-// compute their own placements, but they must agree on the mode or
-// they disagree about what the session looks like. The zero value is
-// the scrolling strip, so a server that never sets it behaves exactly
-// as it did before the field existed.
+// LayoutMode is which Strategy a client is presenting. It is per-client
+// presentation, not session state, and does not cross the wire (#92):
+// each client resolves its own from config and toggles it locally. The
+// type lives here because both config and layout name it.
 type LayoutMode int
 
 const (
@@ -181,16 +180,26 @@ const (
 	LayoutCards
 )
 
-// MsgLayoutSnapshot is sent by the server to update the client on placements, focus, and statuses.
+// String is the mode's name as config spells it and the status line
+// shows it (#91).
+func (m LayoutMode) String() string {
+	switch m {
+	case LayoutScroll:
+		return "scroll"
+	case LayoutCards:
+		return "cards"
+	}
+	return fmt.Sprintf("LayoutMode(%d)", int(m))
+}
+
+// MsgLayoutSnapshot is sent by the server to update the client on columns, focus, and statuses. Placements and layout mode are the client's own (#47, #92).
 type MsgLayoutSnapshot struct {
 	Columns      []ColumnData
-	Placements   []PlacementData
 	FocusPaneID  int
 	PaneStatuses map[int]string
 	// PaneTitles is each pane's terminal title, for chrome that wants
 	// to say what a pane is doing rather than show a sliver of it.
 	PaneTitles map[int]string
-	Layout     LayoutMode
 }
 
 // MsgPaneClosed notifies the client that a pane's process died or was reaped.

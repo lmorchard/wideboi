@@ -161,6 +161,10 @@ func assertAction(t *testing.T, b keys.Binding, got route) {
 		if got.Kind != routeFocusColumn || got.Column != b.Column {
 			t.Errorf("%q: got %+v, want focus column %d", b.Key, got, b.Column)
 		}
+	case keys.ActionToggleLayout:
+		if got.Kind != routeToggleLayout {
+			t.Errorf("%q: got %+v, want routeToggleLayout", b.Key, got)
+		}
 	case keys.ActionHelp, keys.ActionExit:
 		if got.Kind != routeIgnore {
 			t.Errorf("%q: got %+v, want routeIgnore", b.Key, got)
