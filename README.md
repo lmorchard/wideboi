@@ -190,3 +190,7 @@ Flags:
 `make check` runs its targets in parallel; `CHECK_JOBS=1` forces serial.
 
 `docs/LESSONS.md` is worth reading before changing anything.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
