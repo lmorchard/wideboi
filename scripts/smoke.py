@@ -11,10 +11,13 @@ Cases derive from the spec's user-journey list. Add one per feature.
 """
 
 import argparse
+import atexit
 import base64
 import fcntl
+import itertools
 import os
 import re
+import shutil
 import signal
 import struct
 import sys
@@ -27,7 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty,
-    wait_for_exit, descendants, force_cleanup, pane_children, ps_rows,
+    wait_for_exit, descendants, force_cleanup, ps_rows,
     settle_output, still_alive,
 )
 
@@ -84,17 +87,21 @@ def cursor_visible(out: bytes) -> bool | None:
     return None if not found else found[-1] == b"h"
 
 
-# A plain wideboi probes this socket and *attaches* to whatever answers
+# A plain wideboi probes its socket and *attaches* to whatever answers
 # (cmd/wideboi/main.go), so a server running anywhere -- attachcheck's, a
 # parallel run's, or the one the developer has open in another terminal
 # -- silently captures every session this suite starts. With a server up,
 # `make smoke` failed 9 cases.
 #
-# smoke only ever dials, never binds, so pointing every session at a
-# path that is never created makes the suite immune to all of them. Not
-# mkdtemp: nothing is ever written here, and a directory per run would
-# be litter that never gets cleaned up.
-NEVER_SOCK = os.path.join(tempfile.gettempdir(), f"wideboi-never-{os.getpid()}.sock")
+# So every session gets a socket of its own, in a directory private to
+# this run. Of its own, not one per run: when nothing answers, a plain
+# wideboi spawns a server that *binds* the path (#25), and cases run in
+# parallel -- one shared path and the first case's server would capture
+# every other case. A real directory, because servers write into it,
+# removed at exit because a SIGKILLed server leaves its socket behind.
+RUNTIME_DIR = tempfile.mkdtemp(prefix="wideboi-smoke-")
+atexit.register(shutil.rmtree, RUNTIME_DIR, True)
+_SOCK_IDS = itertools.count()
 
 # SPAWNED is the only state shared across cases, and with --jobs > 1 the
 # cases run on separate threads. list.append is atomic under CPython
@@ -119,7 +126,9 @@ class Session:
     """A running wideboi in a pty, with helpers to type and observe."""
 
     def __init__(self, cols=100, rows=30, startup=4.0, env=None, args=None):
-        env = {"WIDEBOI_SOCK": NEVER_SOCK, **(env or {})}
+        with SPAWNED_LOCK:
+            sock = os.path.join(RUNTIME_DIR, f"s{next(_SOCK_IDS)}.sock")
+        env = {"WIDEBOI_SOCK": sock, **(env or {})}
         cmd = ["./bin/wideboi"] + (args or [])
         self.pid, self.fd = spawn_in_pty(cmd, cols, rows, True, env)
         self.rows = rows
@@ -215,7 +224,10 @@ class Session:
         self.drainer.stop()
 
     def quit_and_reap(self, sig=signal.SIGTERM, timeout=8.0) -> int | None:
-        kids = [p for p, _ in pane_children(self.pid)]
+        # descendants, not pane_children: the panes belong to the
+        # `wideboi server` this session spawned, so they are
+        # grandchildren, and the server itself must go too.
+        kids = [p for p, _ in descendants(self.pid)]
         os.kill(self.pid, sig)
         status = wait_for_exit(self.pid, timeout)
         if status is None:
@@ -691,10 +703,10 @@ def case_control_mode_names_every_entry_at_80_columns(fail):
                  b"a attn", b"? help", b"q quit", b"esc exit"):
         if verb not in out:
             fail(f"at 80 columns control mode never shows {verb.decode()!r}")
-    # In-process owns its panes, so detaching would kill them.
-    # scripts/attachcheck.py asserts the socket case.
-    if b"d detach" in out:
-        fail("in-process control mode offers 'd detach', which would kill the panes")
+    # Every session is on a socket now (#25), so detach is real from a
+    # plain wideboi too -- the commonest way to start one.
+    if b"d detach" not in out:
+        fail("at 80 columns control mode never shows 'd detach'")
     s.type("\x1b")
     s.close()
 
@@ -1021,9 +1033,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--only", help="substring filter on case names")
     # Threads, not processes: cases block on pty reads, which release
-    # the GIL. Each case owns its own pty, pid and Drainer, and a plain
-    # wideboi never binds a socket -- only dials one -- so two cases
-    # cannot reach each other. Measured 42.9s -> 13.2s at 8.
+    # the GIL. Each case owns its own pty, pid, Drainer and socket (see
+    # RUNTIME_DIR), so two cases cannot reach each other. Measured 42.9s -> 13.2s at 8.
     #
     # The default is a ceiling rather than a target: 8 buys only 1.4s
     # over 4, and CI's smaller runners self-limit through cpu_count.

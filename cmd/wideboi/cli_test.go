@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/lmorchard/wideboi/internal/config"
 )
 
 func TestParseCLIDefault(t *testing.T) {
@@ -28,6 +30,7 @@ func TestParseCLISubcommands(t *testing.T) {
 	}{
 		{args: []string{"server"}, wantSub: "server"},
 		{args: []string{"attach"}, wantSub: "attach"},
+		{args: []string{"kill-session"}, wantSub: "kill-session"},
 		{args: []string{"version"}, wantSub: "version", wantVer: true},
 		{args: []string{"--version"}, wantVer: true},
 		{args: []string{"-v"}, wantVer: true},
@@ -133,6 +136,82 @@ func TestPrintHelp(t *testing.T) {
 	for _, req := range requiredStrings {
 		if !strings.Contains(out, req) {
 			t.Errorf("printHelp output missing %q:\n%s", req, out)
+		}
+	}
+}
+
+// --owner-fd is how a plain wideboi hands the server it spawned the
+// private connection it owns the session through. Its value must not be
+// mistaken for a subcommand, and the user's own flags ride along after
+// it.
+func TestParseCLIOwnerFD(t *testing.T) {
+	opts, err := parseCLI([]string{"server", "--owner-fd", "3", "-l", "scroll"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if opts.subcommand != "server" {
+		t.Errorf("subcommand = %q, want server", opts.subcommand)
+	}
+	if opts.ownerFD != 3 {
+		t.Errorf("ownerFD = %d, want 3", opts.ownerFD)
+	}
+	if opts.flags.Layout != "scroll" {
+		t.Errorf("layout = %q, want scroll", opts.flags.Layout)
+	}
+
+	opts, err = parseCLI(nil)
+	if err != nil {
+		t.Fatalf("parseCLI(nil) error: %v", err)
+	}
+	if opts.ownerFD != -1 {
+		t.Errorf("default ownerFD = %d, want -1 (no owner)", opts.ownerFD)
+	}
+}
+
+// The detach notice's commands must reach the same session: plain on
+// the default socket, with -s on any other.
+func TestDetachNoticeNamesTheSocketOnlyWhenNeeded(t *testing.T) {
+	var buf bytes.Buffer
+	printDetachNotice(&buf, config.DefaultSocketPath())
+	if strings.Contains(buf.String(), " -s ") {
+		t.Errorf("default-socket notice carries -s:\n%s", buf.String())
+	}
+	if !strings.Contains(buf.String(), config.DefaultSocketPath()) {
+		t.Errorf("notice does not name the socket:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	printDetachNotice(&buf, "/tmp/elsewhere.sock")
+	for _, want := range []string{"wideboi -s /tmp/elsewhere.sock", "wideboi -s /tmp/elsewhere.sock kill-session"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("custom-socket notice lacks %q:\n%s", want, buf.String())
+		}
+	}
+}
+
+// The spawned server must own the session through the fd spawnServer
+// gives it, whatever the user typed. A user-supplied --owner-fd would
+// override ours if it came later, and a stray positional would stop the
+// flag parser before ours if ours came later -- so ours goes first and
+// any of theirs is dropped.
+func TestServerArgsAlwaysNameOurOwnerFD(t *testing.T) {
+	for _, user := range [][]string{
+		nil,
+		{"-l", "scroll"},
+		{"--owner-fd", "9"},
+		{"-owner-fd", "9", "-l", "scroll"},
+		{"--owner-fd=9"},
+		{"-owner-fd=9"},
+		{"stray", "-l", "scroll"},
+	} {
+		opts, err := parseCLI(serverArgs(user))
+		if err != nil {
+			t.Errorf("serverArgs(%q): parse error %v", user, err)
+			continue
+		}
+		if opts.subcommand != "server" || opts.ownerFD != 3 {
+			t.Errorf("serverArgs(%q) = %q: subcommand %q ownerFD %d, want server and 3",
+				user, serverArgs(user), opts.subcommand, opts.ownerFD)
 		}
 	}
 }

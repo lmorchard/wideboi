@@ -153,20 +153,21 @@ smoke: build
 	python3 scripts/smoke.py
 	python3 scripts/golden.py
 
-# attach-check drives the client/server pair over a real Unix socket:
-# `wideboi server` in the background, `wideboi attach` on a pty, and the
-# detach/reattach cycle between them.
+# attach-check drives the session lifecycle across processes: `wideboi
+# server` in the background, `wideboi attach` and plain `wideboi` on a
+# pty, detach and reattach, quit, kill-session, and an owner killed
+# outright.
 #
-# smoke is structurally blind to this seam. It only ever runs the
-# in-process binary, so no message it exercises is ever serialised, and
-# a wire format that cannot encode a coloured cell passes every case in
-# it. That is not hypothetical: protocol.CellData.Style carried a
+# It used to be the only target that serialised anything: smoke ran the
+# in-process binary, so a wire format that could not encode a coloured
+# cell passed every case in it -- protocol.CellData.Style carried a
 # uv.Style, whose colour fields are interfaces gob refuses to encode,
 # and `attach` died on the first coloured prompt with the whole unit
-# suite green.
+# suite green. Since #25 a plain wideboi is a client of a server it
+# spawned, so smoke is on the wire too; this target is for what only
+# more than one process can show.
 #
-# Costs ~60s, dominated by waiting for real login shells to print real
-# prompts. It earns that by being the only target that proves the
-# feature works at all.
+# Costs ~35s, serially, most of it pane shells starting and sessions
+# tearing down.
 attach-check: build
 	python3 scripts/attachcheck.py

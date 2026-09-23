@@ -88,8 +88,8 @@ func paneUpdate(paneID, cols, rows int, text string) protocol.MsgPaneUpdate {
 // newTestClientWithTwoPanes returns a client holding populated mirrors
 // for panes 1 and 2, focused on pane 1.
 //
-// It drives the attach path (drawPane nil), because that is the one a
-// test can supply content for without standing up a server.
+// Pane content comes from the mirrors, which a test can populate
+// without standing up a server.
 func newTestClientWithTwoPanes(t *testing.T, cols, rows int) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
@@ -111,7 +111,7 @@ func TestDrawRendersPaneContent(t *testing.T) {
 	cli := newTestClientWithTwoPanes(t, cols, rows)
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	got := strings.Join(scr.text(), "\n")
 	for _, want := range []string{"PANE-ONE", "PANE-TWO"} {
@@ -130,51 +130,51 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 	scr := newFakeHostScreen(cols, rows)
 
 	// First draw must report dirty / changed.
-	dirty := cli.Draw(scr, nil, nil)
+	dirty := cli.Draw(scr)
 	if !dirty {
 		t.Fatal("first Draw: expected dirty=true, got false")
 	}
 
 	// Second draw with no state change must report clean / unchanged.
-	dirty = cli.Draw(scr, nil, nil)
+	dirty = cli.Draw(scr)
 	if dirty {
 		t.Fatal("second identical Draw: expected dirty=false, got true")
 	}
 
 	// Passing a new HostScreen target must report dirty.
 	scr2 := newFakeHostScreen(cols, rows)
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw with new HostScreen: expected dirty=true, got false")
 	}
 
 	// Updating a pane should cause next Draw to report dirty.
 	cli.HandleServerMsg(paneUpdate(1, 25, 10, "PANE-ONE-CHANGED"))
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after pane update: expected dirty=true, got false")
 	}
 
 	// Subsequent draw without change should report clean again.
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if dirty {
 		t.Fatal("Draw after clean pane: expected dirty=false, got true")
 	}
 
 	// Control mode toggle should report dirty.
 	cli.SetControlMode(true)
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after control mode enabled: expected dirty=true, got false")
 	}
 
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if dirty {
 		t.Fatal("Draw with control mode unchanged: expected dirty=false, got true")
 	}
 
 	cli.SetControlMode(false)
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after control mode disabled: expected dirty=true, got false")
 	}
@@ -182,7 +182,7 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 	// Verify scr is completely untouched when Draw returns false.
 	markerCell := uv.NewCell(scr2.WidthMethod(), "Z")
 	scr2.SetCell(0, 0, markerCell)
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if dirty {
 		t.Fatal("expected dirty=false on unchanged state")
 	}
@@ -200,7 +200,7 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 		CursorY:       2,
 		CursorVisible: true,
 	})
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after cursor position change: expected dirty=true, got false")
 	}
@@ -218,7 +218,7 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 		CursorY:       2,
 		CursorVisible: false,
 	})
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after cursor visibility change: expected dirty=true, got false")
 	}
@@ -227,7 +227,7 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 	}
 
 	// Settled again: should be clean.
-	dirty = cli.Draw(scr2, nil, nil)
+	dirty = cli.Draw(scr2)
 	if dirty {
 		t.Fatal("expected clean draw after cursor settled")
 	}
@@ -239,10 +239,10 @@ func TestClientDrawDirtyDetectionDuringMotion(t *testing.T) {
 	scr := newFakeHostScreen(cols, rows)
 
 	// Initial render
-	if !cli.Draw(scr, nil, nil) {
+	if !cli.Draw(scr) {
 		t.Fatal("initial draw: expected dirty=true")
 	}
-	if cli.Draw(scr, nil, nil) {
+	if cli.Draw(scr) {
 		t.Fatal("subsequent draw: expected dirty=false")
 	}
 
@@ -258,20 +258,20 @@ func TestClientDrawDirtyDetectionDuringMotion(t *testing.T) {
 
 	// Each animation step should report dirty=true
 	for step := 0; step < motionFrames; step++ {
-		dirty := cli.Draw(scr, nil, nil)
+		dirty := cli.Draw(scr)
 		if !dirty {
 			t.Fatalf("step %d of motion: expected dirty=true, got false", step)
 		}
 	}
 
 	// Post-animation frame (cursor becomes visible) should report dirty=true
-	dirty := cli.Draw(scr, nil, nil)
+	dirty := cli.Draw(scr)
 	if !dirty {
 		t.Fatal("post-animation frame: expected dirty=true for cursor reveal, got false")
 	}
 
 	// Settled frame after motion should report dirty=false
-	dirty = cli.Draw(scr, nil, nil)
+	dirty = cli.Draw(scr)
 	if dirty {
 		t.Fatal("settled post-motion frame: expected dirty=false, got true")
 	}

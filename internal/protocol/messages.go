@@ -152,6 +152,16 @@ type MsgScroll struct {
 	Delta  int
 }
 
+// MsgDetach tells the server this client is leaving and the session is
+// not. The server hangs up on the sender; for the client that owns the
+// session it also gives the ownership up, for good.
+type MsgDetach struct{}
+
+// MsgShutdown asks the server to end the session: reap every pane, hang
+// up on every client, and exit. The hang-up is the acknowledgement --
+// it happens only after the reaping has finished.
+type MsgShutdown struct{}
+
 // LayoutMode is which Strategy the session is using.
 //
 // Shared session state, like focus: two clients of different sizes

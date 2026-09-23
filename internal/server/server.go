@@ -3,8 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
-	"image"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/term"
@@ -43,6 +42,18 @@ type Server struct {
 	// layout is the session's strategy mode, shared with every client.
 	layout protocol.LayoutMode
 
+	// owner is the connection of the client that launched this session,
+	// or nil when the session is ownerless: started as `wideboi
+	// server`, or given up by a detach. Once nil it stays nil;
+	// reattaching does not re-own, because nobody's terminal is tied to
+	// the session any more.
+	owner transport.Transport
+
+	// listener is the socket ListenSocket accepts on, if any. Close
+	// shuts it first, so nothing can attach to a session that is
+	// already being reaped.
+	listener *transport.SocketListener
+
 	// closeGrace is handed to every pane this server spawns. Zero means
 	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
 	// it, via SetCloseGrace in export_test.go.
@@ -59,6 +70,16 @@ func (s *Server) SetLayout(mode protocol.LayoutMode) {
 	defer s.mu.Unlock()
 	s.layout = mode
 	layout.ApplyMode(s.strip, mode)
+}
+
+// SetOwner marks tp -- already passed to NewServer -- as the owning
+// client's connection. If it closes without a MsgDetach first, the
+// session ends: that is how an owner killed by SIGKILL, which runs no
+// code at all, still takes its panes with it.
+func (s *Server) SetOwner(tp transport.Transport) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.owner = tp
 }
 
 // SetWidthPresets configures the sequence of presets used by CycleWidth.
@@ -96,6 +117,9 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 
 // ListenSocket starts accepting socket connections on sl.
 func (s *Server) ListenSocket(ctx context.Context, sl *transport.SocketListener) {
+	s.mu.Lock()
+	s.listener = sl
+	s.mu.Unlock()
 	go func() {
 		for {
 			conn, err := sl.Accept()
@@ -106,6 +130,14 @@ func (s *Server) ListenSocket(ctx context.Context, sl *transport.SocketListener)
 			sConn.RunPumps(ctx)
 
 			s.mu.Lock()
+			if s.stoppingLocked() {
+				// Accepted just as Close shut the listener. Close
+				// has taken, or is about to take, its snapshot of
+				// the transports, so this one would never be hung up.
+				s.mu.Unlock()
+				_ = sConn.Close()
+				continue
+			}
 			s.transports = append(s.transports, sConn)
 			s.mu.Unlock()
 
@@ -121,26 +153,56 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 			return
 		case msg, ok := <-tp.ClientSendChan():
 			if !ok {
-				s.mu.Lock()
-				s.removeTransportLocked(tp)
-				s.mu.Unlock()
-				// Close outside s.mu. Close can block, and
-				// Issue #43 records holding s.mu across a
-				// blocking call as the shape behind the server that
-				// cannot be shut down. Close is not on the Transport
-				// interface -- only the socket implementations have
-				// it, InProcChannel does not -- so this is a type
-				// assertion rather than a call. Without it every
-				// detach leaked an fd and the socket's reader
-				// goroutine on a server built to outlive its clients.
-				if cl, ok := tp.(io.Closer); ok {
-					_ = cl.Close()
+				if s.dropClient(tp) {
+					slog.Info("owning client left without detaching; ending the session")
+					_ = s.Close()
 				}
+				return
+			}
+			if _, ok := msg.(protocol.MsgShutdown); ok {
+				// Close hangs up on every transport, this one
+				// included, and only after reaping. Called here,
+				// not under s.mu, for the same reason dropClient
+				// closes outside it (#43).
+				_ = s.Close()
+				return
+			}
+			if _, ok := msg.(protocol.MsgDetach); ok {
+				// An owner detaching gives up ownership, not the
+				// session. Returning here means the EOF that follows
+				// is never read as an owner leaving: this goroutine is
+				// the only reader of this connection, and it stops.
+				s.dropClient(tp)
 				return
 			}
 			s.handleClientMsg(ctx, msg)
 		}
 	}
+}
+
+// dropClient removes tp from the broadcast set and closes it. It reports
+// whether tp was the owner, and clears ownership under the same lock.
+func (s *Server) dropClient(tp transport.Transport) (wasOwner bool) {
+	s.mu.Lock()
+	s.removeTransportLocked(tp)
+	if tp == s.owner {
+		s.owner = nil
+		wasOwner = true
+	}
+	s.mu.Unlock()
+	// Close outside s.mu. Close can block, and
+	// Issue #43 records holding s.mu across a
+	// blocking call as the shape behind the server that
+	// cannot be shut down. Close is not on the Transport
+	// interface -- only the socket implementations have
+	// it, InProcChannel does not -- so this is a type
+	// assertion rather than a call. Without it every
+	// detach leaked an fd and the socket's reader
+	// goroutine on a server built to outlive its clients.
+	if cl, ok := tp.(io.Closer); ok {
+		_ = cl.Close()
+	}
+	return wasOwner
 }
 
 func (s *Server) removeTransportLocked(tp transport.Transport) {
@@ -305,6 +367,12 @@ func (s *Server) SpawnPane() (int, error) {
 }
 
 func (s *Server) spawnPaneLocked() (*Pane, error) {
+	// Close reaps the panes it snapshotted; one spawned after that --
+	// an attach or a new column during the reap -- would be nobody's
+	// to reap.
+	if s.stoppingLocked() {
+		return nil, fmt.Errorf("server is shutting down")
+	}
 	s.nextPaneID++
 	id := s.nextPaneID
 	paneCols := max((s.cols-1)/2, 40)
@@ -388,7 +456,7 @@ func (s *Server) removePaneLocked(id int) {
 // stdin. Blocking here while holding s.mu would park every other goroutine
 // that needs s.mu on one wedged child, srv.Close() among them. So the
 // geometry is read and the lock released before any pane is actually
-// touched, following DrawPane's precedent, and the lock is reacquired
+// touched, following PaneSize's precedent, and the lock is reacquired
 // before returning so the caller's held lock is honored on exit.
 //
 // Be precise about what that buys, because it is less than it looks.
@@ -636,8 +704,8 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context) {
 // resizePanesLocked. Exposed for observability and tests, which otherwise
 // have no way to see across the package boundary that a resize landed.
 //
-// s.mu guards the map lookup only, released before Pane.Size, matching
-// DrawPane's precedent: Size takes p.resizeMu internally, and Resize can
+// s.mu guards the map lookup only, released before Pane.Size: Size
+// takes p.resizeMu internally, and Resize can
 // hold that lock for an unbounded time (see Pane.Close's doc comment).
 // Holding s.mu across the call would park it, and with it the Run loop
 // and srv.Close(), on the same wedge this pattern exists to avoid
@@ -653,36 +721,6 @@ func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	}
 	cols, rows = p.Size()
 	return cols, rows, true
-}
-
-// DrawPane draws pane id's cell buffer onto dst within area.
-func (s *Server) DrawPane(id int, dst uv.Screen, area image.Rectangle) {
-	s.mu.Lock()
-	p, ok := s.panes[id]
-	s.mu.Unlock()
-	if ok && p != nil {
-		p.Draw(dst, area)
-	}
-}
-
-// CursorInfo returns the cursor position and visibility for pane id.
-//
-// s.mu guards the map lookup only, released before CursorPosition and
-// CursorVisible, matching PaneSize and DrawPane's precedent: both reach
-// SafeEmulator's se.mu.RLock, which a blocked Emulator.Write can hold
-// against a child that has stopped reading its stdin. Holding s.mu across
-// the call would park it, and with it the Run loop and srv.Close(), on
-// the same wedge this pattern exists to avoid elsewhere. As with
-// PaneSize, this removes one way to hold s.mu forever, not every way;
-// resizePanesLocked names the residual.
-func (s *Server) CursorInfo(id int) (image.Point, bool) {
-	s.mu.Lock()
-	p, ok := s.panes[id]
-	s.mu.Unlock()
-	if !ok || p == nil {
-		return image.Point{}, false
-	}
-	return p.CursorPosition(), p.CursorVisible()
 }
 
 // pollDescendantsLocked walks ps to maintain a list of active descendant PIDs.
@@ -739,11 +777,33 @@ func (s *Server) pollDescendants() {
 	s.pollDescendantsLocked()
 }
 
-// Close terminates all panes concurrently and cleans up escapee processes.
+// stoppingLocked reports whether Close has begun. s.mu must be held; it
+// is what orders this against Close's snapshot of panes and transports.
+func (s *Server) stoppingLocked() bool {
+	select {
+	case <-s.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// Close terminates all panes concurrently, cleans up escapee processes,
+// and then hangs up on every client.
 func (s *Server) Close() error {
 	var closeErr error
 	s.closeOnce.Do(func() {
+		s.mu.Lock()
 		close(s.stopCh)
+		sl := s.listener
+		s.mu.Unlock()
+		// Stop answering first. The reap below takes seconds, and a
+		// `wideboi` that dialled in during it would attach to a
+		// session about to hang up on it; with the socket gone, it
+		// starts a fresh one instead.
+		if sl != nil {
+			_ = sl.Close()
+		}
 
 		s.mu.Lock()
 		panesToClose := make([]*Pane, 0, len(s.panes))
@@ -777,6 +837,21 @@ func (s *Server) Close() error {
 
 		for _, pid := range escapees {
 			_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+		}
+
+		// Hang up on every client last. For a client waiting on a
+		// shutdown, the closed connection is the only acknowledgement
+		// it gets, so it must not arrive until the reaping above has
+		// finished.
+		s.mu.Lock()
+		tps := s.transports
+		s.transports = nil
+		s.owner = nil
+		s.mu.Unlock()
+		for _, tp := range tps {
+			if cl, ok := tp.(io.Closer); ok {
+				_ = cl.Close()
+			}
 		}
 
 		if len(errs) > 0 {

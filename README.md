@@ -13,6 +13,25 @@ Status: v1. Working, and rough in places — see the [open issues](https://githu
     make build
     ./bin/wideboi
 
+The session runs in a background server, so you can detach from it and
+come back — the panes, and whatever your agents are doing in them, keep
+running:
+
+    ./bin/wideboi               # start a session, or reattach to the running one
+    # ctrl+b d                  # detach; the session keeps running
+    ./bin/wideboi               # back where you left it
+    ./bin/wideboi kill-session  # end it: close every pane and stop the server
+
+A session you started belongs to that terminal until you detach it. If
+the terminal goes away first — you close the window, or the `wideboi`
+process is killed — the whole session is torn down with it, so a
+forgotten `wideboi` never leaves agents running where you cannot see
+them. Once detached, a session lives until `ctrl+b q` from any client,
+`wideboi kill-session`, or a signal to the server.
+
+`wideboi server` and `wideboi attach` start the two halves separately;
+a session started with `wideboi server` is never tied to a terminal.
+
 ## Keys
 
 wideboi uses a prefix key, like tmux. Press `ctrl+b` to enter control
@@ -32,8 +51,8 @@ without doing anything. For the full list, press `?` in control mode.
 | `x` | kill the focused pane |
 | `a` | jump to a pane wanting attention |
 | `?` | show the full help overlay |
-| `d` | detach, leaving the session running (socket sessions only) |
-| `q` | quit wideboi and close every pane |
+| `d` | detach, leaving the session running |
+| `q` | end the session: close every pane and stop the server |
 | `esc` | leave control mode |
 | `ctrl+b` | send a literal `ctrl+b` to the pane, and leave control mode |
 
@@ -155,7 +174,7 @@ Flags:
 ## Development
 
     make quick    # the edit loop: fmt, vet, seam boundary, unit tests (~5s)
-    make check    # the gate: adds race detector, exit contract, smoke, attach (~12s)
+    make check    # the gate: adds race detector, exit contract, smoke, attach (~50s)
     make race     # go test -race -count=1 ./..., on its own
     make smoke    # scripted acceptance cases, asserted on the pty wire
 

@@ -103,7 +103,7 @@ func TestMotionNeverShowsABlankFrame(t *testing.T) {
 
 	for step := 0; step <= motionFrames; step++ {
 		scr := newFakeHostScreen(cols, rows)
-		cli.Draw(scr, nil, nil)
+		cli.Draw(scr)
 		if blankAbove(scr, rows-1) {
 			t.Fatalf("frame %d of the transition is blank above the status bar", step)
 		}
@@ -120,7 +120,7 @@ func TestMotionSettlesOnTheTargetLayout(t *testing.T) {
 	var last *fakeHostScreen
 	for step := 0; step <= motionFrames; step++ {
 		last = newFakeHostScreen(cols, rows)
-		animated.Draw(last, nil, nil)
+		animated.Draw(last)
 	}
 
 	steady := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
@@ -129,7 +129,7 @@ func TestMotionSettlesOnTheTargetLayout(t *testing.T) {
 	steady.HandleServerMsg(paneUpdate(2, 60, 10, "PANE-TWO"))
 	steady.HandleServerMsg(paneUpdate(3, 60, 10, "PANE-THREE"))
 	want := newFakeHostScreen(cols, rows)
-	steady.Draw(want, nil, nil)
+	steady.Draw(want)
 
 	if got, exp := strings.Join(last.textAbove(rows-1), "\n"), strings.Join(want.textAbove(rows-1), "\n"); got != exp {
 		t.Errorf("did not settle on the steady-state frame\n got:\n%s\nwant:\n%s", got, exp)
@@ -162,7 +162,7 @@ func TestResizeCancelsMotion(t *testing.T) {
 	cli := newMotionClient(t, cols, rows)
 
 	focusTo(cli, 2)
-	cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+	cli.Draw(newFakeHostScreen(cols, rows))
 	cli.mu.Lock()
 	running := cli.motion != nil
 	cli.mu.Unlock()
@@ -180,7 +180,7 @@ func TestResizeCancelsMotion(t *testing.T) {
 	}
 
 	scr := newFakeHostScreen(cols+20, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 	if blankAbove(scr, rows-1) {
 		t.Error("snapped frame is blank")
 	}
@@ -195,7 +195,7 @@ func TestCursorHiddenDuringMotion(t *testing.T) {
 	focusTo(cli, 2)
 	scr := newFakeHostScreen(cols, rows)
 	scr.cursorShown = true
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	if scr.cursorShown {
 		t.Error("cursor left visible during motion")
@@ -235,8 +235,8 @@ func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
 	cli := newMotionClient(t, cols, rows)
 
 	focusTo(cli, 2)
-	cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
-	cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+	cli.Draw(newFakeHostScreen(cols, rows))
+	cli.Draw(newFakeHostScreen(cols, rows))
 
 	cli.mu.Lock()
 	stepBefore := cli.motion.step
@@ -321,7 +321,7 @@ func TestRightToLeftMotionNeverShowsABlankFrame(t *testing.T) {
 	// Focus 2 (left-to-right from initial focus 1)
 	focusTo(cli, 2)
 	for step := 0; step <= motionFrames; step++ {
-		cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+		cli.Draw(newFakeHostScreen(cols, rows))
 	}
 
 	// Focus 1 (right-to-left from focus 2)
@@ -329,7 +329,7 @@ func TestRightToLeftMotionNeverShowsABlankFrame(t *testing.T) {
 
 	for step := 0; step <= motionFrames; step++ {
 		scr := newFakeHostScreen(cols, rows)
-		cli.Draw(scr, nil, nil)
+		cli.Draw(scr)
 		if blankAbove(scr, rows-1) {
 			t.Fatalf("frame %d of right-to-left transition is blank above the status bar", step)
 		}
@@ -346,7 +346,7 @@ func TestRightToLeftMotionRetainsCardContent(t *testing.T) {
 
 	focusTo(cli, 2)
 	for step := 0; step <= motionFrames; step++ {
-		cli.Draw(newFakeHostScreen(cols, rows), nil, nil)
+		cli.Draw(newFakeHostScreen(cols, rows))
 	}
 
 	// Focus 1 (right-to-left from focus 2)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/client"
+	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -96,6 +97,62 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 
 	cConn2.Close()
 	_ = srv.Close()
+}
+
+// kill-session must end the session, not just the connection it came in
+// on: the server stops, and a client attached alongside is hung up on.
+//
+// SetCloseGrace is test-only inside package server, so this runs with the
+// real grace -- /bin/sh ignores SIGTERM, so expect a couple of seconds.
+func TestKillSessionShutsDownAServer(t *testing.T) {
+	sockPath := filepath.Join(t.TempDir(), "s.sock")
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener: %v", err)
+	}
+	defer sl.Close()
+	srv := server.NewServer(nil, "/bin/sh", "")
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.ListenSocket(ctx, sl)
+	runDone := make(chan error, 1)
+	go func() { runDone <- srv.Run(ctx) }()
+
+	// One attached client, so there are panes to reap and a bystander
+	// to be hung up on.
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	cc := transport.NewClientSocketConn(conn, 256)
+	cc.RunPumps(ctx)
+	client.NewClient(cc, 80, 24, "C-b").Attach(ctx)
+	select {
+	case <-cc.ServerSendChan():
+	case <-time.After(3 * time.Second):
+		t.Fatal("attached client never heard from the server")
+	}
+
+	if err := runKillSession(config.Config{Socket: sockPath}); err != nil {
+		t.Fatalf("kill-session: %v", err)
+	}
+	select {
+	case <-runDone:
+	case <-time.After(shutdownCeiling):
+		t.Fatal("server kept running after kill-session")
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-cc.ServerSendChan():
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("kill-session did not hang up on the attached client")
+		}
+	}
 }
 
 // A typo in WIDEBOI_LAYOUT must be an error, not a silent fallback to

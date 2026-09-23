@@ -263,6 +263,17 @@ def pane_children(pid: int) -> list[tuple[int, str]]:
     return [(p, cmd) for p, pp, cmd in ps_rows() if pp == pid]
 
 
+def server_child(pid: int) -> int | None:
+    """The `wideboi server` a plain wideboi spawned, or None if it has
+    not spawned one (yet). A plain wideboi owns its session through that
+    server, so the pane shells are *its* children -- pid's grandchildren.
+    """
+    for p, pp, cmd in ps_rows():
+        if pp == pid and " server" in cmd:
+            return p
+    return None
+
+
 def still_alive(pids: list[int], within: float) -> list[int]:
     """Polls until none of pids are left or within elapses, then returns
     whatever is still there. Exit is not synchronous, so a bare one-shot

@@ -153,6 +153,8 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgInput{PaneID: 1, Key: protocol.EncodeKey(uv.KeyPressEvent{Code: 'z', Text: "z"})},
 		protocol.MsgResize{Cols: 100, Rows: 40},
 		protocol.MsgScroll{PaneID: 2, Delta: -3},
+		protocol.MsgShutdown{},
+		protocol.MsgDetach{},
 		protocol.MsgLayoutSnapshot{
 			Columns:      []protocol.ColumnData{{PaneID: 1, Width: 40, Height: 22}},
 			Placements:   []protocol.PlacementData{{PaneID: 1, Src: image.Rect(0, 0, 40, 22), Dst: image.Rect(0, 1, 40, 23), Z: 0}},

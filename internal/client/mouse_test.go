@@ -271,7 +271,7 @@ func newSelectClient(t *testing.T) (*Client, *transport.InProcChannel, *fakeHost
 	cli.HandleServerMsg(paneLines(1, 40, 22, "HELLO WORLD", "SECOND LINE", "THIRD"))
 	cli.HandleServerMsg(paneLines(2, 40, 22, "NEIGHBOUR TEXT", "MORE NEIGHBOUR"))
 	scr := newFakeHostScreen(100, 24)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 	return cli, ch, scr
 }
 
@@ -342,7 +342,7 @@ func TestSelectionIsHighlighted(t *testing.T) {
 	cli, _, scr := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
 	drag(cli, image.Pt(d.Min.X+6, d.Min.Y), image.Pt(d.Min.X+10, d.Min.Y))
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	reversed := func(x, y int) bool {
 		c := scr.CellAt(x, y)
@@ -365,7 +365,7 @@ func TestSelectionHandlesWideGlyphs(t *testing.T) {
 	_ = ch
 	cli.HandleServerMsg(paneLines(1, 40, 22, "A世\x00B"))
 	scr := newFakeHostScreen(100, 24)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 	d := placementFor(cli, 1).Dst
 
 	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+3, d.Min.Y))
@@ -373,7 +373,7 @@ func TestSelectionHandlesWideGlyphs(t *testing.T) {
 		t.Errorf("copied %q, want %q", got, "A世B")
 	}
 
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 	if c := scr.CellAt(d.Min.X+1, d.Min.Y); c == nil || c.Content != "世" {
 		t.Errorf("highlighting blanked the wide glyph: cell = %+v", c)
 	}
@@ -450,7 +450,7 @@ func newTrackingClient(t *testing.T, focus int) (*Client, *transport.InProcChann
 	upd.MouseTracking = true
 	cli.HandleServerMsg(upd)
 	cli.HandleServerMsg(paneLines(1, 40, 22, "PLAIN SHELL"))
-	cli.Draw(newFakeHostScreen(100, 24), nil, nil)
+	cli.Draw(newFakeHostScreen(100, 24))
 	sent(ch)
 	return cli, ch
 }
@@ -563,7 +563,7 @@ func TestTrackingOffRestoresSelection(t *testing.T) {
 	cli, ch := newTrackingClient(t, 2)
 	cli.HandleServerMsg(paneLines(2, 40, 22, "TRACKING CHILD"))
 	scr := newFakeHostScreen(100, 24)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 	d := placementFor(cli, 2).Dst
 
 	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+7, d.Min.Y))
@@ -588,7 +588,7 @@ func TestCardSelectionStopsAtTheCardAbove(t *testing.T) {
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER-CARD-TEXT-THAT-RUNS-UNDER-THE-NEXT", "LOWER-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(2, 60, 10, "TOP-CARD", "TOP-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(3, 60, 10, "RIGHT"))
-	cli.Draw(newFakeHostScreen(100, 24), nil, nil)
+	cli.Draw(newFakeHostScreen(100, 24))
 	d1, d2 := placementFor(cli, 1).Dst, placementFor(cli, 2).Dst
 	if !d1.Overlaps(d2) || d2.Min.X <= d1.Min.X {
 		t.Fatalf("fixture wants pane 2 over pane 1's right side: p1=%v p2=%v", d1, d2)
@@ -630,7 +630,7 @@ func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 	snap := protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards}
 	cli.HandleServerMsg(snap)
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER"))
-	cli.Draw(newFakeHostScreen(100, 24), nil, nil)
+	cli.Draw(newFakeHostScreen(100, 24))
 	d1 := placementFor(cli, 1).Dst
 	drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d1.Min.X+4, d1.Min.Y))
 

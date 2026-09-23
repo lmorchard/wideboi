@@ -144,7 +144,7 @@ func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	cli := newCardClient(t, cols, rows, map[int]string{1: "deploying", 3: "compiling"})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	p1 := placementFor(cli, 1)
 	if p1.Kind != protocol.PlacementFull {
@@ -176,7 +176,7 @@ func TestSliverWithoutATitleStillRenders(t *testing.T) {
 	cli := newCardClient(t, cols, rows, map[int]string{})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	headerRect := image.Rect(placementFor(cli, 1).Dst.Min.X, 0, placementFor(cli, 1).Dst.Max.X, 1)
 	got := regionText(scr, headerRect)
@@ -194,7 +194,7 @@ func TestFocusedCardRendersContentNotChrome(t *testing.T) {
 	cli := newCardClient(t, cols, rows, map[int]string{2: "focused title"})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	got := regionText(scr, placementFor(cli, 2).Dst)
 	// We expect "ONTENT-TWO" because the left border overwrites the first column ('C').
@@ -238,7 +238,7 @@ func TestHigherZSurfaceWinsAtOverlappingCells(t *testing.T) {
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.mu.Lock()
-	cli.composeFrameLocked(scr, st, nil)
+	cli.composeFrameLocked(scr, st)
 	cli.mu.Unlock()
 
 	// In the overlap region [10..30) at row 1, Pane 1 (Z=1) must win over Pane 2 (Z=0),
@@ -272,7 +272,7 @@ func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
 	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	whole := strings.Join(scr.text(), "\n")
 	if strings.Contains(whole, "should not appear") {
@@ -357,7 +357,7 @@ func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.mu.Lock()
-	cli.composeFrameLocked(scr, st, nil)
+	cli.composeFrameLocked(scr, st)
 	cli.mu.Unlock()
 
 	// Check row 0 (the header row). Columns outside [20..35) must be blank.
@@ -426,7 +426,7 @@ func TestHiddenCardMarkerIsRendered(t *testing.T) {
 	cli := cardClientWithColumns(t, cols, rows, 14, 1)
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
 	if !strings.Contains(header, "+") {
@@ -439,7 +439,7 @@ func TestNoMarkerWhenEverythingFits(t *testing.T) {
 	cli := newCardClient(t, cols, rows, map[int]string{})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
 	if strings.Contains(header, "+") {
@@ -470,7 +470,7 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 	}
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
 	// Ending one cell short of the edge, not at it: ultraviolet wraps a
@@ -494,7 +494,7 @@ func TestScrollModeNoMarkerWhenEverythingFits(t *testing.T) {
 	})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	header := strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), "")
 	if strings.Contains(header, "+") {
@@ -511,7 +511,7 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 	cli := cardClientWithColumns(t, cols, rows, 14, 1)
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 	if !strings.Contains(strings.Join(compose.Text(scr, image.Rect(0, 0, cols, 1)), ""), "+") {
 		t.Fatal("fixture should overflow and show a marker before the empty snapshot")
 	}
@@ -521,7 +521,7 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 	})
 
 	scr2 := newFakeHostScreen(cols, rows)
-	cli.Draw(scr2, nil, nil)
+	cli.Draw(scr2)
 	header := strings.Join(compose.Text(scr2, image.Rect(0, 0, cols, 1)), "")
 	if strings.Contains(header, "+") {
 		t.Errorf("marker survived an empty snapshot, counting panes that no longer exist: %q", header)
@@ -560,7 +560,7 @@ func TestCardsDrawDividers(t *testing.T) {
 	})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	whole := strings.Join(scr.text(), "\n")
 	if !strings.Contains(whole, "│") && !strings.Contains(whole, "┃") {
@@ -582,7 +582,7 @@ func TestScrollModeStillDrawsDividers(t *testing.T) {
 	})
 
 	scr := newFakeHostScreen(cols, rows)
-	cli.Draw(scr, nil, nil)
+	cli.Draw(scr)
 
 	whole := strings.Join(scr.text(), "\n")
 	if !strings.Contains(whole, "│") && !strings.Contains(whole, "┃") {

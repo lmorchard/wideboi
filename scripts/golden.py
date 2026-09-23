@@ -61,12 +61,14 @@ def summarize(raw: bytes) -> str:
 
 
 def capture() -> str:
-    # Never created: a plain wideboi attaches to whatever answers this
-    # socket, so the snapshot would record someone else's session. See
-    # smoke.py's NEVER_SOCK.
-    never = os.path.join(tempfile.gettempdir(), f"wideboi-never-golden-{os.getpid()}.sock")
+    # Private to this capture: a plain wideboi attaches to whatever
+    # answers its socket, so a shared path would record someone else's
+    # session. Nothing answers here, so it spawns a server that binds
+    # the path and removes it again when the SIGTERM below ends the
+    # session. See smoke.py's RUNTIME_DIR.
+    sock = os.path.join(tempfile.gettempdir(), f"wideboi-golden-{os.getpid()}.sock")
     pid, fd = spawn_in_pty(["./bin/wideboi"], 100, 30, True,
-                           {"WIDEBOI_SOCK": never})
+                           {"WIDEBOI_SOCK": sock})
     d = Drainer(fd)
     d.start()
     time.sleep(2.0)

@@ -56,6 +56,9 @@ type cliOptions struct {
 	flags      config.ConfigFlags
 	showVer    bool
 	showHelp   bool
+	// ownerFD is the inherited connection a spawning plain wideboi owns
+	// this server through, or -1. Internal: see spawnServer.
+	ownerFD int
 }
 
 func parseCLI(args []string) (cliOptions, error) {
@@ -70,7 +73,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "version" || arg == "help") {
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "version" || arg == "help") {
 			opts.subcommand = arg
 			continue
 		}
@@ -79,7 +82,8 @@ func parseCLI(args []string) (cliOptions, error) {
 			arg == "-l" || arg == "-layout" || arg == "--layout" ||
 			arg == "-p" || arg == "-prefix" || arg == "--prefix" ||
 			arg == "-s" || arg == "-socket" || arg == "--socket" ||
-			arg == "-shell" || arg == "--shell" {
+			arg == "-shell" || arg == "--shell" ||
+			arg == "-owner-fd" || arg == "--owner-fd" {
 			skipNext = true
 		}
 	}
@@ -96,6 +100,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Socket, "s", "", "unix domain socket path")
 	fs.StringVar(&opts.flags.Socket, "socket", "", "unix domain socket path")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
+	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
 	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
 	fs.BoolVar(&opts.showHelp, "h", false, "show help and usage information")
@@ -115,9 +120,12 @@ func parseCLI(args []string) (cliOptions, error) {
 
 func printHelp(w io.Writer) {
 	fmt.Fprintf(w, `Usage:
-  wideboi [flags]            Start an in-process session, or attach if running
+  wideboi [flags]            Start a session in the background and attach to it,
+                             or attach to the one already running
   wideboi [flags] server     Start a background server listening on socket
   wideboi [flags] attach     Attach a client to a running server
+  wideboi [flags] kill-session
+                             End the session: close every pane and stop the server
   wideboi version            Display version information
   wideboi help               Show this help text
 
@@ -165,9 +173,11 @@ func main() {
 
 	switch opts.subcommand {
 	case "server":
-		fatal(runServer(cfg))
+		fatal(runServer(cfg, opts.ownerFD))
 	case "attach":
 		fatal(runAttach(cfg, bindings))
+	case "kill-session":
+		fatal(runKillSession(cfg))
 	default:
 		fatal(run(cfg, bindings))
 	}
@@ -217,46 +227,139 @@ func parseLayout(name string) (protocol.LayoutMode, error) {
 	}
 }
 
-func runServer(cfg config.Config) error {
+// runServer serves the session on cfg.Socket. ownerFD, when not -1, is
+// the inherited connection of the plain wideboi that spawned this
+// server and owns the session; see spawnServer.
+func runServer(cfg config.Config, ownerFD int) error {
 	f, _ := logger.Init("server")
 	if f != nil {
 		defer f.Close()
 	}
-	slog.Info("starting wideboi server", "socketPath", cfg.Socket)
+	slog.Info("starting wideboi server", "socketPath", cfg.Socket, "ownerFD", ownerFD)
 
 	cwd, _ := os.Getwd()
 
+	// Bound before anything else, so a lost race exits before a single
+	// pane spawns. Logged as well as returned: a spawned server's
+	// stderr is /dev/null.
 	sl, err := transport.NewSocketListener(cfg.Socket)
 	if err != nil {
+		slog.Error("cannot listen", "err", err)
 		return err
 	}
 	defer sl.Close()
 
-	srv := server.NewServer(nil, cfg.Shell, cwd)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// A literally-nil interface when there is no owner: a nil
+	// *ServerSocketConn stored in it would not compare equal to nil,
+	// and NewServer would register it as a client.
+	var ownerConn transport.Transport
+	if ownerFD >= 0 {
+		of := os.NewFile(uintptr(ownerFD), "wideboi-owner")
+		conn, err := net.FileConn(of)
+		// FileConn dups the fd with close-on-exec set. The original
+		// has it cleared -- that is how it got here -- so left open
+		// it would leak into every pane this server spawns.
+		of.Close()
+		if err != nil {
+			slog.Error("owner connection", "fd", ownerFD, "err", err)
+			return fmt.Errorf("owner connection on fd %d: %w", ownerFD, err)
+		}
+		sc := transport.NewServerSocketConn(conn, 256)
+		sc.RunPumps(ctx)
+		ownerConn = sc
+	}
+
+	srv := server.NewServer(ownerConn, cfg.Shell, cwd)
+	if ownerConn != nil {
+		srv.SetOwner(ownerConn)
+	}
 	srv.SetLayout(cfg.LayoutMode)
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// The server is responsible for its panes, and there is no
+	// terminal to restore: teardown is the whole job. Without this, SIGTERM took Go's default disposition,
+	// srv.Close never ran, and a nohup'd job in a pane outlived the
+	// server.
+	var signalled atomic.Bool
+	guard := hostterm.NewGuard(func() error {
+		signalled.Store(true)
+		err := srv.Close()
+		// The re-raise skips defers, and a socket nobody answers is
+		// litter the next server has to step over.
+		_ = sl.Close()
+		return err
+	})
+	defer guard.Stop()
+	guard.Arm(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 
 	srv.ListenSocket(ctx, sl)
 
-	return srv.Run(ctx)
+	err = srv.Run(ctx)
+	// Run returns as soon as Close begins, and the guard's Close is
+	// one way that happens. Let it finish and re-raise rather than
+	// exit 0 underneath it. (Before the deferred Stop runs, signalled
+	// can only have been set by a signal.)
+	if signalled.Load() {
+		_ = guard.Stop()
+		time.Sleep(signalExitMargin)
+	}
+	return err
+}
+
+// runKillSession ends the session at cfg.Socket and waits until it has:
+// the server hangs up only once every pane is reaped.
+func runKillSession(cfg config.Config) error {
+	conn, err := net.Dial("unix", cfg.Socket)
+	if err != nil {
+		return fmt.Errorf("no wideboi server running at %s: %w", cfg.Socket, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cc := transport.NewClientSocketConn(conn, 256)
+	cc.RunPumps(ctx)
+	if !hangUp(ctx, cc, protocol.MsgShutdown{}, shutdownCeiling) {
+		return fmt.Errorf("wideboi server at %s did not shut down within %s", cfg.Socket, shutdownCeiling)
+	}
+	return nil
 }
 
 func runAttach(cfg config.Config, bindings []keys.Binding) error {
-	f, _ := logger.Init("client")
-	if f != nil {
-		defer f.Close()
-	}
-	slog.Info("attaching wideboi client to socket", "socketPath", cfg.Socket)
-
 	conn, err := net.Dial("unix", cfg.Socket)
 	if err != nil {
 		return fmt.Errorf("no wideboi server running at %s (start one with 'wideboi server'): %w", cfg.Socket, err)
 	}
+	return runClient(cfg, bindings, conn, false)
+}
+
+// run is plain `wideboi`: attach to the session on cfg.Socket if there
+// is one, otherwise start one in the background and own it.
+func run(cfg config.Config, bindings []keys.Binding) error {
+	if conn, err := net.Dial("unix", cfg.Socket); err == nil {
+		return runClient(cfg, bindings, conn, false)
+	}
+	conn, err := spawnServer(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	return runClient(cfg, bindings, conn, true)
+}
+
+// runClient drives the host terminal for a session reached over conn.
+//
+// owner is true for the plain wideboi that spawned the session. The
+// session then ends with this process -- on a quit, a signal, or a
+// death that runs no code at all -- unless it detached first.
+func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner bool) error {
+	f, _ := logger.Init("client")
+	if f != nil {
+		defer f.Close()
+	}
+	slog.Info("wideboi client starting", "socketPath", cfg.Socket, "owner", owner)
 
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
@@ -268,19 +371,61 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 		return fmt.Errorf("start terminal: %w", err)
 	}
 
-	defer func() {
-		scr.ExitAltScreen()
-		_ = scr.Flush()
-		_ = t.Stop()
-	}()
-
-	var screenLock sync.Mutex
+	var (
+		screenLock sync.Mutex
+		// stopped: a signal's teardown has begun, so stop drawing.
+		stopped atomic.Bool
+		// hungUp: the connection is over, so there is nothing left
+		// to tell the server.
+		hungUp atomic.Bool
+	)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	cConn := transport.NewClientSocketConn(conn, 256)
 	cConn.RunPumps(ctx)
+
+	// The guard restores the terminal on every exit path, a signal
+	// included; before this, SIGTERM to an attached client left the
+	// host terminal in the alt screen. Deferred after cancel so it
+	// runs first, while ctx is still live.
+	guard := hostterm.NewGuard(func() error {
+		stopped.Store(true)
+		// An owner's session dies with it, unless the connection has
+		// already ended -- a detach, a quit, or the server hanging up.
+		// Shut it down *before* restoring the terminal, and wait: the
+		// panes are then reaped before this process re-raises, which
+		// is the order verify-exit asserts. If the ceiling passes,
+		// restore and exit anyway; the server still sees our EOF with
+		// no detach before it, and ends the session itself.
+		var late bool
+		if owner && !hungUp.Load() {
+			late = !hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
+		}
+		screenLock.Lock()
+		defer screenLock.Unlock()
+		scr.ExitAltScreen()
+		_ = scr.Flush()
+		err := t.Stop()
+		if late {
+			fmt.Fprintf(os.Stderr, "wideboi: server did not confirm shutdown within %s\n", shutdownCeiling)
+		}
+		return err
+	})
+	defer guard.Stop()
+	guard.Arm(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
+
+	// awaitReRaise is for every return below. If a signal's teardown is
+	// running on the guard's goroutine, it re-raises when it finishes;
+	// returning first would exit 0 underneath it, so the parent would
+	// see the wrong status.
+	awaitReRaise := func() {
+		if stopped.Load() {
+			_ = guard.Stop()
+			time.Sleep(signalExitMargin)
+		}
+	}
 
 	width, height, termErr := t.GetSize()
 	if termErr != nil || width <= 0 || height <= 0 {
@@ -297,10 +442,18 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 	frame := time.NewTicker(16 * time.Millisecond)
 	defer frame.Stop()
 
+	var (
+		// gotMsg: the server has said anything at all. An owner's
+		// connection that ends before it did means the server we
+		// spawned never got going.
+		gotMsg bool
+	)
 	for {
 		select {
 		case msg, ok := <-cConn.ServerSendChan():
 			if !ok {
+				hungUp.Store(true)
+				awaitReRaise()
 				// The stream ended. Distinguish a server that shut
 				// down or was detached from cleanly -- both ordinary,
 				// both exit 0 -- from a protocol failure, which used
@@ -310,16 +463,22 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 				if err := cConn.Err(); err != nil {
 					return fmt.Errorf("connection to wideboi server failed: %w", err)
 				}
+				if owner && !gotMsg {
+					return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path("server"))
+				}
 				slog.Info("server closed the connection")
 				return nil
 			}
+			gotMsg = true
 			cli.HandleServerMsg(msg)
 
 		case ev := <-t.Events():
 			switch ev := ev.(type) {
 			case uv.WindowSizeEvent:
 				screenLock.Lock()
-				scr.Resize(ev.Width, ev.Height)
+				if !stopped.Load() {
+					scr.Resize(ev.Width, ev.Height)
+				}
 				screenLock.Unlock()
 				cli.SendResize(ctx, ev.Width, ev.Height)
 
@@ -327,11 +486,40 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 				cli.ClearSelection()
 				act := rt.route(ev)
 				switch act.Kind {
-				case routeQuit, routeDetach:
-					// Detaching leaves the server and its children
-					// running; the socket close is what tells the
-					// server this client is gone.
-					slog.Info("client detaching", "verb", act.Kind)
+				case routeDetach:
+					// Leaves the server and its children running.
+					// Waiting for the hang-up makes sure the detach
+					// was read before our socket closes.
+					slog.Info("client detaching")
+					if !hangUp(ctx, cConn, protocol.MsgDetach{}, detachCeiling) {
+						slog.Warn("server did not acknowledge the detach", "ceiling", detachCeiling)
+					}
+					hungUp.Store(true)
+					awaitReRaise()
+					// Restore the terminal first, so the notice lands in
+					// the scrollback rather than in the alt screen the
+					// restore wipes. The deferred Stop is then a no-op.
+					// Sampled before Stop, whose teardown sets stopped
+					// itself: only a signal's teardown means the process
+					// is about to die rather than detach.
+					signalled := stopped.Load()
+					_ = guard.Stop()
+					if !signalled {
+						printDetachNotice(os.Stdout, cfg.Socket)
+					}
+					return nil
+				case routeQuit:
+					slog.Info("client ending the session")
+					acked := hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
+					// Set either way. Unacknowledged, the teardown
+					// would otherwise send a second shutdown and wait
+					// out the whole ceiling again; our EOF, with no
+					// detach before it, ends an owned session anyway.
+					hungUp.Store(true)
+					awaitReRaise()
+					if !acked {
+						return fmt.Errorf("wideboi server did not shut down within %s", shutdownCeiling)
+					}
 					return nil
 				case routeVerb:
 					cli.SendVerb(ctx, act.Verb)
@@ -347,19 +535,36 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 			case uv.MouseEvent:
 				if text := cli.HandleMouse(ctx, ev); text != "" {
 					screenLock.Lock()
-					writeClipboard(scr, text)
+					if !stopped.Load() {
+						writeClipboard(scr, text)
+					}
 					screenLock.Unlock()
 				}
 			}
 
 		case <-frame.C:
 			screenLock.Lock()
-			if cli.Draw(scr, nil, nil) {
-				present(scr)
+			if !stopped.Load() {
+				if cli.Draw(scr) {
+					present(scr)
+				}
 			}
 			screenLock.Unlock()
 		}
 	}
+}
+
+// printDetachNotice tells a user who just detached that the session did
+// not end with the screen: it is still running, and this is where. The
+// commands name the socket only when it is not the default, so the
+// common case stays short.
+func printDetachNotice(w io.Writer, socket string) {
+	sock := ""
+	if socket != config.DefaultSocketPath() {
+		sock = " -s " + socket
+	}
+	fmt.Fprintf(w, "[wideboi detached; the session is still running at %s]\n", socket)
+	fmt.Fprintf(w, "[reattach: wideboi%s   end it: wideboi%s kill-session]\n", sock, sock)
 }
 
 // enableMouse asks the host terminal to report presses, releases and
@@ -388,146 +593,4 @@ func enableMouse(scr *uv.TerminalScreen, cfg config.Config) {
 func writeClipboard(scr *uv.TerminalScreen, text string) {
 	_, _ = scr.WriteString(ansi.SetSystemClipboard(text))
 	_ = scr.Flush()
-}
-
-func run(cfg config.Config, bindings []keys.Binding) error {
-	if conn, err := net.Dial("unix", cfg.Socket); err == nil {
-		conn.Close()
-		return runAttach(cfg, bindings)
-	}
-
-	cwd, _ := os.Getwd()
-
-	t := uv.DefaultTerminal()
-	scr := t.Screen()
-	scr.EnterAltScreen()
-	enableMouse(scr, cfg)
-	if err := t.Start(); err != nil {
-		_ = t.Stop()
-		return fmt.Errorf("start terminal: %w", err)
-	}
-
-	defer func() {
-		scr.ExitAltScreen()
-		_ = scr.Flush()
-		_ = t.Stop()
-	}()
-
-	var (
-		screenLock sync.Mutex
-		stopped    atomic.Bool
-	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	tp := transport.NewInProcChannel(256)
-	srv := server.NewServer(tp, cfg.Shell, cwd)
-	srv.SetLayout(cfg.LayoutMode)
-	if len(cfg.WidthPresets) > 0 {
-		srv.SetWidthPresets(cfg.WidthPresets)
-	}
-
-	guard := hostterm.NewGuard(func() error {
-		stopped.Store(true)
-
-		// Close server and tear down process tree
-		serverErr := srv.Close()
-
-		screenLock.Lock()
-		defer screenLock.Unlock()
-		scr.ExitAltScreen()
-		_ = scr.Flush()
-		err := t.Stop()
-
-		if serverErr != nil {
-			fmt.Fprintln(os.Stderr, "wideboi: teardown:", serverErr)
-		}
-		return err
-	})
-
-	defer guard.Stop()
-	guard.Arm(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
-
-	width, height, termErr := t.GetSize()
-	if termErr != nil || width <= 0 || height <= 0 {
-		width, height = 80, 24
-	}
-
-	cli := client.NewClient(tp, width, height, cfg.PrefixLabel)
-	cli.SetBindings(bindings)
-	rt := &router{prefix: cfg.Prefix, bindings: bindings}
-
-	go func() {
-		_ = srv.Run(ctx)
-	}()
-
-	cli.Attach(ctx)
-
-	frame := time.NewTicker(16 * time.Millisecond)
-	defer frame.Stop()
-
-	for {
-		select {
-		case msg, ok := <-tp.ServerSend:
-			if !ok {
-				if stopped.Load() {
-					time.Sleep(server.CloseResidual + signalExitMargin)
-				}
-				return nil
-			}
-			cli.HandleServerMsg(msg)
-
-		case ev := <-t.Events():
-			switch ev := ev.(type) {
-			case uv.WindowSizeEvent:
-				screenLock.Lock()
-				if !stopped.Load() {
-					scr.Resize(ev.Width, ev.Height)
-				}
-				screenLock.Unlock()
-				cli.SendResize(ctx, ev.Width, ev.Height)
-
-			case uv.KeyPressEvent:
-				cli.ClearSelection()
-				act := rt.route(ev)
-				switch act.Kind {
-				case routeQuit:
-					return nil
-				case routeDetach:
-					return nil
-				case routeVerb:
-					cli.SendVerb(ctx, act.Verb)
-				case routeScroll:
-					cli.SendScroll(ctx, act.Scroll)
-				case routeForward:
-					cli.SendKey(ctx, uv.KeyEvent(ev))
-				case routeIgnore:
-				}
-				// After every key, not only the ones that changed the
-				// mode: the bar must never be able to disagree with the
-				// router about which mode is active.
-				cli.SetControlMode(rt.control)
-				cli.SetHelpVisible(rt.help)
-
-			case uv.MouseEvent:
-				if text := cli.HandleMouse(ctx, ev); text != "" {
-					screenLock.Lock()
-					if !stopped.Load() {
-						writeClipboard(scr, text)
-					}
-					screenLock.Unlock()
-				}
-			}
-
-		case <-frame.C:
-			screenLock.Lock()
-			if !stopped.Load() {
-				if cli.Draw(scr, srv.DrawPane, srv.CursorInfo) {
-					present(scr)
-				}
-			}
-			screenLock.Unlock()
-		}
-	}
 }
