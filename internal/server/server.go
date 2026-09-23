@@ -737,23 +737,21 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	}
 	s.mu.Unlock()
 
-	type delivery struct {
-		tp  transport.Transport
-		id  int
-		gen uint64
+	type result struct {
+		tp       transport.Transport
+		id       int
+		gen      uint64
+		accepted bool
 	}
-	var delivered []delivery
+	var results []result
 	for _, o := range out {
 		for _, tp := range o.to {
-			if tp.SendServer(ctx, o.update) {
-				delivered = append(delivered, delivery{tp, o.update.PaneID, o.gen})
-			}
+			results = append(results, result{tp, o.update.PaneID, o.gen, tp.SendServer(ctx, o.update)})
 		}
 	}
-	if len(delivered) == 0 {
-		return
-	}
 
+	// Runs even when nothing was sent, so records for exited panes go
+	// when the last pane does.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	present := make(map[transport.Transport]bool, len(s.transports))
@@ -763,21 +761,28 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	if s.paneGens == nil {
 		s.paneGens = make(map[transport.Transport]map[int]uint64)
 	}
-	for _, d := range delivered {
+	for _, r := range results {
 		// A client dropped mid-send must not be re-added, and a pane
 		// that exited mid-send has nothing left to track.
-		if !present[d.tp] {
+		if !present[r.tp] {
 			continue
 		}
-		if _, ok := s.panes[d.id]; !ok {
+		if _, ok := s.panes[r.id]; !ok {
 			continue
 		}
-		m := s.paneGens[d.tp]
+		if !r.accepted {
+			// Forget rather than leave alone: a forced resend goes to
+			// clients whose record may already equal gen, and leaving
+			// that in place would mean no later tick retries it.
+			delete(s.paneGens[r.tp], r.id)
+			continue
+		}
+		m := s.paneGens[r.tp]
 		if m == nil {
 			m = make(map[int]uint64)
-			s.paneGens[d.tp] = m
+			s.paneGens[r.tp] = m
 		}
-		m[d.id] = d.gen
+		m[r.id] = r.gen
 	}
 	for _, m := range s.paneGens {
 		for id := range m {

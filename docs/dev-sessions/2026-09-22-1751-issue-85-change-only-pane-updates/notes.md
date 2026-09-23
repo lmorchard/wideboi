@@ -23,6 +23,20 @@
   - Aside: the status-driven forced resend also hides a missing bump in manual testing whenever the pane was
     idle. Keep that in mind when checking a new mutation path by hand.
 
+- **PR #93 and the Copilot review.** Two findings, both real, both fixed test-first (each new assertion was red
+  against the unfixed code):
+  - **High: a dropped forced resend was never retried.** A client could already hold the current generation. If
+    the resend after a snapshot was then dropped, the record still looked current, so no later tick retried it,
+    though the snapshot might just have pruned or blanked that mirror. Now a failed send deletes that client's
+    record for the pane. `TestDroppedForcedResendIsRetried`.
+    - My self-review missed this. The plan treated "record only on success" as sufficient for retries. That holds
+      for change-driven sends, but not for forced ones.
+  - **Medium: the early return skipped pruning when nothing was delivered**, so the last exited pane's record
+    stayed. The record-and-prune step now always runs; it costs one `s.mu` lock per tick. Extended
+    `TestDeliveryRecordsAreForgotten`.
+  - Pushed as a normal commit rather than a squash plus force-push, per LESSONS ("stop force-pushing once handed
+    over for review").
+
 ## For later (not fixed here)
 
 - `vtGrid.Draw`'s doc comment (`grid.go`, above `Draw`) and the `writeResizeMu` field comment both describe an

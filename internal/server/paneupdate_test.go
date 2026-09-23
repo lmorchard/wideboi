@@ -135,8 +135,47 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 		t.Error("record for exited pane 2 survived a broadcast")
 	}
 
+	// With no panes left nothing is delivered, and the last record
+	// must still go.
+	s.mu.Lock()
+	delete(s.panes, 1)
+	s.mu.Unlock()
+	s.broadcastPaneUpdates(ctx, false)
+	if n := len(s.paneGens[tp]); n != 0 {
+		t.Errorf("%d record(s) survived the last pane exiting", n)
+	}
+
 	s.dropClient(tp)
 	if _, ok := s.paneGens[tp]; ok {
 		t.Error("records for a dropped client survived dropClient")
+	}
+}
+
+// A forced resend goes to clients that may already hold the pane's
+// current generation. If it is dropped, the record still looks current,
+// so without invalidating it no later tick would retry -- and the
+// snapshot in front of it may just have pruned or blanked that mirror.
+func TestDroppedForcedResendIsRetried(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	ctx := context.Background()
+	tp := transport.NewInProcChannel(4)
+	s.transports = []transport.Transport{tp}
+	s.broadcastLayoutIfStatusChanged(ctx) // baseline statuses, so only broadcastLayout sends a snapshot
+	drainPaneUpdates(tp)
+	s.broadcastPaneUpdates(ctx, false)
+	if got := drainPaneUpdates(tp); len(got) != 0 {
+		t.Fatalf("baseline not settled: resent %v", got)
+	}
+
+	// Leave room for the snapshot and nothing else.
+	for len(tp.ServerSend) < cap(tp.ServerSend)-1 {
+		tp.ServerSend <- struct{}{}
+	}
+	s.broadcastLayout(ctx)
+	drainPaneUpdates(tp) // filler plus the snapshot; both pane updates were dropped
+
+	s.broadcastPaneUpdates(ctx, false)
+	if got := drainPaneUpdates(tp); !slices.Equal(got, []int{1, 2}) {
+		t.Errorf("after a dropped forced resend, next tick sent %v, want [1 2]", got)
 	}
 }
