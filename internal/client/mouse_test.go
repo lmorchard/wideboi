@@ -716,3 +716,20 @@ func TestHeaderPressFocusesImmediately(t *testing.T) {
 		t.Errorf("focus requests after header press = %v, want [2]", got)
 	}
 }
+
+func TestDragAcrossSoftWrappedRowJoinsLines(t *testing.T) {
+	cli, _ := newMouseClient(t)
+	// Fill row 0 completely (length 40) so the last cell is non-blank.
+	cli.HandleServerMsg(paneLines(1, 40, 22,
+		"1234567890123456789012345678901234567890",
+		"NEXT LINE"))
+	scr := newFakeHostScreen(100, 24)
+	cli.Draw(scr)
+	d := placementFor(cli, 1).Dst
+
+	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+4, d.Min.Y+1))
+	want := "1234567890123456789012345678901234567890NEXT"
+	if got != want {
+		t.Errorf("copied %q, want %q", got, want)
+	}
+}
