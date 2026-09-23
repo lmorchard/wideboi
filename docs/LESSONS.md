@@ -452,6 +452,41 @@ your decoder, not your binding. Neither the unit tests nor the pty smoke
 suite could have caught this, because both typed the escape sequence an
 already-configured terminal would send.
 
+## A new default binding is a breaking change to every config that uses its key
+
+`[keys]` remapping and the default table share one namespace, and
+`BuildBindings` rejects a collision rather than letting one side win.
+So adding a default key is not additive: any config that already
+remapped some other action onto that key stops loading, with a
+duplicate-key error at startup.
+
+#80/#74 bound `y`, `u`, `tab` and `0`-`9`. The documented remap example
+was `scroll_up = "u"`, and it had been copied into five places: the
+README, the smoke config case, and fixtures in `internal/keys`,
+`internal/client` and `internal/config`. Each one failed as a
+collision, and each was moved to `e`. Users who followed the README
+got the same error, which only a note in the PR warned them about.
+
+**Before adding a default key, grep for remaps onto it**
+(`= "<key>"` in `README.md`, `config.example.toml`, `scripts/` and
+`*_test.go`), and put the compat break in the PR description.
+
+## The help overlay is exactly full at 80x24
+
+Bindings with no `BarGroup` are listed only in the overlay, and the
+overlay has to fit on the smallest common terminal or the footer
+("any key closes this") is clipped. Since #80/#74 it is **exactly 24
+rows** at 80x24, with no room to spare. It got there by collapsing
+pairs onto shared lines with `Binding.HelpGroup` (`h/l`, `j/k`,
+`o/p`, `y/u`, and one `0-9` line for the digits).
+
+`TestHelpOverlayFitsAt80x24` fails on the next overlay-only binding.
+That is the test working. The fix is to group the new binding with a
+related one, or to redesign the overlay (columns, scrolling). Raising
+the limit is not a fix. Count rows, not lines: the border adds two,
+and forgetting it is how #80/#74's plan predicted 26 rows when it was
+really 28.
+
 ## Go respects an inherited `SIG_IGN` for SIGHUP and SIGINT
 
 POSIX requires a shell to set SIGINT and SIGQUIT to `SIG_IGN` for an
