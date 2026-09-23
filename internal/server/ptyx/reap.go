@@ -77,11 +77,59 @@ func Descendants(pid int) ([]int, error) {
 	return walk(pid), nil // deepest first
 }
 
+// TTYMates returns every process other than pid whose controlling tty is
+// pid's own. Empty if pid has none.
+//
+// This exists because Descendants cannot see a process whose parent
+// exited first: it is reparented to init/launchd and drops out of the
+// root's tree, but it keeps its controlling tty (#88). For a pane root,
+// that tty is the pane's pty. What neither finds is a process that
+// called setsid itself, since that also drops its controlling tty.
+func TTYMates(pid int) ([]int, error) {
+	if pid <= 0 {
+		return nil, fmt.Errorf("ptyx: tty mates: invalid pid %d", pid)
+	}
+
+	out, err := exec.Command("ps", "-axo", "pid=,tty=").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	ttys := map[int]string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		p, err := strconv.Atoi(fields[0])
+		if err != nil {
+			continue
+		}
+		ttys[p] = fields[1]
+	}
+
+	// ps prints "??" on macOS and "?" on Linux for no controlling tty.
+	own := ttys[pid]
+	if own == "" || strings.Trim(own, "?") == "" {
+		return nil, nil
+	}
+	var mates []int
+	for p, tty := range ttys {
+		if p != pid && tty == own {
+			mates = append(mates, p)
+		}
+	}
+	return mates, nil
+}
+
 // Kill stops the pane's entire process tree. It snapshots the tree's
 // descendants once, while the root is still alive, then sends SIGTERM by
-// the three routes below and waits up to grace.
+// the three routes below and waits up to grace. The snapshot also holds
+// the root's TTYMates: escapees whose parent exited, which the tree no
+// longer reaches. The master is still open at that point, so the pty is
+// still this pane's alone and every process holding it is ours.
 //
-//  1. kill on each snapshotted descendant, deepest first
+//  1. kill on each snapshotted descendant, deepest first, then each tty mate
 //  2. killpg on the pane's group  — the shell and its foreground job
 //  3. kill on the root pid        — the shell itself
 //
@@ -141,6 +189,8 @@ func (p *Pane) Kill(grace time.Duration) error {
 	}
 
 	descendants, _ := Descendants(p.Cmd.Process.Pid)
+	mates, _ := TTYMates(p.Cmd.Process.Pid)
+	descendants = appendNew(descendants, mates)
 
 	p.signalDescendants(descendants, syscall.SIGTERM)
 	p.signalRoot(syscall.SIGTERM)
@@ -167,6 +217,22 @@ func (p *Pane) Kill(grace time.Duration) error {
 		return fmt.Errorf("ptyx: kill: process tree for pid %d survived SIGKILL", p.Cmd.Process.Pid)
 	}
 	return nil
+}
+
+// appendNew appends each pid in more that snapshot does not already hold.
+// The tty mates go after the descendants: they were reparented away from
+// the tree, so deepest-first ordering has nothing to say about them.
+func appendNew(snapshot, more []int) []int {
+	have := make(map[int]bool, len(snapshot))
+	for _, pid := range snapshot {
+		have[pid] = true
+	}
+	for _, pid := range more {
+		if !have[pid] {
+			snapshot = append(snapshot, pid)
+		}
+	}
+	return snapshot
 }
 
 // signalDescendants signals each pid in a Descendants snapshot.

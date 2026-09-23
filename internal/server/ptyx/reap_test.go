@@ -40,6 +40,41 @@ func TestKillReapsEscapedGrandchild(t *testing.T) {
 	}
 }
 
+// TestKillReapsReparentedEscapee covers an escapee whose parent exited
+// first, so it was reparented to init/launchd and no walk from the root
+// pid can find it (#88). It still holds the pane's pty as its
+// controlling tty, and that is what Kill has to find it by. It traps
+// HUP so closing the pty master does not reap it via SIGHUP.
+func TestKillReapsReparentedEscapee(t *testing.T) {
+	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	tag := fmt.Sprintf("wideboi-escapee-%d", time.Now().UnixNano())
+	cmd := fmt.Sprintf("%s && sh -c 'trap \"\" HUP; ./%s 300 & exit'\n", linkSleepAs(tag), tag)
+	if _, err := io.WriteString(p.Master, cmd); err != nil {
+		t.Fatalf("write to pty: %v", err)
+	}
+
+	// Not vacuous: the escapee must really be out of the root's tree,
+	// or the descendant walk would reap it and prove nothing.
+	deadline := time.Now().Add(5 * time.Second)
+	for ppidOf(tag) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("escapee never reparented to pid 1 (ppid %d)", ppidOf(tag))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	_ = p.Kill(2 * time.Second)
+
+	if !waitForProcess(t, tag, false, 5*time.Second) {
+		exec.Command("pkill", "-f", tag).Run()
+		t.Fatal("reparented escapee survived Kill — the pane leaked a process")
+	}
+}
+
 // TestKillReapsSIGTERMIgnoringEscapee covers a descendant that both
 // escaped the process group and ignores SIGTERM. It also traps HUP so
 // closing the pty master does not reap it via SIGHUP. The interactive
@@ -172,4 +207,23 @@ func processExists(tag string) bool {
 		}
 	}
 	return false
+}
+
+// ppidOf returns the parent pid of the process whose command line
+// contains tag, or 0 if there is none.
+func ppidOf(tag string) int {
+	out, err := exec.Command("ps", "-axo", "ppid=,command=").Output()
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, tag) || strings.Contains(line, "ps -axo") || strings.Contains(line, "sh -c") {
+			continue
+		}
+		var ppid int
+		if _, err := fmt.Sscan(line, &ppid); err == nil {
+			return ppid
+		}
+	}
+	return 0
 }

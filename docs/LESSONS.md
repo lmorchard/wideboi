@@ -107,8 +107,17 @@ where the walk runs, which makes it useless as proof of such a change. #83's
 test plan fell into exactly this, and the fix it proposed (moving Close's
 final poll) turned out to duplicate `Kill`'s walk (#87). Before planning a
 reaper change, ask whether the process in question is still in the tree at
-the moment the walk runs. If it is not, the fix needs a different mechanism
-(#88), not a better-timed walk.
+the moment the walk runs. If it is not, the fix needs a different mechanism,
+not a better-timed walk.
+
+That mechanism turned out to be the **controlling tty** (#88). A reparented
+process keeps it, and for a pane that tty is the pane's pty, so `Kill` now
+also snapshots the root's `TTYMates`. This is measured, not assumed: on macOS
+`ps -o sess` prints 0 for everything, so session ID is no use, while `tty`
+survives reparenting. What stays out of reach is a process that calls
+`setsid` itself (a daemon), because that also drops its controlling tty.
+macOS offers no subreaper and no working `NOTE_TRACK`, so that is the limit.
+It is the same limit tmux has.
 
 ## The harness's environment pin only covers what it starts on a pty
 
