@@ -116,6 +116,12 @@ func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Clie
 	}
 }
 
+func (c *Client) SetTransport(tp transport.Transport) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.transport = tp
+}
+
 // Attach sends the initial MsgAttach protocol message to the server.
 func (c *Client) Attach(ctx context.Context) {
 	c.transport.SendClient(ctx, protocol.MsgAttach{Cols: c.cols, Rows: c.rows})

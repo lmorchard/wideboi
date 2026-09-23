@@ -514,8 +514,28 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					}
 					return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path(cfg.Socket, "server"))
 				}
-				slog.Info("server closed the connection")
-				return nil
+				if owner {
+					slog.Info("server closed the connection")
+					return nil
+				}
+
+				// The server is gone but we didn't ask to detach, and we don't own it.
+				// It might be a network drop or a server restart. Try to reconnect.
+				slog.Info("connection dropped, attempting to reconnect...")
+				hungUp.Store(false) // Not permanently hung up yet
+
+				reconnectConn, err := dialWithin(cfg.Socket, 2*time.Second)
+				if err != nil {
+					slog.Info("reconnect failed", "err", err)
+					return nil // Just exit cleanly if the server is truly gone
+				}
+
+				slog.Info("reconnected successfully")
+				cConn = transport.NewClientSocketConn(reconnectConn, 256)
+				cConn.RunPumps(ctx)
+				cli.SetTransport(cConn)
+				cli.Attach(ctx)
+				continue
 			}
 			if !gotMsg {
 				gotMsg = true

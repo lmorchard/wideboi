@@ -863,7 +863,32 @@ def case_reattach_starts_from_the_configured_layout(fail):
         srv.stop()
 
 
+def case_dropped_connection_reconnects(fail):
+    srv = Server()
+    try:
+        c = Client(args=("--socket", srv.sock, "attach"))
+        try:
+            c.wait_for(lambda out: b"[pane 1]" in out)
+            
+            # Kill the server hard
+            srv.proc.kill()
+            srv.proc.wait(timeout=1.0)
+            
+            # Start a new server on the same socket
+            srv2 = Server(sock=srv.sock)
+            try:
+                c.type(b"echo SURVIVED\r")
+                c.wait_for(lambda out: b"SURVIVED" in out, timeout=4.0)
+                c.detach()
+            finally:
+                srv2.stop()
+        finally:
+            c.kill()
+    finally:
+        srv.stop()
+
 CASES = [
+    ("dropped connection reconnects", case_dropped_connection_reconnects),
     ("attach renders pane content over the socket", case_attach_renders_pane_content),
     ("attached client emits no bytes while idle", case_attached_client_idle_emits_no_bytes),
     ("attached client presents no empty frames", case_attached_client_presents_no_empty_frames),
