@@ -22,7 +22,7 @@ func newBareServer(tps ...transport.Transport) *Server {
 	return &Server{
 		strip:      layout.NewStrip(),
 		panes:      make(map[int]*Pane),
-		escapees:   make(map[int]struct{}),
+		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 		transports: tps,
 	}
