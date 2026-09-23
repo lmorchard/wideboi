@@ -34,7 +34,7 @@ func TestDroppedTransportIsClosed(t *testing.T) {
 	tp := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
 	s := &Server{
 		panes:      make(map[int]*Pane),
-		escapees:   make(map[int]struct{}),
+		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 		transports: []transport.Transport{tp},
 	}
@@ -74,7 +74,7 @@ func TestDroppedNonClosableTransportIsStillRemoved(t *testing.T) {
 	tp := transport.NewInProcChannel(8)
 	s := &Server{
 		panes:      make(map[int]*Pane),
-		escapees:   make(map[int]struct{}),
+		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 		transports: []transport.Transport{tp},
 	}

@@ -29,7 +29,7 @@ type Server struct {
 	shell      string
 	cwd        string
 	transports []transport.Transport
-	escapees   map[int]struct{} // Tracked descendant PIDs for teardown
+	escapees   map[int]string // Tracked descendant PIDs for teardown, to their ps start time
 	stopCh     chan struct{}
 	closeOnce  sync.Once
 
@@ -106,7 +106,7 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		shell:      shell,
 		cwd:        cwd,
 		transports: make([]transport.Transport, 0),
-		escapees:   make(map[int]struct{}),
+		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 	}
 	if tp != nil {
@@ -732,7 +732,38 @@ func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	return cols, rows, true
 }
 
-// pollDescendantsLocked walks ps to maintain a list of active descendant PIDs.
+// procEntry is one row of readProcTable: a process's parent and its start
+// time, as ps prints it. The start time is compared, never parsed.
+type procEntry struct {
+	ppid  int
+	start string
+}
+
+// readProcTable snapshots every running process with one ps call.
+func readProcTable() (map[int]procEntry, error) {
+	out, err := exec.Command("ps", "-axo", "pid=,ppid=,lstart=").Output()
+	if err != nil {
+		return nil, err
+	}
+	table := make(map[int]procEntry)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		pid, err1 := strconv.Atoi(fields[0])
+		ppid, err2 := strconv.Atoi(fields[1])
+		if err1 == nil && err2 == nil {
+			table[pid] = procEntry{ppid: ppid, start: strings.Join(fields[2:], " ")}
+		}
+	}
+	return table, nil
+}
+
+// pollDescendantsLocked walks ps to maintain a list of active descendant
+// PIDs, each keyed to its start time. It also prunes entries that exited,
+// or whose PID now has a different start time: the OS recycles PIDs, and
+// Close SIGKILLs whatever this set holds (#89).
 func (s *Server) pollDescendantsLocked() {
 	pids := make([]int, 0, len(s.panes))
 	for _, p := range s.panes {
@@ -740,26 +771,24 @@ func (s *Server) pollDescendantsLocked() {
 			pids = append(pids, pid)
 		}
 	}
-	if len(pids) == 0 {
+	if len(pids) == 0 && len(s.escapees) == 0 {
 		return
 	}
 
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=").Output()
+	table, err := readProcTable()
 	if err != nil {
 		return
 	}
 
+	for pid, start := range s.escapees {
+		if e, ok := table[pid]; !ok || e.start != start {
+			delete(s.escapees, pid)
+		}
+	}
+
 	kids := make(map[int][]int)
-	for _, line := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		pid, err1 := strconv.Atoi(fields[0])
-		ppid, err2 := strconv.Atoi(fields[1])
-		if err1 == nil && err2 == nil {
-			kids[ppid] = append(kids[ppid], pid)
-		}
+	for pid, e := range table {
+		kids[e.ppid] = append(kids[e.ppid], pid)
 	}
 
 	stack := make([]int, 0, len(pids))
@@ -775,7 +804,7 @@ func (s *Server) pollDescendantsLocked() {
 			continue
 		}
 		seen[curr] = struct{}{}
-		s.escapees[curr] = struct{}{}
+		s.escapees[curr] = table[curr].start
 		stack = append(stack, kids[curr]...)
 	}
 }
@@ -824,9 +853,9 @@ func (s *Server) Close() error {
 		// its own live tree (ptyx.Kill's snapshot), so a poll now
 		// would find nothing that walk misses. s.escapees is for what
 		// the background poll saw before it left the tree (#83).
-		escapees := make([]int, 0, len(s.escapees))
-		for pid := range s.escapees {
-			escapees = append(escapees, pid)
+		escapees := make(map[int]string, len(s.escapees))
+		for pid, start := range s.escapees {
+			escapees[pid] = start
 		}
 		s.mu.Unlock()
 
@@ -847,8 +876,18 @@ func (s *Server) Close() error {
 		}
 		wg.Wait()
 
-		for _, pid := range escapees {
-			_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+		// Signal only escapees still running as the process that was
+		// recorded. A PID whose start time has changed was recycled and
+		// is not ours; if ps fails, nothing can be verified and nothing
+		// is signalled, since killing a stranger is worse than a leak.
+		// A PID reused within the same second as its predecessor's
+		// start still matches: lstart has one-second resolution.
+		if table, err := readProcTable(); err == nil {
+			for pid, start := range escapees {
+				if e, ok := table[pid]; ok && e.start == start {
+					_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
+				}
+			}
 		}
 
 		// Hang up on every client last. For a client waiting on a
