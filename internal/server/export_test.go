@@ -2,7 +2,7 @@ package server
 
 import "time"
 
-// SetCloseGrace shortens the SIGTERM grace for panes this server spawns.
+// SetCloseGrace shortens the hangup grace for panes this server spawns.
 //
 // Deliberately in export_test.go, which is compiled only into the test
 // binary: nothing but a test would ever turn this knob, so it should not

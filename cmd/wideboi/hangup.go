@@ -8,10 +8,9 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
-// shutdownCeiling bounds the wait for a server to reap its panes and
-// hang up: the pane grace, the kill residual, and the margin -- the
-// same budget the in-process binary used to sleep through.
-const shutdownCeiling = server.CloseGrace + server.CloseResidual + signalExitMargin
+// shutdownCeiling bounds the wait for a server to hang up its panes and
+// then its clients: the pane grace and the margin.
+const shutdownCeiling = server.CloseGrace + signalExitMargin
 
 // detachCeiling bounds the wait for the server to acknowledge a detach,
 // which involves no reaping.

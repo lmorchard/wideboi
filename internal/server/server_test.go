@@ -12,12 +12,10 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
-// testGrace is the SIGTERM grace these tests tear down with. None of
-// them asserts anything about the grace, escalation, or reaping -- those
-// contracts belong to internal/server/ptyx's reap tests and to
-// scripts/ptycheck.py via `make verify-exit`. At the 2s production
-// default these seven tests spent ~14s between them waiting for an
-// interactive /bin/sh to ignore SIGTERM.
+// testGrace is the hangup grace these tests tear down with. None of them
+// asserts anything about teardown -- that contract belongs to
+// internal/server/ptyx's hangup tests and to scripts/ptycheck.py via
+// `make verify-exit`.
 const testGrace = 100 * time.Millisecond
 
 // placementsAt computes what a scroll-mode client would place for snap

@@ -69,70 +69,44 @@ Three separate times a test here passed against the bug it was written to catch.
 **Break the thing a new test guards, watch it go red, restore it.** For finite
 input spaces, enumerate in a loop rather than hand-picking rows.
 
-## Teardown is the load-bearing guarantee
+## Teardown is a hangup, as in tmux
 
-A multiplexer that leaks background processes is worse than useless — the work
-keeps burning CPU with no window left to find it in. `ptyx.Kill` does three kills
-per pane because each catches processes the others miss, and the ordering is
-deliberate: `closePanes` runs **before** the render lock, so children are reaped
-even when rendering is wedged against a stalled consumer.
+Closing a pane closes its pty master (`ptyx.Hangup`), and the kernel does the
+rest: SIGHUP to the shell and its foreground job, and an interactive shell
+passes it on to its jobs. Nothing else is signalled and no process table is
+read. A job that opted out of the hangup (`nohup`, `disown`, `trap '' HUP`,
+`setsid`) keeps running, by design. That is tmux's model (`window.c` only
+closes the fd) and every terminal emulator's. `TestHangupLeavesANohupJobRunning`
+pins it. If it fails, something is reaping again.
 
-Known parked gaps, recorded with reasoning in the v1 spec: a root that exits
-before `Kill` leaves escapees unsignalled, and `ps -axo` parsing is unverified on
-Linux.
-
-Since #25 every session runs in a separate `wideboi server`, so the guarantee
-crosses a process boundary and has to be stated more carefully: **nothing
-outlives the client that started the session, unless that client detached.**
-There are two routes, and each one covers what the other can't:
+Since #25 every session runs in a separate `wideboi server`, so the contract
+crosses a process boundary: **the session's panes are hung up when the client
+that started it ends, unless that client detached.** There are two routes:
 
 - A signal to the owner sends `MsgShutdown` and waits for the server to hang
-  up, which it does only after reaping. The order is still reap, then restore
-  the terminal, then re-raise.
+  up on it, which it does only after every pane is hung up. Then the owner
+  restores the terminal and re-raises.
 - An owner that dies without running any code (SIGKILL) is caught by the
   server: the owner's socketpair reaches EOF with no `MsgDetach` before it.
 
-That second route is quick enough to satisfy `verify-exit` on its own, so
-ptycheck cannot see whether the first one ran. It does fail when both are
-removed. A detached, ownerless server has no terminal left to take it down,
-so it lives until `kill-session`, a `q`, or a signal, and it arms the same
-guard to reap on that signal.
+A detached, ownerless server lives until `kill-session`, a `q`, or a signal,
+and it arms the same guard on that signal.
 
-**A `ps` walk by parent pid cannot see a process whose parent has died.** It
-is reparented to launchd (pid 1) at once, and from then on no walk from a pane
-root reaches it: not the 1s background poll, not `ptyx.Kill`'s snapshot. So a
-double-forked or `setsid` escapee planted in a test is out of reach of *every*
-walk. A test that plants one fails before and after any change to when or
-where the walk runs, which makes it useless as proof of such a change. #83's
-test plan fell into exactly this, and the fix it proposed (moving Close's
-final poll) turned out to duplicate `Kill`'s walk (#87). Before planning a
-reaper change, ask whether the process in question is still in the tree at
-the moment the walk runs. If it is not, the fix needs a different mechanism,
-not a better-timed walk.
+**Why we stopped hunting escapees.** Until September 2026 wideboi promised
+more than tmux: nothing outlives the session, `nohup` or not. Keeping that
+promise meant reconstructing, from `ps`, a relationship the kernel doesn't
+keep. #83, #89, #88 and an attempt at #39 each plugged one hole and found the
+next. Some holes can't be plugged at all: once a pane's shell exits, its
+escapees have neither a parent chain nor a controlling tty leading back.
+Then an uncommitted #39 attempt added a `ps` column that printed **blank**
+inside `go test`. The fields shifted, and a test's `Close` SIGKILLed most of
+the processes its developer had started that day. The guarantee was dropped
+for the hangup model.
 
-That mechanism turned out to be the **controlling tty** (#88). A reparented
-process keeps it, and for a pane that tty is the pane's pty, so `Kill` now
-also snapshots the root's `TTYMates`. This is measured, not assumed: on macOS
-`ps -o sess` prints 0 for everything, so session ID is no use, while `tty`
-survives reparenting. What stays out of reach is a process that calls
-`setsid` itself (a daemon), because that also drops its controlling tty.
-macOS offers no subreaper and no working `NOTE_TRACK`, so that is the limit.
-It is the same limit tmux has.
-
-**A `ps` parse that feeds a kill must be exact, or it is a weapon.** An
-uncommitted attempt at #39 added a `ps` column that printed fine from a shell
-but **blank** inside the `go test` binary. `strings.Fields` shifted every row,
-the tail joined into a "start time" matched almost everything, and a test's
-`Server.Close` SIGKILLed most of the processes its developer had started that
-day, twice, before anyone noticed. Three rules came out of it:
-
-- Every row gets an exact field count (`parseProcTable`'s is 7: pid, ppid and
-  `lstart`'s five words), and any other shape is dropped. Never join a
-  variable tail in a kill path.
-- Probe a new `ps` column from the process that will run it (Go, under
-  `go test`), not from a shell.
-- A test that sends real signals with a *widened* selection is live fire on the
-  dev machine. Dry-run the selection first and assert that it is small.
+If process-table code ever comes back, one rule is the price of the lesson: a
+`ps` parse that feeds a kill must be exact (a fixed field count, with any
+other row dropped), must be probed from the process that will run it, and
+must be dry-run before a test sends real signals to what it selects.
 
 ## The harness's environment pin only covers what it starts on a pty
 

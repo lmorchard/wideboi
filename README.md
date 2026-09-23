@@ -24,9 +24,12 @@ running:
 
 A session you started belongs to that terminal until you detach it. If
 the terminal goes away first — you close the window, or the `wideboi`
-process is killed — the whole session is torn down with it, so a
-forgotten `wideboi` never leaves agents running where you cannot see
-them. Once detached, a session lives until `ctrl+b q` from any client,
+process is killed — the whole session is torn down with it. Each pane's
+terminal is hung up, as tmux does, so the agents in it get SIGHUP and a
+forgotten `wideboi` never leaves them running where you cannot see them.
+A job you deliberately detached from the terminal (`nohup`, `disown`,
+`setsid`) keeps running, as it would after closing any terminal. Once
+detached, a session lives until `ctrl+b q` from any client,
 `wideboi kill-session`, or a signal to the server.
 
 `wideboi server` and `wideboi attach` start the two halves separately;

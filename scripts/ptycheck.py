@@ -22,28 +22,13 @@ and then asserts all of:
     internal/hostterm's restore-then-re-raise design: the terminal was
     restored first, and only then did the process die by the signal.
 
- 3. Every process wideboi had spawned before the signal is gone
-    afterwards -- the `wideboi server` it owns its session through, that
-    server's pane shells, AND a background job deliberately planted in
-    one of them. The server, and with it the panes, are separate
-    processes now (#25), so this is also the check that killing the
-    owning client ends the session rather than orphaning it.
-
-    This is the leaked-pane check, and it is invisible to the
-    stray-binary scan below, because a leaked pane is a lingering SHELL,
-    not a second wideboi.
-
-    The planted job is what gives this assertion teeth, and it is worth
-    being explicit about why. Snapshotting the pane shells alone is not
-    enough: when wideboi exits, its pty masters close, the shells read
-    EOF and exit on their own, so they are reaped whether or not
-    teardown ran. Verified empirically -- with closePanes deleted from
-    the shutdown path, a pane-shells-only assertion still passed. So
-    the harness types `nohup sleep ... &` into the focused pane first.
-    That job is in its own process group and ignores SIGHUP, so nothing
-    but ptyx.Kill's descendant walk reaches it, and it survives to be
-    counted if teardown is skipped. It is exactly the escapee the
-    three-route reaper in internal/server/ptyx exists for.
+ 3. Every process wideboi spawned before the signal is gone afterwards:
+    the `wideboi server` it owns its session through, and that server's
+    pane shells. The server and the panes are separate processes (#25),
+    so this is also the check that killing the owning client ends the
+    session rather than orphaning it. Teardown is the pty hangup, as in
+    tmux, so a job that opted out of it (nohup, setsid) is deliberately
+    not asserted on.
 
  4. No other process is running this binary. Not a pane-leak check -- a
     leaked pane is a shell -- but a wideboi outliving the one this script
@@ -74,31 +59,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
-    ALT_SCREEN_EXIT, Drainer, spawn_in_pty, descendants, pane_children, ps_rows, still_alive,
+    ALT_SCREEN_EXIT, Drainer, spawn_in_pty, pane_children, ps_rows, still_alive,
     server_child, wait_for_exit, force_cleanup, parse_size, parse_signal,
 )
-
-ESCAPEE_SLEEP = "987654"
-ESCAPEE_CMD = f"nohup sleep {ESCAPEE_SLEEP} >/dev/null 2>&1 &\r"
-
-
-def plant_escapee(master_fd: int, pid: int, within: float) -> tuple[int, str] | None:
-    """Types a nohup'd background job into wideboi's focused pane and
-    waits for it to show up in the process tree.
-
-    Writing to the master is how a real user types: wideboi decodes the
-    bytes into key events and forwards them to the focused pane. Returns
-    the planted process, or None if it never appeared.
-    """
-    os.write(master_fd, ESCAPEE_CMD.encode())
-    deadline = time.monotonic() + within
-    while time.monotonic() < deadline:
-        for cpid, cmd in descendants(pid):
-            if f"sleep {ESCAPEE_SLEEP}" in cmd:
-                return (cpid, cmd)
-        time.sleep(0.1)
-    return None
-
 
 def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
     """Looks for a process still running this binary that this run is
@@ -144,7 +107,7 @@ def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
 
 
 def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
-              startup_delay: float, timeout: float, plant: bool) -> bool:
+              startup_delay: float, timeout: float) -> bool:
     label = f"{cols}x{rows}" if set_winsize else f"{cols}x{rows} (no winsize set)"
     print(f"--- size={label} signal={signal.Signals(sig).name} ---")
 
@@ -204,17 +167,7 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
             print(f"FAIL: expected 2 pane children before signalling, found {len(shells)}: {shells}")
             return False
 
-        if plant:
-            escapee = plant_escapee(master_fd, pid, within=5.0)
-            if escapee is None:
-                print(f"FAIL: planted job (sleep {ESCAPEE_SLEEP}) never appeared in wideboi's "
-                      f"process tree -- without it the leaked-pane assertion is vacuous, "
-                      f"because pane shells exit on their own when the pty master closes")
-                return False
-            tracked = shells + [escapee]
-        else:
-            tracked = list(shells)
-        tracked.append((srv, "wideboi server"))
+        tracked = list(shells) + [(srv, "wideboi server")]
 
         print(f"     tracking {len(tracked)} pid(s): {[t for t, _ in tracked]}")
 
@@ -320,7 +273,6 @@ def main() -> int:
                         help="ceiling on the wait for wideboi to spawn its panes before "
                              "signalling (default: 5); satisfied by observation, so a fast "
                              "run takes a fraction of it")
-    parser.add_argument("--no-escapee", action="store_true", help="skip planting the nohup'd background job; the leaked-pane assertion becomes much weaker (see module docstring)")
     args = parser.parse_args()
 
     if not os.path.isfile(args.binary):
@@ -331,7 +283,7 @@ def main() -> int:
     set_winsize = not (cols == 0 and rows == 0)
 
     ok = run_check(args.binary, cols, rows, set_winsize, args.signal,
-                    args.startup_delay, args.timeout, not args.no_escapee)
+                    args.startup_delay, args.timeout)
     return 0 if ok else 1
 
 

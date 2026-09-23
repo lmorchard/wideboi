@@ -107,10 +107,9 @@ tidy:
 #   2. The alt-screen exit sequence reached the pty before that death.
 #      This is what distinguishes wideboi's restore-then-re-raise from
 #      a bare default kill, and what gives assertion 1 its meaning.
-#   3. Nothing wideboi spawned outlived it -- including a nohup'd
-#      background job the harness types into a pane first, because the
-#      pane shells exit on their own when the master closes and so
-#      cannot detect a skipped teardown by themselves.
+#   3. Nothing wideboi spawned outlived it: its server and that server's
+#      pane shells. Teardown is the pty hangup, so a nohup'd job in a
+#      pane is deliberately not asserted on.
 #
 # The size matrix includes the no-winsize (0x0) case that used to panic
 # before main.go clamped width/height. The signal matrix covers the armed

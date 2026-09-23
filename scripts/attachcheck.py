@@ -36,7 +36,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty, wait_for_exit, force_cleanup,
-    descendants, ps_rows, server_child, settle_output, still_alive,
+    descendants, server_child, settle_output, still_alive,
 )
 # focus_pane_id reads the status line the way the diffing renderer
 # actually writes it: the "focus: [pane N" literal appears only in the
@@ -45,16 +45,16 @@ from ptylib import (
 # -- whether the first frame beats the server's opening snapshot is a
 # race, and a reattach usually loses it, painting "pane 0" once before
 # the real focus arrives.
-from smoke import CUP, EMPTY_SYNC_UPDATE, focus_pane_id, prompts_seen
+from smoke import CUP, EMPTY_SYNC_UPDATE, focus_pane_id
 
 BIN = "./bin/wideboi"
 COLS, ROWS = 80, 24
 
-# The hang-up that acknowledges a shutdown comes only after the reap, so
-# by the time kill-session or C-b q returns the panes are already gone.
-# This is the allowance for the kernel to finish tearing them down, not
-# for reaping; the reap takes seconds, so a hang-up that came before it
-# blows through this.
+# The hang-up that acknowledges a shutdown comes only after every pane
+# has been hung up and its shell has exited, so by the time kill-session
+# or C-b q returns the panes are already gone. This is the allowance for
+# the kernel to finish tearing them down, not for the hangup itself: a
+# client hang-up that came before the panes' would blow through this.
 REAPED_BY_ACK = 0.3
 
 # Ceilings, not durations. Both are now the timeout handed to
@@ -493,20 +493,16 @@ def case_plain_wideboi_detaches_and_the_session_survives(fail):
 def case_sigkilled_owner_takes_the_session_with_it(fail):
     """SIGKILL runs no code at all, so the owner cannot say anything.
     The server must notice the owner's connection end with no detach
-    before it, and end the session itself -- escapees included."""
+    before it, and end the session itself."""
     c, srv = owned_session(fail)
     if srv is None:
         c.kill()
         return
     kids = []
     try:
-        escapee = plant_escapee(c, srv, "987652")
-        if escapee is None:
-            fail("planted job never appeared; the leak assertion would be vacuous")
         kids = [p for p, _ in descendants(srv)]
         c.kill()
-        # The server's own teardown: the pane grace plus the kill
-        # residual, with headroom.
+        # The server's own teardown: the pane grace, with headroom.
         left = still_alive([srv, *kids], 6.0)
         if left:
             fail(f"a SIGKILLed owner left its session running: {left}")
@@ -568,47 +564,14 @@ def case_attach_without_a_server_says_so(fail):
         fail(f"error does not tell the user how to start one: {msg.strip()!r}")
 
 
-def plant_escapee(c, root_pid, tag, within=5.0):
-    """Types a nohup'd background job into the focused pane and waits for
-    it to appear under root_pid. Returns its pid, or None.
-
-    The pane shells alone cannot show a skipped teardown: they exit on
-    their own when their pty master closes. This job is in its own
-    process group and ignores SIGHUP, so only the server's reaper gets
-    it -- the same trick scripts/ptycheck.py uses.
-    """
-    # The focused shell must be at a prompt first. Attaching settles on
-    # the client's own chrome, drawn well before a pane shell has
-    # exec'd, and text typed into a shell that is still starting up can
-    # be discarded. One prompt, not two: at 80x24 in the card layout
-    # only the focused pane's is ever drawn, and waiting for a second
-    # burned the whole ceiling every time.
-    deadline = time.monotonic() + within
-    while prompts_seen(c.output()) < 1 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    c.type(f"nohup sleep {tag} >/dev/null 2>&1 &\r".encode())
-    deadline = time.monotonic() + within
-    while time.monotonic() < deadline:
-        for pid, cmd in descendants(root_pid):
-            if f"sleep {tag}" in cmd:
-                return pid
-        time.sleep(0.1)
-    return None
-
-
 def case_server_reaps_its_panes_on_signal(fail):
     """A background server that leaks shells on SIGTERM is worse than a
     foreground one: there is no window left to find them in."""
     srv = Server()
-    escapee = None
     try:
         c = Client()
         if focus_pane_id(c.output(), ROWS) is None:
             fail("client never attached; teardown assertion would be vacuous")
-        escapee = plant_escapee(c, srv.proc.pid, "987653")
-        if escapee is None:
-            fail("planted job never appeared under the server; the leak "
-                 "assertion would be vacuous")
         c.kill()
     finally:
         srv.stop()
@@ -619,42 +582,6 @@ def case_server_reaps_its_panes_on_signal(fail):
                 os.kill(pid, signal.SIGKILL)
             except OSError:
                 pass
-
-
-def case_server_reaps_a_reparented_escapee(fail):
-    """A job whose parent shell exited is reparented to init/launchd, so
-    no walk down from a pane's root reaches it. It still holds the pane's
-    pty as its controlling tty, and teardown has to find it by that
-    (#88). nohup keeps the hang-up from doing the reaper's job."""
-    srv = Server()
-    tag = "987654"
-    escapee = None
-    try:
-        c = Client()
-        if focus_pane_id(c.output(), ROWS) is None:
-            fail("client never attached; teardown assertion would be vacuous")
-        deadline = time.monotonic() + 5.0
-        while prompts_seen(c.output()) < 1 and time.monotonic() < deadline:
-            time.sleep(0.05)
-        c.type(f"sh -c 'nohup sleep {tag} >/dev/null 2>&1 & exit'\r".encode())
-        deadline = time.monotonic() + 5.0
-        while escapee is None and time.monotonic() < deadline:
-            for pid, ppid, cmd in ps_rows():
-                if f"sleep {tag}" in cmd and ppid == 1:
-                    escapee = pid
-            time.sleep(0.1)
-        if escapee is None:
-            fail("planted job never reparented to pid 1; the leak "
-                 "assertion would be vacuous")
-        c.kill()
-    finally:
-        srv.stop()
-    if escapee is not None and still_alive([escapee], 1.0):
-        fail(f"server left a reparented escapee alive after SIGTERM: {escapee}")
-        try:
-            os.kill(escapee, signal.SIGKILL)
-        except OSError:
-            pass
 
 
 def kill_session() -> subprocess.CompletedProcess:
@@ -854,7 +781,6 @@ CASES = [
     ("a second server refuses to steal the socket", case_second_server_refuses_to_steal_the_socket),
     ("attach without a server says so", case_attach_without_a_server_says_so),
     ("server reaps its panes on signal", case_server_reaps_its_panes_on_signal),
-    ("server reaps a reparented escapee", case_server_reaps_a_reparented_escapee),
     ("kill-session ends the session", case_kill_session_ends_the_session),
     ("kill-session without a server says so", case_kill_session_without_a_server_says_so),
     ("plain wideboi offers detach", case_plain_wideboi_offers_detach),

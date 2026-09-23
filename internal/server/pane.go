@@ -19,7 +19,6 @@ import (
 )
 
 const CloseGrace = 2 * time.Second
-const CloseResidual = ptyx.KillResidual
 const keyQueueDepth = 256
 const ptyWriteTimeout = 50 * time.Millisecond
 
@@ -61,7 +60,7 @@ type Pane struct {
 	failures []error
 }
 
-// graceOrDefault resolves the SIGTERM grace for this pane.
+// graceOrDefault resolves the hangup grace for this pane.
 //
 // The resolution happens here, at the point of use, rather than in a
 // constructor: the white-box fixtures in this package build &Pane{}
@@ -333,23 +332,23 @@ func (p *Pane) ScrollbackLen() int         { return p.grid.ScrollbackLen() }
 func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }
 func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 
-// Close tears down the process tree and emulator.
+// Close hangs up the pane's pty and closes its emulator.
 //
-// pty.Kill and grid.Close run BEFORE resizeMu is taken, not after. They
+// pty.Hangup and grid.Close run BEFORE resizeMu is taken, not after. They
 // are the only two things that can unblock a Resize wedged mid-flight: the
 // pinned x/vt writes an in-band resize notification into the emulator's
 // own reply pipe during Resize when that mode is enabled, that pipe is
 // unbuffered, and its only drainer is the pane's pty-writer pump -- which
 // can itself be blocked in Master.Write against a child that has stopped
-// reading its stdin. Kill closes Master, unparking the pump so it drains
+// reading its stdin. Hangup closes Master, unparking the pump so it drains
 // the pipe; grid.Close unblocks the pipe directly. An earlier version of
 // this fix took resizeMu first, which meant Close waited on the very lock
-// a wedged Resize was holding, and only Close's own Kill/grid.Close could
+// a wedged Resize was holding, and only Close's own Hangup/grid.Close could
 // ever release that Resize -- an unrecoverable hang on quit, not a race.
 //
-// This does reopen a window: Kill/grid.Close can now run concurrently with
+// This does reopen a window: Hangup/grid.Close can now run concurrently with
 // a Resize that is not wedged, merely still in flight. That used to be a
-// real race on the underlying pty fd -- ptyx.Pane.Kill's Master.Close vs.
+// real race on the underlying pty fd -- ptyx.Pane.Hangup's Master.Close vs.
 // ptyx.Pane.Resize's Setsize ioctl, confirmed under -race -- because
 // pty.Setsize calls f.Fd() and hands the raw descriptor to the ioctl
 // syscall with no reference held on the underlying poll.FD, so a
@@ -365,13 +364,12 @@ func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 // taken for the bookkeeping that follows, once any wedge still in
 // progress has had its chance to break.
 //
-// The whole body runs inside closeOnce, caching its result in closeErr:
-// ptyx.Kill's own doc comment states it "has no mutual exclusion and
-// must not be called concurrently for the same Pane." Only wrapping the
-// `close(p.closed)` line, as this used to, left Kill and grid.Close
-// unprotected against a second concurrent Close call reaching them at
-// the same time. Unreachable today -- every caller removes the pane from
-// s.panes under s.mu before closing it -- but Close is public API this
+// The whole body runs inside closeOnce, caching its result in closeErr.
+// Only wrapping the `close(p.closed)` line, as this used to, left the
+// teardown and grid.Close unprotected against a second concurrent Close
+// call reaching them at the same time. Unreachable today -- every caller
+// removes the pane from s.panes under s.mu before closing it -- but
+// Close is public API this
 // package cannot fully control, and enforcing the precondition here
 // costs nothing: a second concurrent caller now simply waits for the
 // first's teardown and gets the same cached result.
@@ -379,13 +377,13 @@ func (p *Pane) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.closed)
 
-		killErr := p.pty.Kill(p.graceOrDefault())
+		p.pty.Hangup(p.graceOrDefault())
 		gridErr := p.grid.Close()
 
 		p.resizeMu.Lock()
 		defer p.resizeMu.Unlock()
 
-		errs := []error{killErr}
+		var errs []error
 		if gridErr != nil {
 			errs = append(errs, fmt.Errorf("close emulator: %w", gridErr))
 		}

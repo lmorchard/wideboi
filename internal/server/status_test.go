@@ -77,7 +77,6 @@ func serverWithStatuses(t *testing.T, statuses map[int]term.PaneStatus) (*Server
 		panes:      make(map[int]*Pane),
 		cols:       80,
 		rows:       24,
-		escapees:   make(map[int]string),
 		stopCh:     make(chan struct{}),
 		transports: []transport.Transport{transport.NewInProcChannel(64)},
 	}

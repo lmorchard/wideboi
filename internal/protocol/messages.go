@@ -162,9 +162,10 @@ type MsgScroll struct {
 // session it also gives the ownership up, for good.
 type MsgDetach struct{}
 
-// MsgShutdown asks the server to end the session: reap every pane, hang
-// up on every client, and exit. The hang-up is the acknowledgement --
-// it happens only after the reaping has finished.
+// MsgShutdown asks the server to end the session: hang up every pane,
+// hang up on every client, and exit. The client hang-up is the
+// acknowledgement, and it happens only after every pane has been hung
+// up.
 type MsgShutdown struct{}
 
 // LayoutMode is which Strategy a client is presenting. It is per-client
