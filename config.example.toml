@@ -7,7 +7,8 @@
 #
 # Precedence order (highest to lowest):
 #   1. Command-line flags (-l, -p, -s, --shell)
-#   2. Environment variable overrides (WIDEBOI_LAYOUT, WIDEBOI_PREFIX, WIDEBOI_SOCK, WIDEBOI_SHELL)
+#   2. Environment variable overrides (WIDEBOI_LAYOUT, WIDEBOI_PREFIX, WIDEBOI_SOCK, WIDEBOI_SHELL,
+#      WIDEBOI_LOG_LEVEL)
 #   3. Configuration file (this file)
 #   4. Defaults (including $SHELL or /bin/sh)
 
@@ -34,6 +35,12 @@ prefix = "ctrl+b"
 # Set to false to leave the mouse to your terminal, which restores its own
 # selection and scrollback wheel. Defaults to true.
 # mouse = true
+
+# Log verbosity for $TMPDIR/wideboi-<uid>/{client,server}.log:
+# "trace", "debug", "info" (default), "warn" or "error". The logs are
+# appended to forever, and trace records every message a client receives,
+# so raise it only while chasing something.
+# log_level = "info"
 
 # Key remapping for control mode
 #

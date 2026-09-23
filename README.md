@@ -109,7 +109,7 @@ config file.
 wideboi reads configuration with the following precedence (highest to lowest):
 
 1. **Command-line flags** (`-l`, `-p`, `-s`, `--shell`)
-2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`)
+2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`)
 3. **Configuration file** (TOML)
 4. **Defaults** (including `$SHELL` or `/bin/sh`)
 
@@ -169,6 +169,7 @@ Flags:
 - `WIDEBOI_PREFIX`: prefix key (`ctrl+<letter>` or `ctrl+space`)
 - `WIDEBOI_SOCK`: unix domain socket path override
 - `WIDEBOI_SHELL`: shell path override (takes precedence over TOML `shell`)
+- `WIDEBOI_LOG_LEVEL`: log verbosity, `trace`, `debug`, `info` (default), `warn` or `error`. Logs go to `$TMPDIR/wideboi-<uid>/{client,server}.log` and are appended to, so `trace`, which records every message a client receives, is for chasing something specific
 - `SHELL`: default shell path (used when shell is not set in config)
 
 ## Development

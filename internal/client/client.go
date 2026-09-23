@@ -15,6 +15,7 @@ import (
 	"github.com/lmorchard/wideboi/internal/client/compose"
 	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/layout"
+	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -204,7 +205,9 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		}
 
 	case protocol.MsgPaneUpdate:
-		slog.Debug("received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
+		// Trace, not Debug: this fires for every pane on every server
+		// frame, whether or not anything changed.
+		slog.Log(context.Background(), logger.LevelTrace, "received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
 		mirror, ok := c.mirrors[m.PaneID]
 		if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {
 			mirror = &PaneMirror{

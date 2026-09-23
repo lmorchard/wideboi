@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/keys"
+	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
@@ -269,5 +271,49 @@ func TestLoadMouse(t *testing.T) {
 	}
 	if cfg.MouseEnabled {
 		t.Error("MouseEnabled = true with mouse = false in the file")
+	}
+}
+
+func TestLoadLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	env := func(m map[string]string) func(string) string {
+		return func(k string) string {
+			if k == "XDG_CONFIG_HOME" {
+				return dir // no config file here unless a case writes one
+			}
+			return m[k]
+		}
+	}
+
+	cfg, _, err := config.Load(config.ConfigFlags{}, env(nil))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.LogLevel != slog.LevelInfo {
+		t.Errorf("default log level = %v, want INFO", cfg.LogLevel)
+	}
+
+	file := filepath.Join(dir, "c.toml")
+	if err := os.WriteFile(file, []byte(`log_level = "debug"`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: file}, env(nil))
+	if err != nil {
+		t.Fatalf("Load with log_level: %v", err)
+	}
+	if cfg.LogLevel != slog.LevelDebug {
+		t.Errorf("toml log_level = %v, want DEBUG", cfg.LogLevel)
+	}
+
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: file}, env(map[string]string{"WIDEBOI_LOG_LEVEL": "trace"}))
+	if err != nil {
+		t.Fatalf("Load with WIDEBOI_LOG_LEVEL: %v", err)
+	}
+	if cfg.LogLevel != logger.LevelTrace {
+		t.Errorf("WIDEBOI_LOG_LEVEL=trace gave %v, want TRACE (env overrides toml)", cfg.LogLevel)
+	}
+
+	if _, _, err := config.Load(config.ConfigFlags{}, env(map[string]string{"WIDEBOI_LOG_LEVEL": "verbose"})); err == nil {
+		t.Error("an unknown WIDEBOI_LOG_LEVEL was accepted")
 	}
 }

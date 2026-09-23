@@ -148,6 +148,7 @@ Environment Variables:
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
+  WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
   SHELL                  Default shell path (when shell is not set in config)
 `)
 }
@@ -231,7 +232,7 @@ func parseLayout(name string) (protocol.LayoutMode, error) {
 // the inherited connection of the plain wideboi that spawned this
 // server and owns the session; see spawnServer.
 func runServer(cfg config.Config, ownerFD int) error {
-	f, _ := logger.Init("server")
+	f, _ := logger.Init("server", cfg.LogLevel)
 	if f != nil {
 		defer f.Close()
 	}
@@ -355,7 +356,7 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 // session then ends with this process -- on a quit, a signal, or a
 // death that runs no code at all -- unless it detached first.
 func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner bool) error {
-	f, _ := logger.Init("client")
+	f, _ := logger.Init("client", cfg.LogLevel)
 	if f != nil {
 		defer f.Close()
 	}
