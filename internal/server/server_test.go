@@ -321,7 +321,7 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 	surviveID := snap.Columns[1].PaneID
 
 	// Drain every further server->client message for the rest of the test.
-	// broadcastLayoutLocked runs under s.mu, so an unread, full ServerSend
+	// broadcastLayout runs under s.mu, so an unread, full ServerSend
 	// would park the Run loop and prevent the very overlap this test needs.
 	drainDone := make(chan struct{})
 	go func() {
