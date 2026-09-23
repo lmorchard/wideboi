@@ -119,6 +119,21 @@ survives reparenting. What stays out of reach is a process that calls
 macOS offers no subreaper and no working `NOTE_TRACK`, so that is the limit.
 It is the same limit tmux has.
 
+**A `ps` parse that feeds a kill must be exact, or it is a weapon.** An
+uncommitted attempt at #39 added a `ps` column that printed fine from a shell
+but **blank** inside the `go test` binary. `strings.Fields` shifted every row,
+the tail joined into a "start time" matched almost everything, and a test's
+`Server.Close` SIGKILLed most of the processes its developer had started that
+day, twice, before anyone noticed. Three rules came out of it:
+
+- Every row gets an exact field count (`parseProcTable`'s is 7: pid, ppid and
+  `lstart`'s five words), and any other shape is dropped. Never join a
+  variable tail in a kill path.
+- Probe a new `ps` column from the process that will run it (Go, under
+  `go test`), not from a shell.
+- A test that sends real signals with a *widened* selection is live fire on the
+  dev machine. Dry-run the selection first and assert that it is small.
+
 ## The harness's environment pin only covers what it starts on a pty
 
 `ptylib.spawn_in_pty` pins `SHELL`, `TERM` and `PS1`. attachcheck starts

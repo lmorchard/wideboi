@@ -9,6 +9,7 @@ package server
 
 import (
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -112,5 +113,40 @@ func TestPollPrunesExitedAndRecycledEscapees(t *testing.T) {
 	}
 	if _, ok := s.escapees[kept]; !ok {
 		t.Errorf("poll dropped pid %d, still alive as itself", kept)
+	}
+}
+
+// Close SIGKILLs by what parseProcTable reads, so a row it cannot read
+// exactly must be dropped, never guessed at. On 2026-09-23 a ps column
+// that printed blank shifted every row's fields, the tail that was
+// joined into a "start time" matched almost everything, and an
+// uncommitted version of the poll had a test's Close kill most of the
+// machine's processes. Parse-only: nothing here runs ps or sends a
+// signal.
+func TestParseProcTableRejectsRowsItCannotReadExactly(t *testing.T) {
+	out := strings.Join([]string{
+		"  101     1 Wed Sep 23 10:37:01 2026",       // well-formed
+		"  102   101 Thu Sep  3 09:05:00 2026",       // padded day: still 5 words
+		"  103   101 Wed Sep 23 10:37:01",            // a column short
+		"  104   101 ?? Wed Sep 23 10:37:01 2026",    // a column extra
+		"  105   101 Wed Sep 23 10:37:01 2026 extra", // trailing junk
+		"  abc   101 Wed Sep 23 10:37:01 2026",       // non-numeric pid
+		"  106   xyz Wed Sep 23 10:37:01 2026",       // non-numeric ppid
+		"",
+	}, "\n")
+
+	table := parseProcTable(out)
+
+	want := map[int]procEntry{
+		101: {ppid: 1, start: "Wed Sep 23 10:37:01 2026"},
+		102: {ppid: 101, start: "Thu Sep 3 09:05:00 2026"},
+	}
+	if len(table) != len(want) {
+		t.Errorf("parsed %d rows, want %d: %+v", len(table), len(want), table)
+	}
+	for pid, w := range want {
+		if got, ok := table[pid]; !ok || got != w {
+			t.Errorf("pid %d: got %+v (present %v), want %+v", pid, got, ok, w)
+		}
 	}
 }

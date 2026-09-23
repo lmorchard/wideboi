@@ -833,15 +833,33 @@ type procEntry struct {
 }
 
 // readProcTable snapshots every running process with one ps call.
+//
+// LC_ALL=C pins lstart's format, which parseProcTable depends on.
 func readProcTable() (map[int]procEntry, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,lstart=").Output()
+	cmd := exec.Command("ps", "-axo", "pid=,ppid=,lstart=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
+	return parseProcTable(string(out)), nil
+}
+
+// procTableFields is a row's exact shape: pid, ppid, and lstart's five
+// words ("Wed Sep 23 10:37:01 2026").
+const procTableFields = 7
+
+// parseProcTable reads ps output into a table, dropping any row that is
+// not exactly procTableFields fields. Close SIGKILLs by what this reads,
+// so a row it cannot read exactly is dropped, never guessed at: a shifted
+// column once turned every process started that day into an "escapee"
+// with a matching start time. If ps's format drifts, every row is dropped
+// and the poll records nothing, which fails as a leak and not a kill.
+func parseProcTable(out string) map[int]procEntry {
 	table := make(map[int]procEntry)
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		if len(fields) != procTableFields {
 			continue
 		}
 		pid, err1 := strconv.Atoi(fields[0])
@@ -850,7 +868,7 @@ func readProcTable() (map[int]procEntry, error) {
 			table[pid] = procEntry{ppid: ppid, start: strings.Join(fields[2:], " ")}
 		}
 	}
-	return table, nil
+	return table
 }
 
 // pollDescendantsLocked walks ps to maintain a list of active descendant
