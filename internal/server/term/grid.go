@@ -92,6 +92,18 @@ type Grid interface {
 	ScrollOffset() int
 	SetScrollOffset(offset int)
 
+	// Generation advances whenever anything a pane update carries may
+	// have changed: cells, cursor position or visibility, mouse modes,
+	// size, or scroll offset. Only inequality is meaningful. The server
+	// reads it *before* rendering, so a change racing the render errs
+	// toward one update too many, never one too few.
+	//
+	// Every new path that mutates what Draw, CursorPosition,
+	// CursorVisible or MouseTracking report must bump it. One that
+	// doesn't leaves every attached client stale until something
+	// unrelated changes the pane.
+	Generation() uint64
+
 	// Resize changes the emulator's dimensions, reflowing the visible
 	// screen so narrowing does not destroy text.
 	Resize(cols, rows int)
@@ -163,6 +175,9 @@ type vtGrid struct {
 	title                  atomic.Pointer[string]
 	sawAuthoritativeStatus atomic.Bool
 	scrollOffset           atomic.Int32
+
+	// generation backs Generation; see the Grid interface.
+	generation atomic.Uint64
 
 	// idleTimeout is how long Status waits before the fallback calls a
 	// pane idle. Zero means DefaultIdleTimeout; resolved in Status
@@ -340,7 +355,9 @@ func (g *vtGrid) Write(p []byte) (int, error) {
 	if !g.sawAuthoritativeStatus.Load() {
 		g.status.Store(int32(StatusWorking))
 	}
-	return g.em.Write(p)
+	n, err := g.em.Write(p)
+	g.generation.Add(1)
+	return n, err
 }
 
 // Title reports the pane's terminal title. See the Grid interface.
@@ -452,6 +469,8 @@ func (g *vtGrid) Resize(cols, rows int) {
 	if cols == oldCols && rows == oldRows {
 		return
 	}
+	// Both the alt-screen and reflow paths below change the grid.
+	defer g.generation.Add(1)
 	if g.em.IsAltScreen() {
 		g.em.Resize(cols, rows)
 		return
@@ -528,8 +547,12 @@ func (g *vtGrid) SetScrollOffset(offset int) {
 	if offset > maxOffset {
 		offset = maxOffset
 	}
-	g.scrollOffset.Store(int32(offset))
+	if g.scrollOffset.Swap(int32(offset)) != int32(offset) {
+		g.generation.Add(1)
+	}
 }
+
+func (g *vtGrid) Generation() uint64 { return g.generation.Load() }
 
 // Draw's fast path (no scrollback in view) delegates to g.em.Draw, which
 // runs entirely inside SafeEmulator's own se.mu.RLock and never leaks a

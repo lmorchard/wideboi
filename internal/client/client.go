@@ -205,8 +205,8 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		}
 
 	case protocol.MsgPaneUpdate:
-		// Trace, not Debug: this fires for every pane on every server
-		// frame, whether or not anything changed.
+		// Trace, not Debug: busy panes still send one of these per
+		// server frame.
 		slog.Log(context.Background(), logger.LevelTrace, "received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
 		mirror, ok := c.mirrors[m.PaneID]
 		if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {

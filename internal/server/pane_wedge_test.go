@@ -69,6 +69,7 @@ func (g *blockingGrid) Title() string                   { return "" }
 func (g *blockingGrid) ScrollbackLen() int              { return 0 }
 func (g *blockingGrid) ScrollOffset() int               { return 0 }
 func (g *blockingGrid) SetScrollOffset(int)             {}
+func (g *blockingGrid) Generation() uint64              { return 0 }
 func (g *blockingGrid) Draw(uv.Screen, image.Rectangle) {}
 func (g *blockingGrid) CellAt(x, y int) *uv.Cell        { return nil }
 func (g *blockingGrid) Size() (int, int)                { return 10, 10 }
