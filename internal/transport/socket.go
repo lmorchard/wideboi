@@ -318,6 +318,7 @@ type ClientSocketConn struct {
 	ServerSend chan ServerMessage
 	encoder    *gob.Encoder
 	decoder    *gob.Decoder
+	cancel     context.CancelFunc
 }
 
 // NewClientSocketConn wraps a client-side net.Conn with buffered channels.
@@ -336,6 +337,8 @@ func NewClientSocketConn(conn net.Conn, bufSize int) *ClientSocketConn {
 
 // RunPumps starts background read and write loops for the connection.
 func (cc *ClientSocketConn) RunPumps(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	cc.cancel = cancel
 	go cc.writeLoop(ctx)
 	go cc.readLoop(ctx)
 }
@@ -399,7 +402,10 @@ func (cc *ClientSocketConn) ServerSendChan() <-chan ServerMessage {
 	return cc.ServerSend
 }
 
-// Close closes the underlying network connection.
+// Close closes the underlying network connection and stops the pumps.
 func (cc *ClientSocketConn) Close() error {
+	if cc.cancel != nil {
+		cc.cancel()
+	}
 	return cc.conn.Close()
 }

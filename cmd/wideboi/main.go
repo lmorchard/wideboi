@@ -531,6 +531,11 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				}
 
 				slog.Info("reconnected successfully")
+
+				// Close the old transport pumps and swap in the new one.
+				// The transport handles stopping its own writeLoop when Close is called.
+				cConn.Close()
+
 				cConn = transport.NewClientSocketConn(reconnectConn, 256)
 				cConn.RunPumps(ctx)
 				cli.SetTransport(cConn)
