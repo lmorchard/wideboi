@@ -35,6 +35,24 @@ detached, a session lives until `ctrl+b q` from any client,
 `wideboi server` and `wideboi attach` start the two halves separately;
 a session started with `wideboi server` is never tied to a terminal.
 
+### Several sessions
+
+Give a session a name with `-L` to run more than one side by side:
+
+    ./bin/wideboi -L work       # start or reattach the session called "work"
+    ./bin/wideboi ls            # list running sessions
+    ./bin/wideboi -L work kill-session
+
+With no name, the session is `default`. Every command takes `-L`, and
+`WIDEBOI_SESSION` or `session = "..."` in the config file set it too. A
+named session's socket is `$TMPDIR/wideboi-<uid>/<name>.sock`. To use a
+socket somewhere else, pass `-s <path>` instead; setting both at the
+same level is an error. `ls` only lists sessions in that directory.
+
+Starting two `wideboi` at once for one session (two terminals opened
+together, or a restored set of tabs) gives you one session with both
+attached, not an error.
+
 ## Keys
 
 wideboi uses a prefix key, like tmux. Press `ctrl+b` to enter control
@@ -124,8 +142,8 @@ config file.
 
 wideboi reads configuration with the following precedence (highest to lowest):
 
-1. **Command-line flags** (`-l`, `-p`, `-s`, `--shell`)
-2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`)
+1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`)
+2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`)
 3. **Configuration file** (TOML)
 4. **Defaults** (including `$SHELL` or `/bin/sh`)
 
@@ -177,8 +195,9 @@ Flags:
   -l, --layout <mode>    Starting layout for this client: "cards" (default) or "scroll"
   -p, --prefix <key>     Control mode prefix key: "ctrl+<letter>" or "ctrl+space"
                          (default: "ctrl+b")
-  -s, --socket <path>    Unix domain socket path
-                         (default: $TMPDIR/wideboi-<uid>/default.sock)
+  -L, --session <name>   Session to start or attach to (default: "default");
+                         its socket is $TMPDIR/wideboi-<uid>/<name>.sock
+  -s, --socket <path>    Unix domain socket path, instead of a session name
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
   -v, --version          Print version and exit
@@ -189,9 +208,10 @@ Flags:
 
 - `WIDEBOI_LAYOUT`: starting layout for this client (`cards` or `scroll`)
 - `WIDEBOI_PREFIX`: prefix key (`ctrl+<letter>` or `ctrl+space`)
-- `WIDEBOI_SOCK`: unix domain socket path override
+- `WIDEBOI_SESSION`: session name override
+- `WIDEBOI_SOCK`: unix domain socket path override, instead of a session name
 - `WIDEBOI_SHELL`: shell path override (takes precedence over TOML `shell`)
-- `WIDEBOI_LOG_LEVEL`: log verbosity, `trace`, `debug`, `info` (default), `warn` or `error`. Logs go to `$TMPDIR/wideboi-<uid>/{client,server}.log` and are appended to, so `trace`, which records every message a client receives, is for chasing something specific
+- `WIDEBOI_LOG_LEVEL`: log verbosity, `trace`, `debug`, `info` (default), `warn` or `error`. Logs go beside the session's socket, as `<socket without .sock>.{client,server}.log` (so `$TMPDIR/wideboi-<uid>/default.server.log` for the default session), and are appended to, so `trace`, which records every message a client receives, is for chasing something specific
 - `SHELL`: default shell path (used when shell is not set in config)
 
 ## Development

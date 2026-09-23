@@ -24,19 +24,17 @@ Never hangs: every wait is bounded and every child is reaped.
 """
 
 import argparse
-import atexit
 import os
-import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty, wait_for_exit, force_cleanup,
     descendants, server_child, settle_output, still_alive,
+    private_run_dir, run_main,
 )
 # focus_pane_id reads the status line the way the diffing renderer
 # actually writes it: the "focus: [pane N" literal appears only in the
@@ -76,11 +74,11 @@ SETTLE = 1.5
 # *exclusive* ownership of the path ("a second server refuses to steal
 # the socket", "attach without a server says so"), so the path has to
 # belong to this run alone. Passed to the binary as WIDEBOI_SOCK.
-RUNTIME_DIR = tempfile.mkdtemp(prefix=f"wideboi-attach-{os.getuid()}-")
+RUNTIME_DIR = private_run_dir(f"wideboi-attach-{os.getuid()}-")
 # A real directory is needed here (unlike smoke's never-created path)
 # because a server actually binds inside it, so it has to be removed
-# again or every run leaves litter behind.
-atexit.register(shutil.rmtree, RUNTIME_DIR, True)
+# again or every run leaves litter behind. Kept when a case fails: the
+# servers' and clients' logs are written beside their sockets.
 
 
 def runtime_dir() -> str:
@@ -108,15 +106,15 @@ def bin_env() -> dict:
 class Server:
     """A `wideboi server` in the background, with its socket bound."""
 
-    def __init__(self, timeout=10.0):
-        self.sock = socket_path()
+    def __init__(self, timeout=10.0, args=(), env=None, sock=None):
+        self.sock = sock or socket_path()
         if os.path.exists(self.sock):
             os.remove(self.sock)
         self.proc = subprocess.Popen(
-            [BIN, "server"],
+            [BIN, *args, "server"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            env=bin_env(),
+            env=env or bin_env(),
         )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -156,8 +154,12 @@ class Client:
     plain=True runs a plain `wideboi` instead, which attaches if a server
     answers and otherwise spawns one and owns the session."""
 
-    def __init__(self, startup=PROMPT_WAIT, plain=False, args=()):
+    def __init__(self, startup=PROMPT_WAIT, plain=False, args=(), gate=None):
         argv = [BIN, *args] if plain else [BIN, "attach", *args]
+        if gate is not None:
+            # Held on opening the fifo until something opens its write
+            # end, which releases every gated client at once.
+            argv = ["/bin/sh", "-c", ': < "$0"; exec "$@"', gate, *argv]
         self.pid, self.fd = spawn_in_pty(argv, COLS, ROWS, True,
                                          {"WIDEBOI_SOCK": socket_path()})
         self.drainer = Drainer(self.fd)
@@ -176,7 +178,8 @@ class Client:
                 f"the attached client is gone -- writing {text!r} to its pty "
                 f"failed with {exc}. It exited on its own, which is what a "
                 f"transport-level failure looks like from here; check "
-                f"client.log and server.log in the runtime dir."
+                f"default.client.log and default.server.log in the runtime "
+                f"dir, which is kept when the run fails."
             ) from exc
         settle_output(self.drainer, timeout=settle)
 
@@ -531,6 +534,97 @@ def case_plain_wideboi_attaches_to_a_running_server(fail):
         srv.stop()
 
 
+def case_two_plain_wideboi_at_once_share_one_session(fail):
+    """#86: two plain wideboi on one free socket, released together.
+    Both dials fail and both spawn a server; the loser's server finds
+    the lock held. The user asked for a wideboi, so the loser attaches
+    to the winner's session instead of reporting an error."""
+    sock = socket_path()
+    if os.path.exists(sock):
+        os.remove(sock)
+    fifo = os.path.join(runtime_dir(), "go.fifo")
+    os.mkfifo(fifo)
+    a = b = None
+    try:
+        a = Client(plain=True, gate=fifo, startup=0.3)
+        b = Client(plain=True, gate=fifo, startup=0.3)
+        # Opening the write end releases both `: < fifo` at once.
+        os.close(os.open(fifo, os.O_WRONLY))
+        for name, c in (("first", a), ("second", b)):
+            if not c.wait_for(lambda out: focus_pane_id(out, ROWS) is not None):
+                fail(f"the {name} plain wideboi never drew a session")
+        for name, c in (("first", a), ("second", b)):
+            if wait_for_exit(c.pid, 0.1) is not None:
+                fail(f"the {name} plain wideboi exited instead of attaching: "
+                     f"{c.output()[-300:]!r}")
+        # Exactly one spawned server may remain; the loser's exits at once.
+        def servers():
+            return [s for s in (server_child(a.pid), server_child(b.pid)) if s]
+        deadline = time.monotonic() + 3.0
+        while len(servers()) != 1 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if len(servers()) != 1:
+            fail(f"want exactly one server, found {len(servers())}")
+            return
+        # Type into the winner and look for it on the loser. Not the
+        # other way round: the loser's first frame paints before its
+        # doomed connection ends, and keys typed while it switches to
+        # the winner's socket are lost with the old connection.
+        winner, loser = (a, b) if server_child(a.pid) else (b, a)
+        winner.type(b"echo race-marker\r")
+        if not loser.wait_for(lambda out: b"race-marker" in out):
+            fail("the two clients are not in the same session")
+        if not os.path.exists(sock):
+            fail("the session's socket file is gone")
+    finally:
+        pids = []
+        for c in (a, b):
+            if c is not None:
+                pids += [p for p, _ in descendants(c.pid)]
+                c.kill()
+        reap_everything(pids)
+        os.remove(fifo)
+
+
+def case_named_sessions_are_independent(fail):
+    """#27: two names are two sessions. ls lists both, and ending one
+    leaves the other.
+
+    Named sessions live in $TMPDIR/wideboi-<uid>/, so TMPDIR points at a
+    directory private to this case -- a short one under /tmp, because
+    sun_path is 104 bytes and the default temp dir under /var/folders
+    plus wideboi-<uid>/<name>.sock gets close."""
+    tmp = private_run_dir("wb", parent="/tmp")
+    env = {k: v for k, v in bin_env().items() if k != "WIDEBOI_SOCK"}
+    env["TMPDIR"] = tmp
+    sdir = os.path.join(tmp, f"wideboi-{os.getuid()}")
+    alpha = beta = None
+    try:
+        alpha = Server(args=("-L", "alpha"), env=env, sock=os.path.join(sdir, "alpha.sock"))
+        beta = Server(args=("-L", "beta"), env=env, sock=os.path.join(sdir, "beta.sock"))
+        ls = subprocess.run([BIN, "ls"], capture_output=True, timeout=10, env=env)
+        if ls.returncode != 0 or ls.stdout.decode().split() != ["alpha", "beta"]:
+            fail(f"ls exited {ls.returncode} printing {ls.stdout!r}, want alpha and beta")
+        r = subprocess.run([BIN, "-L", "alpha", "kill-session"],
+                           capture_output=True, timeout=15, env=env)
+        if r.returncode != 0:
+            fail(f"kill-session -L alpha exited {r.returncode}: "
+                 f"{(r.stdout + r.stderr).decode(errors='replace').strip()!r}")
+        try:
+            alpha.proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            fail("alpha still running after kill-session -L alpha")
+        if not beta.alive():
+            fail("ending alpha ended beta")
+        ls = subprocess.run([BIN, "ls"], capture_output=True, timeout=10, env=env)
+        if ls.stdout.decode().split() != ["beta"]:
+            fail(f"after the kill, ls printed {ls.stdout!r}, want beta")
+    finally:
+        for s in (alpha, beta):
+            if s is not None:
+                s.stop()
+
+
 def case_second_server_refuses_to_steal_the_socket(fail):
     """Binding over a live server's path orphans its panes invisibly:
     the old process keeps its clients, the new one owns the name."""
@@ -539,8 +633,8 @@ def case_second_server_refuses_to_steal_the_socket(fail):
         second = subprocess.run(
             [BIN, "server"], capture_output=True, timeout=10, env=bin_env(),
         )
-        if second.returncode == 0:
-            fail("a second server started while the first was listening")
+        if second.returncode != 3:
+            fail(f"second server exited {second.returncode}, want 3 (session taken)")
         msg = (second.stdout + second.stderr).decode(errors="replace")
         if "already listening" not in msg:
             fail(f"second server failed for the wrong reason: {msg.strip()!r}")
@@ -779,6 +873,7 @@ CASES = [
     ("quit from an attached client ends the session", case_quit_from_an_attached_client_ends_the_session),
     ("signalled attached client restores and detaches", case_signalled_attached_client_restores_and_detaches),
     ("a second server refuses to steal the socket", case_second_server_refuses_to_steal_the_socket),
+    ("named sessions are independent", case_named_sessions_are_independent),
     ("attach without a server says so", case_attach_without_a_server_says_so),
     ("server reaps its panes on signal", case_server_reaps_its_panes_on_signal),
     ("kill-session ends the session", case_kill_session_ends_the_session),
@@ -787,6 +882,7 @@ CASES = [
     ("plain wideboi detaches and the session survives", case_plain_wideboi_detaches_and_the_session_survives),
     ("SIGKILLed owner takes the session with it", case_sigkilled_owner_takes_the_session_with_it),
     ("plain wideboi attaches to a running server", case_plain_wideboi_attaches_to_a_running_server),
+    ("two plain wideboi at once share one session", case_two_plain_wideboi_at_once_share_one_session),
     ("layout toggle affects only its own client", case_toggle_affects_only_its_own_client),
     ("attach honours its own layout flag", case_attach_layout_flag_is_honoured),
     ("reattach starts from the configured layout", case_reattach_starts_from_the_configured_layout),
@@ -821,4 +917,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_main(main)

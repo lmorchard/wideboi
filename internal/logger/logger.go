@@ -42,19 +42,21 @@ func ParseLevel(name string) (slog.Level, error) {
 	}
 }
 
-// Path is where component's log lives. Exposed so an error can point at
-// the log of a process whose stderr goes nowhere.
-func Path(component string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()), component+".log")
+// Path is where component's log for the session at socket lives:
+// beside the socket, named after it. Per session, so several sessions
+// do not interleave in one file, and a test harness's private socket
+// directory gets private logs. Exposed so an error can point at the log
+// of a process whose stderr goes nowhere.
+func Path(socket, component string) string {
+	return strings.TrimSuffix(socket, ".sock") + "." + component + ".log"
 }
 
-// Init initializes file-based structured logging for component ("server"
-// or "client"), recording level and above.
-func Init(component string, level slog.Level) (*os.File, error) {
-	logPath := Path(component)
-	_ = os.MkdirAll(filepath.Dir(logPath), 0700)
+// Init initializes file-based structured logging to path, recording
+// level and above.
+func Init(path string, level slog.Level) (*os.File, error) {
+	_ = os.MkdirAll(filepath.Dir(path), 0700)
 
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, err
 	}

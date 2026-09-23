@@ -19,8 +19,11 @@ layout = "cards"
 # Note: "ctrl+i", "ctrl+m", and "ctrl+[" are reserved (they decode as Tab, Enter, Escape).
 prefix = "ctrl+b"
 
-# Unix domain socket path for client/server communication.
-# Defaults to $TMPDIR/wideboi-<uid>/default.sock
+# Session to start or attach to. Its socket is $TMPDIR/wideboi-<uid>/<name>.sock.
+# Defaults to "default". Set this or socket, not both.
+# session = "default"
+
+# Unix domain socket path for client/server communication, instead of a session name.
 # socket = "/path/to/socket.sock"
 
 # Shell executable to spawn in new panes.

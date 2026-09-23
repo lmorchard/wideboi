@@ -3,13 +3,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -29,18 +29,11 @@ import (
 
 const signalExitMargin = 500 * time.Millisecond
 
-// defaultSocketPath is where `wideboi server` listens, where `wideboi
-// attach` dials, and what a plain `wideboi` probes before deciding
-// whether to start its own session.
-func defaultSocketPath() string {
-	if p := os.Getenv("WIDEBOI_SOCK"); p != "" {
-		_ = os.MkdirAll(filepath.Dir(p), 0700)
-		return p
-	}
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
-	_ = os.MkdirAll(dir, 0700)
-	return filepath.Join(dir, "default.sock")
-}
+// exitSessionTaken is `wideboi server`'s status when another server
+// already holds the session. A spawning plain wideboi reads it to
+// attach instead of reporting a failure (#86). 1 is any other error;
+// 128+n is a signal.
+const exitSessionTaken = 3
 
 // Stamped by the linker at build time; see LDFLAGS in the Makefile.
 // The defaults are what an unstamped `go build` produces, and saying
@@ -77,11 +70,16 @@ func parseCLI(args []string) (cliOptions, error) {
 			opts.subcommand = arg
 			continue
 		}
+		if opts.subcommand == "" && (arg == "ls" || arg == "list-sessions") {
+			opts.subcommand = "ls"
+			continue
+		}
 		flagArgs = append(flagArgs, arg)
 		if arg == "-c" || arg == "-config" || arg == "--config" ||
 			arg == "-l" || arg == "-layout" || arg == "--layout" ||
 			arg == "-p" || arg == "-prefix" || arg == "--prefix" ||
 			arg == "-s" || arg == "-socket" || arg == "--socket" ||
+			arg == "-L" || arg == "-session" || arg == "--session" ||
 			arg == "-shell" || arg == "--shell" ||
 			arg == "-owner-fd" || arg == "--owner-fd" {
 			skipNext = true
@@ -99,6 +97,8 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Prefix, "prefix", "", "prefix key, e.g. ctrl+b, ctrl+space")
 	fs.StringVar(&opts.flags.Socket, "s", "", "unix domain socket path")
 	fs.StringVar(&opts.flags.Socket, "socket", "", "unix domain socket path")
+	fs.StringVar(&opts.flags.Session, "L", "", "session name")
+	fs.StringVar(&opts.flags.Session, "session", "", "session name")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
@@ -126,6 +126,7 @@ func printHelp(w io.Writer) {
   wideboi [flags] attach     Attach a client to a running server
   wideboi [flags] kill-session
                              End the session: close every pane and stop the server
+  wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
   wideboi help               Show this help text
 
@@ -136,8 +137,9 @@ Flags:
   -l, --layout <mode>    Starting layout for this client: "cards" (default) or "scroll"
   -p, --prefix <key>     Control mode prefix key: "ctrl+<letter>" or "ctrl+space"
                          (default: "ctrl+b")
-  -s, --socket <path>    Unix domain socket path
-                         (default: $TMPDIR/wideboi-<uid>/default.sock)
+  -L, --session <name>   Session to start or attach to (default: "default");
+                         its socket is $TMPDIR/wideboi-<uid>/<name>.sock
+  -s, --socket <path>    Unix domain socket path, instead of a session name
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
   -v, --version          Print version and exit
@@ -146,6 +148,7 @@ Flags:
 Environment Variables:
   WIDEBOI_LAYOUT         Starting layout for this client ("cards" or "scroll")
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
+  WIDEBOI_SESSION        Session name override
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
@@ -174,11 +177,18 @@ func main() {
 
 	switch opts.subcommand {
 	case "server":
-		fatal(runServer(cfg, opts.ownerFD))
+		if err := runServer(cfg, opts.ownerFD); errors.Is(err, transport.ErrSessionTaken) {
+			fmt.Fprintln(os.Stderr, "wideboi:", err)
+			os.Exit(exitSessionTaken)
+		} else {
+			fatal(err)
+		}
 	case "attach":
 		fatal(runAttach(cfg, bindings))
 	case "kill-session":
 		fatal(runKillSession(cfg))
+	case "ls":
+		fatal(runList(os.Stdout))
 	default:
 		fatal(run(cfg, bindings))
 	}
@@ -209,7 +219,7 @@ func fatal(err error) {
 // the inherited connection of the plain wideboi that spawned this
 // server and owns the session; see spawnServer.
 func runServer(cfg config.Config, ownerFD int) error {
-	f, _ := logger.Init("server", cfg.LogLevel)
+	f, _ := logger.Init(logger.Path(cfg.Socket, "server"), cfg.LogLevel)
 	if f != nil {
 		defer f.Close()
 	}
@@ -310,29 +320,79 @@ func runAttach(cfg config.Config, bindings []keys.Binding) error {
 	if err != nil {
 		return fmt.Errorf("no wideboi server running at %s (start one with 'wideboi server'): %w", cfg.Socket, err)
 	}
-	return runClient(cfg, bindings, conn, false)
+	return runClient(cfg, bindings, conn, nil)
 }
 
 // run is plain `wideboi`: attach to the session on cfg.Socket if there
 // is one, otherwise start one in the background and own it.
 func run(cfg config.Config, bindings []keys.Binding) error {
 	if conn, err := net.Dial("unix", cfg.Socket); err == nil {
-		return runClient(cfg, bindings, conn, false)
+		return runClient(cfg, bindings, conn, nil)
 	}
-	conn, err := spawnServer(os.Args[1:])
+	conn, exited, err := spawnServer(os.Args[1:])
 	if err != nil {
 		return err
 	}
-	return runClient(cfg, bindings, conn, true)
+	err = runClient(cfg, bindings, conn, exited)
+	if !errors.Is(err, errSessionTaken) {
+		return err
+	}
+	// Another wideboi started this session between our dial and our
+	// server's bind (#86). Join it: the user asked for a wideboi.
+	slog.Info("another server took the session first; attaching to it", "socketPath", cfg.Socket)
+	conn, err = dialWithin(cfg.Socket, takenCeiling)
+	if err != nil {
+		return fmt.Errorf("another wideboi took the session at %s first, but it did not answer within %s: %w",
+			cfg.Socket, takenCeiling, err)
+	}
+	return runClient(cfg, bindings, conn, nil)
+}
+
+// errSessionTaken is runClient's report that the server it spawned
+// found the session already held; run attaches to that one instead.
+var errSessionTaken = errors.New("session taken")
+
+// takenCeiling bounds the wait for the winning server to listen. It
+// holds the lock before it binds, so it is normally milliseconds away.
+const takenCeiling = 5 * time.Second
+
+// reapCeiling bounds the wait for a spawned server's exit code once
+// its owner connection has closed; the reap follows the close promptly.
+const reapCeiling = 2 * time.Second
+
+// dialWithin dials socket until it answers or ceiling passes: a wait
+// for observed state, with the ceiling as the timeout.
+func dialWithin(socket string, ceiling time.Duration) (net.Conn, error) {
+	deadline := time.Now().Add(ceiling)
+	for {
+		conn, err := net.Dial("unix", socket)
+		if err == nil || time.Now().After(deadline) {
+			return conn, err
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// serverExitCode waits up to ceiling for a spawned server's exit code;
+// -1 if it does not arrive.
+func serverExitCode(exited <-chan int, ceiling time.Duration) int {
+	select {
+	case code := <-exited:
+		return code
+	case <-time.After(ceiling):
+		return -1
+	}
 }
 
 // runClient drives the host terminal for a session reached over conn.
 //
-// owner is true for the plain wideboi that spawned the session. The
-// session then ends with this process -- on a quit, a signal, or a
-// death that runs no code at all -- unless it detached first.
-func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner bool) error {
-	f, _ := logger.Init("client", cfg.LogLevel)
+// serverExit is non-nil for the plain wideboi that spawned the session,
+// and delivers that server's exit code (see spawnServer). This process
+// then owns the session, which ends with it -- on a quit, a signal, or
+// a death that runs no code at all -- unless it detached first.
+func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, serverExit <-chan int) error {
+	owner := serverExit != nil
+	f, _ := logger.Init(logger.Path(cfg.Socket, "client"), cfg.LogLevel)
 	if f != nil {
 		defer f.Close()
 	}
@@ -442,7 +502,10 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 					return fmt.Errorf("connection to wideboi server failed: %w", err)
 				}
 				if owner && !gotMsg {
-					return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path("server"))
+					if serverExitCode(serverExit, reapCeiling) == exitSessionTaken {
+						return errSessionTaken
+					}
+					return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path(cfg.Socket, "server"))
 				}
 				slog.Info("server closed the connection")
 				return nil
@@ -538,15 +601,19 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 
 // printDetachNotice tells a user who just detached that the session did
 // not end with the screen: it is still running, and this is where. The
-// commands name the socket only when it is not the default, so the
-// common case stays short.
+// commands name the session the way the user would: nothing for the
+// default, so the common case stays short; -L for another named
+// session; -s for a socket anywhere else.
 func printDetachNotice(w io.Writer, socket string) {
-	sock := ""
-	if socket != config.DefaultSocketPath() {
-		sock = " -s " + socket
+	target := " -s " + socket
+	if name, ok := config.SessionName(socket); ok {
+		target = " -L " + name
+		if name == "default" {
+			target = ""
+		}
 	}
 	fmt.Fprintf(w, "[wideboi detached; the session is still running at %s]\n", socket)
-	fmt.Fprintf(w, "[reattach: wideboi%s   end it: wideboi%s kill-session]\n", sock, sock)
+	fmt.Fprintf(w, "[reattach: wideboi%s   end it: wideboi%s kill-session]\n", target, target)
 }
 
 // enableMouse asks the host terminal to report presses, releases and

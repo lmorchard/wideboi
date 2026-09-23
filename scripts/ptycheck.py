@@ -54,13 +54,13 @@ import argparse
 import os
 import signal
 import sys
-import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_EXIT, Drainer, spawn_in_pty, pane_children, ps_rows, still_alive,
     server_child, wait_for_exit, force_cleanup, parse_size, parse_signal,
+    private_run_dir, run_main,
 )
 
 def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
@@ -116,9 +116,11 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     # its socket, and an unrelated server on the default path would
     # leave this child with no session of its own. Nothing is listening
     # here, so it spawns a server that binds it -- and that server must
-    # remove it again on the way out, which is asserted below.
-    sock = os.path.join(tempfile.gettempdir(),
-                        f"wideboi-ptycheck-{os.getpid()}.sock")
+    # remove it again on the way out, which is asserted below. A
+    # directory of its own, because the server also leaves its lock
+    # file beside the socket, and that is never deleted.
+    run_dir = private_run_dir("wideboi-ptycheck-")
+    sock = os.path.join(run_dir, "s.sock")
     pid, master_fd = spawn_in_pty(argv, cols, rows, set_winsize,
                                   {"WIDEBOI_SOCK": sock})
 
@@ -288,4 +290,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_main(main)

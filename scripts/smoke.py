@@ -11,13 +11,11 @@ Cases derive from the spec's user-journey list. Add one per feature.
 """
 
 import argparse
-import atexit
 import base64
 import fcntl
 import itertools
 import os
 import re
-import shutil
 import signal
 import struct
 import sys
@@ -31,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty,
     wait_for_exit, descendants, force_cleanup, ps_rows,
-    settle_output, still_alive,
+    settle_output, still_alive, private_run_dir, run_main,
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
@@ -98,9 +96,10 @@ def cursor_visible(out: bytes) -> bool | None:
 # wideboi spawns a server that *binds* the path (#25), and cases run in
 # parallel -- one shared path and the first case's server would capture
 # every other case. A real directory, because servers write into it,
-# removed at exit because a SIGKILLed server leaves its socket behind.
-RUNTIME_DIR = tempfile.mkdtemp(prefix="wideboi-smoke-")
-atexit.register(shutil.rmtree, RUNTIME_DIR, True)
+# removed at exit because a SIGKILLed server leaves its socket behind --
+# unless the run failed, since the logs beside the sockets are the
+# first thing to read.
+RUNTIME_DIR = private_run_dir("wideboi-smoke-")
 _SOCK_IDS = itertools.count()
 
 # SPAWNED is the only state shared across cases, and with --jobs > 1 the
@@ -1157,4 +1156,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_main(main)

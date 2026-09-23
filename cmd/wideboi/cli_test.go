@@ -112,6 +112,44 @@ func TestParseCLIFlagsWithSubcommands(t *testing.T) {
 	}
 }
 
+func TestParseCLIList(t *testing.T) {
+	for _, arg := range []string{"ls", "list-sessions"} {
+		opts, err := parseCLI([]string{arg})
+		if err != nil {
+			t.Fatalf("parseCLI(%s) error: %v", arg, err)
+		}
+		if opts.subcommand != "ls" {
+			t.Errorf("parseCLI(%s) subcommand = %q, want ls", arg, opts.subcommand)
+		}
+	}
+}
+
+func TestParseCLISession(t *testing.T) {
+	for _, args := range [][]string{
+		{"-L", "work"},
+		{"--session", "work"},
+		{"-L", "work", "attach"},
+		{"attach", "-L", "work"},
+		{"kill-session", "--session", "work"},
+	} {
+		opts, err := parseCLI(args)
+		if err != nil {
+			t.Fatalf("parseCLI(%v) error: %v", args, err)
+		}
+		if opts.flags.Session != "work" {
+			t.Errorf("parseCLI(%v) Session = %q, want work", args, opts.flags.Session)
+		}
+	}
+	// The name is a flag value, never a subcommand, even when it spells one.
+	opts, err := parseCLI([]string{"-L", "attach"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if opts.subcommand != "" || opts.flags.Session != "attach" {
+		t.Errorf("-L attach: subcommand = %q, Session = %q; want none, attach", opts.subcommand, opts.flags.Session)
+	}
+}
+
 func TestPrintHelp(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
@@ -122,14 +160,17 @@ func TestPrintHelp(t *testing.T) {
 		"wideboi [flags]",
 		"wideboi [flags] server",
 		"wideboi [flags] attach",
+		"wideboi ls",
 		"-c, --config",
 		"-l, --layout",
 		"-p, --prefix",
 		"-s, --socket",
+		"-L, --session",
 		"--shell",
 		"WIDEBOI_LAYOUT",
 		"WIDEBOI_PREFIX",
 		"WIDEBOI_SOCK",
+		"WIDEBOI_SESSION",
 		"SHELL",
 	}
 
@@ -169,7 +210,8 @@ func TestParseCLIOwnerFD(t *testing.T) {
 }
 
 // The detach notice's commands must reach the same session: plain on
-// the default socket, with -s on any other.
+// the default session, -L on another named session, -s on any other
+// socket.
 func TestDetachNoticeNamesTheSocketOnlyWhenNeeded(t *testing.T) {
 	var buf bytes.Buffer
 	printDetachNotice(&buf, config.DefaultSocketPath())
@@ -178,6 +220,17 @@ func TestDetachNoticeNamesTheSocketOnlyWhenNeeded(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), config.DefaultSocketPath()) {
 		t.Errorf("notice does not name the socket:\n%s", buf.String())
+	}
+
+	buf.Reset()
+	printDetachNotice(&buf, config.SessionSocketPath("work"))
+	for _, want := range []string{"wideboi -L work ", "wideboi -L work kill-session"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("named-session notice lacks %q:\n%s", want, buf.String())
+		}
+	}
+	if strings.Contains(buf.String(), " -s ") {
+		t.Errorf("named-session notice carries -s:\n%s", buf.String())
 	}
 
 	buf.Reset()
