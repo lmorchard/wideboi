@@ -5,11 +5,13 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/lmorchard/wideboi/internal/keys"
+	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	toml "github.com/pelletier/go-toml/v2"
 )
@@ -26,9 +28,12 @@ type Config struct {
 	Keys         map[string]string   `toml:"keys"`
 	// Mouse is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read MouseEnabled, not this.
-	Mouse        *bool  `toml:"mouse"`
-	MouseEnabled bool   `toml:"-"`
-	ConfigFile   string `toml:"-"`
+	Mouse        *bool `toml:"mouse"`
+	MouseEnabled bool  `toml:"-"`
+	// LogLevelName is what was configured; LogLevel is it resolved.
+	LogLevelName string     `toml:"log_level"`
+	LogLevel     slog.Level `toml:"-"`
+	ConfigFile   string     `toml:"-"`
 }
 
 // ConfigFlags contains command-line flag overrides passed into Load.
@@ -122,6 +127,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			if len(fileCfg.WidthPresets) > 0 {
 				cfg.WidthPresets = fileCfg.WidthPresets
 			}
+			if fileCfg.LogLevelName != "" {
+				cfg.LogLevelName = fileCfg.LogLevelName
+			}
 			cfg.ConfigFile = cfgFile
 		}
 	}
@@ -138,6 +146,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if envShell := getenv("WIDEBOI_SHELL"); envShell != "" {
 		cfg.Shell = envShell
+	}
+	if envLevel := getenv("WIDEBOI_LOG_LEVEL"); envLevel != "" {
+		cfg.LogLevelName = envLevel
 	}
 
 	// 4. Command line flags
@@ -187,6 +198,13 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if cfg.Shell == "" {
 		cfg.Shell = "/bin/sh"
 	}
+
+	// Log level
+	level, err := logger.ParseLevel(cfg.LogLevelName)
+	if err != nil {
+		return Config{}, nil, err
+	}
+	cfg.LogLevel = level
 
 	// Mouse
 	cfg.MouseEnabled = cfg.Mouse == nil || *cfg.Mouse
