@@ -602,3 +602,17 @@ Before blaming the branch, check the stray's start time against the run's. A
 server that predates the run is yours: end that session and rerun. Don't
 loosen the scan. The ppid-1 rule is the only thing that catches a real
 orphan.
+
+## Unbinding one member of a group breaks every line that describes the group
+
+`[keys]` can unbind an action with `[]` (#99). Pairs like `h`/`l` share one
+help-overlay line, "focus the column left / right", through `HelpGroup`. The
+spec thought through the status bar's move-group label (drop the missing
+letter) and missed the help line, so `focus_right = []` left `h` advertising a
+direction that no longer existed. Review caught it; `BuildBindings` now clears
+`HelpGroup` on the survivors so they fall back to their own `Long`.
+
+**When a change can remove a member from anything grouped — `BarGroup`,
+`HelpGroup`, `HelpKey` — check every consumer of the group,** not just the one
+the change is about. `internal/client/help.go` and `keys.BarItemsFor` are the
+two today.
