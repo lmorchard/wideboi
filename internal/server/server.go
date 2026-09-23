@@ -54,9 +54,6 @@ type Server struct {
 	// s.mu, never while holding it.
 	paneSendMu sync.Mutex
 
-	// layout is the session's strategy mode, shared with every client.
-	layout protocol.LayoutMode
-
 	// owner is the connection of the client that launched this session,
 	// or nil when the session is ownerless: started as `wideboi
 	// server`, or given up by a detach. Once nil it stays nil;
@@ -73,18 +70,6 @@ type Server struct {
 	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
 	// it, via SetCloseGrace in export_test.go.
 	closeGrace time.Duration
-}
-
-// SetLayout installs the session's layout mode.
-//
-// A method rather than a NewServer parameter: the zero value is
-// already the scrolling strip, so only a caller that wants cards has
-// to say so, and the eight existing NewServer call sites stay put.
-func (s *Server) SetLayout(mode protocol.LayoutMode) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.layout = mode
-	layout.ApplyMode(s.strip, mode)
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning
@@ -312,7 +297,7 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			s.strip.MoveLeft()
 		case protocol.VerbMoveRight:
 			// Neither move calls resizePanesLocked, for the same
-			// reason VerbToggleCards does not: order is presentation,
+			// reason a layout toggle never did: order is presentation,
 			// and a column's width goes wherever the column goes.
 			s.strip.MoveRight()
 		case protocol.VerbFocusLast:
@@ -328,18 +313,15 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 				s.strip.FocusPaneID(id)
 			}
 		case protocol.VerbToggleCards:
-			if s.layout == protocol.LayoutCards {
-				s.layout = protocol.LayoutScroll
-			} else {
-				s.layout = protocol.LayoutCards
-			}
-			layout.ApplyMode(s.strip, s.layout)
-			// Deliberately no resizePanesLocked: a pane's logical
-			// width is its column's width regardless of what is
-			// visible, so changing presentation must not resize
-			// anything. That is the no-shrink premise.
+			// Reserved: layout is the client's (#92). An older client
+			// may still send it; there is nothing to do.
 		}
-		needBroadcast = true
+		// Every other verb changes the strip. The reserved one changes
+		// nothing, and a snapshot costs a forced resend of every pane to
+		// every client, so it must not broadcast.
+		if m.Verb != protocol.VerbToggleCards {
+			needBroadcast = true
+		}
 
 	case protocol.MsgFocusPane:
 		// Guarded: the pane may have closed between the client's draw
@@ -667,16 +649,13 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 
 func (s *Server) broadcastLayout(ctx context.Context) {
 	s.mu.Lock()
-	placements := s.strip.ComputePlacements(s.cols, s.rows)
 	statuses := s.statusGlyphsLocked()
 	titles := s.paneTitlesLocked()
 	snapshot := protocol.MsgLayoutSnapshot{
 		Columns:      layout.ToColumnData(s.strip.Columns()),
-		Placements:   layout.ToProtocol(placements),
 		FocusPaneID:  s.strip.FocusedPaneID(),
 		PaneStatuses: statuses,
 		PaneTitles:   titles,
-		Layout:       s.layout,
 	}
 	tps := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()

@@ -693,20 +693,20 @@ def case_card_layout_toggles(fail):
     if not positions:
         fail("no cursor position reported before toggling")
         return
-    scroll_col = positions[-1][1]
+    default_col = positions[-1][1]
 
-    s.type("\x02c")                       # toggle to cards
-    cards_col = s.cursor_positions()[-1][1]
+    s.type("\x02c")                       # toggle away from the default
+    toggled_col = s.cursor_positions()[-1][1]
 
     s.type("\x02c")                       # and back
     back_col = s.cursor_positions()[-1][1]
     s.close()
 
-    if cards_col == scroll_col:
-        fail(f"card layout left the focused pane at column {scroll_col}; "
+    if toggled_col == default_col:
+        fail(f"the toggled layout left the focused pane at column {default_col}; "
              "the toggle never reached the placement maths")
-    if back_col != scroll_col:
-        fail(f"toggling back landed at column {back_col}, want {scroll_col}")
+    if back_col != default_col:
+        fail(f"toggling back landed at column {back_col}, want {default_col}")
 
 
 def case_scroll_mode_marks_off_screen_panes(fail):
@@ -716,6 +716,8 @@ def case_scroll_mode_marks_off_screen_panes(fail):
     # the marker surviving the renderer onto the wire.
     s = Session(cols=100, args=["--layout", "scroll"])
     mark = len(s.output())
+    if "scroll · ".encode() not in s.output():
+        fail("status line does not show 'scroll' for a --layout scroll session (#91)")
     if b"+1" in s.output():
         fail("marker drawn before any pane was off-screen")
     # Three columns do not fit in 100 cells, and focus on the newest
@@ -751,6 +753,10 @@ def case_status_line_names_the_prefix(fail):
         fail("status line renders the literal placeholder '$mod'")
     if b"C-b for commands" not in out:
         fail("status line never tells the user how to reach the verbs")
+    # #91: the layout tag sits right before the hint. Cards is the
+    # default, and the first frame draws the whole line as one literal.
+    if "cards · C-b for commands".encode() not in out:
+        fail("status line does not show the default layout ('cards') before the hint")
     if b"alt+" in out:
         fail("status line still advertises the removed alt bindings")
     s.close()

@@ -38,16 +38,15 @@ func sliverCount(ps []protocol.PlacementData) int {
 }
 
 // Placements are computed client-side (Plan 12), so the client's own
-// strip has to learn the mode. Carrying it on the snapshot is what
-// keeps two clients of different sizes agreeing about the layout, the
-// same argument that makes focus shared state.
-func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
+// strip has to use the client's own mode, which since #92 it sets for
+// itself rather than learning from the server.
+func TestSetLayoutModeCardsProducesCardPlacements(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
 		FocusPaneID: 2,
-		Layout:      protocol.LayoutCards,
 	})
 
 	cli.mu.Lock()
@@ -66,27 +65,26 @@ func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
 
 // The toggle has to work in both directions, and going back to scroll
 // must leave nothing marked as chrome.
-func TestClientRevertsToScrollLayout(t *testing.T) {
+func TestToggleBackToScrollLeavesNoSlivers(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
+		Columns: threeColumns(), FocusPaneID: 2,
 	})
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutScroll,
-	})
+	cli.ToggleLayout()
 
 	cli.mu.Lock()
 	got := sliverCount(cli.placements)
 	cli.mu.Unlock()
 
 	if got != 0 {
-		t.Errorf("after reverting to scroll layout, %d placements are still slivers", got)
+		t.Errorf("after toggling back to scroll layout, %d placements are still slivers", got)
 	}
 }
 
-// The zero value is scroll, so a snapshot from a server that never sets
-// the field behaves exactly as before.
+// NewClient's zero value is scroll. That cards is the default is
+// config's job (config.Load), applied through SetLayoutMode.
 func TestClientDefaultsToScrollLayout(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
@@ -124,10 +122,10 @@ func placementFor(cli *Client, paneID int) protocol.PlacementData {
 func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:      threeColumns(),
 		FocusPaneID:  2,
-		Layout:       protocol.LayoutCards,
 		PaneTitles:   titles,
 		PaneStatuses: map[int]string{1: "✓", 2: " ", 3: "»"},
 	})
@@ -262,10 +260,10 @@ func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
 	// Narrow enough that the unfocused column is clipped.
 	const cols, rows = 45, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
 		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
 		PaneTitles:  map[int]string{2: "should not appear"},
 	})
 	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
@@ -386,10 +384,10 @@ func manyColumns(n int) []protocol.ColumnData {
 func cardClientWithColumns(t *testing.T, cols, rows, n, focus int) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(n),
 		FocusPaneID: focus,
-		Layout:      protocol.LayoutCards,
 	})
 	return cli
 }
@@ -456,10 +454,10 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 	// focus on the first leaves about twelve fully off the right edge.
 	const cols, rows = 60, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(14),
 		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
 	})
 
 	cli.mu.Lock()
@@ -487,10 +485,10 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 func TestScrollModeNoMarkerWhenEverythingFits(t *testing.T) {
 	const cols, rows = 120, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(3),
 		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
 	})
 
 	scr := newFakeHostScreen(cols, rows)
@@ -517,7 +515,7 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 	}
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: nil, FocusPaneID: 0, Layout: protocol.LayoutCards,
+		Columns: nil, FocusPaneID: 0,
 	})
 
 	scr2 := newFakeHostScreen(cols, rows)
@@ -528,17 +526,18 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 	}
 }
 
-// A mode change must land even while the session has no panes, or the
-// next snapshot renders under the previous strategy.
-func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
+// The mode is the client's, so a snapshot -- including the empty one
+// sent when the last pane closes -- must leave it alone.
+func TestEmptySnapshotKeepsClientLayoutMode(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 60, 16, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: nil, Layout: protocol.LayoutCards})
+	cli.SetLayoutMode(protocol.LayoutCards)
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: nil})
 
 	cli.mu.Lock()
 	got := cli.layoutMode
 	cli.mu.Unlock()
 	if got != protocol.LayoutCards {
-		t.Errorf("layoutMode = %v after an empty card-mode snapshot, want %v", got, protocol.LayoutCards)
+		t.Errorf("layoutMode = %v after an empty snapshot, want the client's %v", got, protocol.LayoutCards)
 	}
 }
 
@@ -550,13 +549,14 @@ func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
 func TestCardsDrawDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
 			{PaneID: 1, Width: 60, Height: 10},
 			{PaneID: 2, Width: 60, Height: 10},
 			{PaneID: 3, Width: 60, Height: 10},
 		},
-		FocusPaneID: 2, Layout: protocol.LayoutCards,
+		FocusPaneID: 2,
 	})
 
 	scr := newFakeHostScreen(cols, rows)
@@ -573,12 +573,13 @@ func TestCardsDrawDividers(t *testing.T) {
 func TestScrollModeStillDrawsDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
 			{PaneID: 1, Width: 30, Height: 10},
 			{PaneID: 2, Width: 30, Height: 10},
 		},
-		FocusPaneID: 1, Layout: protocol.LayoutScroll,
+		FocusPaneID: 1,
 	})
 
 	scr := newFakeHostScreen(cols, rows)

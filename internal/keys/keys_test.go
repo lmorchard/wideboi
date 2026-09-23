@@ -66,7 +66,7 @@ func TestTableIsWellFormed(t *testing.T) {
 			if (b.Column < 1 || b.Column > 9) && b.Column != keys.LastColumn {
 				t.Errorf("%q is ActionFocusColumn with Column %d; want 1-9 or LastColumn", b.Key, b.Column)
 			}
-		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit:
+		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit, keys.ActionToggleLayout:
 		default:
 			t.Errorf("%q has unknown Action %v", b.Key, b.Action)
 		}
@@ -272,7 +272,11 @@ func TestSmartJumpIsOnA(t *testing.T) {
 // leaves control mode.
 func TestToggleCardsIsOnC(t *testing.T) {
 	for _, b := range keys.Bindings {
-		if b.Action == keys.ActionVerb && b.Verb == protocol.VerbToggleCards {
+		if b.ActionName == keys.ActionNameToggleCards {
+			if b.Action != keys.ActionToggleLayout || b.Verb != 0 {
+				t.Errorf("card toggle is action %v verb %v; layout is client-local "+
+					"(#92), so it must be ActionToggleLayout with no verb", b.Action, b.Verb)
+			}
 			if b.Key != "c" {
 				t.Errorf("card toggle is on %q, want %q", b.Key, "c")
 			}
@@ -293,7 +297,7 @@ func TestToggleCardsIsOnC(t *testing.T) {
 			return
 		}
 	}
-	t.Error("no binding produces VerbToggleCards")
+	t.Error("no toggle_cards binding")
 }
 
 func TestBuildBindingsDefaults(t *testing.T) {

@@ -15,6 +15,7 @@ SYNC_END: present
 ## words rendered
 2027
 C-b
+cards
 commands
 focus
 for

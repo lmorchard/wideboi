@@ -174,29 +174,10 @@ func TestUndeliveredStatusBroadcastIsRetried(t *testing.T) {
 	}
 }
 
-// The toggle is a server-side flip of shared session state; clients
-// learn about it from the next snapshot.
-func TestToggleCardsFlipsLayoutMode(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
-	ctx := context.Background()
-
-	if s.layout != protocol.LayoutScroll {
-		t.Fatalf("initial layout = %v, want %v", s.layout, protocol.LayoutScroll)
-	}
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
-	if s.layout != protocol.LayoutCards {
-		t.Errorf("after one toggle layout = %v, want %v", s.layout, protocol.LayoutCards)
-	}
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
-	if s.layout != protocol.LayoutScroll {
-		t.Errorf("after two toggles layout = %v, want %v", s.layout, protocol.LayoutScroll)
-	}
-}
-
-// The no-shrink premise is what this whole project rests on: a pane's
-// logical width is its column's width, independent of what is visible.
-// Switching presentation must not touch it.
-func TestToggleCardsLeavesColumnWidthsAlone(t *testing.T) {
+// Layout is client-local since #92. An older client can still send the
+// reserved verb; it must change nothing -- above all not a column
+// width, which is the no-shrink premise.
+func TestReservedToggleVerbChangesNothing(t *testing.T) {
 	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle, 3: term.StatusIdle})
 	ctx := context.Background()
 
@@ -208,17 +189,26 @@ func TestToggleCardsLeavesColumnWidthsAlone(t *testing.T) {
 		}
 		before[id] = w
 	}
+	focus := s.strip.FocusedPaneID()
 
 	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
 
+	// Nor may it broadcast: a snapshot is followed by a forced resend
+	// of every pane to every client, so an old client's C-b c would
+	// otherwise cost a full-session repaint for nothing.
+	select {
+	case msg := <-s.transports[0].(*transport.InProcChannel).ServerSend:
+		t.Errorf("the reserved toggle verb sent %T to a client; it must send nothing", msg)
+	default:
+	}
+	if got := s.strip.FocusedPaneID(); got != focus {
+		t.Errorf("focus %d -> %d across the reserved toggle verb", focus, got)
+	}
 	for id, want := range before {
 		got, ok := s.strip.ColumnWidth(id)
-		if !ok {
-			t.Fatalf("pane %d lost its column across the toggle", id)
-		}
-		if got != want {
-			t.Errorf("pane %d width %d -> %d across a layout toggle; "+
-				"presentation must not resize", id, want, got)
+		if !ok || got != want {
+			t.Errorf("pane %d width %d -> %d (ok=%v) across the reserved toggle verb; "+
+				"presentation must not resize", id, want, got, ok)
 		}
 	}
 }

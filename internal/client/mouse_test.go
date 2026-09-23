@@ -17,13 +17,13 @@ func newMouseClient(t *testing.T) (*Client, *transport.InProcChannel) {
 	t.Helper()
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
 			{PaneID: 1, Width: 40, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
 		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
 	})
 	return cli, ch
 }
@@ -104,8 +104,9 @@ func TestClickOnFocusedPaneSendsNothing(t *testing.T) {
 func TestClickHitsTopmostCard(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
+		Columns: threeColumns(), FocusPaneID: 2,
 	})
 	p1, p2 := placementFor(cli, 1), placementFor(cli, 2)
 	overlap := p1.Dst.Intersect(p2.Dst)
@@ -401,13 +402,13 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 	drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+4, d.Min.Y))
 
 	// Same layout again: nothing moved, selection survives.
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
 			{PaneID: 1, Width: 40, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
 		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
 	})
 	cli.mu.Lock()
 	survived := cli.sel != nil
@@ -417,13 +418,13 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 	}
 
 	// Pane 1 widens: its rect changes.
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
 			{PaneID: 1, Width: 60, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
 		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
 	})
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
@@ -438,13 +439,13 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 func newTrackingClient(t *testing.T, focus int) (*Client, *transport.InProcChannel) {
 	t.Helper()
 	cli, ch := newMouseClient(t)
+	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
 			{PaneID: 1, Width: 40, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
 		FocusPaneID: focus,
-		Layout:      protocol.LayoutScroll,
 	})
 	upd := paneLines(2, 40, 22, "TRACKING CHILD")
 	upd.MouseTracking = true
@@ -582,8 +583,9 @@ func TestTrackingOffRestoresSelection(t *testing.T) {
 func TestCardSelectionStopsAtTheCardAbove(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
+		Columns: threeColumns(), FocusPaneID: 2,
 	})
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER-CARD-TEXT-THAT-RUNS-UNDER-THE-NEXT", "LOWER-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(2, 60, 10, "TOP-CARD", "TOP-ROW-TWO"))
@@ -627,7 +629,8 @@ func TestStaleGrabDoesNotSwallowNextPress(t *testing.T) {
 func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
-	snap := protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards}
+	cli.SetLayoutMode(protocol.LayoutCards)
+	snap := protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2}
 	cli.HandleServerMsg(snap)
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER"))
 	cli.Draw(newFakeHostScreen(100, 24))

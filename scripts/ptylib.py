@@ -20,6 +20,7 @@ import signal
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -201,6 +202,19 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
             # child's output, not wideboi's chrome, and the snapshot
             # exists to pin the chrome.
             child_env["PS1"] = "$ "
+            # And the layout, for the fourth. Several assertions and the
+            # golden snapshot expect the built-in default (cards) -- the
+            # status line's layout tag, and attachcheck's comparisons
+            # between clients -- so neither WIDEBOI_LAYOUT nor a
+            # developer's own config file may choose it. Dropping the
+            # variable and pointing XDG_CONFIG_HOME at a directory that
+            # never exists (config.Load ignores a missing default file)
+            # keeps the real default under test, rather than a pinned
+            # copy of it. A case that wants another layout, or a config,
+            # passes --layout or -c explicitly.
+            child_env.pop("WIDEBOI_LAYOUT", None)
+            child_env["XDG_CONFIG_HOME"] = os.path.join(
+                tempfile.gettempdir(), f"wideboi-harness-no-config-{os.getpid()}")
             if env:
                 child_env.update(env)
             os.execvpe(argv[0], argv, child_env)

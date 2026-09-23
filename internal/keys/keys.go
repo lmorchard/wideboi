@@ -44,8 +44,8 @@ const (
 )
 
 // Action is what a binding does when it fires. It is deliberately not
-// protocol.VerbType: scrolling, quitting, detaching, help and leaving
-// the mode are not verbs the server knows about.
+// protocol.VerbType: scrolling, quitting, detaching, help, the layout
+// toggle and leaving the mode are not verbs the server knows about.
 type Action int
 
 const (
@@ -65,6 +65,9 @@ const (
 	// ActionFocusColumn focuses the column at position Column, counting
 	// from 1 at the left.
 	ActionFocusColumn
+	// ActionToggleLayout flips this client between the card fan and the
+	// scrolling strip. Client-local: layout is presentation (#92).
+	ActionToggleLayout
 )
 
 // LastColumn is Column's value for "the rightmost column, however many
@@ -191,7 +194,7 @@ var Bindings = slices.Concat([]Binding{
 	//
 	// NoRepeat because ctrl+c must stay an unknown key that leaves
 	// control mode; see the field's comment.
-	{ActionName: ActionNameToggleCards, Key: "c", Action: ActionVerb, Verb: protocol.VerbToggleCards,
+	{ActionName: ActionNameToggleCards, Key: "c", Action: ActionToggleLayout,
 		NoRepeat: true, Long: "toggle the card layout"},
 	{ActionName: ActionNameQuit, Key: "q", Action: ActionQuit, Essential: true,
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},

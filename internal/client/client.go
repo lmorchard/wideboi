@@ -146,24 +146,22 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// step counter repeatedly and never settle.
 		prevTarget := c.placements
 		prevOnScreen := c.currentPlacementsLocked()
-		// Unconditionally, before anything below reads them: the
-		// mode decides which strategy runs, and the strip is what
-		// hiddenCountsLocked compares placements against.
+		// Unconditionally, before anything below reads it: the strip
+		// is what hiddenCountsLocked compares placements against.
 		//
-		// Both used to be inside the len(m.Columns) > 0 branch, which
+		// It used to be inside the len(m.Columns) > 0 branch, which
 		// meant the snapshot sent when the last pane closes left a
 		// stale strip behind -- so card mode drew a "+N" counting
-		// panes that no longer existed -- and a mode change arriving
-		// while the session was empty was dropped.
-		c.layoutMode = m.Layout
-		layout.ApplyMode(c.strip, m.Layout)
+		// panes that no longer existed.
+		//
+		// The layout mode is not read from the snapshot: it is this
+		// client's own (#92), set by SetLayoutMode and ToggleLayout.
 		c.strip.SyncColumns(m.Columns, m.FocusPaneID)
 
-		if len(m.Columns) > 0 {
-			c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
-		} else {
-			c.placements = m.Placements
-		}
+		// With no columns ComputePlacements returns nil, which is what
+		// an empty session should draw. The server sent its own
+		// placements for that case until #47; they were always nil.
+		c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
 		c.focusPaneID = m.FocusPaneID
 		c.paneStatuses = m.PaneStatuses
 		c.paneTitles = m.PaneTitles
@@ -180,9 +178,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
 		}
 
-		activeIDs := make(map[int]bool)
 		for _, p := range c.placements {
-			activeIDs[p.PaneID] = true
 			m, ok := c.mirrors[p.PaneID]
 			if !ok {
 				// Allocate surface sized to logical width/height
@@ -207,14 +203,21 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			}
 		}
 
-		// Prune inactive mirrors
+		// Prune against the panes that exist, not the ones placed. A
+		// local ToggleLayout changes placements with no snapshot and
+		// no resend, so a mirror pruned for being off-screen would come
+		// back blank until its pane next changed (#92).
+		live := make(map[int]bool, len(m.Columns))
+		for _, col := range m.Columns {
+			live[col.PaneID] = true
+		}
 		for id := range c.mirrors {
-			if !activeIDs[id] {
+			if !live[id] {
 				delete(c.mirrors, id)
 			}
 		}
 		for id := range c.mouseTracking {
-			if !activeIDs[id] {
+			if !live[id] {
 				delete(c.mouseTracking, id)
 			}
 		}
@@ -817,12 +820,17 @@ func (c *Client) normalStatusLocked(budget int) string {
 			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
 		}
 	}
-	// The hint is right-aligned and is the first thing to go when the
-	// terminal is too narrow for it: the pane statuses are live
-	// information, the hint is a fixed string a user learns once.
-	hint := c.prefixLabel + " for commands"
-	if pad := budget - runeLen(status) - runeLen(hint); pad >= 2 {
-		status += strings.Repeat(" ", pad) + hint
+	// The right-hand side is the layout tag and then the hint, and it
+	// degrades hint first: the pane statuses and the mode are live
+	// state -- an accidental C-b c changes the mode (#91) -- while the
+	// hint is a fixed string a user learns once. Right-aligned because
+	// the left edge is pinned: smoke.py finds the focused pane by its
+	// column in "focus: [pane N".
+	mode := c.layoutMode.String()
+	for _, right := range []string{mode + " · " + c.prefixLabel + " for commands", mode} {
+		if pad := budget - runeLen(status) - runeLen(right); pad >= 2 {
+			return truncateRunes(status+strings.Repeat(" ", pad)+right, budget)
+		}
 	}
 	return truncateRunes(status, budget)
 }
@@ -868,6 +876,49 @@ func (c *Client) SetHelpVisible(on bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.helpVisible = on
+}
+
+// SetLayoutMode installs this client's layout. Layout is presentation,
+// and presentation is per-client (#92): the server never learns it, so
+// cmd/wideboi calls this once, from the client's own config, before the
+// first snapshot arrives.
+func (c *Client) SetLayoutMode(mode protocol.LayoutMode) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.setLayoutModeLocked(mode)
+}
+
+// ToggleLayout flips between the card fan and the scrolling strip.
+// Nothing is sent: other clients keep their own mode, and this one is
+// forgotten on detach. It animates like any other change of geometry.
+func (c *Client) ToggleLayout() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	next := protocol.LayoutCards
+	if c.layoutMode == protocol.LayoutCards {
+		next = protocol.LayoutScroll
+	}
+	// Same two "previous" values HandleServerMsg keeps, for the same
+	// reasons: prevTarget decides whether anything moved, prevOnScreen
+	// is where the animation starts.
+	prevTarget := c.placements
+	prevOnScreen := c.currentPlacementsLocked()
+	c.setLayoutModeLocked(next)
+	if c.sel != nil && !c.selectionStillPlacedLocked() {
+		c.sel = nil
+	}
+	if c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
+		c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
+	}
+}
+
+// setLayoutModeLocked installs mode and recomputes placements from the
+// strip as it stands. With no columns yet ComputePlacements returns
+// nil, which is right before the first snapshot. c.mu must be held.
+func (c *Client) setLayoutModeLocked(mode protocol.LayoutMode) {
+	c.layoutMode = mode
+	layout.ApplyMode(c.strip, mode)
+	c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
 }
 
 // runeLen counts cells the way compose.WriteString consumes them: one

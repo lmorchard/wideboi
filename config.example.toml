@@ -12,7 +12,7 @@
 #   3. Configuration file (this file)
 #   4. Defaults (including $SHELL or /bin/sh)
 
-# Layout strategy: "cards" (default) or "scroll"
+# Starting layout for each client: "cards" (default) or "scroll". C-b c toggles it for that client only.
 layout = "cards"
 
 # Prefix key used to enter control mode: "ctrl+<letter>" or "ctrl+space"

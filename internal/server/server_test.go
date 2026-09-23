@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -18,6 +19,17 @@ import (
 // default these seven tests spent ~14s between them waiting for an
 // interactive /bin/sh to ignore SIGTERM.
 const testGrace = 100 * time.Millisecond
+
+// placementsAt computes what a scroll-mode client would place for snap
+// at cols x rows. The server no longer computes placements (#47), so a
+// test that needs to know what is on screen -- to confirm its own
+// clipping scenario -- computes it the way a client does.
+func placementsAt(snap protocol.MsgLayoutSnapshot, cols, rows int) []layout.Placement {
+	s := layout.NewStrip()
+	layout.ApplyMode(s, protocol.LayoutScroll)
+	s.SyncColumns(snap.Columns, snap.FocusPaneID)
+	return s.ComputePlacements(cols, rows)
+}
 
 func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgLayoutSnapshot {
 	t.Helper()
@@ -51,8 +63,8 @@ func TestServerLifecycleAndAttach(t *testing.T) {
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
-	if len(snap.Placements) != 2 {
-		t.Fatalf("expected 2 initial placements, got %d", len(snap.Placements))
+	if len(snap.Columns) != 2 {
+		t.Fatalf("expected 2 initial columns, got %d", len(snap.Columns))
 	}
 
 	if err := srv.Close(); err != nil {
@@ -78,9 +90,13 @@ func TestServerVerbHandling(t *testing.T) {
 	// Request new column
 	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbNewColumn})
 
+	// The session starts with two panes. This used to count the
+	// server's placements, which at 80 columns in scroll mode was 2
+	// either way -- the new pane scrolls off -- so it never showed the
+	// verb did anything. Columns count every pane.
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
-	if len(snap.Placements) != 2 {
-		t.Fatalf("expected 2 placements after NewColumn verb, got %d", len(snap.Placements))
+	if len(snap.Columns) != 3 {
+		t.Fatalf("expected 3 columns after NewColumn verb, got %d", len(snap.Columns))
 	}
 
 	// Test GrowWidth verb
@@ -139,19 +155,19 @@ func TestResizePropagatesToPanes(t *testing.T) {
 	tp.SendClient(ctx, protocol.MsgResize{Cols: 100, Rows: 40})
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
-	if len(snap.Placements) == 0 {
-		t.Fatal("expected placements after resize")
+	if len(snap.Columns) == 0 {
+		t.Fatal("expected columns after resize")
 	}
-	for _, pl := range snap.Placements {
-		cols, rows, ok := srv.PaneSize(pl.PaneID)
+	for _, col := range snap.Columns {
+		cols, rows, ok := srv.PaneSize(col.PaneID)
 		if !ok {
-			t.Fatalf("pane %d not found after resize", pl.PaneID)
+			t.Fatalf("pane %d not found after resize", col.PaneID)
 		}
 		if cols <= 0 || cols > 100 {
-			t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", pl.PaneID, cols)
+			t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", col.PaneID, cols)
 		}
 		if rows != 38 {
-			t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", pl.PaneID, rows)
+			t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", col.PaneID, rows)
 		}
 	}
 
@@ -189,7 +205,7 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 	sawClippedPlacement := false
-	for _, pl := range snap.Placements {
+	for _, pl := range placementsAt(snap, 70, 20) {
 		if pl.Dst.Dx() < 59 {
 			sawClippedPlacement = true
 		}
@@ -238,20 +254,20 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
-	if len(snap.Placements) != 2 {
-		t.Fatalf("expected 2 initial placements, got %+v", snap)
+	if len(snap.Columns) != 2 {
+		t.Fatalf("expected 2 initial columns, got %+v", snap)
 	}
 	var paneIDs []int
-	for _, pl := range snap.Placements {
-		paneIDs = append(paneIDs, pl.PaneID)
+	for _, col := range snap.Columns {
+		paneIDs = append(paneIDs, col.PaneID)
 	}
 
 	tp.SendClient(ctx, protocol.MsgResize{Cols: 40, Rows: 20})
 
 	snap = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
-	if len(snap.Placements) != 1 {
-		t.Fatalf("test setup bug: expected exactly 1 placement (the other pane scrolled fully off), got %d", len(snap.Placements))
+	if n := len(placementsAt(snap, 40, 20)); n != 1 {
+		t.Fatalf("test setup bug: expected exactly 1 placement (the other pane scrolled fully off), got %d", n)
 	}
 
 	for _, id := range paneIDs {
@@ -300,11 +316,11 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 
 	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
 	snap, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot)
-	if !ok || len(snap.Placements) != 2 {
-		t.Fatalf("expected 2 initial placements, got %+v", snap)
+	if !ok || len(snap.Columns) != 2 {
+		t.Fatalf("expected 2 initial columns, got %+v", snap)
 	}
-	killID := snap.Placements[0].PaneID
-	surviveID := snap.Placements[1].PaneID
+	killID := snap.Columns[0].PaneID
+	surviveID := snap.Columns[1].PaneID
 
 	// Drain every further server->client message for the rest of the test.
 	// broadcastLayoutLocked runs under s.mu, so an unread, full ServerSend

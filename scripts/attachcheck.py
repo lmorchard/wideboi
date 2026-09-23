@@ -45,7 +45,7 @@ from ptylib import (
 # -- whether the first frame beats the server's opening snapshot is a
 # race, and a reattach usually loses it, painting "pane 0" once before
 # the real focus arrives.
-from smoke import EMPTY_SYNC_UPDATE, focus_pane_id, prompts_seen
+from smoke import CUP, EMPTY_SYNC_UPDATE, focus_pane_id, prompts_seen
 
 BIN = "./bin/wideboi"
 COLS, ROWS = 80, 24
@@ -156,8 +156,8 @@ class Client:
     plain=True runs a plain `wideboi` instead, which attaches if a server
     answers and otherwise spawns one and owns the session."""
 
-    def __init__(self, startup=PROMPT_WAIT, plain=False):
-        argv = [BIN] if plain else [BIN, "attach"]
+    def __init__(self, startup=PROMPT_WAIT, plain=False, args=()):
+        argv = [BIN, *args] if plain else [BIN, "attach", *args]
         self.pid, self.fd = spawn_in_pty(argv, COLS, ROWS, True,
                                          {"WIDEBOI_SOCK": socket_path()})
         self.drainer = Drainer(self.fd)
@@ -746,6 +746,102 @@ def case_attached_client_presents_no_empty_frames(fail):
         srv.stop()
 
 
+def cursor_col(out: bytes) -> int | None:
+    """Column of the last cursor move: the focused pane's cursor, which
+    is where the layout put that pane."""
+    moves = CUP.findall(out)
+    return int(moves[-1][1]) if moves else None
+
+
+def case_toggle_affects_only_its_own_client(fail):
+    """Layout is presentation, and presentation is per-client (#92):
+    C-b c in one attached client must leave another alone."""
+    srv = Server()
+    a = b = None
+    try:
+        a = Client()
+        b = Client()
+        a.type(b"\x02n")                  # a third pane, so there is a fan
+        settle_output(b.drainer, timeout=SETTLE)
+        a_before, b_before = cursor_col(a.output()), cursor_col(b.output())
+
+        a.type(b"\x02c")
+        settle_output(b.drainer, timeout=SETTLE)
+        a_after, b_after = cursor_col(a.output()), cursor_col(b.output())
+
+        if a_after == a_before:
+            fail(f"the toggle left client a's cursor at column {a_before}; "
+                 "the layouts coincide at this size and the case is vacuous")
+        if b_after != b_before:
+            fail(f"toggling in client a moved client b's cursor from column "
+                 f"{b_before} to {b_after}; the layout is still session state")
+    finally:
+        for c in (a, b):
+            if c is not None:
+                c.kill()
+        srv.stop()
+
+
+def case_attach_layout_flag_is_honoured(fail):
+    """An attaching client starts in the layout its own config names.
+    Before #92 attach resolved --layout and threw it away."""
+    srv = Server()
+    clients = []
+    try:
+        a = Client()
+        clients.append(a)
+        a.type(b"\x02n")
+        scroll = Client(args=["--layout", "scroll"])
+        clients.append(scroll)
+        cards = Client(args=["--layout", "cards"])
+        clients.append(cards)
+        a_col = cursor_col(a.output())
+        scroll_col = cursor_col(scroll.output())
+        cards_col = cursor_col(cards.output())
+
+        if cards_col != a_col:
+            fail(f"an explicit --layout cards client sits at column {cards_col}, "
+                 f"the default client at {a_col}; the comparison below means nothing")
+        if scroll_col == a_col:
+            fail(f"attach --layout scroll put the cursor at column {scroll_col}, "
+                 "the same as the cards client; the flag was ignored")
+    finally:
+        for c in clients:
+            c.kill()
+        srv.stop()
+
+
+def case_reattach_starts_from_the_configured_layout(fail):
+    """A toggle belongs to the client that made it and goes when it
+    detaches. The next attach starts from config, not from whatever the
+    last client left behind -- which is how an accidental C-b c used to
+    outlive the terminal it was pressed in."""
+    srv = Server()
+    c = None
+    try:
+        a = Client()
+        a.type(b"\x02n")
+        col0 = cursor_col(a.output())
+        a.type(b"\x02c")
+        col1 = cursor_col(a.output())
+        if col1 == col0:
+            fail(f"the toggle left the cursor at column {col0}; the case is vacuous")
+        status = a.detach()
+        if status is None:
+            fail("C-b d did not exit the client")
+            return
+
+        c = Client(startup=SETTLE * 2)
+        col2 = cursor_col(c.output())
+        if col2 != col0:
+            fail(f"reattached client's cursor is at column {col2}, want the "
+                 f"configured layout's {col0} (the toggled layout put it at {col1})")
+    finally:
+        if c is not None:
+            c.kill()
+        srv.stop()
+
+
 CASES = [
     ("attach renders pane content over the socket", case_attach_renders_pane_content),
     ("attached client emits no bytes while idle", case_attached_client_idle_emits_no_bytes),
@@ -765,6 +861,9 @@ CASES = [
     ("plain wideboi detaches and the session survives", case_plain_wideboi_detaches_and_the_session_survives),
     ("SIGKILLed owner takes the session with it", case_sigkilled_owner_takes_the_session_with_it),
     ("plain wideboi attaches to a running server", case_plain_wideboi_attaches_to_a_running_server),
+    ("layout toggle affects only its own client", case_toggle_affects_only_its_own_client),
+    ("attach honours its own layout flag", case_attach_layout_flag_is_honoured),
+    ("reattach starts from the configured layout", case_reattach_starts_from_the_configured_layout),
 ]
 
 
