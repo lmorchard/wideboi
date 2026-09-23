@@ -597,13 +597,51 @@ func TestCardSelectionStopsAtTheCardAbove(t *testing.T) {
 	}
 
 	got := drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d2.Min.X+10, d1.Min.Y+1))
-	// Not "TOP": the card above paints its left divider over its own
-	// first column, so what leaks is "OP-CARD".
-	if strings.Contains(got, "OP-CARD") || strings.Contains(got, "┃") {
+	// The card above's border, in the cell left of its content, belongs
+	// to the card above too.
+	if strings.Contains(got, "TOP-CARD") || strings.ContainsAny(got, "│┃") {
 		t.Errorf("selection on pane 1 copied pane 2's text: %q", got)
 	}
 	if !strings.HasPrefix(got, "LOWER") {
 		t.Errorf("copied %q, want pane 1's visible text", got)
+	}
+}
+
+// A drag over a card to the right of the focused one copies its text
+// from the first column, with no border glyph in front of it.
+func TestCardSelectionCopiesNoBorder(t *testing.T) {
+	ch := transport.NewInProcChannel(64)
+	cli := NewClient(ch, 100, 24, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneID: 2,
+	})
+	cli.HandleServerMsg(paneLines(3, 60, 10, "RIGHT-CARD"))
+	cli.Draw(newFakeHostScreen(100, 24))
+	d3 := placementFor(cli, 3).Dst
+
+	got := drag(cli, image.Pt(d3.Min.X, d3.Min.Y), image.Pt(d3.Max.X-1, d3.Min.Y))
+	if got != "RIGHT-CARD" {
+		t.Errorf("copied %q, want %q", got, "RIGHT-CARD")
+	}
+}
+
+// A card's border is part of that card: clicking it focuses the card
+// whose edge it is, not the one underneath.
+func TestClickOnCardBorderFocusesThatCard(t *testing.T) {
+	ch := transport.NewInProcChannel(64)
+	cli := NewClient(ch, 100, 24, "C-b")
+	cli.SetLayoutMode(protocol.LayoutCards)
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneID: 1,
+	})
+	cli.Draw(newFakeHostScreen(100, 24))
+	sent(ch)
+	d2 := placementFor(cli, 2).Dst
+
+	click(cli, d2.Min.X-1, d2.Min.Y+2)
+	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
+		t.Errorf("click on pane 2's border requested focus %v, want [2]", got)
 	}
 }
 

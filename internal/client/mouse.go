@@ -31,7 +31,8 @@ func (c *Client) hitTestLocked(pt image.Point) *protocol.PlacementData {
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Z < sorted[j].Z })
 	for i := len(sorted) - 1; i >= 0; i-- {
 		p := sorted[i]
-		if pt.X >= p.Dst.Min.X && pt.X < p.Dst.Max.X && pt.Y >= 0 && pt.Y < p.Dst.Max.Y {
+		f := c.frameLocked(p)
+		if pt.X >= f.Min.X && pt.X < f.Max.X && pt.Y >= 0 && pt.Y < f.Max.Y {
 			return &p
 		}
 	}
@@ -58,13 +59,16 @@ func (c *Client) visibleRectLocked(p *protocol.PlacementData, pt image.Point) im
 			above = true
 			continue
 		}
-		if !above || !q.Dst.Overlaps(r) {
+		// q's frame, not its Dst: a card's border covers the cell
+		// before its content.
+		qf := c.frameLocked(q)
+		if !above || !qf.Overlaps(r) {
 			continue
 		}
-		if pt.X < q.Dst.Min.X {
-			r.Max.X = min(r.Max.X, q.Dst.Min.X)
+		if pt.X < qf.Min.X {
+			r.Max.X = min(r.Max.X, qf.Min.X)
 		} else {
-			r.Min.X = max(r.Min.X, q.Dst.Max.X)
+			r.Min.X = max(r.Min.X, qf.Max.X)
 		}
 	}
 	return r

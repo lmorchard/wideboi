@@ -20,10 +20,15 @@ const MinSliverWidth = 4
 // the focused pane.
 //
 // The focused pane keeps its own width and the rest divide whatever
-// is left, so the fan always spans the viewport. No divider columns
-// are reserved: every sliver draws a spine at its own left edge,
-// which is the separator -- reserving one as ScrollStrategy does
-// would cost a cell per card for no visible gain.
+// is left, so the fan always spans the viewport.
+//
+// Every card but the leftmost has a border in the first cell of its
+// slot, and its Dst starts one cell after it: the client draws the
+// border at Dst.Min.X-1. It used to be painted over the card's own
+// first column, which hid column 0 of every pane in the fan and put
+// the border glyph into anything copied from it. A sliver's border
+// comes out of its own share; the focused card's is one extra cell,
+// since it keeps its whole width.
 type CardStrategy struct {
 	// SliverWidth, when positive, forces every sliver to this width
 	// instead of an even share. Tests use it to pin geometry; nothing
@@ -75,7 +80,14 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	focusedW := min(s.columns[focusedIdx].Width, viewportWidth)
 	remaining := max(viewportWidth-focusedW, 0)
 
-	showLeft, showRight := cs.visibleSides(s, remaining)
+	// A focused card with cards to its left needs a cell for its
+	// border. Take it out of the slivers' budget before deciding how
+	// many fit, then give it back if none turn out to be on the left.
+	border := min(focusedIdx, 1)
+	showLeft, showRight := cs.visibleSides(s, max(remaining-border, 0))
+	if showLeft > 0 {
+		remaining -= border
+	}
 	sliverCount := showLeft + showRight
 
 	// Sliver widths, indexed left to right across the whole fan so the
@@ -98,8 +110,12 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		if w <= 0 || x >= viewportWidth {
 			return
 		}
-		right := min(x+col.Width, viewportWidth)
-		dst := image.Rect(x, 1, right, 1+availHeight)
+		left := x
+		if left > 0 {
+			left++ // past the border
+		}
+		right := min(left+col.Width, viewportWidth)
+		dst := image.Rect(left, 1, right, 1+availHeight)
 		if dst.Empty() {
 			return
 		}
@@ -124,7 +140,11 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		sliverIdx++
 	}
 
-	place(s.columns[focusedIdx], focusedW, 1)
+	focusedSlot := focusedW
+	if x > 0 {
+		focusedSlot++ // its border
+	}
+	place(s.columns[focusedIdx], focusedSlot, 1)
 
 	for i := focusedIdx + 1; i <= focusedIdx+showRight; i++ {
 		col := s.columns[i]

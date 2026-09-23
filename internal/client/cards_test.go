@@ -195,9 +195,30 @@ func TestFocusedCardRendersContentNotChrome(t *testing.T) {
 	cli.Draw(scr)
 
 	got := regionText(scr, placementFor(cli, 2).Dst)
-	// We expect "ONTENT-TWO" because the left border overwrites the first column ('C').
-	if !strings.Contains(got, "ONTENT-TWO") {
+	if !strings.Contains(got, "CONTENT-TWO") {
 		t.Errorf("focused card is not showing its content:\n%s", got)
+	}
+}
+
+// A card's border lives in the cell just left of its content. It used
+// to be painted over the card's own first column, so every card but the
+// leftmost hid column 0 of its pane -- and drag-to-copy picked the
+// border glyph up as text.
+func TestCardBorderSitsOutsideTheContent(t *testing.T) {
+	const cols, rows = 100, 16
+	cli := newCardClient(t, cols, rows, nil)
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr)
+
+	for id, want := range map[int]string{2: "CONTENT-TWO", 3: "CONTENT-THREE"} {
+		d := placementFor(cli, id).Dst
+		if d.Min.X == 0 {
+			t.Fatalf("fixture wants pane %d away from the left edge, got %v", id, d)
+		}
+		row := compose.Text(scr, image.Rect(d.Min.X-1, d.Min.Y, d.Max.X, d.Min.Y+1))[0]
+		if !strings.HasPrefix(row, "│"+want) && !strings.HasPrefix(row, "┃"+want) {
+			t.Errorf("pane %d row 0 from its border = %q, want a border then %q", id, row, want)
+		}
 	}
 }
 
