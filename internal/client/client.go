@@ -550,7 +550,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			c.drawSliverLocked(dst, p, st)
 		default:
 			if mirror, ok := c.mirrors[p.PaneID]; ok {
-				compose.Blit(dst, mirror.Surface, p.Dst)
+				compose.Blit(dst, mirror.Surface, p.Src, p.Dst)
 			}
 		}
 
