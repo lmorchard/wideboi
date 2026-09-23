@@ -58,31 +58,31 @@ func blankAbove(scr *fakeHostScreen, limit int) bool {
 
 // twoColumns is the layout both pane fixtures below describe: two
 // equal panes side by side, each narrower than the viewport.
-func twoColumns() []protocol.ColumnData {
-	return []protocol.ColumnData{
-		{PaneID: 1, Width: 25, Height: 10},
-		{PaneID: 2, Width: 25, Height: 10},
+func twoColumns() []*protocol.ColumnData {
+	return []*protocol.ColumnData{
+		&protocol.ColumnData{PaneId: int32(1), Width: 25, Height: 10},
+		&protocol.ColumnData{PaneId: int32(2), Width: 25, Height: 10},
 	}
 }
 
 // paneUpdate builds a MsgPaneUpdate whose first row is text, so a test
 // can tell which pane it is looking at on the composited screen.
-func paneUpdate(paneID, cols, rows int, text string) protocol.MsgPaneUpdate {
-	line := make(protocol.LineData, 0, len(text))
+func paneUpdate(paneID, cols, rows int, text string) *protocol.ServerEnvelope {
+	line := make([]*protocol.CellData, 0, len(text))
 	for _, r := range text {
-		line = append(line, protocol.CellData{Content: string(r), Width: 1})
+		line = append(line, &protocol.CellData{Content: string(r), Width: 1})
 	}
-	lines := make([]protocol.LineData, rows)
-	lines[0] = line
-	return protocol.MsgPaneUpdate{
-		PaneID:        paneID,
-		Cols:          cols,
-		Rows:          rows,
+	lines := make([]*protocol.LineData, rows)
+	lines[0] = &protocol.LineData{Cells: line}
+	return &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneUpdate{PaneUpdate: &protocol.MsgPaneUpdate{
+		PaneId:        int32(paneID),
+		Cols:          int32(cols),
+		Rows:          int32(rows),
 		Lines:         lines,
 		CursorX:       0,
 		CursorY:       0,
 		CursorVisible: true,
-	}
+	}}}
 }
 
 // newTestClientWithTwoPanes returns a client holding populated mirrors
@@ -93,11 +93,11 @@ func paneUpdate(paneID, cols, rows int, text string) protocol.MsgPaneUpdate {
 func newTestClientWithTwoPanes(t *testing.T, cols, rows int) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     twoColumns(),
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 	cli.HandleServerMsg(paneUpdate(1, 25, 10, "PANE-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 25, 10, "PANE-TWO"))
 	return cli
@@ -191,15 +191,15 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 	}
 
 	// Verify cursor position change reports dirty.
-	cli.HandleServerMsg(protocol.MsgPaneUpdate{
-		PaneID:        1,
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneUpdate{PaneUpdate: &protocol.MsgPaneUpdate{
+		PaneId:        1,
 		Cols:          25,
 		Rows:          10,
-		Lines:         paneUpdate(1, 25, 10, "PANE-ONE-CHANGED").Lines,
+		Lines:         paneUpdate(1, 25, 10, "PANE-ONE-CHANGED").GetPaneUpdate().Lines,
 		CursorX:       5,
 		CursorY:       2,
 		CursorVisible: true,
-	})
+	}}})
 	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after cursor position change: expected dirty=true, got false")
@@ -209,15 +209,15 @@ func TestClientDrawDirtyDetection(t *testing.T) {
 	}
 
 	// Verify cursor visibility change reports dirty.
-	cli.HandleServerMsg(protocol.MsgPaneUpdate{
-		PaneID:        1,
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneUpdate{PaneUpdate: &protocol.MsgPaneUpdate{
+		PaneId:        1,
 		Cols:          25,
 		Rows:          10,
-		Lines:         paneUpdate(1, 25, 10, "PANE-ONE-CHANGED").Lines,
+		Lines:         paneUpdate(1, 25, 10, "PANE-ONE-CHANGED").GetPaneUpdate().Lines,
 		CursorX:       5,
 		CursorY:       2,
 		CursorVisible: false,
-	})
+	}}})
 	dirty = cli.Draw(scr2)
 	if !dirty {
 		t.Fatal("Draw after cursor visibility change: expected dirty=true, got false")

@@ -86,7 +86,7 @@ func (s *Strip) WidthPresets() []int {
 // the two halves cannot end up disagreeing about what a mode means.
 func ApplyMode(s *Strip, mode protocol.LayoutMode) {
 	switch mode {
-	case protocol.LayoutCards:
+	case protocol.LayoutMode_LAYOUT_CARDS:
 		s.SetStrategy(CardStrategy{})
 	default:
 		s.SetStrategy(ScrollStrategy{})
@@ -363,7 +363,7 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 			// Always Full. This strategy clips panes at the viewport
 			// edge, and a clipped pane is still showing its own
 			// content -- the no-shrink premise depends on it.
-			Kind: protocol.PlacementFull,
+			Kind: protocol.PlacementKind_PLACEMENT_FULL,
 		})
 	}
 
@@ -371,14 +371,14 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 }
 
 // ToProtocol converts Placements to protocol.PlacementData for wire transport.
-func ToProtocol(placements []Placement) []protocol.PlacementData {
-	out := make([]protocol.PlacementData, len(placements))
+func ToProtocol(placements []Placement) []*protocol.PlacementData {
+	out := make([]*protocol.PlacementData, len(placements))
 	for i, p := range placements {
-		out[i] = protocol.PlacementData{
-			PaneID: p.PaneID,
-			Src:    p.Src,
-			Dst:    p.Dst,
-			Z:      p.Z,
+		out[i] = &protocol.PlacementData{
+			PaneId: int32(p.PaneID),
+			Src:    protocol.EncodeRectangle(p.Src),
+			Dst:    protocol.EncodeRectangle(p.Dst),
+			Z:      int32(p.Z),
 			Kind:   p.Kind,
 		}
 	}
@@ -386,13 +386,13 @@ func ToProtocol(placements []Placement) []protocol.PlacementData {
 }
 
 // ToColumnData converts columns to protocol.ColumnData for wire transport.
-func ToColumnData(columns []Column) []protocol.ColumnData {
-	out := make([]protocol.ColumnData, len(columns))
+func ToColumnData(columns []Column) []*protocol.ColumnData {
+	out := make([]*protocol.ColumnData, len(columns))
 	for i, c := range columns {
-		out[i] = protocol.ColumnData{
-			PaneID: c.PaneID,
-			Width:  c.Width,
-			Height: c.Height,
+		out[i] = &protocol.ColumnData{
+			PaneId: int32(c.PaneID),
+			Width:  int32(c.Width),
+			Height: int32(c.Height),
 		}
 	}
 	return out
@@ -406,13 +406,13 @@ func (s *Strip) Columns() []Column {
 }
 
 // SyncColumns updates the strip's columns and focused pane from protocol ColumnData.
-func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
+func (s *Strip) SyncColumns(cols []*protocol.ColumnData, focusPaneID int) {
 	s.columns = make([]Column, len(cols))
 	for i, c := range cols {
 		s.columns[i] = Column{
-			PaneID: c.PaneID,
-			Width:  c.Width,
-			Height: c.Height,
+			PaneID: int(c.PaneId),
+			Width:  int(c.Width),
+			Height: int(c.Height),
 		}
 	}
 	s.FocusPaneID(focusPaneID)

@@ -31,14 +31,14 @@ const motionFrames = 8
 // mid-flight is handled by restarting from the current interpolated
 // rects rather than by carrying velocity.
 type motion struct {
-	from  []protocol.PlacementData
-	to    []protocol.PlacementData
+	from  []*protocol.PlacementData
+	to    []*protocol.PlacementData
 	step  int
 	total int
 }
 
 // at returns the placement set for the animation's current step.
-func (m *motion) at() []protocol.PlacementData {
+func (m *motion) at() []*protocol.PlacementData {
 	if m.total <= 0 {
 		return m.to
 	}
@@ -76,20 +76,19 @@ func lerp(a, b int, t float64) int {
 // Kind in particular is deliberately not interpolated: a card that is
 // becoming a sliver should start drawing chrome immediately, because
 // there is no halfway between content and a spine.
-func interpolate(from, to []protocol.PlacementData, t float64) []protocol.PlacementData {
-	byID := make(map[int]protocol.PlacementData, len(from))
+func interpolate(from, to []*protocol.PlacementData, t float64) []*protocol.PlacementData {
+	byID := make(map[int]*protocol.PlacementData, len(from))
 	for _, p := range from {
-		byID[p.PaneID] = p
+		byID[int(p.PaneId)] = p
 	}
 	seen := make(map[int]bool, len(to))
 
-	out := make([]protocol.PlacementData, 0, len(to)+len(from))
+	out := make([]*protocol.PlacementData, 0, len(to)+len(from))
 	for _, dst := range to {
-		seen[dst.PaneID] = true
-		src, ok := byID[dst.PaneID]
+		seen[int(dst.PaneId)] = true
+		src, ok := byID[int(dst.PaneId)]
 		if !ok {
-			src = dst
-			src.Dst = collapsed(dst.Dst)
+			src = &protocol.PlacementData{PaneId: dst.PaneId, Src: dst.Src, Dst: protocol.EncodeRectangle(collapsed(dst.Dst.Decode())), Z: dst.Z, Kind: dst.Kind}
 		}
 		out = append(out, blend(src, dst, dst, t))
 	}
@@ -97,13 +96,12 @@ func interpolate(from, to []protocol.PlacementData, t float64) []protocol.Placem
 	// Panes only in the outgoing layout collapse toward their own
 	// left edge and stop being drawn once they reach zero width.
 	for _, src := range from {
-		if seen[src.PaneID] {
+		if seen[int(src.PaneId)] {
 			continue
 		}
-		gone := src
-		gone.Dst = collapsed(src.Dst)
+		gone := &protocol.PlacementData{PaneId: src.PaneId, Src: src.Src, Dst: protocol.EncodeRectangle(collapsed(src.Dst.Decode())), Z: src.Z, Kind: src.Kind}
 		p := blend(src, gone, src, t)
-		if p.Dst.Dx() <= 0 {
+		if p.Dst.Decode().Dx() <= 0 {
 			continue
 		}
 		out = append(out, p)
@@ -130,23 +128,23 @@ func collapsed(r image.Rectangle) image.Rectangle {
 
 // blend interpolates a's rect toward b's, taking everything else from
 // meta.
-func blend(a, b, meta protocol.PlacementData, t float64) protocol.PlacementData {
+func blend(a, b, meta *protocol.PlacementData, t float64) *protocol.PlacementData {
 	dst := image.Rect(
-		lerp(a.Dst.Min.X, b.Dst.Min.X, t),
-		lerp(a.Dst.Min.Y, b.Dst.Min.Y, t),
-		lerp(a.Dst.Max.X, b.Dst.Max.X, t),
-		lerp(a.Dst.Max.Y, b.Dst.Max.Y, t),
+		lerp(a.Dst.Decode().Min.X, b.Dst.Decode().Min.X, t),
+		lerp(a.Dst.Decode().Min.Y, b.Dst.Decode().Min.Y, t),
+		lerp(a.Dst.Decode().Max.X, b.Dst.Decode().Max.X, t),
+		lerp(a.Dst.Decode().Max.Y, b.Dst.Decode().Max.Y, t),
 	)
 	// Src has to track Dst's size or the compositor crops wrongly --
 	// every strategy emits Src and Dst the same size, and the layout
 	// property tests assert it.
 	src := image.Rect(
-		meta.Src.Min.X, meta.Src.Min.Y,
-		meta.Src.Min.X+dst.Dx(), meta.Src.Min.Y+dst.Dy(),
+		meta.Src.Decode().Min.X, meta.Src.Decode().Min.Y,
+		meta.Src.Decode().Min.X+dst.Dx(), meta.Src.Decode().Min.Y+dst.Dy(),
 	)
 	kind := meta.Kind
-	if t < 1.0 && (a.Kind == protocol.PlacementFull || b.Kind == protocol.PlacementFull) && dst.Dx() >= layout.MinSliverWidth {
-		kind = protocol.PlacementFull
+	if t < 1.0 && (a.Kind == protocol.PlacementKind_PLACEMENT_FULL || b.Kind == protocol.PlacementKind_PLACEMENT_FULL) && dst.Dx() >= layout.MinSliverWidth {
+		kind = protocol.PlacementKind_PLACEMENT_FULL
 	}
 	z := meta.Z
 	if t < 1.0 {
@@ -156,10 +154,10 @@ func blend(a, b, meta protocol.PlacementData, t float64) protocol.PlacementData 
 			z = b.Z
 		}
 	}
-	return protocol.PlacementData{
-		PaneID: meta.PaneID,
-		Src:    src,
-		Dst:    dst,
+	return &protocol.PlacementData{
+		PaneId: meta.PaneId,
+		Src:    protocol.EncodeRectangle(src),
+		Dst:    protocol.EncodeRectangle(dst),
 		Z:      z,
 		Kind:   kind,
 	}
@@ -168,12 +166,12 @@ func blend(a, b, meta protocol.PlacementData, t float64) protocol.PlacementData 
 // placementsEqual reports whether two placement sets would render
 // identically, so a snapshot that changed only a status glyph does
 // not start an animation. Those arrive whenever a pane writes.
-func placementsEqual(a, b []protocol.PlacementData) bool {
+func placementsEqual(a, b []*protocol.PlacementData) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if a[i].PaneId != b[i].PaneId || a[i].Src.Decode() != b[i].Src.Decode() || a[i].Dst.Decode() != b[i].Dst.Decode() || a[i].Z != b[i].Z || a[i].Kind != b[i].Kind {
 			return false
 		}
 	}

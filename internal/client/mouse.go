@@ -26,13 +26,13 @@ const wheelStep = 3
 // spans. c.mu must be held.
 func (c *Client) hitTestLocked(pt image.Point) *protocol.PlacementData {
 	ps := c.currentPlacementsLocked()
-	sorted := make([]protocol.PlacementData, len(ps))
+	sorted := make([]*protocol.PlacementData, len(ps))
 	copy(sorted, ps)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Z < sorted[j].Z })
 	for i := len(sorted) - 1; i >= 0; i-- {
 		p := sorted[i]
-		if pt.X >= p.Dst.Min.X && pt.X < p.Dst.Max.X && pt.Y >= 0 && pt.Y < p.Dst.Max.Y {
-			return &p
+		if pt.X >= p.Dst.Decode().Min.X && pt.X < p.Dst.Decode().Max.X && pt.Y >= 0 && pt.Y < p.Dst.Decode().Max.Y {
+			return p
 		}
 	}
 	return nil
@@ -48,23 +48,23 @@ func (c *Client) hitTestLocked(pt image.Point) *protocol.PlacementData {
 // c.mu must be held.
 func (c *Client) visibleRectLocked(p *protocol.PlacementData, pt image.Point) image.Rectangle {
 	ps := c.currentPlacementsLocked()
-	sorted := make([]protocol.PlacementData, len(ps))
+	sorted := make([]*protocol.PlacementData, len(ps))
 	copy(sorted, ps)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Z < sorted[j].Z })
-	r := p.Dst
+	r := p.Dst.Decode()
 	above := false
 	for _, q := range sorted {
-		if q.PaneID == p.PaneID {
+		if int(q.PaneId) == int(p.PaneId) {
 			above = true
 			continue
 		}
-		if !above || !q.Dst.Overlaps(r) {
+		if !above || !q.Dst.Decode().Overlaps(r) {
 			continue
 		}
-		if pt.X < q.Dst.Min.X {
-			r.Max.X = min(r.Max.X, q.Dst.Min.X)
+		if pt.X < q.Dst.Decode().Min.X {
+			r.Max.X = min(r.Max.X, q.Dst.Decode().Min.X)
 		} else {
-			r.Min.X = max(r.Min.X, q.Dst.Max.X)
+			r.Min.X = max(r.Min.X, q.Dst.Decode().Max.X)
 		}
 	}
 	return r
@@ -74,7 +74,7 @@ func (c *Client) visibleRectLocked(p *protocol.PlacementData, pt image.Point) im
 // nil over a header, a sliver, or empty space. c.mu must be held.
 func (c *Client) contentHitLocked(pt image.Point) *protocol.PlacementData {
 	p := c.hitTestLocked(pt)
-	if p == nil || p.Kind != protocol.PlacementFull || !pt.In(p.Dst) {
+	if p == nil || p.Kind != protocol.PlacementKind_PLACEMENT_FULL || !pt.In(p.Dst.Decode()) {
 		return nil
 	}
 	return p
@@ -110,9 +110,9 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 	if g := c.grab; g != nil {
 		switch ev.(type) {
 		case uv.MouseMotionEvent:
-			out = append(out, protocol.EncodeMouse(g.paneID, ev, g.local(pt)))
+			out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Mouse{Mouse: protocol.EncodeMouse(g.paneID, ev, g.local(pt))}})
 		case uv.MouseReleaseEvent:
-			out = append(out, protocol.EncodeMouse(g.paneID, ev, g.local(pt)))
+			out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Mouse{Mouse: protocol.EncodeMouse(g.paneID, ev, g.local(pt))}})
 			c.grab = nil
 		}
 		c.mu.Unlock()
@@ -132,22 +132,22 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 			break
 		}
 		cp := c.contentHitLocked(pt)
-		tracking := cp != nil && c.mouseTracking[cp.PaneID]
+		tracking := cp != nil && c.mouseTracking[int(p.PaneId)]
 
 		// A press on the focused child's content is the child's, any
 		// button. A press that changes focus is never forwarded: the
 		// child would see a release with no press, or a click it was
 		// not the target of when the user aimed.
-		if tracking && p.PaneID == c.focusPaneID {
-			g := &mouseGrab{paneID: cp.PaneID, dst: cp.Dst, src: cp.Src.Min}
-			out = append(out, protocol.EncodeMouse(g.paneID, ev, g.local(pt)))
+		if tracking && int(p.PaneId) == c.focusPaneID {
+			g := &mouseGrab{paneID: int(p.PaneId), dst: cp.Dst.Decode(), src: cp.Src.Decode().Min}
+			out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Mouse{Mouse: protocol.EncodeMouse(g.paneID, ev, g.local(pt))}})
 			c.grab = g
 			break
 		}
 		if m.Button != uv.MouseLeft {
 			break
 		}
-		unfocused := p.PaneID != c.focusPaneID
+		unfocused := int(p.PaneId) != c.focusPaneID
 		// No wideboi selection over a child that wants the mouse; the
 		// terminal's own bypass modifier still selects natively there.
 		if cp != nil && !tracking {
@@ -158,7 +158,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 			// from a background pane without disturbing anything is
 			// worth keeping.
 			c.sel = &selection{
-				paneID: cp.PaneID, dst: cp.Dst, bounds: c.visibleRectLocked(cp, pt),
+				paneID: int(p.PaneId), dst: cp.Dst.Decode(), bounds: c.visibleRectLocked(cp, pt),
 				anchor: pt, cursor: pt, dragging: true, focusOnClick: unfocused,
 			}
 			break
@@ -166,7 +166,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		// Headers, slivers and tracking children cannot start a
 		// selection, so there is nothing to wait for.
 		if unfocused {
-			out = append(out, protocol.MsgFocusPane{PaneID: p.PaneID})
+			out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_FocusPane{FocusPane: &protocol.MsgFocusPane{PaneId: int32(int(p.PaneId))}}})
 		}
 
 	case uv.MouseMotionEvent:
@@ -185,7 +185,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 			// A click, not a drag. Copying one character on every
 			// click-to-focus would clobber the clipboard constantly.
 			if c.sel.focusOnClick {
-				out = append(out, protocol.MsgFocusPane{PaneID: c.sel.paneID})
+				out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_FocusPane{FocusPane: &protocol.MsgFocusPane{PaneId: int32(c.sel.paneID)}}})
 			}
 			c.sel = nil
 		case c.lastRenderedScreen != nil:
@@ -199,15 +199,15 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		p := c.contentHitLocked(pt)
 		switch {
 		case p == nil:
-		case c.mouseTracking[p.PaneID]:
-			g := mouseGrab{paneID: p.PaneID, dst: p.Dst, src: p.Src.Min}
-			out = append(out, protocol.EncodeMouse(p.PaneID, ev, g.local(pt)))
+		case c.mouseTracking[int(p.PaneId)]:
+			g := mouseGrab{paneID: int(p.PaneId), dst: p.Dst.Decode(), src: p.Src.Decode().Min}
+			out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Mouse{Mouse: protocol.EncodeMouse(int(p.PaneId), ev, g.local(pt))}})
 		default:
 			switch m.Button {
 			case uv.MouseWheelUp:
-				out = append(out, protocol.MsgScroll{PaneID: p.PaneID, Delta: wheelStep})
+				out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Scroll{Scroll: &protocol.MsgScroll{PaneId: int32(int(p.PaneId)), Delta: int32(wheelStep)}}})
 			case uv.MouseWheelDown:
-				out = append(out, protocol.MsgScroll{PaneID: p.PaneID, Delta: -wheelStep})
+				out = append(out, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Scroll{Scroll: &protocol.MsgScroll{PaneId: int32(int(p.PaneId)), Delta: int32(-wheelStep)}}})
 			}
 		}
 	}
@@ -343,7 +343,7 @@ func (c *Client) drawSelectionLocked(scr uv.Screen) {
 // c.mu must be held.
 func (c *Client) selectionStillPlacedLocked() bool {
 	for _, p := range c.placements {
-		if p.PaneID == c.sel.paneID && p.Dst == c.sel.dst {
+		if int(p.PaneId) == c.sel.paneID && p.Dst.Decode() == c.sel.dst {
 			return true
 		}
 	}

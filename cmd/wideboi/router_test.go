@@ -199,7 +199,7 @@ func TestCtrlRepeatThenPlainExits(t *testing.T) {
 	}
 	for i := 0; i < 2; i++ {
 		got := r.route(uv.KeyPressEvent{Code: 'h', Mod: uv.ModCtrl})
-		if got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft {
+		if got.Kind != routeVerb || got.Verb != protocol.VerbType_VERB_FOCUS_LEFT {
 			t.Fatalf("repeat %d: %+v", i, got)
 		}
 		if !r.control {
@@ -207,7 +207,7 @@ func TestCtrlRepeatThenPlainExits(t *testing.T) {
 		}
 	}
 	got := r.route(key('h'))
-	if got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft {
+	if got.Kind != routeVerb || got.Verb != protocol.VerbType_VERB_FOCUS_LEFT {
 		t.Fatalf("final: %+v", got)
 	}
 	if r.control {
@@ -363,12 +363,12 @@ func TestCustomAliasAndItsCtrlFormFire(t *testing.T) {
 	custom := map[string][]string{keys.ActionNameFocusLeft: {"h", "g"}}
 
 	r := customRouter(t, custom)
-	if got := r.route(key('g')); got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft || r.control {
+	if got := r.route(key('g')); got.Kind != routeVerb || got.Verb != protocol.VerbType_VERB_FOCUS_LEFT || r.control {
 		t.Errorf("g: got %+v control=%v, want FocusLeft and out of control mode", got, r.control)
 	}
 
 	r = customRouter(t, custom)
-	if got := r.route(ctrl('g')); got.Kind != routeVerb || got.Verb != protocol.VerbFocusLeft || !r.control {
+	if got := r.route(ctrl('g')); got.Kind != routeVerb || got.Verb != protocol.VerbType_VERB_FOCUS_LEFT || !r.control {
 		t.Errorf("ctrl+g: got %+v control=%v, want FocusLeft and still in control mode", got, r.control)
 	}
 }

@@ -220,9 +220,9 @@ func fatal(err error) {
 func parseLayout(name string) (protocol.LayoutMode, error) {
 	switch name {
 	case "", "cards":
-		return protocol.LayoutCards, nil
+		return protocol.LayoutMode_LAYOUT_CARDS, nil
 	case "scroll":
-		return protocol.LayoutScroll, nil
+		return protocol.LayoutMode_LAYOUT_SCROLL, nil
 	default:
 		return 0, fmt.Errorf("WIDEBOI_LAYOUT=%q: want \"scroll\" or \"cards\"", name)
 	}
@@ -323,7 +323,7 @@ func runKillSession(cfg config.Config) error {
 	defer cancel()
 	cc := transport.NewClientSocketConn(conn, 256)
 	cc.RunPumps(ctx)
-	if !hangUp(ctx, cc, protocol.MsgShutdown{}, shutdownCeiling) {
+	if !hangUp(ctx, cc, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Shutdown{Shutdown: &protocol.MsgShutdown{}}}, shutdownCeiling) {
 		return fmt.Errorf("wideboi server at %s did not shut down within %s", cfg.Socket, shutdownCeiling)
 	}
 	return nil
@@ -402,7 +402,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 		// no detach before it, and ends the session itself.
 		var late bool
 		if owner && !hungUp.Load() {
-			late = !hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
+			late = !hangUp(ctx, cConn, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Shutdown{Shutdown: &protocol.MsgShutdown{}}}, shutdownCeiling)
 		}
 		screenLock.Lock()
 		defer screenLock.Unlock()
@@ -492,7 +492,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 					// Waiting for the hang-up makes sure the detach
 					// was read before our socket closes.
 					slog.Info("client detaching")
-					if !hangUp(ctx, cConn, protocol.MsgDetach{}, detachCeiling) {
+					if !hangUp(ctx, cConn, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Detach{Detach: &protocol.MsgDetach{}}}, detachCeiling) {
 						slog.Warn("server did not acknowledge the detach", "ceiling", detachCeiling)
 					}
 					hungUp.Store(true)
@@ -511,7 +511,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, owner 
 					return nil
 				case routeQuit:
 					slog.Info("client ending the session")
-					acked := hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
+					acked := hangUp(ctx, cConn, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Shutdown{Shutdown: &protocol.MsgShutdown{}}}, shutdownCeiling)
 					// Set either way. Unacknowledged, the teardown
 					// would otherwise send a second shutdown and wait
 					// out the whole ceiling again; our EOF, with no

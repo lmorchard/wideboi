@@ -51,7 +51,7 @@ func TestShutdownClosesServerAndHangsUpEveryClient(t *testing.T) {
 	other := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
 	s := newBareServer(asker, other)
 
-	asker.ClientSend <- protocol.MsgShutdown{}
+	asker.ClientSend <- &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Shutdown{Shutdown: &protocol.MsgShutdown{}}}
 	runLoopUntilReturn(t, s, asker)
 
 	select {
@@ -72,7 +72,7 @@ func TestDetachHangsUpOnlyThatClient(t *testing.T) {
 	stayer := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
 	s := newBareServer(leaver, stayer)
 
-	leaver.ClientSend <- protocol.MsgDetach{}
+	leaver.ClientSend <- &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Detach{Detach: &protocol.MsgDetach{}}}
 	runLoopUntilReturn(t, s, leaver)
 
 	if !leaver.closed.Load() {
@@ -116,7 +116,7 @@ func TestOwnerDetachGivesUpOwnership(t *testing.T) {
 	s := newBareServer(owner)
 	s.SetOwner(owner)
 
-	owner.ClientSend <- protocol.MsgDetach{}
+	owner.ClientSend <- &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Detach{Detach: &protocol.MsgDetach{}}}
 	close(owner.ClientSend)
 	runLoopUntilReturn(t, s, owner) // consumes the detach
 	// In production nothing reads the connection after a detach -- the
@@ -165,8 +165,8 @@ func TestClosedServerSpawnsNoPanes(t *testing.T) {
 	s := NewServer(nil, "/bin/sh", "")
 	_ = s.Close()
 
-	s.handleClientMsg(context.Background(), protocol.MsgAttach{Cols: 80, Rows: 24})
-	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbNewColumn})
+	s.handleClientMsg(context.Background(), &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(80), Rows: int32(24)}}})
+	s.handleClientMsg(context.Background(), &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_NEW_COLUMN}}})
 
 	s.mu.Lock()
 	leaked := make([]*Pane, 0, len(s.panes))
@@ -207,7 +207,7 @@ func TestCloseStopsListeningBeforeReaping(t *testing.T) {
 
 	// Real panes, so the reap takes its real time: /bin/sh ignores
 	// SIGTERM and burns the whole grace.
-	s.handleClientMsg(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	s.handleClientMsg(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(80), Rows: int32(24)}}})
 
 	closed := make(chan struct{})
 	go func() {

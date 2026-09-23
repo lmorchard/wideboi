@@ -148,7 +148,7 @@ func TestUndeliveredStatusBroadcastIsRetried(t *testing.T) {
 	// send fails for every attempt.
 	tp := s.transports[0].(*transport.InProcChannel)
 	for len(tp.ServerSend) < cap(tp.ServerSend) {
-		tp.ServerSend <- struct{}{}
+		tp.ServerSend <- &protocol.ServerEnvelope{}
 	}
 
 	grids[1].set(term.StatusFailed)
@@ -180,16 +180,16 @@ func TestToggleCardsFlipsLayoutMode(t *testing.T) {
 	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
 	ctx := context.Background()
 
-	if s.layout != protocol.LayoutScroll {
-		t.Fatalf("initial layout = %v, want %v", s.layout, protocol.LayoutScroll)
+	if s.layout != protocol.LayoutMode_LAYOUT_SCROLL {
+		t.Fatalf("initial layout = %v, want %v", s.layout, protocol.LayoutMode_LAYOUT_SCROLL)
 	}
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
-	if s.layout != protocol.LayoutCards {
-		t.Errorf("after one toggle layout = %v, want %v", s.layout, protocol.LayoutCards)
+	s.handleClientMsg(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_TOGGLE_CARDS}}})
+	if s.layout != protocol.LayoutMode_LAYOUT_CARDS {
+		t.Errorf("after one toggle layout = %v, want %v", s.layout, protocol.LayoutMode_LAYOUT_CARDS)
 	}
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
-	if s.layout != protocol.LayoutScroll {
-		t.Errorf("after two toggles layout = %v, want %v", s.layout, protocol.LayoutScroll)
+	s.handleClientMsg(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_TOGGLE_CARDS}}})
+	if s.layout != protocol.LayoutMode_LAYOUT_SCROLL {
+		t.Errorf("after two toggles layout = %v, want %v", s.layout, protocol.LayoutMode_LAYOUT_SCROLL)
 	}
 }
 
@@ -209,7 +209,7 @@ func TestToggleCardsLeavesColumnWidthsAlone(t *testing.T) {
 		before[id] = w
 	}
 
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
+	s.handleClientMsg(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_TOGGLE_CARDS}}})
 
 	for id, want := range before {
 		got, ok := s.strip.ColumnWidth(id)
@@ -253,10 +253,11 @@ func TestPaneTitlesReachTheSnapshot(t *testing.T) {
 	s.broadcastLayout(context.Background())
 
 	tp := s.transports[0].(*transport.InProcChannel)
-	var snap protocol.MsgLayoutSnapshot
+	var snap *protocol.MsgLayoutSnapshot
 	for len(tp.ServerSend) > 0 {
-		if m, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot); ok {
-			snap = m
+		m := <-tp.ServerSend
+		if m.GetLayoutSnapshot() != nil {
+			snap = m.GetLayoutSnapshot()
 		}
 	}
 	if got := snap.PaneTitles[1]; got != "◑ Pong reply" {
@@ -276,7 +277,7 @@ func TestUndeliveredToOneOfTwoClientsIsRetried(t *testing.T) {
 	wedged := transport.NewInProcChannel(4)
 	s.transports = append(s.transports, wedged)
 	for len(wedged.ServerSend) < cap(wedged.ServerSend) {
-		wedged.ServerSend <- struct{}{}
+		wedged.ServerSend <- &protocol.ServerEnvelope{}
 	}
 
 	grids[1].set(term.StatusFailed)

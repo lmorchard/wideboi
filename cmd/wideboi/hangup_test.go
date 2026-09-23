@@ -21,10 +21,12 @@ func TestHangUpCeilingCoversTheSend(t *testing.T) {
 	// No pumps: nothing drains ClientSend, so once it is full a send
 	// can only block.
 	cc := transport.NewClientSocketConn(ours, 1)
-	cc.SendClient(context.Background(), protocol.MsgResize{Cols: 1, Rows: 1})
+	cc.SendClient(context.Background(), &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Resize{Resize: &protocol.MsgResize{Cols: 1, Rows: 1}}})
 
 	done := make(chan bool, 1)
-	go func() { done <- hangUp(context.Background(), cc, protocol.MsgShutdown{}, 100*time.Millisecond) }()
+	go func() {
+		done <- hangUp(context.Background(), cc, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Shutdown{Shutdown: &protocol.MsgShutdown{}}}, 100*time.Millisecond)
+	}()
 	select {
 	case ok := <-done:
 		if ok {

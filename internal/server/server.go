@@ -36,8 +36,8 @@ type Server struct {
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
 	// tell when either has changed.
-	lastStatuses map[int]string
-	lastTitles   map[int]string
+	lastStatuses map[int32]string
+	lastTitles   map[int32]string
 
 	// paneGens records, per client, the grid generation each pane was
 	// at in the last update that client accepted. The frame tick sends a
@@ -174,7 +174,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				}
 				return
 			}
-			if _, ok := msg.(protocol.MsgShutdown); ok {
+			if msg.GetShutdown() != nil {
 				// Close hangs up on every transport, this one
 				// included, and only after reaping. Called here,
 				// not under s.mu, for the same reason dropClient
@@ -182,7 +182,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				_ = s.Close()
 				return
 			}
-			if _, ok := msg.(protocol.MsgDetach); ok {
+			if msg.GetDetach() != nil {
 				// An owner detaching gives up ownership, not the
 				// session. Returning here means the EOF that follows
 				// is never read as an owner leaving: this goroutine is
@@ -266,14 +266,18 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessage) {
+func (s *Server) handleClientMsg(ctx context.Context, msg *protocol.ClientEnvelope) {
 	s.mu.Lock()
 	needBroadcast := false
 
-	switch m := msg.(type) {
-	case protocol.MsgAttach:
-		if m.Cols > 0 && m.Rows > 0 {
-			s.cols, s.rows = m.Cols, m.Rows
+	if msg == nil || msg.Payload == nil {
+		return
+	}
+	switch payload := msg.Payload.(type) {
+	case *protocol.ClientEnvelope_Attach:
+		m := payload.Attach
+		if int(m.Cols) > 0 && int(m.Rows) > 0 {
+			s.cols, s.rows = int(m.Cols), int(m.Rows)
 		}
 		if len(s.panes) == 0 {
 			_, _ = s.spawnPaneLocked()
@@ -283,55 +287,57 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		s.resizePanesLocked()
 		needBroadcast = true
 
-	case protocol.MsgResize:
-		if m.Cols > 0 && m.Rows > 0 {
-			s.cols, s.rows = m.Cols, m.Rows
+	case *protocol.ClientEnvelope_Resize:
+		m := payload.Resize
+		if int(m.Cols) > 0 && int(m.Rows) > 0 {
+			s.cols, s.rows = int(m.Cols), int(m.Rows)
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
 
-	case protocol.MsgVerb:
+	case *protocol.ClientEnvelope_Verb:
+		m := payload.Verb
 		switch m.Verb {
-		case protocol.VerbFocusLeft:
+		case protocol.VerbType_VERB_FOCUS_LEFT:
 			s.strip.FocusLeft()
-		case protocol.VerbFocusRight:
+		case protocol.VerbType_VERB_FOCUS_RIGHT:
 			s.strip.FocusRight()
-		case protocol.VerbNewColumn:
+		case protocol.VerbType_VERB_NEW_COLUMN:
 			_, _ = s.spawnPaneLocked()
 			s.resizePanesLocked()
-		case protocol.VerbCycleWidth:
+		case protocol.VerbType_VERB_CYCLE_WIDTH:
 			s.strip.CycleWidth()
 			s.resizePanesLocked()
-		case protocol.VerbGrowWidth:
+		case protocol.VerbType_VERB_GROW_WIDTH:
 			s.strip.GrowWidth(10)
 			s.resizePanesLocked()
-		case protocol.VerbShrinkWidth:
+		case protocol.VerbType_VERB_SHRINK_WIDTH:
 			s.strip.ShrinkWidth(10)
 			s.resizePanesLocked()
-		case protocol.VerbMoveLeft:
+		case protocol.VerbType_VERB_MOVE_LEFT:
 			s.strip.MoveLeft()
-		case protocol.VerbMoveRight:
+		case protocol.VerbType_VERB_MOVE_RIGHT:
 			// Neither move calls resizePanesLocked, for the same
 			// reason VerbToggleCards does not: order is presentation,
 			// and a column's width goes wherever the column goes.
 			s.strip.MoveRight()
-		case protocol.VerbFocusLast:
+		case protocol.VerbType_VERB_FOCUS_LAST:
 			s.strip.FocusLast()
-		case protocol.VerbKillPane:
+		case protocol.VerbType_VERB_KILL_PANE:
 			focusedID := s.strip.FocusedPaneID()
 			if focusedID > 0 {
 				s.removePaneLocked(focusedID)
 				s.resizePanesLocked()
 			}
-		case protocol.VerbSmartJump:
+		case protocol.VerbType_VERB_SMART_JUMP:
 			if id := s.smartJumpTargetLocked(); id > 0 {
 				s.strip.FocusPaneID(id)
 			}
-		case protocol.VerbToggleCards:
-			if s.layout == protocol.LayoutCards {
-				s.layout = protocol.LayoutScroll
+		case protocol.VerbType_VERB_TOGGLE_CARDS:
+			if s.layout == protocol.LayoutMode_LAYOUT_CARDS {
+				s.layout = protocol.LayoutMode_LAYOUT_SCROLL
 			} else {
-				s.layout = protocol.LayoutCards
+				s.layout = protocol.LayoutMode_LAYOUT_CARDS
 			}
 			layout.ApplyMode(s.strip, s.layout)
 			// Deliberately no resizePanesLocked: a pane's logical
@@ -341,16 +347,18 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		}
 		needBroadcast = true
 
-	case protocol.MsgFocusPane:
+	case *protocol.ClientEnvelope_FocusPane:
+		m := payload.FocusPane
 		// Guarded: the pane may have closed between the client's draw
 		// and the click.
-		if _, ok := s.panes[m.PaneID]; ok {
-			s.strip.FocusPaneID(m.PaneID)
+		if _, ok := s.panes[int(m.PaneId)]; ok {
+			s.strip.FocusPaneID(int(m.PaneId))
 			needBroadcast = true
 		}
 
-	case protocol.MsgInput:
-		if p, ok := s.panes[m.PaneID]; ok {
+	case *protocol.ClientEnvelope_Input:
+		m := payload.Input
+		if p, ok := s.panes[int(m.PaneId)]; ok {
 			if len(m.Data) > 0 {
 				_, _ = p.Write(m.Data)
 			} else if !m.Key.IsZero() {
@@ -358,14 +366,16 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			}
 		}
 
-	case protocol.MsgMouse:
-		if p, ok := s.panes[m.PaneID]; ok {
+	case *protocol.ClientEnvelope_Mouse:
+		m := payload.Mouse
+		if p, ok := s.panes[int(m.PaneId)]; ok {
 			p.SendMouse(m.Decode())
 		}
 
-	case protocol.MsgScroll:
-		if p, ok := s.panes[m.PaneID]; ok {
-			p.SetScrollOffset(p.ScrollOffset() + m.Delta)
+	case *protocol.ClientEnvelope_Scroll:
+		m := payload.Scroll
+		if p, ok := s.panes[int(m.PaneId)]; ok {
+			p.SetScrollOffset(p.ScrollOffset() + int(m.Delta))
 		}
 	}
 
@@ -601,26 +611,26 @@ func (s *Server) smartJumpTargetLocked() int {
 
 // statusGlyphsLocked renders the current per-pane status glyphs.
 // s.mu must be held.
-func (s *Server) statusGlyphsLocked() map[int]string {
-	out := make(map[int]string, len(s.panes))
+func (s *Server) statusGlyphsLocked() map[int32]string {
+	out := make(map[int32]string, len(s.panes))
 	for id, p := range s.panes {
-		out[id] = p.Status().Glyph()
+		out[int32(id)] = p.Status().Glyph()
 	}
 	return out
 }
 
 // paneTitlesLocked collects each pane's terminal title.
 // s.mu must be held.
-func (s *Server) paneTitlesLocked() map[int]string {
-	out := make(map[int]string, len(s.panes))
+func (s *Server) paneTitlesLocked() map[int32]string {
+	out := make(map[int32]string, len(s.panes))
 	for id, p := range s.panes {
-		out[id] = p.Title()
+		out[int32(id)] = p.Title()
 	}
 	return out
 }
 
 // sameStringMap reports whether two pane-keyed string maps agree.
-func sameStringMap(a, b map[int]string) bool {
+func sameStringMap(a, b map[int32]string) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -670,14 +680,14 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	placements := s.strip.ComputePlacements(s.cols, s.rows)
 	statuses := s.statusGlyphsLocked()
 	titles := s.paneTitlesLocked()
-	snapshot := protocol.MsgLayoutSnapshot{
+	snapshot := &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:      layout.ToColumnData(s.strip.Columns()),
 		Placements:   layout.ToProtocol(placements),
-		FocusPaneID:  s.strip.FocusedPaneID(),
+		FocusPaneId:  int32(s.strip.FocusedPaneID()),
 		PaneStatuses: statuses,
 		PaneTitles:   titles,
 		Layout:       s.layout,
-	}
+	}}}
 	tps := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()
 
@@ -721,7 +731,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	defer s.paneSendMu.Unlock()
 
 	type outgoing struct {
-		update protocol.MsgPaneUpdate
+		update *protocol.ServerEnvelope
 		gen    uint64
 		to     []transport.Transport
 	}
@@ -755,7 +765,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	var results []result
 	for _, o := range out {
 		for _, tp := range o.to {
-			results = append(results, result{tp, o.update.PaneID, o.gen, tp.SendServer(ctx, o.update)})
+			results = append(results, result{tp, int(o.update.GetPaneUpdate().PaneId), o.gen, tp.SendServer(ctx, o.update)})
 		}
 	}
 

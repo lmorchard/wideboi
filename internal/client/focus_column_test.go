@@ -18,13 +18,13 @@ func outOfOrderClient(t *testing.T, cols int, ids ...int) (*Client, *transport.I
 	t.Helper()
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, cols, 24, "C-b")
-	columns := make([]protocol.ColumnData, len(ids))
+	columns := make([]*protocol.ColumnData, len(ids))
 	for i, id := range ids {
-		columns[i] = protocol.ColumnData{PaneID: id, Width: 40, Height: 22}
+		columns[i] = &protocol.ColumnData{PaneId: int32(id), Width: 40, Height: 22}
 	}
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: columns, FocusPaneID: ids[0], Layout: protocol.LayoutScroll,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: columns, FocusPaneId: int32(ids[0]), Layout: protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 	return cli, ch
 }
 
@@ -57,9 +57,9 @@ func TestHeaderShowsColumnPosition(t *testing.T) {
 	scr := newFakeHostScreen(100, 24)
 	cli.Draw(scr)
 
-	for id, want := range map[int]string{5: " 1 [5]", 2: " 2 [2]"} {
-		p := placementFor(cli, id)
-		got := regionText(scr, image.Rect(p.Dst.Min.X, 0, p.Dst.Max.X, 1))
+	for id, want := range map[int32]string{5: " 1 [5]", 2: " 2 [2]"} {
+		p := placementFor(cli, int(id))
+		got := regionText(scr, image.Rect(p.Dst.Decode().Min.X, 0, p.Dst.Decode().Max.X, 1))
 		if !strings.HasPrefix(got, want) {
 			t.Errorf("pane %d header = %q, want prefix %q", id, got, want)
 		}

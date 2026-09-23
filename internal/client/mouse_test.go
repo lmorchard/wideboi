@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"google.golang.org/protobuf/proto"
 	"image"
 	"strings"
 	"testing"
@@ -17,14 +18,14 @@ func newMouseClient(t *testing.T) (*Client, *transport.InProcChannel) {
 	t.Helper()
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 40, Height: 22},
-			{PaneID: 2, Width: 40, Height: 22},
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: []*protocol.ColumnData{
+			&protocol.ColumnData{PaneId: 1, Width: 40, Height: 22},
+			&protocol.ColumnData{PaneId: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 	return cli, ch
 }
 
@@ -54,8 +55,8 @@ func click(cli *Client, x, y int) {
 func focusRequests(msgs []transport.ClientMessage) []int {
 	var ids []int
 	for _, m := range msgs {
-		if f, ok := m.(protocol.MsgFocusPane); ok {
-			ids = append(ids, f.PaneID)
+		if f := m.GetFocusPane(); f != nil {
+			ids = append(ids, int(f.PaneId))
 		}
 	}
 	return ids
@@ -64,11 +65,11 @@ func focusRequests(msgs []transport.ClientMessage) []int {
 func TestClickFocusesPaneUnderPointer(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p2 := placementFor(cli, 2)
-	if p2.Dst.Empty() {
+	if p2.Dst.Decode().Empty() {
 		t.Fatal("pane 2 has no placement; fixture is wrong")
 	}
 
-	click(cli, p2.Dst.Min.X+2, p2.Dst.Min.Y+2)
+	click(cli, p2.Dst.Decode().Min.X+2, p2.Dst.Decode().Min.Y+2)
 
 	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
 		t.Errorf("focus requests = %v, want [2]", got)
@@ -81,7 +82,7 @@ func TestClickOnHeaderRowFocuses(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 
-	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
+	cli.HandleMouse(context.Background(), press(p2.Dst.Decode().Min.X+2, 0))
 
 	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
 		t.Errorf("focus requests = %v, want [2]", got)
@@ -92,7 +93,7 @@ func TestClickOnFocusedPaneSendsNothing(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p1 := placementFor(cli, 1)
 
-	click(cli, p1.Dst.Min.X+2, p1.Dst.Min.Y+2)
+	click(cli, p1.Dst.Decode().Min.X+2, p1.Dst.Decode().Min.Y+2)
 
 	if got := focusRequests(sent(ch)); len(got) != 0 {
 		t.Errorf("focus requests = %v, want none", got)
@@ -104,13 +105,13 @@ func TestClickOnFocusedPaneSendsNothing(t *testing.T) {
 func TestClickHitsTopmostCard(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 	p1, p2 := placementFor(cli, 1), placementFor(cli, 2)
-	overlap := p1.Dst.Intersect(p2.Dst)
+	overlap := p1.Dst.Decode().Intersect(p2.Dst.Decode())
 	if overlap.Empty() {
-		t.Fatalf("fixture has no overlap: p1=%v p2=%v", p1.Dst, p2.Dst)
+		t.Fatalf("fixture has no overlap: p1=%v p2=%v", p1.Dst.Decode(), p2.Dst)
 	}
 	if p2.Z <= p1.Z {
 		t.Fatalf("fixture wants pane 2 above pane 1: z1=%d z2=%d", p1.Z, p2.Z)
@@ -121,7 +122,7 @@ func TestClickHitsTopmostCard(t *testing.T) {
 		t.Errorf("click on overlap sent focus %v; pane 2 is on top and already focused", got)
 	}
 
-	click(cli, p1.Dst.Min.X, p1.Dst.Min.Y+1)
+	click(cli, p1.Dst.Decode().Min.X, p1.Dst.Decode().Min.Y+1)
 	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 1 {
 		t.Errorf("click on pane 1's visible edge sent %v, want [1]", got)
 	}
@@ -132,7 +133,7 @@ func TestMouseIgnoredWhileHelpVisible(t *testing.T) {
 	cli.SetHelpVisible(true)
 	p2 := placementFor(cli, 2)
 
-	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, p2.Dst.Min.Y+2))
+	cli.HandleMouse(context.Background(), press(p2.Dst.Decode().Min.X+2, p2.Dst.Decode().Min.Y+2))
 
 	if got := sent(ch); len(got) != 0 {
 		t.Errorf("sent %v while help was up, want nothing", got)
@@ -155,10 +156,10 @@ func wheel(x, y int, b uv.MouseButton) uv.MouseEvent {
 	return uv.MouseWheelEvent{X: x, Y: y, Button: b}
 }
 
-func scrolls(msgs []transport.ClientMessage) []protocol.MsgScroll {
-	var out []protocol.MsgScroll
+func scrolls(msgs []transport.ClientMessage) []*protocol.MsgScroll {
+	var out []*protocol.MsgScroll
 	for _, m := range msgs {
-		if s, ok := m.(protocol.MsgScroll); ok {
+		if s := m.GetScroll(); s != nil {
 			out = append(out, s)
 		}
 	}
@@ -172,11 +173,11 @@ func TestWheelScrollsPaneUnderPointer(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 
-	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, p2.Dst.Min.Y+2, uv.MouseWheelUp))
+	cli.HandleMouse(context.Background(), wheel(p2.Dst.Decode().Min.X+2, p2.Dst.Decode().Min.Y+2, uv.MouseWheelUp))
 
 	msgs := sent(ch)
 	got := scrolls(msgs)
-	if len(got) != 1 || got[0] != (protocol.MsgScroll{PaneID: 2, Delta: wheelStep}) {
+	if len(got) != 1 || got[0].PaneId != 2 || got[0].Delta != int32(wheelStep) {
 		t.Errorf("scrolls = %v, want [{2 %d}]", got, wheelStep)
 	}
 	if f := focusRequests(msgs); len(f) != 0 {
@@ -188,10 +189,10 @@ func TestWheelDownScrollsForward(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p1 := placementFor(cli, 1)
 
-	cli.HandleMouse(context.Background(), wheel(p1.Dst.Min.X+2, p1.Dst.Min.Y+2, uv.MouseWheelDown))
+	cli.HandleMouse(context.Background(), wheel(p1.Dst.Decode().Min.X+2, p1.Dst.Decode().Min.Y+2, uv.MouseWheelDown))
 
 	got := scrolls(sent(ch))
-	if len(got) != 1 || got[0] != (protocol.MsgScroll{PaneID: 1, Delta: -wheelStep}) {
+	if len(got) != 1 || got[0].PaneId != 1 || got[0].Delta != int32(-wheelStep) {
 		t.Errorf("scrolls = %v, want [{1 %d}]", got, -wheelStep)
 	}
 }
@@ -206,20 +207,20 @@ func TestWheelOverSliverOrHeaderDoesNothing(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 
-	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, 0, uv.MouseWheelUp))
+	cli.HandleMouse(context.Background(), wheel(p2.Dst.Decode().Min.X+2, 0, uv.MouseWheelUp))
 	if got := sent(ch); len(got) != 0 {
 		t.Errorf("wheel on header sent %v, want nothing", got)
 	}
 
 	cli.mu.Lock()
 	for i := range cli.placements {
-		if cli.placements[i].PaneID == 2 {
-			cli.placements[i].Kind = protocol.PlacementSliver
+		if int(cli.placements[i].PaneId) == 2 {
+			cli.placements[i].Kind = protocol.PlacementKind_PLACEMENT_SLIVER
 		}
 	}
 	cli.mu.Unlock()
 
-	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, p2.Dst.Min.Y+2, uv.MouseWheelUp))
+	cli.HandleMouse(context.Background(), wheel(p2.Dst.Decode().Min.X+2, p2.Dst.Decode().Min.Y+2, uv.MouseWheelUp))
 	if got := sent(ch); len(got) != 0 {
 		t.Errorf("wheel on sliver sent %v, want nothing", got)
 	}
@@ -228,22 +229,22 @@ func TestWheelOverSliverOrHeaderDoesNothing(t *testing.T) {
 // paneLines is a pane update carrying one string per row. A rune
 // followed by "\x00" is treated as double width: the glyph cell gets
 // Width 2 and the next cell is its placeholder, as the server sends it.
-func paneLines(paneID, cols, rows int, rowsText ...string) protocol.MsgPaneUpdate {
-	lines := make([]protocol.LineData, rows)
+func paneLines(paneID, cols, rows int, rowsText ...string) *protocol.ServerEnvelope {
+	lines := make([]*protocol.LineData, rows)
 	for y, text := range rowsText {
-		var line protocol.LineData
+		var line []*protocol.CellData
 		rs := []rune(text)
 		for i := 0; i < len(rs); i++ {
 			if i+1 < len(rs) && rs[i+1] == 0 {
-				line = append(line, protocol.CellData{Content: string(rs[i]), Width: 2})
+				line = append(line, &protocol.CellData{Content: string(rs[i]), Width: 2})
 				i++
 				continue
 			}
-			line = append(line, protocol.CellData{Content: string(rs[i]), Width: 1})
+			line = append(line, &protocol.CellData{Content: string(rs[i]), Width: 1})
 		}
-		lines[y] = line
+		lines[y] = &protocol.LineData{Cells: line}
 	}
-	return protocol.MsgPaneUpdate{PaneID: paneID, Cols: cols, Rows: rows, Lines: lines}
+	return &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneUpdate{PaneUpdate: &protocol.MsgPaneUpdate{PaneId: int32(paneID), Cols: int32(cols), Rows: int32(rows), Lines: lines}}}
 }
 
 func moveTo(x, y int) uv.MouseEvent {
@@ -281,12 +282,12 @@ func TestDragSelectsAndReturnsText(t *testing.T) {
 	cli, _, _ := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
 
-	got := drag(cli, image.Pt(d.Min.X+6, d.Min.Y), image.Pt(d.Min.X+2, d.Min.Y+1))
+	got := drag(cli, image.Pt(d.Decode().Min.X+6, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+2, d.Decode().Min.Y+1))
 	if got != "WORLD\nSEC" {
 		t.Errorf("forward drag copied %q, want %q", got, "WORLD\nSEC")
 	}
 
-	got = drag(cli, image.Pt(d.Min.X+2, d.Min.Y+1), image.Pt(d.Min.X+6, d.Min.Y))
+	got = drag(cli, image.Pt(d.Decode().Min.X+2, d.Decode().Min.Y+1), image.Pt(d.Decode().Min.X+6, d.Decode().Min.Y))
 	if got != "WORLD\nSEC" {
 		t.Errorf("backward drag copied %q, want %q", got, "WORLD\nSEC")
 	}
@@ -298,7 +299,7 @@ func TestDragAcrossRowsTrimsTrailingBlanks(t *testing.T) {
 	cli, _, _ := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
 
-	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+2, d.Min.Y+2))
+	got := drag(cli, image.Pt(d.Decode().Min.X, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+2, d.Decode().Min.Y+2))
 	want := "HELLO WORLD\nSECOND LINE\nTHI"
 	if got != want {
 		t.Errorf("copied %q, want %q", got, want)
@@ -309,7 +310,7 @@ func TestReleaseWithoutDragCopiesNothing(t *testing.T) {
 	cli, _, _ := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
 
-	if got := drag(cli, image.Pt(d.Min.X+3, d.Min.Y), image.Pt(d.Min.X+3, d.Min.Y)); got != "" {
+	if got := drag(cli, image.Pt(d.Decode().Min.X+3, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+3, d.Decode().Min.Y)); got != "" {
 		t.Errorf("a click copied %q, want nothing", got)
 	}
 	cli.mu.Lock()
@@ -326,7 +327,7 @@ func TestDragIsClampedToStartingPane(t *testing.T) {
 	cli, _, _ := newSelectClient(t)
 	d1, d2 := placementFor(cli, 1).Dst, placementFor(cli, 2).Dst
 
-	got := drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d2.Min.X+5, d1.Min.Y+1))
+	got := drag(cli, image.Pt(d1.Decode().Min.X, d1.Decode().Min.Y), image.Pt(d2.Decode().Min.X+5, d1.Decode().Min.Y+1))
 	// Pane 2's second row starts "MORE"; an unclamped drag ending five
 	// cells into it would copy exactly that.
 	if strings.Contains(got, "MORE") {
@@ -341,19 +342,19 @@ func TestDragIsClampedToStartingPane(t *testing.T) {
 func TestSelectionIsHighlighted(t *testing.T) {
 	cli, _, scr := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
-	drag(cli, image.Pt(d.Min.X+6, d.Min.Y), image.Pt(d.Min.X+10, d.Min.Y))
+	drag(cli, image.Pt(d.Decode().Min.X+6, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+10, d.Decode().Min.Y))
 	cli.Draw(scr)
 
 	reversed := func(x, y int) bool {
 		c := scr.CellAt(x, y)
 		return c != nil && c.Style.Attrs&uv.AttrReverse != 0
 	}
-	for x := d.Min.X + 6; x <= d.Min.X+10; x++ {
-		if !reversed(x, d.Min.Y) {
+	for x := d.Decode().Min.X + 6; x <= d.Decode().Min.X+10; x++ {
+		if !reversed(x, d.Decode().Min.Y) {
 			t.Errorf("cell %d in the selection is not highlighted", x)
 		}
 	}
-	if reversed(d.Min.X+5, d.Min.Y) || reversed(d.Min.X+11, d.Min.Y) {
+	if reversed(d.Decode().Min.X+5, d.Decode().Min.Y) || reversed(d.Decode().Min.X+11, d.Decode().Min.Y) {
 		t.Error("a cell outside the selection is highlighted")
 	}
 }
@@ -368,13 +369,13 @@ func TestSelectionHandlesWideGlyphs(t *testing.T) {
 	cli.Draw(scr)
 	d := placementFor(cli, 1).Dst
 
-	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+3, d.Min.Y))
+	got := drag(cli, image.Pt(d.Decode().Min.X, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+3, d.Decode().Min.Y))
 	if got != "A世B" {
 		t.Errorf("copied %q, want %q", got, "A世B")
 	}
 
 	cli.Draw(scr)
-	if c := scr.CellAt(d.Min.X+1, d.Min.Y); c == nil || c.Content != "世" {
+	if c := scr.CellAt(d.Decode().Min.X+1, d.Decode().Min.Y); c == nil || c.Content != "世" {
 		t.Errorf("highlighting blanked the wide glyph: cell = %+v", c)
 	}
 }
@@ -382,7 +383,7 @@ func TestSelectionHandlesWideGlyphs(t *testing.T) {
 func TestClearSelectionOnKey(t *testing.T) {
 	cli, _, _ := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
-	drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+4, d.Min.Y))
+	drag(cli, image.Pt(d.Decode().Min.X, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+4, d.Decode().Min.Y))
 
 	cli.ClearSelection()
 
@@ -398,17 +399,17 @@ func TestClearSelectionOnKey(t *testing.T) {
 func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 	cli, _, _ := newSelectClient(t)
 	d := placementFor(cli, 1).Dst
-	drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+4, d.Min.Y))
+	drag(cli, image.Pt(d.Decode().Min.X, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+4, d.Decode().Min.Y))
 
 	// Same layout again: nothing moved, selection survives.
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 40, Height: 22},
-			{PaneID: 2, Width: 40, Height: 22},
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: []*protocol.ColumnData{
+			&protocol.ColumnData{PaneId: 1, Width: 40, Height: 22},
+			&protocol.ColumnData{PaneId: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 	cli.mu.Lock()
 	survived := cli.sel != nil
 	cli.mu.Unlock()
@@ -417,14 +418,14 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 	}
 
 	// Pane 1 widens: its rect changes.
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 60, Height: 22},
-			{PaneID: 2, Width: 40, Height: 22},
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: []*protocol.ColumnData{
+			{PaneId: 1, Width: 60, Height: 22},
+			&protocol.ColumnData{PaneId: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
 	if cli.sel != nil {
@@ -438,16 +439,16 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 func newTrackingClient(t *testing.T, focus int) (*Client, *transport.InProcChannel) {
 	t.Helper()
 	cli, ch := newMouseClient(t)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 40, Height: 22},
-			{PaneID: 2, Width: 40, Height: 22},
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: []*protocol.ColumnData{
+			&protocol.ColumnData{PaneId: 1, Width: 40, Height: 22},
+			&protocol.ColumnData{PaneId: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: focus,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: int32(focus),
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 	upd := paneLines(2, 40, 22, "TRACKING CHILD")
-	upd.MouseTracking = true
+	upd.GetPaneUpdate().MouseTracking = true
 	cli.HandleServerMsg(upd)
 	cli.HandleServerMsg(paneLines(1, 40, 22, "PLAIN SHELL"))
 	cli.Draw(newFakeHostScreen(100, 24))
@@ -455,10 +456,10 @@ func newTrackingClient(t *testing.T, focus int) (*Client, *transport.InProcChann
 	return cli, ch
 }
 
-func mice(msgs []transport.ClientMessage) []protocol.MsgMouse {
-	var out []protocol.MsgMouse
+func mice(msgs []transport.ClientMessage) []*protocol.MsgMouse {
+	var out []*protocol.MsgMouse
 	for _, m := range msgs {
-		if mm, ok := m.(protocol.MsgMouse); ok {
+		if mm := m.GetMouse(); mm != nil {
 			out = append(out, mm)
 		}
 	}
@@ -468,15 +469,15 @@ func mice(msgs []transport.ClientMessage) []protocol.MsgMouse {
 func TestPressInTrackingFocusedPaneIsForwarded(t *testing.T) {
 	cli, ch := newTrackingClient(t, 2)
 	d := placementFor(cli, 2).Dst
-	if d.Min.X == 0 {
+	if d.Decode().Min.X == 0 {
 		t.Fatal("fixture wants pane 2 off the left edge so translation is visible")
 	}
 
-	cli.HandleMouse(context.Background(), press(d.Min.X+3, d.Min.Y+2))
+	cli.HandleMouse(context.Background(), press(d.Decode().Min.X+3, d.Decode().Min.Y+2))
 
 	got := mice(sent(ch))
-	want := protocol.MsgMouse{PaneID: 2, Kind: protocol.MousePress, X: 3, Y: 2, Button: int(uv.MouseLeft)}
-	if len(got) != 1 || got[0] != want {
+	want := &protocol.MsgMouse{PaneId: 2, Kind: protocol.MouseKind_MOUSE_PRESS, X: 3, Y: 2, Button: int32(uv.MouseLeft)}
+	if len(got) != 1 || !proto.Equal(got[0], want) {
 		t.Errorf("forwarded %+v, want [%+v]", got, want)
 	}
 }
@@ -487,8 +488,8 @@ func TestPressOnUnfocusedTrackingPaneOnlyFocuses(t *testing.T) {
 	cli, ch := newTrackingClient(t, 1)
 	d := placementFor(cli, 2).Dst
 
-	cli.HandleMouse(context.Background(), press(d.Min.X+3, d.Min.Y+2))
-	copied := cli.HandleMouse(context.Background(), release(d.Min.X+3, d.Min.Y+2))
+	cli.HandleMouse(context.Background(), press(d.Decode().Min.X+3, d.Decode().Min.Y+2))
+	copied := cli.HandleMouse(context.Background(), release(d.Decode().Min.X+3, d.Decode().Min.Y+2))
 
 	msgs := sent(ch)
 	if f := focusRequests(msgs); len(f) != 1 || f[0] != 2 {
@@ -510,19 +511,19 @@ func TestForwardedDragFollowsGrabOutsidePane(t *testing.T) {
 	d := placementFor(cli, 2).Dst
 	ctx := context.Background()
 
-	cli.HandleMouse(ctx, press(d.Min.X+3, d.Min.Y+2))
-	cli.HandleMouse(ctx, moveTo(0, d.Min.Y+2))
-	copied := cli.HandleMouse(ctx, release(0, d.Min.Y+2))
+	cli.HandleMouse(ctx, press(d.Decode().Min.X+3, d.Decode().Min.Y+2))
+	cli.HandleMouse(ctx, moveTo(0, d.Decode().Min.Y+2))
+	copied := cli.HandleMouse(ctx, release(0, d.Decode().Min.Y+2))
 
 	msgs := sent(ch)
 	got := mice(msgs)
 	if len(got) != 3 {
 		t.Fatalf("forwarded %d events, want press, motion, release: %+v", len(got), got)
 	}
-	if got[1].Kind != protocol.MouseMotion || got[1].X != 0 {
+	if got[1].Kind != protocol.MouseKind_MOUSE_MOTION || got[1].X != 0 {
 		t.Errorf("motion = %+v, want MouseMotion clamped to X=0", got[1])
 	}
-	if got[2].Kind != protocol.MouseRelease || got[2].X != 0 {
+	if got[2].Kind != protocol.MouseKind_MOUSE_RELEASE || got[2].X != 0 {
 		t.Errorf("release = %+v, want MouseRelease clamped to X=0", got[2])
 	}
 	if f := focusRequests(msgs); len(f) != 0 {
@@ -533,7 +534,7 @@ func TestForwardedDragFollowsGrabOutsidePane(t *testing.T) {
 	}
 
 	// The grab ends on release: the next motion goes nowhere.
-	cli.HandleMouse(ctx, moveTo(d.Min.X+5, d.Min.Y+2))
+	cli.HandleMouse(ctx, moveTo(d.Decode().Min.X+5, d.Decode().Min.Y+2))
 	if m := mice(sent(ch)); len(m) != 0 {
 		t.Errorf("motion after release forwarded %+v", m)
 	}
@@ -545,15 +546,15 @@ func TestWheelOverTrackingPaneIsForwarded(t *testing.T) {
 	cli, ch := newTrackingClient(t, 1)
 	d := placementFor(cli, 2).Dst
 
-	cli.HandleMouse(context.Background(), wheel(d.Min.X+1, d.Min.Y+1, uv.MouseWheelUp))
+	cli.HandleMouse(context.Background(), wheel(d.Decode().Min.X+1, d.Decode().Min.Y+1, uv.MouseWheelUp))
 
 	msgs := sent(ch)
 	if s := scrolls(msgs); len(s) != 0 {
 		t.Errorf("wheel over a tracking child scrolled wideboi's history: %+v", s)
 	}
 	got := mice(msgs)
-	want := protocol.MsgMouse{PaneID: 2, Kind: protocol.MouseWheel, X: 1, Y: 1, Button: int(uv.MouseWheelUp)}
-	if len(got) != 1 || got[0] != want {
+	want := &protocol.MsgMouse{PaneId: 2, Kind: protocol.MouseKind_MOUSE_WHEEL, X: 1, Y: 1, Button: int32(uv.MouseWheelUp)}
+	if len(got) != 1 || !proto.Equal(got[0], want) {
 		t.Errorf("forwarded %+v, want [%+v]", got, want)
 	}
 }
@@ -566,7 +567,7 @@ func TestTrackingOffRestoresSelection(t *testing.T) {
 	cli.Draw(scr)
 	d := placementFor(cli, 2).Dst
 
-	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+7, d.Min.Y))
+	got := drag(cli, image.Pt(d.Decode().Min.X, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+7, d.Decode().Min.Y))
 	if got != "TRACKING" {
 		t.Errorf("copied %q, want %q", got, "TRACKING")
 	}
@@ -582,19 +583,19 @@ func TestTrackingOffRestoresSelection(t *testing.T) {
 func TestCardSelectionStopsAtTheCardAbove(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER-CARD-TEXT-THAT-RUNS-UNDER-THE-NEXT", "LOWER-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(2, 60, 10, "TOP-CARD", "TOP-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(3, 60, 10, "RIGHT"))
 	cli.Draw(newFakeHostScreen(100, 24))
 	d1, d2 := placementFor(cli, 1).Dst, placementFor(cli, 2).Dst
-	if !d1.Overlaps(d2) || d2.Min.X <= d1.Min.X {
+	if !d1.Decode().Overlaps(d2.Decode()) || d2.Decode().Min.X <= d1.Decode().Min.X {
 		t.Fatalf("fixture wants pane 2 over pane 1's right side: p1=%v p2=%v", d1, d2)
 	}
 
-	got := drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d2.Min.X+10, d1.Min.Y+1))
+	got := drag(cli, image.Pt(d1.Decode().Min.X, d1.Decode().Min.Y), image.Pt(d2.Decode().Min.X+10, d1.Decode().Min.Y+1))
 	// Not "TOP": the card above paints its left divider over its own
 	// first column, so what leaks is "OP-CARD".
 	if strings.Contains(got, "OP-CARD") || strings.Contains(got, "┃") {
@@ -612,11 +613,11 @@ func TestStaleGrabDoesNotSwallowNextPress(t *testing.T) {
 	d := placementFor(cli, 2).Dst
 	ctx := context.Background()
 
-	cli.HandleMouse(ctx, press(d.Min.X+3, d.Min.Y+2))
-	cli.HandleMouse(ctx, press(d.Min.X+5, d.Min.Y+2))
+	cli.HandleMouse(ctx, press(d.Decode().Min.X+3, d.Decode().Min.Y+2))
+	cli.HandleMouse(ctx, press(d.Decode().Min.X+5, d.Decode().Min.Y+2))
 
 	got := mice(sent(ch))
-	if len(got) != 2 || got[1].Kind != protocol.MousePress || got[1].X != 5 {
+	if len(got) != 2 || got[1].Kind != protocol.MouseKind_MOUSE_PRESS || got[1].X != 5 {
 		t.Errorf("forwarded %+v, want two presses, the second at X=5", got)
 	}
 }
@@ -627,14 +628,14 @@ func TestStaleGrabDoesNotSwallowNextPress(t *testing.T) {
 func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
-	snap := protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards}
+	snap := &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_CARDS}}}
 	cli.HandleServerMsg(snap)
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER"))
 	cli.Draw(newFakeHostScreen(100, 24))
 	d1 := placementFor(cli, 1).Dst
-	drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d1.Min.X+4, d1.Min.Y))
+	drag(cli, image.Pt(d1.Decode().Min.X, d1.Decode().Min.Y), image.Pt(d1.Decode().Min.X+4, d1.Decode().Min.Y))
 
-	snap.PaneStatuses = map[int]string{3: "»"}
+	snap.GetLayoutSnapshot().PaneStatuses = map[int32]string{3: "»"}
 	cli.HandleServerMsg(snap)
 
 	cli.mu.Lock()
@@ -653,7 +654,7 @@ func TestDragOnUnfocusedPaneSelectsWithoutFocusing(t *testing.T) {
 	cli, ch, _ := newSelectClient(t)
 	d := placementFor(cli, 2).Dst
 
-	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+8, d.Min.Y))
+	got := drag(cli, image.Pt(d.Decode().Min.X, d.Decode().Min.Y), image.Pt(d.Decode().Min.X+8, d.Decode().Min.Y))
 
 	if got != "NEIGHBOUR" {
 		t.Errorf("copied %q, want %q", got, "NEIGHBOUR")
@@ -669,7 +670,7 @@ func TestHeaderPressFocusesImmediately(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 
-	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
+	cli.HandleMouse(context.Background(), press(p2.Dst.Decode().Min.X+2, 0))
 
 	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
 		t.Errorf("focus requests after header press = %v, want [2]", got)

@@ -37,7 +37,7 @@ type cursorPos struct {
 // Everything else Draw needs -- control mode, prefix label,
 // detachable -- is chrome that does not participate in a transition.
 type frameState struct {
-	placements   []protocol.PlacementData
+	placements   []*protocol.PlacementData
 	focusPaneID  int
 	paneStatuses map[int]string
 	paneTitles   map[int]string
@@ -53,7 +53,7 @@ type Client struct {
 	cols         int
 	rows         int
 	strip        *layout.Strip
-	placements   []protocol.PlacementData
+	placements   []*protocol.PlacementData
 	focusPaneID  int
 	paneStatuses map[int]string
 	paneTitles   map[int]string
@@ -118,17 +118,21 @@ func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Clie
 
 // Attach sends the initial MsgAttach protocol message to the server.
 func (c *Client) Attach(ctx context.Context) {
-	c.transport.SendClient(ctx, protocol.MsgAttach{Cols: c.cols, Rows: c.rows})
+	c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(c.cols), Rows: int32(c.rows)}}})
 }
 
 // HandleServerMsg processes messages received from the server.
-func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
+func (c *Client) HandleServerMsg(msg *protocol.ServerEnvelope) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	switch m := msg.(type) {
-	case protocol.MsgLayoutSnapshot:
-		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", m.FocusPaneID)
+	if msg == nil || msg.Payload == nil {
+		return
+	}
+	switch payload := msg.Payload.(type) {
+	case *protocol.ServerEnvelope_LayoutSnapshot:
+		m := payload.LayoutSnapshot
+		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", int(m.FocusPaneId))
 		oldFocus := c.focusPaneID
 		// Two different "previous" values, and the distinction
 		// matters.
@@ -144,7 +148,8 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// broadcastLayoutIfStatusChanged sends a snapshot every time
 		// a busy pane's glyph changes, so the motion would reset its
 		// step counter repeatedly and never settle.
-		prevTarget := c.placements
+		prevTarget := make([]*protocol.PlacementData, len(c.placements))
+		copy(prevTarget, c.placements)
 		prevOnScreen := c.currentPlacementsLocked()
 		// Unconditionally, before anything below reads them: the
 		// mode decides which strategy runs, and the strip is what
@@ -157,16 +162,22 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// while the session was empty was dropped.
 		c.layoutMode = m.Layout
 		layout.ApplyMode(c.strip, m.Layout)
-		c.strip.SyncColumns(m.Columns, m.FocusPaneID)
+		c.strip.SyncColumns(m.Columns, int(m.FocusPaneId))
 
 		if len(m.Columns) > 0 {
 			c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
 		} else {
 			c.placements = m.Placements
 		}
-		c.focusPaneID = m.FocusPaneID
-		c.paneStatuses = m.PaneStatuses
-		c.paneTitles = m.PaneTitles
+		c.focusPaneID = int(m.FocusPaneId)
+		c.paneStatuses = make(map[int]string)
+		for k, v := range m.PaneStatuses {
+			c.paneStatuses[int(k)] = v
+		}
+		c.paneTitles = make(map[int]string)
+		for k, v := range m.PaneTitles {
+			c.paneTitles[int(k)] = v
+		}
 		if c.sel != nil && !c.selectionStillPlacedLocked() {
 			c.sel = nil
 		}
@@ -177,33 +188,34 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// the pre-animation layout is what lets a second change
 		// mid-flight continue rather than jump.
 		if oldFocus != 0 && !placementsEqual(prevTarget, c.placements) {
-			c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
+			c.motion = &motion{from: prevOnScreen, to: make([]*protocol.PlacementData, len(c.placements)), total: motionFrames}
+			copy(c.motion.to, c.placements)
 		}
 
 		activeIDs := make(map[int]bool)
 		for _, p := range c.placements {
-			activeIDs[p.PaneID] = true
-			m, ok := c.mirrors[p.PaneID]
+			activeIDs[int(p.PaneId)] = true
+			m, ok := c.mirrors[int(p.PaneId)]
 			if !ok {
 				// Allocate surface sized to logical width/height
-				w := p.Src.Dx()
-				h := p.Src.Dy()
+				w := p.Src.Decode().Dx()
+				h := p.Src.Decode().Dy()
 				if w <= 0 {
 					w = 40
 				}
 				if h <= 0 {
 					h = 20
 				}
-				c.mirrors[p.PaneID] = &PaneMirror{
-					ID:      p.PaneID,
+				c.mirrors[int(p.PaneId)] = &PaneMirror{
+					ID:      int(p.PaneId),
 					Surface: compose.NewSurface(w, h),
 					Cols:    w,
 					Rows:    h,
 				}
-			} else if p.Src.Dx() > m.Cols || p.Src.Dy() > m.Rows {
-				m.Cols = max(m.Cols, p.Src.Dx())
-				m.Rows = max(m.Rows, p.Src.Dy())
-				m.Surface = compose.NewSurface(m.Cols, m.Rows)
+			} else if p.Src.Decode().Dx() > m.Cols || p.Src.Decode().Dy() > m.Rows {
+				m.Cols = max(m.Cols, p.Src.Decode().Dx())
+				m.Rows = max(m.Rows, p.Src.Decode().Dy())
+				m.Surface = compose.NewSurface(int(m.Cols), int(m.Rows))
 			}
 		}
 
@@ -219,27 +231,31 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			}
 		}
 
-	case protocol.MsgPaneUpdate:
+	case *protocol.ServerEnvelope_PaneUpdate:
+		m := payload.PaneUpdate
 		// Trace, not Debug: busy panes still send one of these per
 		// server frame.
-		slog.Log(context.Background(), logger.LevelTrace, "received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
-		mirror, ok := c.mirrors[m.PaneID]
-		if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {
+		slog.Log(context.Background(), logger.LevelTrace, "received MsgPaneUpdate", "paneID", int(m.PaneId), "cols", m.Cols, "rows", m.Rows)
+		mirror, ok := c.mirrors[int(m.PaneId)]
+		if !ok || mirror.Cols != int(m.Cols) || mirror.Rows != int(m.Rows) {
 			mirror = &PaneMirror{
-				ID:      m.PaneID,
-				Surface: compose.NewSurface(m.Cols, m.Rows),
-				Cols:    m.Cols,
-				Rows:    m.Rows,
+				ID:      int(m.PaneId),
+				Surface: compose.NewSurface(int(m.Cols), int(m.Rows)),
+				Cols:    int(m.Cols),
+				Rows:    int(m.Rows),
 			}
-			c.mirrors[m.PaneID] = mirror
+			c.mirrors[int(m.PaneId)] = mirror
 		}
 		for y, line := range m.Lines {
 			currX := 0
-			for _, cell := range line {
+			if line == nil {
+				continue
+			}
+			for _, cell := range line.Cells {
 				uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
 				uvCell.Style = cell.Style.Decode()
 				mirror.Surface.SetCell(currX, y, uvCell)
-				w := cell.Width
+				w := int(int(cell.Width))
 				if w <= 0 {
 					w = 1
 				}
@@ -249,14 +265,14 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		if c.cursorInfos == nil {
 			c.cursorInfos = make(map[int]cursorPos)
 		}
-		c.cursorInfos[m.PaneID] = cursorPos{
-			pt:      image.Pt(m.CursorX, m.CursorY),
+		c.cursorInfos[int(m.PaneId)] = cursorPos{
+			pt:      image.Pt(int(m.CursorX), int(m.CursorY)),
 			visible: m.CursorVisible,
 		}
 		if c.mouseTracking == nil {
 			c.mouseTracking = make(map[int]bool)
 		}
-		c.mouseTracking[m.PaneID] = m.MouseTracking
+		c.mouseTracking[int(m.PaneId)] = m.MouseTracking
 	}
 }
 
@@ -463,12 +479,12 @@ func (c *Client) drawToScreenLocked(scr HostScreen) {
 		if info, ok := c.cursorInfos[c.focusPaneID]; ok {
 			cp, visible = info.pt, info.visible
 		}
-		fx := focusedPlacement.Dst.Min.X + cp.X - focusedPlacement.Src.Min.X
-		fy := focusedPlacement.Dst.Min.Y + cp.Y - focusedPlacement.Src.Min.Y
-		if visible && fx >= focusedPlacement.Dst.Min.X && fx <= focusedPlacement.Dst.Max.X &&
-			fy >= focusedPlacement.Dst.Min.Y && fy <= focusedPlacement.Dst.Max.Y {
-			fx = min(fx, max(focusedPlacement.Dst.Max.X-1, 0))
-			fy = min(fy, max(focusedPlacement.Dst.Max.Y-1, 0))
+		fx := focusedPlacement.Dst.Decode().Min.X + cp.X - focusedPlacement.Src.Decode().Min.X
+		fy := focusedPlacement.Dst.Decode().Min.Y + cp.Y - focusedPlacement.Src.Decode().Min.Y
+		if visible && fx >= focusedPlacement.Dst.Decode().Min.X && fx <= focusedPlacement.Dst.Decode().Max.X &&
+			fy >= focusedPlacement.Dst.Decode().Min.Y && fy <= focusedPlacement.Dst.Decode().Max.Y {
+			fx = min(fx, max(focusedPlacement.Dst.Decode().Max.X-1, 0))
+			fy = min(fy, max(focusedPlacement.Dst.Decode().Max.Y-1, 0))
 			scr.SetCursorPosition(fx, fy)
 			scr.ShowCursor()
 		} else {
@@ -498,34 +514,34 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 	// Sort placements by Z-order back-to-front for rendering.
 	// We copy the slice so we don't mutate the frameState's slice,
 	// which might be expected to remain in layout order elsewhere.
-	sorted := make([]protocol.PlacementData, len(st.placements))
+	sorted := make([]*protocol.PlacementData, len(st.placements))
 	copy(sorted, st.placements)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return sorted[i].Z < sorted[j].Z
 	})
 
 	for i := range sorted {
-		p := &sorted[i]
-		if p.PaneID == st.focusPaneID {
+		p := sorted[i]
+		if int(p.PaneId) == st.focusPaneID {
 			focusedPlacement = p
 		}
 
 		// Draw 1-row pane header bar at Y = 0
-		headerW := p.Dst.Dx()
+		headerW := p.Dst.Decode().Dx()
 		if headerW > 0 {
-			glyph := st.paneStatuses[p.PaneID]
-			header := fmt.Sprintf(" [%d]", p.PaneID)
-			if pos := st.positions[p.PaneID]; pos > 0 {
-				header = fmt.Sprintf(" %d [%d]", pos, p.PaneID)
+			glyph := st.paneStatuses[int(p.PaneId)]
+			header := fmt.Sprintf(" [%d]", int(p.PaneId))
+			if pos := st.positions[int(p.PaneId)]; pos > 0 {
+				header = fmt.Sprintf(" %d [%d]", pos, int(p.PaneId))
 			}
 			if glyph != "" && glyph != " " {
 				header += " " + glyph
 			}
-			title := st.paneTitles[p.PaneID]
+			title := st.paneTitles[int(p.PaneId)]
 			if title != "" {
 				header += " " + title
 			}
-			if p.PaneID == st.focusPaneID {
+			if int(p.PaneId) == st.focusPaneID {
 				header += " ★"
 			}
 			header = compose.TruncateWidth(dst, header, headerW)
@@ -533,30 +549,30 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 				header += strings.Repeat(" ", headerW-used)
 			}
 
-			if p.PaneID == st.focusPaneID {
-				compose.WriteStyled(dst, p.Dst.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
+			if int(p.PaneId) == st.focusPaneID {
+				compose.WriteStyled(dst, p.Dst.Decode().Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
 			} else {
-				compose.WriteString(dst, p.Dst.Min.X, 0, header)
+				compose.WriteString(dst, p.Dst.Decode().Min.X, 0, header)
 			}
 		}
 
 		switch {
-		case p.Kind == protocol.PlacementSliver:
+		case p.Kind == protocol.PlacementKind_PLACEMENT_SLIVER:
 			c.drawSliverLocked(dst, p, st)
 		default:
-			if mirror, ok := c.mirrors[p.PaneID]; ok {
-				compose.Blit(dst, mirror.Surface, p.Dst)
+			if mirror, ok := c.mirrors[int(p.PaneId)]; ok {
+				compose.Blit(dst, mirror.Surface, p.Dst.Decode())
 			}
 		}
 
 		// Draw column divider on right edge if applicable.
 		// Bold ┃ if adjacent to focused pane, otherwise │.
-		if c.layoutMode != protocol.LayoutCards && p.Dst.Max.X < c.cols {
+		if c.layoutMode != protocol.LayoutMode_LAYOUT_CARDS && p.Dst.Decode().Max.X < c.cols {
 			// Find if the adjacent pane in the original slice is focused
 			var adjacentFocused bool
 			for j, orig := range st.placements {
-				if orig.PaneID == p.PaneID {
-					if j+1 < len(st.placements) && st.placements[j+1].PaneID == st.focusPaneID {
+				if int(orig.PaneId) == int(p.PaneId) {
+					if j+1 < len(st.placements) && int(st.placements[j+1].PaneId) == st.focusPaneID {
 						adjacentFocused = true
 					}
 					break
@@ -564,29 +580,29 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			}
 
 			divider := "│"
-			if p.PaneID == st.focusPaneID || adjacentFocused {
+			if int(p.PaneId) == st.focusPaneID || adjacentFocused {
 				divider = "┃"
 			}
-			for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-				compose.WriteString(dst, p.Dst.Max.X, y, divider)
+			for y := p.Dst.Decode().Min.Y; y < p.Dst.Decode().Max.Y; y++ {
+				compose.WriteString(dst, p.Dst.Decode().Max.X, y, divider)
 			}
 		}
 
-		if c.layoutMode == protocol.LayoutCards {
+		if c.layoutMode == protocol.LayoutMode_LAYOUT_CARDS {
 			// For overlapping cards, the left edge is the visible boundary that occludes the card to its left.
-			if p.Dst.Min.X > 0 {
+			if p.Dst.Decode().Min.X > 0 {
 				divider := "│"
-				if p.PaneID == st.focusPaneID {
+				if int(p.PaneId) == st.focusPaneID {
 					divider = "┃"
 				}
-				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-					compose.WriteString(dst, p.Dst.Min.X, y, divider)
+				for y := p.Dst.Decode().Min.Y; y < p.Dst.Decode().Max.Y; y++ {
+					compose.WriteString(dst, p.Dst.Decode().Min.X, y, divider)
 				}
 			}
 			// Additionally, the focused card is the top-most card, so its right edge is also fully visible.
-			if p.PaneID == st.focusPaneID && p.Dst.Max.X < c.cols {
-				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-					compose.WriteString(dst, p.Dst.Max.X, y, "┃")
+			if int(p.PaneId) == st.focusPaneID && p.Dst.Decode().Max.X < c.cols {
+				for y := p.Dst.Decode().Min.Y; y < p.Dst.Decode().Max.Y; y++ {
+					compose.WriteString(dst, p.Dst.Decode().Max.X, y, "┃")
 				}
 			}
 		}
@@ -617,23 +633,23 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 // Row 0 is the pane header, drawn by the caller. This fills the rest.
 // c.mu must be held.
 func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st frameState) {
-	w := p.Dst.Dx()
+	w := p.Dst.Decode().Dx()
 	if w <= 0 {
 		return
 	}
 
-	glyph := st.paneStatuses[p.PaneID]
+	glyph := st.paneStatuses[int(p.PaneId)]
 	if glyph == " " {
 		glyph = ""
 	}
-	title := st.paneTitles[p.PaneID]
+	title := st.paneTitles[int(p.PaneId)]
 
 	// Glyph and title on the first row, whichever of them exists. A
 	// pane whose child never set a title still gets its glyph, so the
 	// row never looks like a rendering fault.
 	label := strings.TrimSpace(glyph + " " + title)
 	if label != "" {
-		compose.WriteStyled(dst, p.Dst.Min.X, p.Dst.Min.Y,
+		compose.WriteStyled(dst, p.Dst.Decode().Min.X, p.Dst.Decode().Min.Y,
 			compose.TruncateWidth(dst, label, w), uv.Style{})
 	}
 
@@ -649,8 +665,8 @@ func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st f
 	if glyph == "»" {
 		spine = uv.Style{Attrs: uv.AttrBold}
 	}
-	for y := p.Dst.Min.Y + 1; y < p.Dst.Max.Y; y++ {
-		compose.WriteStyled(dst, p.Dst.Min.X, y, "▌", spine)
+	for y := p.Dst.Decode().Min.Y + 1; y < p.Dst.Decode().Max.Y; y++ {
+		compose.WriteStyled(dst, p.Dst.Decode().Min.X, y, "▌", spine)
 	}
 }
 
@@ -677,7 +693,7 @@ func (c *Client) hiddenCountsLocked(st frameState) (left, right int) {
 
 	placed := make(map[int]bool, len(st.placements))
 	for _, p := range st.placements {
-		placed[p.PaneID] = true
+		placed[int(p.PaneId)] = true
 	}
 
 	focusIdx := 0
@@ -744,7 +760,7 @@ func (c *Client) drawStatusBarLocked(scr uv.Screen) {
 // Arming a new animation from here rather than from c.placements is
 // what makes a second focus change mid-flight continue from what the
 // user is looking at instead of jumping back. c.mu must be held.
-func (c *Client) currentPlacementsLocked() []protocol.PlacementData {
+func (c *Client) currentPlacementsLocked() []*protocol.PlacementData {
 	if c.motion != nil {
 		return c.motion.at()
 	}
@@ -813,8 +829,8 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 func (c *Client) normalStatusLocked(budget int) string {
 	status := fmt.Sprintf("focus: [pane %d ★]", c.focusPaneID)
 	for _, p := range c.placements {
-		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
-			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
+		if glyph, ok := c.paneStatuses[int(p.PaneId)]; ok && glyph != "" && glyph != " " {
+			status += fmt.Sprintf("  [%d %s]", int(p.PaneId), glyph)
 		}
 	}
 	// The hint is right-aligned and is the first thing to go when the
@@ -897,7 +913,7 @@ func truncateRunes(s string, n int) string {
 
 // SendVerb forwards a layout action request to the server.
 func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
-	c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v})
+	c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: v}}})
 }
 
 // FocusColumn focuses the n'th column from the left, or the rightmost
@@ -917,7 +933,7 @@ func (c *Client) FocusColumn(ctx context.Context, n int) {
 	if i < 0 || i >= len(ids) {
 		return
 	}
-	c.transport.SendClient(ctx, protocol.MsgFocusPane{PaneID: ids[i]})
+	c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_FocusPane{FocusPane: &protocol.MsgFocusPane{PaneId: int32(ids[i])}}})
 }
 
 // SendKey forwards a decoded key event for the focused pane to the server.
@@ -927,7 +943,7 @@ func (c *Client) SendKey(ctx context.Context, k uv.KeyEvent) {
 	c.mu.Unlock()
 
 	if focusedID > 0 {
-		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Key: protocol.EncodeKey(k)})
+		c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Input{Input: &protocol.MsgInput{PaneId: int32(focusedID), Key: protocol.EncodeKey(k)}}})
 	}
 }
 
@@ -938,7 +954,7 @@ func (c *Client) SendInput(ctx context.Context, data []byte) {
 	c.mu.Unlock()
 
 	if focusedID > 0 {
-		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Data: data})
+		c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Input{Input: &protocol.MsgInput{PaneId: int32(focusedID), Data: data}}})
 	}
 }
 
@@ -949,7 +965,7 @@ func (c *Client) SendScroll(ctx context.Context, delta int) {
 	c.mu.Unlock()
 
 	if focusedID > 0 {
-		c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: focusedID, Delta: delta})
+		c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Scroll{Scroll: &protocol.MsgScroll{PaneId: int32(focusedID), Delta: int32(delta)}}})
 	}
 }
 
@@ -967,7 +983,7 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	}
 	c.mu.Unlock()
 
-	c.transport.SendClient(ctx, protocol.MsgResize{Cols: cols, Rows: rows})
+	c.transport.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Resize{Resize: &protocol.MsgResize{Cols: int32(cols), Rows: int32(rows)}}})
 }
 
 // FocusPaneID returns current focused pane ID.

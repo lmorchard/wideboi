@@ -253,7 +253,7 @@ func TestScrollDirections(t *testing.T) {
 // back on j and take scroll-down away again.
 func TestSmartJumpIsOnA(t *testing.T) {
 	for _, b := range keys.Bindings {
-		if b.Action == keys.ActionVerb && b.Verb == protocol.VerbSmartJump {
+		if b.Action == keys.ActionVerb && b.Verb == protocol.VerbType_VERB_SMART_JUMP {
 			if b.Key != "a" {
 				t.Errorf("smart jump is on %q, want %q", b.Key, "a")
 			}
@@ -272,7 +272,7 @@ func TestSmartJumpIsOnA(t *testing.T) {
 // leaves control mode.
 func TestToggleCardsIsOnC(t *testing.T) {
 	for _, b := range keys.Bindings {
-		if b.Action == keys.ActionVerb && b.Verb == protocol.VerbToggleCards {
+		if b.Action == keys.ActionVerb && b.Verb == protocol.VerbType_VERB_TOGGLE_CARDS {
 			if b.Key != "c" {
 				t.Errorf("card toggle is on %q, want %q", b.Key, "c")
 			}

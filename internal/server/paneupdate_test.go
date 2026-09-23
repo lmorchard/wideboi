@@ -21,8 +21,8 @@ func drainPaneUpdates(tp *transport.InProcChannel) []int {
 	for {
 		select {
 		case msg := <-tp.ServerSend:
-			if u, ok := msg.(protocol.MsgPaneUpdate); ok {
-				ids = append(ids, u.PaneID)
+			if u := msg.GetPaneUpdate(); u != nil {
+				ids = append(ids, int(u.PaneId))
 			}
 		default:
 			sort.Ints(ids)
@@ -69,7 +69,7 @@ func TestDroppedPaneUpdateIsRetriedForThatClientOnly(t *testing.T) {
 	wedged := transport.NewInProcChannel(4)
 	s.transports = append(s.transports, wedged)
 	for len(wedged.ServerSend) < cap(wedged.ServerSend) {
-		wedged.ServerSend <- struct{}{}
+		wedged.ServerSend <- &protocol.ServerEnvelope{}
 	}
 
 	s.broadcastPaneUpdates(ctx, false)
@@ -169,7 +169,7 @@ func TestDroppedForcedResendIsRetried(t *testing.T) {
 
 	// Leave room for the snapshot and nothing else.
 	for len(tp.ServerSend) < cap(tp.ServerSend)-1 {
-		tp.ServerSend <- struct{}{}
+		tp.ServerSend <- &protocol.ServerEnvelope{}
 	}
 	s.broadcastLayout(ctx)
 	drainPaneUpdates(tp) // filler plus the snapshot; both pane updates were dropped

@@ -25,8 +25,8 @@ func TestMouseRoundtripsEveryKind(t *testing.T) {
 		// Screen coordinates are replaced by pane-local ones.
 		local := image.Pt(2, 3)
 		msg := EncodeMouse(5, ev, local)
-		if msg.PaneID != 5 {
-			t.Errorf("%T: PaneID = %d, want 5", ev, msg.PaneID)
+		if int(msg.PaneId) != 5 {
+			t.Errorf("%T: PaneID = %d, want 5", ev, int(msg.PaneId))
 		}
 		got := msg.Decode()
 		if reflect.TypeOf(got) != reflect.TypeOf(ev) {

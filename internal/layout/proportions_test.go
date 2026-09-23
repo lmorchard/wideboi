@@ -105,7 +105,7 @@ func TestWideShareRendersFullNotSliver(t *testing.T) {
 	ps := s.ComputePlacements(120, 24) // share = (120-30)/2 = 45 > 30
 
 	for _, p := range ps {
-		if p.Kind != protocol.PlacementFull {
+		if p.Kind != protocol.PlacementKind_PLACEMENT_FULL {
 			t.Errorf("pane %d is %v at a share wider than the pane; want Full", p.PaneID, p.Kind)
 		}
 		if w := p.Dst.Dx(); w != 30 {

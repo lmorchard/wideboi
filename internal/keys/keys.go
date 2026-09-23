@@ -148,33 +148,33 @@ const (
 
 // Bindings is the table, in status-bar display order.
 var Bindings = slices.Concat([]Binding{
-	{ActionName: ActionNameFocusLeft, Key: "h", Aliases: []string{"left"}, Action: ActionVerb, Verb: protocol.VerbFocusLeft,
+	{ActionName: ActionNameFocusLeft, Key: "h", Aliases: []string{"left"}, Action: ActionVerb, Verb: protocol.VerbType_VERB_FOCUS_LEFT,
 		BarGroup: "hjkl move", Long: "focus the column to the left", HelpGroup: helpFocus},
-	{ActionName: ActionNameFocusRight, Key: "l", Aliases: []string{"right"}, Action: ActionVerb, Verb: protocol.VerbFocusRight,
+	{ActionName: ActionNameFocusRight, Key: "l", Aliases: []string{"right"}, Action: ActionVerb, Verb: protocol.VerbType_VERB_FOCUS_RIGHT,
 		BarGroup: "hjkl move", Long: "focus the column to the right", HelpGroup: helpFocus},
 	{ActionName: ActionNameScrollDown, Key: "j", Action: ActionScroll, Scroll: -10,
 		BarGroup: "hjkl move", Long: "scroll this pane's history down", HelpGroup: helpScroll},
 	{ActionName: ActionNameScrollUp, Key: "k", Action: ActionScroll, Scroll: 10,
 		BarGroup: "hjkl move", Long: "scroll this pane's history up", HelpGroup: helpScroll},
-	{ActionName: ActionNameNewColumn, Key: "n", Action: ActionVerb, Verb: protocol.VerbNewColumn,
+	{ActionName: ActionNameNewColumn, Key: "n", Action: ActionVerb, Verb: protocol.VerbType_VERB_NEW_COLUMN,
 		BarGroup: "n new", Long: "open a new column"},
-	{ActionName: ActionNameCycleWidth, Key: "w", Action: ActionVerb, Verb: protocol.VerbCycleWidth,
+	{ActionName: ActionNameCycleWidth, Key: "w", Action: ActionVerb, Verb: protocol.VerbType_VERB_CYCLE_WIDTH,
 		BarGroup: "w width", Long: "cycle this column's width"},
-	{ActionName: ActionNameShrinkWidth, Key: "o", Action: ActionVerb, Verb: protocol.VerbShrinkWidth,
+	{ActionName: ActionNameShrinkWidth, Key: "o", Action: ActionVerb, Verb: protocol.VerbType_VERB_SHRINK_WIDTH,
 		Long: "shrink this column's width", HelpGroup: helpWidth},
-	{ActionName: ActionNameGrowWidth, Key: "p", Action: ActionVerb, Verb: protocol.VerbGrowWidth,
+	{ActionName: ActionNameGrowWidth, Key: "p", Action: ActionVerb, Verb: protocol.VerbType_VERB_GROW_WIDTH,
 		Long: "grow this column's width", HelpGroup: helpWidth},
-	{ActionName: ActionNameMoveLeft, Key: "y", Action: ActionVerb, Verb: protocol.VerbMoveLeft,
+	{ActionName: ActionNameMoveLeft, Key: "y", Action: ActionVerb, Verb: protocol.VerbType_VERB_MOVE_LEFT,
 		Long: "move this column left", HelpGroup: helpMove},
-	{ActionName: ActionNameMoveRight, Key: "u", Action: ActionVerb, Verb: protocol.VerbMoveRight,
+	{ActionName: ActionNameMoveRight, Key: "u", Action: ActionVerb, Verb: protocol.VerbType_VERB_MOVE_RIGHT,
 		Long: "move this column right", HelpGroup: helpMove},
-	{ActionName: ActionNameKillPane, Key: "x", Action: ActionVerb, Verb: protocol.VerbKillPane,
+	{ActionName: ActionNameKillPane, Key: "x", Action: ActionVerb, Verb: protocol.VerbType_VERB_KILL_PANE,
 		BarGroup: "x kill", Long: "kill the focused pane"},
-	{ActionName: ActionNameSmartJump, Key: "a", Action: ActionVerb, Verb: protocol.VerbSmartJump,
+	{ActionName: ActionNameSmartJump, Key: "a", Action: ActionVerb, Verb: protocol.VerbType_VERB_SMART_JUMP,
 		BarGroup: "a attn", Long: "jump to a pane wanting attention"},
 	// tab has no ctrl form -- CtrlForm wants a single letter, and ctrl+i
 	// decodes as tab anyway -- and repeating a toggle only bounces.
-	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
+	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbType_VERB_FOCUS_LAST,
 		Long: "focus the previously focused pane"},
 }, digitBindings(), []Binding{
 	{ActionName: ActionNameHelp, Key: "?", Action: ActionHelp,
@@ -191,7 +191,7 @@ var Bindings = slices.Concat([]Binding{
 	//
 	// NoRepeat because ctrl+c must stay an unknown key that leaves
 	// control mode; see the field's comment.
-	{ActionName: ActionNameToggleCards, Key: "c", Action: ActionVerb, Verb: protocol.VerbToggleCards,
+	{ActionName: ActionNameToggleCards, Key: "c", Action: ActionVerb, Verb: protocol.VerbType_VERB_TOGGLE_CARDS,
 		NoRepeat: true, Long: "toggle the card layout"},
 	{ActionName: ActionNameQuit, Key: "q", Action: ActionQuit, Essential: true,
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},

@@ -170,10 +170,10 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	switch strings.ToLower(strings.TrimSpace(cfg.Layout)) {
 	case "", "cards":
 		cfg.Layout = "cards"
-		cfg.LayoutMode = protocol.LayoutCards
+		cfg.LayoutMode = protocol.LayoutMode_LAYOUT_CARDS
 	case "scroll":
 		cfg.Layout = "scroll"
-		cfg.LayoutMode = protocol.LayoutScroll
+		cfg.LayoutMode = protocol.LayoutMode_LAYOUT_SCROLL
 	default:
 		return Config{}, nil, fmt.Errorf("layout %q: want \"scroll\" or \"cards\"", cfg.Layout)
 	}

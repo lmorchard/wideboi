@@ -27,7 +27,7 @@ func TestScrollStrategyNeverEmitsSlivers(t *testing.T) {
 		vh := rapid.IntRange(5, 60).Draw(t, "viewportHeight")
 
 		for _, p := range s.ComputePlacements(vw, vh) {
-			if p.Kind != protocol.PlacementFull {
+			if p.Kind != protocol.PlacementKind_PLACEMENT_FULL {
 				t.Fatalf("pane %d has Kind=%v under ScrollStrategy at %dx%d; "+
 					"clipping is not occlusion", p.PaneID, p.Kind, vw, vh)
 			}
@@ -50,8 +50,8 @@ func TestCardStrategyMarksAllAsFull(t *testing.T) {
 	}
 
 	for _, p := range placements {
-		if p.Kind != protocol.PlacementFull {
-			t.Errorf("pane %d Kind = %v, want %v", p.PaneID, p.Kind, protocol.PlacementFull)
+		if p.Kind != protocol.PlacementKind_PLACEMENT_FULL {
+			t.Errorf("pane %d Kind = %v, want %v", p.PaneID, p.Kind, protocol.PlacementKind_PLACEMENT_FULL)
 		}
 	}
 }
@@ -67,18 +67,18 @@ func TestCardStrategySingleColumnIsFull(t *testing.T) {
 	if len(placements) != 1 {
 		t.Fatalf("got %d placements, want 1", len(placements))
 	}
-	if placements[0].Kind != protocol.PlacementFull {
-		t.Errorf("single column Kind = %v, want %v", placements[0].Kind, protocol.PlacementFull)
+	if placements[0].Kind != protocol.PlacementKind_PLACEMENT_FULL {
+		t.Errorf("single column Kind = %v, want %v", placements[0].Kind, protocol.PlacementKind_PLACEMENT_FULL)
 	}
 }
 
 // Kind has to survive the conversion, or the client never sees it.
 func TestToProtocolCarriesKind(t *testing.T) {
 	placements := []layout.Placement{
-		{PaneID: 1, Kind: protocol.PlacementSliver},
+		{PaneID: 1, Kind: protocol.PlacementKind_PLACEMENT_SLIVER},
 	}
 	data := layout.ToProtocol(placements)
-	if len(data) != 1 || data[0].Kind != protocol.PlacementSliver {
+	if len(data) != 1 || data[0].Kind != protocol.PlacementKind_PLACEMENT_SLIVER {
 		t.Error("ToProtocol dropped Kind")
 	}
 }

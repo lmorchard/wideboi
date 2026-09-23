@@ -79,13 +79,13 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 	for !gotSnapshot || !gotPaneUpdate {
 		select {
 		case msg := <-cConn2.ServerSendChan():
-			switch m := msg.(type) {
-			case protocol.MsgLayoutSnapshot:
+			switch m := msg.Payload.(type) {
+			case *protocol.ServerEnvelope_LayoutSnapshot:
+				cli2.HandleServerMsg(&protocol.ServerEnvelope{Payload: m})
 				gotSnapshot = true
-				cli2.HandleServerMsg(m)
-			case protocol.MsgPaneUpdate:
+			case *protocol.ServerEnvelope_PaneUpdate:
+				cli2.HandleServerMsg(&protocol.ServerEnvelope{Payload: m})
 				gotPaneUpdate = true
-				cli2.HandleServerMsg(m)
 			}
 		case <-deadline:
 			t.Fatalf("timeout waiting for reattached client 2 messages (gotSnap=%v, gotUpdate=%v)", gotSnapshot, gotPaneUpdate)
@@ -171,9 +171,9 @@ func TestParseLayoutRejectsUnknown(t *testing.T) {
 
 func TestParseLayoutAcceptsKnown(t *testing.T) {
 	cases := map[string]protocol.LayoutMode{
-		"":       protocol.LayoutCards,
-		"scroll": protocol.LayoutScroll,
-		"cards":  protocol.LayoutCards,
+		"":       protocol.LayoutMode_LAYOUT_CARDS,
+		"scroll": protocol.LayoutMode_LAYOUT_SCROLL,
+		"cards":  protocol.LayoutMode_LAYOUT_CARDS,
 	}
 	for name, want := range cases {
 		got, err := parseLayout(name)
@@ -234,7 +234,7 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 			select {
 			case msg := <-cc.ServerSendChan():
 				cli.HandleServerMsg(msg)
-				if _, ok := msg.(protocol.MsgPaneUpdate); ok {
+				if msg != nil && msg.GetPaneUpdate() != nil {
 					timer.Reset(quiet)
 				}
 			case <-timer.C:
@@ -262,10 +262,10 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 			select {
 			case msg := <-cc.ServerSendChan():
 				cli.HandleServerMsg(msg)
-				switch msg.(type) {
-				case protocol.MsgLayoutSnapshot:
+				switch msg.Payload.(type) {
+				case *protocol.ServerEnvelope_LayoutSnapshot:
 					afterSnapshot = true
-				case protocol.MsgPaneUpdate:
+				case *protocol.ServerEnvelope_PaneUpdate:
 					return afterSnapshot
 				}
 			case <-deadline:

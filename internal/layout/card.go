@@ -67,7 +67,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			Dst:    image.Rect(0, 1, w, 1+availHeight),
 			Z:      1,
 			// A lone column is occluded by nothing.
-			Kind: protocol.PlacementFull,
+			Kind: protocol.PlacementKind_PLACEMENT_FULL,
 		}}
 	}
 
@@ -106,7 +106,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 
 		// With overlapping cards, every pane is rendered as full content.
 		// It's the z-order and clipping that handles the "sliver" effect.
-		kind := protocol.PlacementFull
+		kind := protocol.PlacementKind_PLACEMENT_FULL
 
 		placements = append(placements, Placement{
 			PaneID: col.PaneID,

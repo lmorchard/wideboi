@@ -19,18 +19,18 @@ import (
 // interactive /bin/sh to ignore SIGTERM.
 const testGrace = 100 * time.Millisecond
 
-func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgLayoutSnapshot {
+func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) *protocol.MsgLayoutSnapshot {
 	t.Helper()
 	deadline := time.After(timeout)
 	for {
 		select {
 		case msg := <-ch:
-			if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+			if snap := msg.GetLayoutSnapshot(); snap != nil {
 				return snap
 			}
 		case <-deadline:
 			t.Fatalf("timeout waiting for MsgLayoutSnapshot")
-			return protocol.MsgLayoutSnapshot{}
+			return nil
 		}
 	}
 }
@@ -48,7 +48,7 @@ func TestServerLifecycleAndAttach(t *testing.T) {
 	}()
 
 	// Send Attach
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(80), Rows: int32(24)}}})
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 	if len(snap.Placements) != 2 {
@@ -72,11 +72,11 @@ func TestServerVerbHandling(t *testing.T) {
 		_ = srv.Run(ctx)
 	}()
 
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(80), Rows: int32(24)}}})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	// Request new column
-	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbNewColumn})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_NEW_COLUMN}}})
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 	if len(snap.Placements) != 2 {
@@ -84,25 +84,25 @@ func TestServerVerbHandling(t *testing.T) {
 	}
 
 	// Test GrowWidth verb
-	focusedID := snap.FocusPaneID
-	initialCols, _, ok := srv.PaneSize(focusedID)
+	focusedID := snap.FocusPaneId
+	initialCols, _, ok := srv.PaneSize(int(focusedID))
 	if !ok {
 		t.Fatalf("pane %d not found", focusedID)
 	}
 
-	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbGrowWidth})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_GROW_WIDTH}}})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
-	grownCols, _, ok := srv.PaneSize(focusedID)
+	grownCols, _, ok := srv.PaneSize(int(focusedID))
 	if !ok || grownCols != initialCols+10 {
 		t.Errorf("after VerbGrowWidth: cols = %d, want %d", grownCols, initialCols+10)
 	}
 
 	// Test ShrinkWidth verb
-	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbShrinkWidth})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_SHRINK_WIDTH}}})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
-	shrunkCols, _, ok := srv.PaneSize(focusedID)
+	shrunkCols, _, ok := srv.PaneSize(int(focusedID))
 	if !ok || shrunkCols != initialCols {
 		t.Errorf("after VerbShrinkWidth: cols = %d, want %d", shrunkCols, initialCols)
 	}
@@ -133,25 +133,25 @@ func TestResizePropagatesToPanes(t *testing.T) {
 		_ = srv.Run(ctx)
 	}()
 
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(80), Rows: int32(24)}}})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
-	tp.SendClient(ctx, protocol.MsgResize{Cols: 100, Rows: 40})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Resize{Resize: &protocol.MsgResize{Cols: int32(100), Rows: int32(40)}}})
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 	if len(snap.Placements) == 0 {
 		t.Fatal("expected placements after resize")
 	}
 	for _, pl := range snap.Placements {
-		cols, rows, ok := srv.PaneSize(pl.PaneID)
+		cols, rows, ok := srv.PaneSize(int(pl.PaneId))
 		if !ok {
-			t.Fatalf("pane %d not found after resize", pl.PaneID)
+			t.Fatalf("pane %d not found after resize", int(pl.PaneId))
 		}
 		if cols <= 0 || cols > 100 {
-			t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", pl.PaneID, cols)
+			t.Errorf("pane %d has cols=%d, want a positive width no wider than the 100-col viewport", int(pl.PaneId), cols)
 		}
 		if rows != 38 {
-			t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", pl.PaneID, rows)
+			t.Errorf("pane %d has rows=%d, want 38 (the new 40-row viewport minus header and status line)", int(pl.PaneId), rows)
 		}
 	}
 
@@ -182,26 +182,26 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 		_ = srv.Run(ctx)
 	}()
 
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(120), Rows: int32(30)}}})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
-	tp.SendClient(ctx, protocol.MsgResize{Cols: 70, Rows: 20})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Resize{Resize: &protocol.MsgResize{Cols: int32(70), Rows: int32(20)}}})
 
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 	sawClippedPlacement := false
 	for _, pl := range snap.Placements {
-		if pl.Dst.Dx() < 59 {
+		if pl.Dst.Decode().Dx() < 59 {
 			sawClippedPlacement = true
 		}
-		cols, rows, ok := srv.PaneSize(pl.PaneID)
+		cols, rows, ok := srv.PaneSize(int(pl.PaneId))
 		if !ok {
-			t.Fatalf("pane %d not found after resize", pl.PaneID)
+			t.Fatalf("pane %d not found after resize", int(pl.PaneId))
 		}
 		if cols != 59 {
-			t.Errorf("pane %d has cols=%d, want 59 (its full column width) regardless of its %d-wide on-screen crop", pl.PaneID, cols, pl.Dst.Dx())
+			t.Errorf("pane %d has cols=%d, want 59 (its full column width) regardless of its %d-wide on-screen crop", int(pl.PaneId), cols, pl.Dst.Decode().Dx())
 		}
 		if rows != 18 {
-			t.Errorf("pane %d has rows=%d, want 18 (the 20-row viewport minus header and status line)", pl.PaneID, rows)
+			t.Errorf("pane %d has rows=%d, want 18 (the 20-row viewport minus header and status line)", int(pl.PaneId), rows)
 		}
 	}
 	if !sawClippedPlacement {
@@ -236,17 +236,17 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 		_ = srv.Run(ctx)
 	}()
 
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(120), Rows: int32(30)}}})
 	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 	if len(snap.Placements) != 2 {
 		t.Fatalf("expected 2 initial placements, got %+v", snap)
 	}
 	var paneIDs []int
 	for _, pl := range snap.Placements {
-		paneIDs = append(paneIDs, pl.PaneID)
+		paneIDs = append(paneIDs, int(pl.PaneId))
 	}
 
-	tp.SendClient(ctx, protocol.MsgResize{Cols: 40, Rows: 20})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Resize{Resize: &protocol.MsgResize{Cols: int32(40), Rows: int32(20)}}})
 
 	snap = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
@@ -298,13 +298,15 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 		_ = srv.Run(ctx)
 	}()
 
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 30})
-	snap, ok := (<-tp.ServerSend).(protocol.MsgLayoutSnapshot)
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(120), Rows: int32(30)}}})
+	env := <-tp.ServerSend
+	snap := env.GetLayoutSnapshot()
+	ok := snap != nil
 	if !ok || len(snap.Placements) != 2 {
 		t.Fatalf("expected 2 initial placements, got %+v", snap)
 	}
-	killID := snap.Placements[0].PaneID
-	surviveID := snap.Placements[1].PaneID
+	killID := int(snap.Placements[0].PaneId)
+	surviveID := int(snap.Placements[1].PaneId)
 
 	// Drain every further server->client message for the rest of the test.
 	// broadcastLayoutLocked runs under s.mu, so an unread, full ServerSend
@@ -322,7 +324,7 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 	}()
 
 	t.Log("STEP 1: sending exit")
-	tp.SendClient(ctx, protocol.MsgInput{PaneID: killID, Data: []byte("exit\r")})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Input{Input: &protocol.MsgInput{PaneId: int32(killID), Data: []byte("exit\r")}}})
 
 	var wg sync.WaitGroup
 	deadline := time.Now().Add(1500 * time.Millisecond)
@@ -332,7 +334,7 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 		n := 0
 		for time.Now().Before(deadline) {
 			n++
-			tp.SendClient(ctx, protocol.MsgResize{Cols: 80 + n%40, Rows: 20 + n%10})
+			tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Resize{Resize: &protocol.MsgResize{Cols: int32(80 + n%40), Rows: int32(20 + n%10)}}})
 			time.Sleep(1 * time.Millisecond)
 		}
 		t.Log("STEP 2: hammering done")
@@ -374,26 +376,27 @@ func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
 	}()
 
 	// No MsgAttach: s.rows is still its zero value.
-	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbNewColumn})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Verb{Verb: &protocol.MsgVerb{Verb: protocol.VerbType_VERB_NEW_COLUMN}}})
 
 	select {
 	case msg := <-tp.ServerSend:
-		snap, ok := msg.(protocol.MsgLayoutSnapshot)
+		snap := msg.GetLayoutSnapshot()
+		ok := snap != nil
 		if !ok {
 			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
 		}
-		if snap.FocusPaneID <= 0 {
+		if snap.FocusPaneId <= 0 {
 			t.Fatalf("expected a focused pane after VerbNewColumn, got %+v", snap)
 		}
-		_, rows, ok := srv.PaneSize(snap.FocusPaneID)
+		_, rows, ok := srv.PaneSize(int(snap.FocusPaneId))
 		if !ok {
-			t.Fatalf("pane %d not found", snap.FocusPaneID)
+			t.Fatalf("pane %d not found", snap.FocusPaneId)
 		}
 		if rows == 1 {
-			t.Errorf("pane %d has rows=1 -- resizePanesLocked ran against an unset (0) viewport instead of skipping it", snap.FocusPaneID)
+			t.Errorf("pane %d has rows=1 -- resizePanesLocked ran against an unset (0) viewport instead of skipping it", snap.FocusPaneId)
 		}
 		if rows <= 0 {
-			t.Errorf("pane %d has non-positive rows=%d", snap.FocusPaneID, rows)
+			t.Errorf("pane %d has non-positive rows=%d", snap.FocusPaneId, rows)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for MsgLayoutSnapshot after VerbNewColumn")

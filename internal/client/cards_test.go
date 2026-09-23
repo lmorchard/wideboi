@@ -19,15 +19,15 @@ import (
 // proportional shares a 30-wide pane in a 100-column viewport gets 35
 // and renders full, which is correct behaviour and useless as a
 // sliver fixture -- hence 60.
-func threeColumns() []protocol.ColumnData {
-	return []protocol.ColumnData{
-		{PaneID: 1, Width: 60, Height: 10},
-		{PaneID: 2, Width: 60, Height: 10},
-		{PaneID: 3, Width: 60, Height: 10},
+func threeColumns() []*protocol.ColumnData {
+	return []*protocol.ColumnData{
+		{PaneId: 1, Width: 60, Height: 10},
+		{PaneId: 2, Width: 60, Height: 10},
+		{PaneId: 3, Width: 60, Height: 10},
 	}
 }
 
-func sliverCount(ps []protocol.PlacementData) int {
+func sliverCount(ps []*protocol.PlacementData) int {
 	n := 0
 	for _, p := range ps {
 		if p.Z == 1 {
@@ -37,18 +37,18 @@ func sliverCount(ps []protocol.PlacementData) int {
 	return n
 }
 
-// Placements are computed client-side (Plan 12), so the client's own
+// Placements are computed client-side (Plan 12)), so the client's own
 // strip has to learn the mode. Carrying it on the snapshot is what
 // keeps two clients of different sizes agreeing about the layout, the
 // same argument that makes focus shared state.
 func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
-		FocusPaneID: 2,
-		Layout:      protocol.LayoutCards,
-	})
+		FocusPaneId: 2,
+		Layout:      protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 
 	cli.mu.Lock()
 	got := sliverCount(cli.placements)
@@ -69,12 +69,12 @@ func TestClientAppliesCardLayoutFromSnapshot(t *testing.T) {
 func TestClientRevertsToScrollLayout(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
-	})
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutScroll,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 
 	cli.mu.Lock()
 	got := sliverCount(cli.placements)
@@ -90,9 +90,9 @@ func TestClientRevertsToScrollLayout(t *testing.T) {
 func TestClientDefaultsToScrollLayout(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneId: 2,
+	}}})
 
 	cli.mu.Lock()
 	got := sliverCount(cli.placements)
@@ -108,29 +108,29 @@ func regionText(scr *fakeHostScreen, r image.Rectangle) string {
 	return strings.Join(compose.Text(scr, r), "\n")
 }
 
-func placementFor(cli *Client, paneID int) protocol.PlacementData {
+func placementFor(cli *Client, paneID int) *protocol.PlacementData {
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
 	for _, p := range cli.placements {
-		if p.PaneID == paneID {
+		if int(p.PaneId) == paneID {
 			return p
 		}
 	}
-	return protocol.PlacementData{}
+	return nil
 }
 
 // newCardClient returns a client in card mode with three panes, each
 // carrying distinct content and a distinct title, focused on pane 2.
-func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client {
+func newCardClient(t *testing.T, cols, rows int, titles map[int32]string) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:      threeColumns(),
-		FocusPaneID:  2,
-		Layout:       protocol.LayoutCards,
+		FocusPaneId:  2,
+		Layout:       protocol.LayoutMode_LAYOUT_CARDS,
 		PaneTitles:   titles,
-		PaneStatuses: map[int]string{1: "✓", 2: " ", 3: "»"},
-	})
+		PaneStatuses: map[int32]string{1: "✓", 2: " ", 3: "»"},
+	}}})
 	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
 	cli.HandleServerMsg(paneUpdate(3, 30, 10, "CONTENT-THREE"))
@@ -141,18 +141,18 @@ func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client 
 // so a partially occluded pane still shows its left edge and header.
 func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	const cols, rows = 120, 16
-	cli := newCardClient(t, cols, rows, map[int]string{1: "deploying", 3: "compiling"})
+	cli := newCardClient(t, cols, rows, map[int32]string{1: "deploying", 3: "compiling"})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)
 
 	p1 := placementFor(cli, 1)
-	if p1.Kind != protocol.PlacementFull {
+	if p1.Kind != protocol.PlacementKind_PLACEMENT_FULL {
 		t.Fatalf("pane 1 is %v, expected PlacementFull for overlapping cards", p1.Kind)
 	}
 
 	// Check just the first row for the header
-	headerRect := image.Rect(p1.Dst.Min.X, 0, p1.Dst.Max.X, 1)
+	headerRect := image.Rect(p1.Dst.Decode().Min.X, 0, p1.Dst.Decode().Max.X, 1)
 	headerText := regionText(scr, headerRect)
 	if !strings.Contains(headerText, "deploy") {
 		t.Errorf("card header does not show the title:\n%s", headerText)
@@ -162,7 +162,7 @@ func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	}
 
 	// Check the left visible edge for content
-	sliverRect := image.Rect(p1.Dst.Min.X, 1, p1.Dst.Min.X+4, p1.Dst.Max.Y)
+	sliverRect := image.Rect(p1.Dst.Decode().Min.X, 1, p1.Dst.Decode().Min.X+4, p1.Dst.Decode().Max.Y)
 	sliverText := regionText(scr, sliverRect)
 	if !strings.Contains(sliverText, "CONT") {
 		t.Errorf("card sliver does not show pane content:\n%s", sliverText)
@@ -173,12 +173,12 @@ func TestSliverRendersGlyphAndTitle(t *testing.T) {
 // looks like a rendering bug.
 func TestSliverWithoutATitleStillRenders(t *testing.T) {
 	const cols, rows = 120, 16
-	cli := newCardClient(t, cols, rows, map[int]string{})
+	cli := newCardClient(t, cols, rows, map[int32]string{})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)
 
-	headerRect := image.Rect(placementFor(cli, 1).Dst.Min.X, 0, placementFor(cli, 1).Dst.Max.X, 1)
+	headerRect := image.Rect(placementFor(cli, 1).Dst.Decode().Min.X, 0, placementFor(cli, 1).Dst.Decode().Max.X, 1)
 	got := regionText(scr, headerRect)
 	if strings.TrimSpace(got) == "" {
 		t.Error("a titleless card rendered nothing in its header")
@@ -191,12 +191,12 @@ func TestSliverWithoutATitleStillRenders(t *testing.T) {
 // The focused card is the one you are actually looking at.
 func TestFocusedCardRendersContentNotChrome(t *testing.T) {
 	const cols, rows = 120, 16
-	cli := newCardClient(t, cols, rows, map[int]string{2: "focused title"})
+	cli := newCardClient(t, cols, rows, map[int32]string{2: "focused title"})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)
 
-	got := regionText(scr, placementFor(cli, 2).Dst)
+	got := regionText(scr, placementFor(cli, 2).Dst.Decode())
 	// We expect "ONTENT-TWO" because the left border overwrites the first column ('C').
 	if !strings.Contains(got, "ONTENT-TWO") {
 		t.Errorf("focused card is not showing its content:\n%s", got)
@@ -213,23 +213,23 @@ func TestHigherZSurfaceWinsAtOverlappingCells(t *testing.T) {
 	// Pane 1 is focused (Z=1).
 	// We directly invoke composeFrameLocked with a slice where Z=1 comes FIRST
 	// and Z=0 comes SECOND, both covering overlapping columns [10..30).
-	pFocused := protocol.PlacementData{
-		PaneID: 1,
-		Src:    image.Rect(0, 0, 30, 10),
-		Dst:    image.Rect(0, 1, 30, 9),
+	pFocused := &protocol.PlacementData{
+		PaneId: 1,
+		Src:    protocol.EncodeRectangle(image.Rect(0, 0, 30, 10)),
+		Dst:    protocol.EncodeRectangle(image.Rect(0, 1, 30, 9)),
 		Z:      1,
-		Kind:   protocol.PlacementFull,
+		Kind:   protocol.PlacementKind_PLACEMENT_FULL,
 	}
-	pBackground := protocol.PlacementData{
-		PaneID: 2,
-		Src:    image.Rect(0, 0, 30, 10),
-		Dst:    image.Rect(10, 1, 40, 9),
+	pBackground := &protocol.PlacementData{
+		PaneId: 2,
+		Src:    protocol.EncodeRectangle(image.Rect(0, 0, 30, 10)),
+		Dst:    protocol.EncodeRectangle(image.Rect(10, 1, 40, 9)),
 		Z:      0,
-		Kind:   protocol.PlacementFull,
+		Kind:   protocol.PlacementKind_PLACEMENT_FULL,
 	}
 
 	st := frameState{
-		placements:  []protocol.PlacementData{pFocused, pBackground},
+		placements:  []*protocol.PlacementData{pFocused, pBackground},
 		focusPaneID: 1,
 	}
 
@@ -241,7 +241,7 @@ func TestHigherZSurfaceWinsAtOverlappingCells(t *testing.T) {
 	cli.composeFrameLocked(scr, st)
 	cli.mu.Unlock()
 
-	// In the overlap region [10..30) at row 1, Pane 1 (Z=1) must win over Pane 2 (Z=0),
+	// In the overlap region [10..30) at row 1, Pane 1 (Z=1) must win over Pane 2 (Z=0)),
 	// even though Pane 2 was after Pane 1 in st.placements.
 	sampleX := 20
 	c := scr.CellAt(sampleX, 1)
@@ -262,12 +262,12 @@ func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
 	// Narrow enough that the unfocused column is clipped.
 	const cols, rows = 45, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-		PaneTitles:  map[int]string{2: "should not appear"},
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+		PaneTitles:  map[int32]string{2: "should not appear"},
+	}}})
 	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
 
@@ -298,13 +298,13 @@ func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	// A 15-cell sliver parked in the middle of a wide blank surface,
 	// so anything it writes outside its bounds is visible.
 	p := &protocol.PlacementData{
-		PaneID: 7,
-		Src:    image.Rect(0, 0, 15, 10),
-		Dst:    image.Rect(20, 1, 35, 11),
-		Kind:   protocol.PlacementSliver,
+		PaneId: 7,
+		Src:    protocol.EncodeRectangle(image.Rect(0, 0, 15, 10)),
+		Dst:    protocol.EncodeRectangle(image.Rect(20, 1, 35, 11)),
+		Kind:   protocol.PlacementKind_PLACEMENT_SLIVER,
 	}
 	st := frameState{
-		placements:   []protocol.PlacementData{*p},
+		placements:   []*protocol.PlacementData{p},
 		focusPaneID:  1,
 		paneStatuses: map[int]string{7: "»"},
 		// 12 double-width runes: 12 runes but 24 cells, against 15.
@@ -318,20 +318,20 @@ func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {
-			inside := x >= p.Dst.Min.X && x < p.Dst.Max.X && y >= p.Dst.Min.Y && y < p.Dst.Max.Y
+			inside := x >= p.Dst.Decode().Min.X && x < p.Dst.Decode().Max.X && y >= p.Dst.Decode().Min.Y && y < p.Dst.Decode().Max.Y
 			if inside {
 				continue
 			}
 			c := scr.CellAt(x, y)
 			if c != nil && strings.TrimSpace(c.Content) != "" {
-				t.Fatalf("sliver wrote %q at (%d,%d), outside its rect %v",
-					c.Content, x, y, p.Dst)
+				t.Fatalf("sliver wrote %q at (%d,%d)), outside its rect %v",
+					c.Content, x, y, p.Dst.Decode())
 			}
 		}
 	}
 
 	// And it must have drawn something inside.
-	if !strings.ContainsAny(regionText(scr, p.Dst), "日") {
+	if !strings.ContainsAny(regionText(scr, p.Dst.Decode()), "日") {
 		t.Error("the sliver drew none of the title at all")
 	}
 }
@@ -340,15 +340,15 @@ func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	const cols, rows = 60, 12
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 
-	p := protocol.PlacementData{
-		PaneID: 7,
-		Src:    image.Rect(0, 0, 15, 10),
-		Dst:    image.Rect(20, 1, 35, 11),
-		Kind:   protocol.PlacementFull,
+	p := &protocol.PlacementData{
+		PaneId: 7,
+		Src:    protocol.EncodeRectangle(image.Rect(0, 0, 15, 10)),
+		Dst:    protocol.EncodeRectangle(image.Rect(20, 1, 35, 11)),
+		Kind:   protocol.PlacementKind_PLACEMENT_FULL,
 		Z:      1,
 	}
 	st := frameState{
-		placements:   []protocol.PlacementData{p},
+		placements:   []*protocol.PlacementData{p},
 		focusPaneID:  7,
 		paneStatuses: map[int]string{7: "»"},
 		// 12 double-width runes: 12 runes but 24 cells, against 15.
@@ -365,7 +365,7 @@ func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 		inside := x >= 20 && x < 35
 		if !inside {
 			if c := scr.CellAt(x, 0); c != nil && c.Content != "" && c.Content != " " {
-				t.Fatalf("header wrote %q at (%d,0), outside its rect [20..35)", c.Content, x)
+				t.Fatalf("header wrote %q at (%d,0)), outside its rect [20..35)", c.Content, x)
 			}
 		}
 	}
@@ -375,10 +375,10 @@ func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 // falling below MinSliverWidth rather than on a fixed width running
 // off the edge, so a fixture that overflows needs enough columns for
 // the division to round under the floor -- see the callers.
-func manyColumns(n int) []protocol.ColumnData {
-	out := make([]protocol.ColumnData, 0, n)
+func manyColumns(n int) []*protocol.ColumnData {
+	out := make([]*protocol.ColumnData, 0, n)
 	for i := 1; i <= n; i++ {
-		out = append(out, protocol.ColumnData{PaneID: i, Width: 30, Height: 10})
+		out = append(out, &protocol.ColumnData{PaneId: int32(i), Width: 30, Height: 10})
 	}
 	return out
 }
@@ -386,11 +386,11 @@ func manyColumns(n int) []protocol.ColumnData {
 func cardClientWithColumns(t *testing.T, cols, rows, n, focus int) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(n),
-		FocusPaneID: focus,
-		Layout:      protocol.LayoutCards,
-	})
+		FocusPaneId: int32(focus),
+		Layout:      protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 	return cli
 }
 
@@ -436,7 +436,7 @@ func TestHiddenCardMarkerIsRendered(t *testing.T) {
 
 func TestNoMarkerWhenEverythingFits(t *testing.T) {
 	const cols, rows = 120, 16
-	cli := newCardClient(t, cols, rows, map[int]string{})
+	cli := newCardClient(t, cols, rows, map[int32]string{})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)
@@ -456,11 +456,11 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 	// focus on the first leaves about twelve fully off the right edge.
 	const cols, rows = 60, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(14),
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 
 	cli.mu.Lock()
 	_, right := cli.hiddenCountsLocked(cli.frameStateLocked())
@@ -487,11 +487,11 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 func TestScrollModeNoMarkerWhenEverythingFits(t *testing.T) {
 	const cols, rows = 120, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     manyColumns(3),
-		FocusPaneID: 1,
-		Layout:      protocol.LayoutScroll,
-	})
+		FocusPaneId: 1,
+		Layout:      protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)
@@ -516,9 +516,9 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 		t.Fatal("fixture should overflow and show a marker before the empty snapshot")
 	}
 
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: nil, FocusPaneID: 0, Layout: protocol.LayoutCards,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: nil, FocusPaneId: 0, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 
 	scr2 := newFakeHostScreen(cols, rows)
 	cli.Draw(scr2)
@@ -532,13 +532,13 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 // next snapshot renders under the previous strategy.
 func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 60, 16, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: nil, Layout: protocol.LayoutCards})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{Columns: nil, Layout: protocol.LayoutMode_LAYOUT_CARDS}}})
 
 	cli.mu.Lock()
 	got := cli.layoutMode
 	cli.mu.Unlock()
-	if got != protocol.LayoutCards {
-		t.Errorf("layoutMode = %v after an empty card-mode snapshot, want %v", got, protocol.LayoutCards)
+	if got != protocol.LayoutMode_LAYOUT_CARDS {
+		t.Errorf("layoutMode = %v after an empty card-mode snapshot, want %v", got, protocol.LayoutMode_LAYOUT_CARDS)
 	}
 }
 
@@ -550,14 +550,14 @@ func TestEmptySnapshotStillAppliesLayoutMode(t *testing.T) {
 func TestCardsDrawDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 60, Height: 10},
-			{PaneID: 2, Width: 60, Height: 10},
-			{PaneID: 3, Width: 60, Height: 10},
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: []*protocol.ColumnData{
+			{PaneId: 1, Width: 60, Height: 10},
+			{PaneId: 2, Width: 60, Height: 10},
+			{PaneId: 3, Width: 60, Height: 10},
 		},
-		FocusPaneID: 2, Layout: protocol.LayoutCards,
-	})
+		FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)
@@ -573,13 +573,13 @@ func TestCardsDrawDividers(t *testing.T) {
 func TestScrollModeStillDrawsDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 30, Height: 10},
-			{PaneID: 2, Width: 30, Height: 10},
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: []*protocol.ColumnData{
+			{PaneId: 1, Width: 30, Height: 10},
+			{PaneId: 2, Width: 30, Height: 10},
 		},
-		FocusPaneID: 1, Layout: protocol.LayoutScroll,
-	})
+		FocusPaneId: 1, Layout: protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 
 	scr := newFakeHostScreen(cols, rows)
 	cli.Draw(scr)

@@ -81,14 +81,15 @@ func TestSocketListenerAndConnRoundTrip(t *testing.T) {
 	}
 
 	// Send client -> server message (MsgAttach)
-	attachMsg := protocol.MsgAttach{Cols: 80, Rows: 24}
+	attachMsg := &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: 80, Rows: 24}}}
 	if !clientConn.SendClient(ctx, attachMsg) {
 		t.Fatal("client SendClient failed")
 	}
 
 	select {
 	case msg := <-srvConn.ClientSendChan():
-		got, ok := msg.(protocol.MsgAttach)
+		got := msg.GetAttach()
+		ok := got != nil
 		if !ok || got.Cols != 80 || got.Rows != 24 {
 			t.Fatalf("got server msg %+v, want MsgAttach {80, 24}", msg)
 		}
@@ -97,16 +98,17 @@ func TestSocketListenerAndConnRoundTrip(t *testing.T) {
 	}
 
 	// Send server -> client message (MsgLayoutSnapshot)
-	snapMsg := protocol.MsgLayoutSnapshot{FocusPaneID: 42}
+	snapMsg := &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{FocusPaneId: 42}}}
 	if !srvConn.SendServer(ctx, snapMsg) {
 		t.Fatal("server SendServer failed")
 	}
 
 	select {
 	case msg := <-clientConn.ServerSendChan():
-		got, ok := msg.(protocol.MsgLayoutSnapshot)
-		if !ok || got.FocusPaneID != 42 {
-			t.Fatalf("got client msg %+v, want MsgLayoutSnapshot {FocusPaneID: 42}", msg)
+		got := msg.GetLayoutSnapshot()
+		ok := got != nil
+		if !ok || got.FocusPaneId != 42 {
+			t.Fatalf("got client msg %+v, want MsgLayoutSnapshot {FocusPaneId: 42}}}", msg)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for server message on client")
@@ -126,10 +128,12 @@ func TestServerSendReturnsOnceClosed(t *testing.T) {
 	defer theirs.Close()
 	// No pumps: nothing drains ServerSend, as with a stuck write pump.
 	sc := transport.NewServerSocketConn(ours, 1)
-	sc.SendServer(context.Background(), protocol.MsgPaneClosed{PaneID: 1})
+	sc.SendServer(context.Background(), &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneClosed{PaneClosed: &protocol.MsgPaneClosed{PaneId: 1}}})
 
 	done := make(chan bool, 1)
-	go func() { done <- sc.SendServer(context.Background(), protocol.MsgPaneClosed{PaneID: 2}) }()
+	go func() {
+		done <- sc.SendServer(context.Background(), &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneClosed{PaneClosed: &protocol.MsgPaneClosed{PaneId: 2}}})
+	}()
 	time.Sleep(50 * time.Millisecond)
 	_ = sc.Close()
 

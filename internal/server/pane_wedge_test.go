@@ -169,7 +169,7 @@ func TestChildNotReadingStdinDoesNotFreezeServer(t *testing.T) {
 	}()
 
 	// Attach so server spawns 2 panes running shell
-	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	tp.SendClient(ctx, &protocol.ClientEnvelope{Payload: &protocol.ClientEnvelope_Attach{Attach: &protocol.MsgAttach{Cols: int32(80), Rows: int32(24)}}})
 
 	// Wait for layout snapshot
 	select {

@@ -279,7 +279,7 @@ func (p *Pane) Title() string { return p.grid.Title() }
 func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
 
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport.
-func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
+func (p *Pane) UpdateMessage() *protocol.ServerEnvelope {
 	p.resizeMu.Lock()
 	cols, rows := p.cols, p.rows
 	p.resizeMu.Unlock()
@@ -287,13 +287,13 @@ func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 	buf := uv.NewScreenBuffer(cols, rows)
 	p.Draw(buf, image.Rect(0, 0, cols, rows))
 
-	lines := make([]protocol.LineData, rows)
+	lines := make([]*protocol.LineData, rows)
 	for y := 0; y < rows; y++ {
-		line := make(protocol.LineData, cols)
+		cells := make([]*protocol.CellData, cols)
 		for x := 0; x < cols; x++ {
 			c := buf.CellAt(x, y)
 			if c == nil {
-				line[x] = protocol.CellData{Content: " ", Width: 1}
+				cells[x] = &protocol.CellData{Content: " ", Width: 1}
 				continue
 			}
 			content := c.Content
@@ -304,26 +304,26 @@ func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 			if w <= 0 {
 				w = 1
 			}
-			line[x] = protocol.CellData{
+			cells[x] = &protocol.CellData{
 				Content: content,
-				Width:   w,
+				Width:   int32(w),
 				Style:   protocol.EncodeStyle(c.Style),
 			}
 		}
-		lines[y] = line
+		lines[y] = &protocol.LineData{Cells: cells}
 	}
 
 	cp := p.CursorPosition()
-	return protocol.MsgPaneUpdate{
-		PaneID:        p.id,
-		Cols:          cols,
-		Rows:          rows,
+	return &protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_PaneUpdate{PaneUpdate: &protocol.MsgPaneUpdate{
+		PaneId:        int32(p.id),
+		Cols:          int32(cols),
+		Rows:          int32(rows),
 		Lines:         lines,
-		CursorX:       cp.X,
-		CursorY:       cp.Y,
+		CursorX:       int32(cp.X),
+		CursorY:       int32(cp.Y),
 		CursorVisible: p.CursorVisible(),
 		MouseTracking: p.grid.MouseTracking(),
-	}
+	}}}
 }
 
 // Generation reports the grid's change counter; see term.Grid.Generation.

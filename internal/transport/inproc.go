@@ -3,13 +3,15 @@ package transport
 
 import (
 	"context"
+
+	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
 // ClientMessage wraps any message sent from client to server.
-type ClientMessage interface{}
+type ClientMessage = *protocol.ClientEnvelope
 
 // ServerMessage wraps any message sent from server to client.
-type ServerMessage interface{}
+type ServerMessage = *protocol.ServerEnvelope
 
 // Transport represents a bi-directional communication channel between client and server.
 type Transport interface {

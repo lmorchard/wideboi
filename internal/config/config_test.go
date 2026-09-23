@@ -29,7 +29,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.Layout != "cards" {
 		t.Errorf("Layout = %q, want cards", cfg.Layout)
 	}
-	if cfg.LayoutMode != protocol.LayoutCards {
+	if cfg.LayoutMode != protocol.LayoutMode_LAYOUT_CARDS {
 		t.Errorf("LayoutMode = %v, want LayoutCards", cfg.LayoutMode)
 	}
 	if cfg.Prefix != "ctrl+b" {

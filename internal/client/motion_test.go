@@ -32,17 +32,17 @@ func newMotionClient(t *testing.T, cols, rows int) *Client {
 // focusTo moves focus by replaying a layout snapshot, which is what
 // the server sends and what arms an animation.
 func focusTo(cli *Client, paneID int) {
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
-		FocusPaneID: paneID,
-		Layout:      protocol.LayoutCards,
-	})
+		FocusPaneId: int32(paneID),
+		Layout:      protocol.LayoutMode_LAYOUT_CARDS,
+	}}})
 }
 
-func rectOf(ps []protocol.PlacementData, paneID int) image.Rectangle {
+func rectOf(ps []*protocol.PlacementData, paneID int) image.Rectangle {
 	for _, p := range ps {
-		if p.PaneID == paneID {
-			return p.Dst
+		if int(p.PaneId) == paneID {
+			return p.Dst.Decode()
 		}
 	}
 	return image.Rectangle{}
@@ -54,38 +54,38 @@ func rectOf(ps []protocol.PlacementData, paneID int) image.Rectangle {
 // focus change repositions every pane -- the screen showed two
 // different geometries at once.
 func TestMotionInterpolatesTowardTheTarget(t *testing.T) {
-	from := []protocol.PlacementData{{PaneID: 1, Dst: image.Rect(0, 1, 10, 11), Src: image.Rect(0, 0, 10, 10)}}
-	to := []protocol.PlacementData{{PaneID: 1, Dst: image.Rect(40, 1, 90, 11), Src: image.Rect(0, 0, 50, 10)}}
+	from := []*protocol.PlacementData{{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 10, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 10, 10))}}
+	to := []*protocol.PlacementData{{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(40, 1, 90, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 50, 10))}}
 
-	if got := rectOf(interpolate(from, to, 0), 1); got != from[0].Dst {
+	if got := rectOf(interpolate(from, to, 0), 1); got != from[0].Dst.Decode() {
 		t.Errorf("at t=0 got %v, want the source rect %v", got, from[0].Dst)
 	}
-	if got := rectOf(interpolate(from, to, 1), 1); got != to[0].Dst {
+	if got := rectOf(interpolate(from, to, 1), 1); got != to[0].Dst.Decode() {
 		t.Errorf("at t=1 got %v, want the target rect %v", got, to[0].Dst)
 	}
 
 	mid := rectOf(interpolate(from, to, 0.5), 1)
-	if !(mid.Min.X > from[0].Dst.Min.X && mid.Min.X < to[0].Dst.Min.X) {
-		t.Errorf("midpoint X %d is not between %d and %d", mid.Min.X, from[0].Dst.Min.X, to[0].Dst.Min.X)
+	if !(mid.Min.X > from[0].Dst.Decode().Min.X && mid.Min.X < to[0].Dst.Decode().Min.X) {
+		t.Errorf("midpoint X %d is not between %d and %d", mid.Min.X, from[0].Dst.Decode().Min.X, to[0].Dst.Decode().Min.X)
 	}
-	if !(mid.Dx() > from[0].Dst.Dx() && mid.Dx() < to[0].Dst.Dx()) {
-		t.Errorf("midpoint width %d is not between %d and %d", mid.Dx(), from[0].Dst.Dx(), to[0].Dst.Dx())
+	if !(mid.Dx() > from[0].Dst.Decode().Dx() && mid.Dx() < to[0].Dst.Decode().Dx()) {
+		t.Errorf("midpoint width %d is not between %d and %d", mid.Dx(), from[0].Dst.Decode().Dx(), to[0].Dst.Decode().Dx())
 	}
 }
 
 // A pane that only exists in the target grows from nothing rather
 // than appearing at full size part-way through.
 func TestMotionGrowsAnAddedPaneFromZero(t *testing.T) {
-	from := []protocol.PlacementData{{PaneID: 1, Dst: image.Rect(0, 1, 40, 11), Src: image.Rect(0, 0, 40, 10)}}
-	to := []protocol.PlacementData{
-		{PaneID: 1, Dst: image.Rect(0, 1, 40, 11), Src: image.Rect(0, 0, 40, 10)},
-		{PaneID: 2, Dst: image.Rect(40, 1, 80, 11), Src: image.Rect(0, 0, 40, 10)},
+	from := []*protocol.PlacementData{{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 40, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 40, 10))}}
+	to := []*protocol.PlacementData{
+		{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 40, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 40, 10))},
+		{PaneId: 2, Dst: protocol.EncodeRectangle(image.Rect(40, 1, 80, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 40, 10))},
 	}
 
 	if got := rectOf(interpolate(from, to, 0), 2).Dx(); got != 0 {
 		t.Errorf("added pane starts %d cells wide, want 0", got)
 	}
-	if got := rectOf(interpolate(from, to, 1), 2); got != to[1].Dst {
+	if got := rectOf(interpolate(from, to, 1), 2); got != to[1].Dst.Decode() {
 		t.Errorf("added pane ends at %v, want %v", got, to[1].Dst)
 	}
 	if got := rectOf(interpolate(from, to, 0.5), 2).Dx(); got <= 0 || got >= 40 {
@@ -142,10 +142,10 @@ func TestNoMotionWhenPlacementsAreUnchanged(t *testing.T) {
 	const cols, rows = 90, 12
 	cli := newMotionClient(t, cols, rows)
 
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 1, Layout: protocol.LayoutCards,
-		PaneStatuses: map[int]string{1: "»"},
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: threeColumns(), FocusPaneId: 1, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+		PaneStatuses: map[int32]string{1: "»"},
+	}}})
 
 	cli.mu.Lock()
 	running := cli.motion != nil
@@ -211,9 +211,9 @@ func TestNoMotionWhenFocusMovesButGeometryDoesNot(t *testing.T) {
 	const cols, rows = 60, 12
 	cli := newTestClientWithTwoPanes(t, cols, rows) // both visible
 
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: twoColumns(), FocusPaneID: 2, Layout: protocol.LayoutScroll,
-	})
+	cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+		Columns: twoColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_SCROLL,
+	}}})
 
 	cli.mu.Lock()
 	running := cli.motion != nil
@@ -248,10 +248,10 @@ func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
 	// Same geometry, different glyphs -- exactly what
 	// broadcastLayoutIfStatusChanged sends while a pane is working.
 	for i := 0; i < 3; i++ {
-		cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-			Columns: threeColumns(), FocusPaneID: 2, Layout: protocol.LayoutCards,
-			PaneStatuses: map[int]string{2: "»"},
-		})
+		cli.HandleServerMsg(&protocol.ServerEnvelope{Payload: &protocol.ServerEnvelope_LayoutSnapshot{LayoutSnapshot: &protocol.MsgLayoutSnapshot{
+			Columns: threeColumns(), FocusPaneId: 2, Layout: protocol.LayoutMode_LAYOUT_CARDS,
+			PaneStatuses: map[int32]string{2: "»"},
+		}}})
 	}
 
 	cli.mu.Lock()
@@ -273,14 +273,14 @@ func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
 // come back sorted with the highest Z last or a sliver paints over
 // the pane the user is looking at.
 func TestInterpolatedPlacementsArePaintedBackToFront(t *testing.T) {
-	from := []protocol.PlacementData{
-		{PaneID: 1, Dst: image.Rect(0, 1, 10, 11), Src: image.Rect(0, 0, 10, 10), Z: 0},
-		{PaneID: 2, Dst: image.Rect(10, 1, 70, 11), Src: image.Rect(0, 0, 60, 10), Z: 1},
+	from := []*protocol.PlacementData{
+		{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 10, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 10, 10)), Z: 0},
+		{PaneId: 2, Dst: protocol.EncodeRectangle(image.Rect(10, 1, 70, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 60, 10)), Z: 1},
 	}
 	// Focus moves left: pane 1 becomes the wide one.
-	to := []protocol.PlacementData{
-		{PaneID: 1, Dst: image.Rect(0, 1, 60, 11), Src: image.Rect(0, 0, 60, 10), Z: 1},
-		{PaneID: 2, Dst: image.Rect(60, 1, 70, 11), Src: image.Rect(0, 0, 10, 10), Z: 0},
+	to := []*protocol.PlacementData{
+		{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 60, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 60, 10)), Z: 1},
+		{PaneId: 2, Dst: protocol.EncodeRectangle(image.Rect(60, 1, 70, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 10, 10)), Z: 0},
 	}
 
 	for _, tt := range []float64{0, 0.25, 0.5, 0.75, 1} {
@@ -297,12 +297,12 @@ func TestInterpolatedPlacementsArePaintedBackToFront(t *testing.T) {
 // An outgoing pane must not be painted over the survivors just
 // because it was appended last.
 func TestCollapsingPaneDoesNotPaintOverTheRest(t *testing.T) {
-	from := []protocol.PlacementData{
-		{PaneID: 1, Dst: image.Rect(0, 1, 40, 11), Src: image.Rect(0, 0, 40, 10), Z: 1},
-		{PaneID: 9, Dst: image.Rect(40, 1, 80, 11), Src: image.Rect(0, 0, 40, 10), Z: 0},
+	from := []*protocol.PlacementData{
+		{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 40, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 40, 10)), Z: 1},
+		{PaneId: 9, Dst: protocol.EncodeRectangle(image.Rect(40, 1, 80, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 40, 10)), Z: 0},
 	}
-	to := []protocol.PlacementData{
-		{PaneID: 1, Dst: image.Rect(0, 1, 80, 11), Src: image.Rect(0, 0, 80, 10), Z: 1},
+	to := []*protocol.PlacementData{
+		{PaneId: 1, Dst: protocol.EncodeRectangle(image.Rect(0, 1, 80, 11)), Src: protocol.EncodeRectangle(image.Rect(0, 0, 80, 10)), Z: 1},
 	}
 
 	got := interpolate(from, to, 0.5)
@@ -367,16 +367,16 @@ func TestRightToLeftMotionRetainsCardContent(t *testing.T) {
 	foundTwo := false
 	foundOne := false
 	for _, p := range placements {
-		if p.PaneID == 2 {
+		if int(p.PaneId) == 2 {
 			foundTwo = true
-			if p.Kind != protocol.PlacementFull {
+			if p.Kind != protocol.PlacementKind_PLACEMENT_FULL {
 				t.Errorf("contracting card (Pane 2) transitioned to Kind=%v on frame 1, expected PlacementFull", p.Kind)
 			}
 			if p.Z != 0 {
 				t.Errorf("contracting card (Pane 2) transitioned to Z=%v on frame 1, expected 0 to fall back to natural deck order", p.Z)
 			}
 		}
-		if p.PaneID == 1 {
+		if int(p.PaneId) == 1 {
 			foundOne = true
 			if p.Z != 0 {
 				t.Errorf("expanding card (Pane 1) transitioned to Z=%v on frame 1, expected 0 to fall back to natural deck order", p.Z)
