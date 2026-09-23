@@ -379,3 +379,108 @@ func TestLoadTomlQuitUnbound(t *testing.T) {
 		t.Errorf("err = %v, want one saying quit cannot be unbound", err)
 	}
 }
+
+// emptyConfigHome keeps a developer's own ~/.config/wideboi/config.toml
+// out of a test that asserts where the socket resolves.
+func emptyConfigHome(t *testing.T, env map[string]string) map[string]string {
+	t.Helper()
+	out := map[string]string{"XDG_CONFIG_HOME": t.TempDir()}
+	for k, v := range env {
+		out[k] = v
+	}
+	return out
+}
+
+func TestSessionNameMapsToASocketInTheSessionDir(t *testing.T) {
+	cfg, _, err := config.Load(config.ConfigFlags{Session: "work"}, mockEnv(emptyConfigHome(t, nil)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := filepath.Join(config.SessionDir(), "work.sock")
+	if cfg.Socket != want || config.SessionSocketPath("work") != want {
+		t.Errorf("Socket = %q, SessionSocketPath = %q, want %q", cfg.Socket, config.SessionSocketPath("work"), want)
+	}
+	if config.DefaultSocketPath() != config.SessionSocketPath("default") {
+		t.Errorf("DefaultSocketPath = %q, want the session called default", config.DefaultSocketPath())
+	}
+}
+
+// Each precedence layer may name a session or give a path. A later
+// layer overrides an earlier one; both in one layer is ambiguous.
+func TestSessionAndSocketLayering(t *testing.T) {
+	cases := []struct {
+		name    string
+		toml    string
+		env     map[string]string
+		flags   config.ConfigFlags
+		want    string // socket; empty when wantErr
+		session string // resolved Session; empty when a path won
+		wantErr string
+	}{
+		{name: "default", want: config.DefaultSocketPath(), session: "default"},
+		{name: "toml session", toml: `session = "a"`, want: config.SessionSocketPath("a"), session: "a"},
+		{name: "env path beats toml session", toml: `session = "a"`,
+			env: map[string]string{"WIDEBOI_SOCK": "/tmp/x.sock"}, want: "/tmp/x.sock"},
+		{name: "flag session beats env path", env: map[string]string{"WIDEBOI_SOCK": "/tmp/x.sock"},
+			flags: config.ConfigFlags{Session: "b"}, want: config.SessionSocketPath("b"), session: "b"},
+		{name: "flag path beats env session", env: map[string]string{"WIDEBOI_SESSION": "a"},
+			flags: config.ConfigFlags{Socket: "/tmp/y.sock"}, want: "/tmp/y.sock"},
+		{name: "env session", env: map[string]string{"WIDEBOI_SESSION": "a"}, want: config.SessionSocketPath("a"), session: "a"},
+		{name: "both flags", flags: config.ConfigFlags{Session: "b", Socket: "/tmp/y.sock"}, wantErr: "not both"},
+		{name: "both env", env: map[string]string{"WIDEBOI_SESSION": "a", "WIDEBOI_SOCK": "/tmp/x.sock"}, wantErr: "not both"},
+		{name: "both toml", toml: "session = \"a\"\nsocket = \"/tmp/x.sock\"", wantErr: "not both"},
+		{name: "bad name", flags: config.ConfigFlags{Session: "../up"}, wantErr: "session name"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			flags := tc.flags
+			if tc.toml != "" {
+				flags.ConfigFile = filepath.Join(t.TempDir(), "config.toml")
+				if err := os.WriteFile(flags.ConfigFile, []byte(tc.toml), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, _, err := config.Load(flags, mockEnv(emptyConfigHome(t, tc.env)))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want one containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Socket != tc.want {
+				t.Errorf("Socket = %q, want %q", cfg.Socket, tc.want)
+			}
+			if cfg.Session != tc.session {
+				t.Errorf("Session = %q, want %q", cfg.Session, tc.session)
+			}
+		})
+	}
+}
+
+func TestSessionNameValidation(t *testing.T) {
+	for _, ok := range []string{"work", "a.b", "x_1", "default", "9", "a-b"} {
+		if !config.ValidSessionName(ok) {
+			t.Errorf("ValidSessionName(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{"", ".hidden", "-x", "a/b", "../up", "sp ace"} {
+		if config.ValidSessionName(bad) {
+			t.Errorf("ValidSessionName(%q) = true, want false", bad)
+		}
+	}
+}
+
+func TestSessionNameRecognisesOnlySessionDirSockets(t *testing.T) {
+	if name, ok := config.SessionName(config.SessionSocketPath("work")); !ok || name != "work" {
+		t.Errorf("SessionName(work's socket) = %q, %v; want work, true", name, ok)
+	}
+	if _, ok := config.SessionName("/tmp/elsewhere.sock"); ok {
+		t.Error("a socket outside the session dir was taken for a named session")
+	}
+	if _, ok := config.SessionName(filepath.Join(config.SessionDir(), "bad name.sock")); ok {
+		t.Error("an invalid name in the session dir was taken for a named session")
+	}
+}

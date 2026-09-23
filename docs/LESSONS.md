@@ -559,6 +559,23 @@ had made the `os.Remove` harmless. Nothing about the diff that added the
 override looked dangerous, because the dangerous line was somewhere else and
 unchanged.
 
+**The unlink is now guarded by a lock, not a probe (#86).** A dial probe
+answered "is anyone home?" but left a window between probe, remove and listen:
+two servers starting together could both find nothing, and the second would
+unlink the first's brand-new socket, orphaning a live session no attach could
+reach. Ownership is now an exclusive `flock` on `<socket>.lock`, held for the
+server's whole life (`NewSocketListener`). Two rules keep it sound:
+
+- **Never delete the lock file.** Unlinking a lock file lets a waiter lock the
+  old inode while a newcomer creates and locks a fresh one: two owners.
+- **Remove the socket before releasing the lock** in `Close`. The other order
+  lets a successor bind in the gap and have its socket unlinked by the dying
+  server.
+- **A new arbiter doesn't bind servers that predate it.** A server from an
+  older binary holds no lock, so taking the lock proves nothing about it. A
+  dial probe still runs under the lock, so a socket that answers is never
+  treated as a corpse.
+
 ## One green run is how a flaky suite presents
 
 This has now been paid for three times, in three different shapes:

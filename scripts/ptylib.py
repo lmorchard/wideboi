@@ -12,10 +12,12 @@ looks exactly like a hang in the thing under test.
 from __future__ import annotations
 
 import argparse
+import atexit
 import fcntl
 import os
 import pty
 import re
+import shutil
 import signal
 import struct
 import subprocess
@@ -331,3 +333,40 @@ def force_cleanup(pid: int) -> None:
     except ProcessLookupError:
         return
     wait_for_exit(pid, timeout=3.0)
+
+
+# Servers and clients log beside their sockets, so a suite's private
+# socket directory is also where its logs are. Removed at exit on
+# success; kept on failure, because the logs are the first thing to read.
+_RUN_FAILED = False
+
+
+def private_run_dir(prefix: str, parent: str | None = None) -> str:
+    """A directory private to this run for sockets, lock files and the
+    logs written beside them, under parent (default: the temp dir).
+    Removed at exit unless run_main saw a failure and something was
+    written into it."""
+    path = tempfile.mkdtemp(prefix=prefix, dir=parent)
+    atexit.register(_discard_run_dir, path)
+    return path
+
+
+def _discard_run_dir(path: str) -> None:
+    if _RUN_FAILED and os.path.isdir(path) and os.listdir(path):
+        print(f"logs kept in {path}", file=sys.stderr)
+        return
+    shutil.rmtree(path, True)
+
+
+def run_main(main) -> None:
+    """sys.exit(main()), recording a non-zero status or an uncaught
+    exception as a failure so private run dirs are kept."""
+    global _RUN_FAILED
+    try:
+        rc = main()
+    except BaseException:
+        _RUN_FAILED = True
+        raise
+    if rc:
+        _RUN_FAILED = True
+    sys.exit(rc)

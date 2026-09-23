@@ -68,3 +68,18 @@ func TestInfoDropsTraceAndDebug(t *testing.T) {
 		t.Errorf("info-level handler dropped an info line: %q", buf.String())
 	}
 }
+
+// Logs sit beside the socket, so sessions do not interleave in one
+// file and a harness's private socket directory gets private logs.
+func TestPathSitsBesideTheSocket(t *testing.T) {
+	cases := []struct{ socket, component, want string }{
+		{"/t/wideboi-501/default.sock", "server", "/t/wideboi-501/default.server.log"},
+		{"/x/work.sock", "client", "/x/work.client.log"},
+		{"/x/plain", "server", "/x/plain.server.log"}, // WIDEBOI_SOCK needn't end in .sock
+	}
+	for _, c := range cases {
+		if got := Path(c.socket, c.component); got != c.want {
+			t.Errorf("Path(%q, %q) = %q, want %q", c.socket, c.component, got, c.want)
+		}
+	}
+}

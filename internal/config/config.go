@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/lmorchard/wideboi/internal/keys"
@@ -18,7 +19,10 @@ import (
 
 // Config represents the resolved, fully-validated configuration for wideboi.
 type Config struct {
-	Socket       string              `toml:"socket"`
+	Socket string `toml:"socket"`
+	// Session is the resolved session name, or empty when a socket path
+	// was chosen instead. Socket is what is used.
+	Session      string              `toml:"session"`
 	Layout       string              `toml:"layout"`
 	LayoutMode   protocol.LayoutMode `toml:"-"`
 	Prefix       string              `toml:"prefix"`
@@ -42,6 +46,7 @@ type ConfigFlags struct {
 	Layout     string
 	Prefix     string
 	Socket     string
+	Session    string
 	Shell      string
 }
 
@@ -60,10 +65,67 @@ func DefaultConfigPath(getenv func(string) string) string {
 	return filepath.Join(home, ".config", "wideboi", "config.toml")
 }
 
-// DefaultSocketPath returns the standard Unix domain socket path for wideboi.
+// SessionDir holds the sockets of named sessions, and so their locks
+// and logs.
+func SessionDir() string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
+}
+
+// SessionSocketPath is where the session called name listens.
+func SessionSocketPath(name string) string {
+	return filepath.Join(SessionDir(), name+".sock")
+}
+
+// DefaultSocketPath is the session a bare wideboi means.
 func DefaultSocketPath() string {
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
-	return filepath.Join(dir, "default.sock")
+	return SessionSocketPath("default")
+}
+
+var sessionNameRE = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]*$`)
+
+// validateSessionName keeps a name a single, visible path element that
+// cannot be mistaken for a flag.
+func validateSessionName(name string) error {
+	if !sessionNameRE.MatchString(name) {
+		return fmt.Errorf("session name %q: use letters, digits, '_', '-' and '.', not starting with '.' or '-'", name)
+	}
+	return nil
+}
+
+// ValidSessionName reports whether -L could address name. Shared with
+// `wideboi ls`, so both apply one rule.
+func ValidSessionName(name string) bool {
+	return validateSessionName(name) == nil
+}
+
+// SessionName reports the name a user would pass to -L for socket, if
+// it is a named session's socket at all.
+func SessionName(socket string) (string, bool) {
+	if filepath.Dir(socket) != SessionDir() || !strings.HasSuffix(socket, ".sock") {
+		return "", false
+	}
+	name := strings.TrimSuffix(filepath.Base(socket), ".sock")
+	return name, ValidSessionName(name)
+}
+
+// applySessionLayer applies one precedence layer's choice of session:
+// a name, a path, or neither. Both at once is ambiguous, so it is an
+// error rather than a silent preference.
+func applySessionLayer(cfg *Config, layer, session, socket string) error {
+	switch {
+	case session != "" && socket != "":
+		return fmt.Errorf("%s sets both a session name (%q) and a socket path (%q); set one, not both", layer, session, socket)
+	case session != "":
+		if err := validateSessionName(session); err != nil {
+			return fmt.Errorf("%s: %w", layer, err)
+		}
+		cfg.Socket = SessionSocketPath(session)
+		cfg.Session = session
+	case socket != "":
+		cfg.Socket = socket
+		cfg.Session = ""
+	}
+	return nil
 }
 
 // Load loads and validates configuration by resolving precedence:
@@ -78,10 +140,11 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	// serves as the baseline default when not configured in TOML. WIDEBOI_SHELL
 	// is the wideboi-specific environment override that takes precedence over TOML.
 	cfg := Config{
-		Layout: "cards",
-		Prefix: "ctrl+b",
-		Socket: DefaultSocketPath(),
-		Shell:  getenv("SHELL"),
+		Layout:  "cards",
+		Prefix:  "ctrl+b",
+		Socket:  DefaultSocketPath(),
+		Session: "default",
+		Shell:   getenv("SHELL"),
 	}
 	if cfg.Shell == "" {
 		cfg.Shell = "/bin/sh"
@@ -112,8 +175,8 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			if fileCfg.Prefix != "" {
 				cfg.Prefix = fileCfg.Prefix
 			}
-			if fileCfg.Socket != "" {
-				cfg.Socket = fileCfg.Socket
+			if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
+				return Config{}, nil, err
 			}
 			if fileCfg.Shell != "" {
 				cfg.Shell = fileCfg.Shell
@@ -141,8 +204,8 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if envPrefix := getenv("WIDEBOI_PREFIX"); envPrefix != "" {
 		cfg.Prefix = envPrefix
 	}
-	if envSock := getenv("WIDEBOI_SOCK"); envSock != "" {
-		cfg.Socket = envSock
+	if err := applySessionLayer(&cfg, "environment", getenv("WIDEBOI_SESSION"), getenv("WIDEBOI_SOCK")); err != nil {
+		return Config{}, nil, err
 	}
 	if envShell := getenv("WIDEBOI_SHELL"); envShell != "" {
 		cfg.Shell = envShell
@@ -158,8 +221,8 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if flags.Prefix != "" {
 		cfg.Prefix = flags.Prefix
 	}
-	if flags.Socket != "" {
-		cfg.Socket = flags.Socket
+	if err := applySessionLayer(&cfg, "command line", flags.Session, flags.Socket); err != nil {
+		return Config{}, nil, err
 	}
 	if flags.Shell != "" {
 		cfg.Shell = flags.Shell

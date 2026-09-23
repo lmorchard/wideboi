@@ -2,9 +2,11 @@ package transport_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,4 +143,120 @@ func TestServerSendReturnsOnceClosed(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("SendServer stayed blocked after Close")
 	}
+}
+
+// shortTempDir is a private directory short enough for a socket path:
+// darwin caps sun_path at 104 bytes, and t.TempDir() under /var/folders
+// can exceed it.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "wb")
+	if err != nil {
+		t.Fatalf("MkdirTemp failed: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
+// A second server for a path must not probe, unlink or rebind it while
+// the first is alive (#86). Two opens of one file conflict under flock
+// even within one process, so this exercises the real exclusion.
+func TestSecondListenerIsRefusedAndLeavesTheSocketAlone(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "s.sock")
+	first, err := transport.NewSocketListener(path)
+	if err != nil {
+		t.Fatalf("first listener: %v", err)
+	}
+	defer first.Close()
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	second, err := transport.NewSocketListener(path)
+	if err == nil {
+		second.Close()
+		t.Fatal("a second listener bound a path whose owner is alive")
+	}
+	if !errors.Is(err, transport.ErrSessionTaken) {
+		t.Fatalf("second listener: err = %v, want ErrSessionTaken", err)
+	}
+	if !strings.Contains(err.Error(), "already listening") {
+		t.Errorf("message %q lost 'already listening'", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("the first listener's socket was replaced or removed (err %v)", err)
+	}
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("first listener unreachable: %v", err)
+	}
+	c.Close()
+}
+
+func TestListenerRebindsOnceTheOwnerCloses(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "s.sock")
+	first, err := transport.NewSocketListener(path)
+	if err != nil {
+		t.Fatalf("first listener: %v", err)
+	}
+	first.Close()
+	second, err := transport.NewSocketListener(path)
+	if err != nil {
+		t.Fatalf("rebinding after the owner closed: %v", err)
+	}
+	second.Close()
+}
+
+// A SIGKILLed server runs no cleanup, so it leaves its socket file --
+// but the kernel drops its lock, and the next server reclaims the path.
+func TestStaleSocketWithoutALockIsReclaimed(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "s.sock")
+	l, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	l.(*net.UnixListener).SetUnlinkOnClose(false)
+	l.Close()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("fixture: the corpse socket is missing: %v", err)
+	}
+
+	sl, err := transport.NewSocketListener(path)
+	if err != nil {
+		t.Fatalf("reclaiming a stale socket: %v", err)
+	}
+	defer sl.Close()
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("reclaimed socket unreachable: %v", err)
+	}
+	c.Close()
+}
+
+// A server from a binary older than the lock serves its socket without
+// holding one. Taking the lock must not be read as "this socket is a
+// corpse" while something still answers it.
+func TestLiveSocketWithoutALockIsLeftAlone(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "s.sock")
+	old, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer old.Close()
+
+	sl, err := transport.NewSocketListener(path)
+	if err == nil {
+		sl.Close()
+		t.Fatal("bound over a live, unlocked socket")
+	}
+	if !errors.Is(err, transport.ErrSessionTaken) {
+		t.Fatalf("err = %v, want ErrSessionTaken", err)
+	}
+	c, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatalf("the old server's socket was removed: %v", err)
+	}
+	c.Close()
 }

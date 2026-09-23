@@ -22,7 +22,12 @@ import (
 // end too, it would hold its own owner connection open, and the EOF
 // that tells it its owner died would never come. ExtraFiles clears the
 // flag on fd 3 in the child, which is the one copy it should have.
-func spawnServer(args []string) (net.Conn, error) {
+//
+// exited delivers the server's exit code once it has been reaped (-1 if
+// a signal killed it). An owner whose server quits before saying
+// anything reads it to tell "another server already had the session"
+// from a real failure.
+func spawnServer(args []string) (conn net.Conn, exited <-chan int, err error) {
 	syscall.ForkLock.RLock()
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err == nil {
@@ -31,7 +36,7 @@ func spawnServer(args []string) (net.Conn, error) {
 	}
 	syscall.ForkLock.RUnlock()
 	if err != nil {
-		return nil, fmt.Errorf("socketpair: %w", err)
+		return nil, nil, fmt.Errorf("socketpair: %w", err)
 	}
 	ours := os.NewFile(uintptr(fds[0]), "wideboi-owner")
 	theirs := os.NewFile(uintptr(fds[1]), "wideboi-owner-server")
@@ -40,7 +45,7 @@ func spawnServer(args []string) (net.Conn, error) {
 
 	exe, err := os.Executable()
 	if err != nil {
-		return nil, fmt.Errorf("locating the wideboi binary: %w", err)
+		return nil, nil, fmt.Errorf("locating the wideboi binary: %w", err)
 	}
 	cmd := exec.Command(exe, serverArgs(args)...)
 	cmd.ExtraFiles = []*os.File{theirs}
@@ -50,16 +55,24 @@ func spawnServer(args []string) (net.Conn, error) {
 	// Stdin, Stdout and Stderr are left nil, which is /dev/null. The
 	// server logs to its file.
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting wideboi server: %w", err)
+		return nil, nil, fmt.Errorf("starting wideboi server: %w", err)
 	}
 	// Reap it if it exits while we are alive; if we die first, init does.
-	go func() { _ = cmd.Wait() }()
+	code := make(chan int, 1)
+	go func() {
+		_ = cmd.Wait()
+		c := -1
+		if cmd.ProcessState != nil {
+			c = cmd.ProcessState.ExitCode()
+		}
+		code <- c
+	}()
 
-	conn, err := net.FileConn(ours)
+	conn, err = net.FileConn(ours)
 	if err != nil {
-		return nil, fmt.Errorf("owner connection: %w", err)
+		return nil, nil, fmt.Errorf("owner connection: %w", err)
 	}
-	return conn, nil
+	return conn, code, nil
 }
 
 // serverArgs is the argument list for the server spawnServer starts:

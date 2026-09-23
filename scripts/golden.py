@@ -14,11 +14,12 @@ import os
 import re
 import signal
 import sys
-import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptylib import Drainer, spawn_in_pty, wait_for_exit, force_cleanup
+from ptylib import (
+    Drainer, spawn_in_pty, wait_for_exit, force_cleanup, private_run_dir, run_main,
+)
 
 GOLDEN = os.path.join("testdata", "golden", "startup.txt")
 
@@ -65,8 +66,10 @@ def capture() -> str:
     # answers its socket, so a shared path would record someone else's
     # session. Nothing answers here, so it spawns a server that binds
     # the path and removes it again when the SIGTERM below ends the
-    # session. See smoke.py's RUNTIME_DIR.
-    sock = os.path.join(tempfile.gettempdir(), f"wideboi-golden-{os.getpid()}.sock")
+    # session. See smoke.py's RUNTIME_DIR. A directory of its own,
+    # because the server also leaves its lock file beside the socket.
+    run_dir = private_run_dir("wideboi-golden-")
+    sock = os.path.join(run_dir, "s.sock")
     pid, fd = spawn_in_pty(["./bin/wideboi"], 100, 30, True,
                            {"WIDEBOI_SOCK": sock})
     d = Drainer(fd)
@@ -112,4 +115,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    run_main(main)

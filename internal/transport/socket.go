@@ -84,33 +84,75 @@ func init() {
 	gob.Register(protocol.MsgPaneClosed{})
 }
 
+// ErrSessionTaken means another live server holds the session's lock.
+var ErrSessionTaken = errors.New("session taken")
+
 // SocketListener manages a Unix domain socket server.
 type SocketListener struct {
 	listener net.Listener
 	path     string
-	mu       sync.Mutex
-	closed   bool
+	// lock is held for the listener's whole life; see NewSocketListener.
+	lock   *os.File
+	mu     sync.Mutex
+	closed bool
 }
 
 // NewSocketListener binds a Unix domain socket at path.
 //
-// A leftover socket file has to be removed before Listen will bind, but
-// removing it unconditionally is how you steal the address from a
-// server that is still running: the old process keeps its listening fd
-// and its clients, the new one binds a fresh inode at the same path,
-// and every subsequent `wideboi attach` reaches the new server while
-// the old one's panes keep running invisibly. So probe first. A
-// successful dial means somebody is home, and that is an error, not a
-// file to delete.
+// Ownership of path is an exclusive flock on path+".lock", held for as
+// long as the server lives. The kernel drops it when the process dies,
+// SIGKILL included, so a held lock always means a live server. The lock
+// replaced a dial probe as the arbiter: the probe's probe/remove/listen
+// window let two servers starting together both bind, the second
+// unlinking the first's socket and leaving it running where no attach
+// could reach it (#86). A probe survives only as a guard against a
+// server too old to take the lock.
+//
+// The lock file is never deleted: unlinking it would let a waiter lock
+// the old inode while a newcomer locks a fresh one. os.OpenFile sets
+// O_CLOEXEC, so pane processes never inherit the lock and cannot keep
+// the name taken after the server has gone.
 func NewSocketListener(path string) (*SocketListener, error) {
+	lock, err := os.OpenFile(path+".lock", os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("opening lock for %s: %w", path, err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, fmt.Errorf("a wideboi server is already listening at %s: %w", path, ErrSessionTaken)
+		}
+		return nil, fmt.Errorf("locking %s.lock: %w", path, err)
+	}
+	// The lock settles it among servers that take it. A server from a
+	// binary older than the lock serves its socket without one, so a
+	// socket that still answers is not a corpse, lock or no lock.
 	if c, derr := net.Dial("unix", path); derr == nil {
 		c.Close()
-		return nil, fmt.Errorf("a wideboi server is already listening at %s", path)
+		lock.Close()
+		return nil, fmt.Errorf("a wideboi server is already listening at %s: %w", path, ErrSessionTaken)
 	}
-	// Nothing answered, so a socket here is a corpse from a server that
-	// did not get to clean up after itself. Only a socket: WIDEBOI_SOCK
-	// lets a caller name any path, and unlinking whatever happens to be
-	// there would turn a typo into data loss.
+	l, err := bindHeld(path)
+	if err != nil {
+		lock.Close()
+		return nil, err
+	}
+	return &SocketListener{
+		listener: l,
+		path:     path,
+		lock:     lock,
+	}, nil
+}
+
+// bindHeld listens at path, whose lock the caller holds.
+//
+// A leftover socket has to be removed before Listen will bind. Holding
+// the lock is what makes that safe: nobody else can be serving it, so a
+// socket here is a corpse from a server that did not get to clean up
+// after itself. Only a socket: WIDEBOI_SOCK lets a caller name any
+// path, and unlinking whatever happens to be there would turn a typo
+// into data loss.
+func bindHeld(path string) (net.Listener, error) {
 	if fi, serr := os.Lstat(path); serr == nil {
 		if fi.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("refusing to remove %s: it exists and is not a socket", path)
@@ -125,10 +167,7 @@ func NewSocketListener(path string) (*SocketListener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen unix socket %s: %w", path, err)
 	}
-	return &SocketListener{
-		listener: l,
-		path:     path,
-	}, nil
+	return l, nil
 }
 
 // Path returns the socket file path.
@@ -141,7 +180,7 @@ func (sl *SocketListener) Accept() (net.Conn, error) {
 	return sl.listener.Accept()
 }
 
-// Close closes the listener and removes the socket file.
+// Close closes the listener, removes the socket file and releases the lock.
 func (sl *SocketListener) Close() error {
 	sl.mu.Lock()
 	defer sl.mu.Unlock()
@@ -150,7 +189,10 @@ func (sl *SocketListener) Close() error {
 	}
 	sl.closed = true
 	err := sl.listener.Close()
+	// Remove before unlocking: a successor that bound in between would
+	// otherwise have its fresh socket unlinked by us.
 	_ = os.Remove(sl.path)
+	_ = sl.lock.Close()
 	return err
 }
 
