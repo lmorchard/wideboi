@@ -9,3 +9,4 @@ web/playwright-report/
 *.swp
 *.swo
 .*.toml
+/tmp/

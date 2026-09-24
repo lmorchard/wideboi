@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import { PaneStore, selectionText } from './pane-state';
 import { PanePainter } from './pane-painter';
+import { RenderStats } from './stats';
 import {
   CellDataSchema, LineDataSchema, MsgPanePatchSchema, MsgPaneUpdateSchema,
 } from './gen/internal/protocol/wirepb/wideboi_pb';
@@ -121,12 +122,55 @@ describe('per-pane painting', () => {
   });
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  const painter = () => {
+  const painter = (stats?: RenderStats) => {
     const ctx = { setTransform: vi.fn(), fillRect, fillText };
     const canvas = { width: 0, height: 0, style: { width: '', height: '' },
       getContext: () => ctx } as unknown as HTMLCanvasElement;
-    return { painter: new PanePainter(canvas, 8), canvas };
+    return { painter: new PanePainter(canvas, 8, stats), canvas };
   };
+
+  it('records full, patch, resync and draw timings only when given stats', () => {
+    // The clock only advances while draw() issues canvas calls, so a non-zero
+    // draw sample proves the timing wraps draw() itself.
+    let clock = 0;
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    fillRect.mockImplementation(() => { clock += 7; });
+    const full = create(MsgPaneUpdateSchema, { paneId: 1, cols: 1, rows: 1, generation: 1n,
+      lines: [row(' ')] });
+    const patch = create(MsgPanePatchSchema, { paneId: 1, cols: 1, rows: 1,
+      baseGeneration: 1n, generation: 2n });
+
+    const plainStore = new PaneStore();
+    plainStore.update(full);
+    plainStore.patch(patch);
+    const { painter: plain } = painter();
+    plain.resize(8, 20);
+    plain.start();
+    plain.setPane(plainStore.get(1));
+    flush();
+    plain.stop();
+    expect(now).not.toHaveBeenCalled();
+
+    const stats = new RenderStats();
+    const store = new PaneStore(stats);
+    store.update(full);
+    expect(store.patch(patch)).toBe(true);
+    expect(store.patch(patch)).toBe(false);
+    const { painter: p } = painter(stats);
+    p.resize(8, 20);
+    p.start();
+    p.setPane(full);
+    flush();
+    p.stop();
+    expect([stats.fulls, stats.patches, stats.resyncs, stats.draws]).toEqual([1, 1, 1, 1]);
+    const s = stats.summary(1000);
+    expect([s.apply.full.count, s.apply.patch.count, s.apply.resync.count]).toEqual([1, 1, 1]);
+    expect(s.apply.full.max).toBe(0);
+    expect(s.draw.count).toBe(1);
+    expect(s.draw.max).toBeGreaterThan(0);
+    fillRect.mockReset();
+    now.mockRestore();
+  });
 
   it('draws once for a burst and pauses while hidden or stopped', () => {
     const { painter: p } = painter();

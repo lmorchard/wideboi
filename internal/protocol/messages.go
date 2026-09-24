@@ -5,6 +5,7 @@ package protocol
 import (
 	"fmt"
 	"image"
+	"time"
 )
 
 type VerbType int
@@ -281,4 +282,85 @@ type MsgPaneMetadata struct {
 	PaneID   int               `json:"pane_id"`
 	CWD      string            `json:"cwd"`
 	UserVars map[string]string `json:"user_vars"`
+}
+
+// MsgTrafficRequest asks the server for a MsgTrafficStats reply, sent only
+// to the requester (#179). It changes nothing.
+type MsgTrafficRequest struct{}
+
+// TimingStat accumulates wall-clock durations for one measured step.
+type TimingStat struct {
+	Count      uint64 `json:"count"`
+	TotalNanos uint64 `json:"total_nanos"`
+	MaxNanos   uint64 `json:"max_nanos"`
+}
+
+// Add records one duration.
+func (t *TimingStat) Add(d time.Duration) {
+	n := uint64(max(d, 0))
+	t.Count++
+	t.TotalNanos += n
+	t.MaxNanos = max(t.MaxNanos, n)
+}
+
+// Merge folds o into t.
+func (t *TimingStat) Merge(o TimingStat) {
+	t.Count += o.Count
+	t.TotalNanos += o.TotalNanos
+	t.MaxNanos = max(t.MaxNanos, o.MaxNanos)
+}
+
+// ClientTraffic is one attached client's traffic since it attached.
+// Counts only: nothing here says what a pane contained.
+type ClientTraffic struct {
+	ClientID        int    `json:"client_id"`
+	Transport       string `json:"transport"` // "socket", "websocket", "inproc"
+	ConnectedMillis int64  `json:"connected_millis"`
+	// Pane deliveries the client accepted, by kind. ChangedRows sums
+	// the rows carried by row and shift patches.
+	FullUpdates  uint64 `json:"full_updates"`
+	RowPatches   uint64 `json:"row_patches"`
+	ShiftPatches uint64 `json:"shift_patches"`
+	ChangedRows  uint64 `json:"changed_rows"`
+	// ResyncRequests counts MsgPaneResync received; each is answered by
+	// a full update, also counted above. SendFailures counts pane
+	// deliveries the transport refused.
+	ResyncRequests uint64 `json:"resync_requests"`
+	SendFailures   uint64 `json:"send_failures"`
+	// Byte counts come from the transport: PayloadBytes is protobuf
+	// envelopes of every message, PanePayloadBytes those of pane
+	// updates and patches, WireBytes what was written to the net.Conn.
+	Messages         uint64     `json:"messages"`
+	PayloadBytes     uint64     `json:"payload_bytes"`
+	PanePayloadBytes uint64     `json:"pane_payload_bytes"`
+	WireBytes        uint64     `json:"wire_bytes"`
+	Encode           TimingStat `json:"encode"`
+}
+
+// Merge sums o's counters into c. ClientID, Transport and
+// ConnectedMillis describe one client and are left alone.
+func (c *ClientTraffic) Merge(o ClientTraffic) {
+	c.FullUpdates += o.FullUpdates
+	c.RowPatches += o.RowPatches
+	c.ShiftPatches += o.ShiftPatches
+	c.ChangedRows += o.ChangedRows
+	c.ResyncRequests += o.ResyncRequests
+	c.SendFailures += o.SendFailures
+	c.Messages += o.Messages
+	c.PayloadBytes += o.PayloadBytes
+	c.PanePayloadBytes += o.PanePayloadBytes
+	c.WireBytes += o.WireBytes
+	c.Encode.Merge(o.Encode)
+}
+
+// MsgTrafficStats answers MsgTrafficRequest. Clients are the attached
+// connections, in attach order; Departed sums attached clients that have
+// since left. Render and BuildPatch are zero unless TimingEnabled.
+type MsgTrafficStats struct {
+	UptimeMillis  int64           `json:"uptime_millis"`
+	TimingEnabled bool            `json:"timing_enabled"`
+	Clients       []ClientTraffic `json:"clients"`
+	Departed      ClientTraffic   `json:"departed"`
+	Render        TimingStat      `json:"render"`
+	BuildPatch    TimingStat      `json:"build_patch"`
 }

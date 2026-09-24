@@ -14,7 +14,7 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v4';
+        this.protocol = 'wideboi.v5';
         this.readyState = 0;
         this.sent = [];
         if (url.endsWith('/ws')) window.testSockets.push(this);
@@ -84,7 +84,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url) {
-        this.protocol = 'wideboi.v4';
+        this.protocol = 'wideboi.v5';
         this.readyState = 0;
         this.sent = [];
         if (url.endsWith('/ws')) window.testSockets.push(this);
@@ -170,4 +170,76 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   await page.keyboard.type('q');
   await expect.poll(async () => (await messages()).some(msg =>
     msg.case === 'input' && msg.value.paneId === 3 && msg.value.key?.text === 'q')).toBe(true);
+});
+
+// ?stats=1 (#179): an overlay that starts as "collecting…" and a periodic
+// summary on the console. The fake clock stands in for the 5 s report
+// interval (STATS_REPORT_MS), so the test does not wait it out.
+test('?stats=1 shows the stats overlay and reports periodically', async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    window.testSockets = [];
+    window.WebSocket = class {
+      static OPEN = 1;
+      constructor(url) {
+        this.protocol = 'wideboi.v5';
+        this.readyState = 0;
+        this.sent = [];
+        if (url.endsWith('/ws')) window.testSockets.push(this);
+      }
+      send(data) { this.sent.push(new Uint8Array(data)); }
+      close() { this.readyState = 3; this.onclose?.(); }
+      open() { this.readyState = 1; this.onopen?.(); }
+      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
+    };
+  });
+  const reports = [];
+  page.on('console', msg => {
+    if (msg.type() === 'info' && msg.text().startsWith('[wideboi stats]')) reports.push(msg.text());
+  });
+
+  await page.goto('/?stats=1');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+  const overlay = page.locator('.stats-overlay');
+  await expect(overlay).toHaveText('stats: collecting…');
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    const socket = window.testSockets[0];
+    socket.message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [{ paneId: 1, width: 40, height: 10 }],
+    } }));
+    socket.message(serverBytes({ case: 'paneUpdate', value: {
+      paneId: 1, generation: 1n, cols: 1, rows: 1,
+      lines: [{ cells: [{ content: 'Z', width: 1 }] }],
+    } }));
+  });
+  await page.clock.runFor(5000);
+  await expect.poll(() => reports.length).toBeGreaterThan(0);
+  await expect(overlay).not.toHaveText('stats: collecting…');
+  // The overlay shows the same summary, one " | " part per line.
+  expect(await overlay.textContent()).toBe(reports[0].replace('[wideboi stats] ', '').split(' | ').join('\n'));
+});
+
+test('without ?stats=1 there is no stats overlay', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.testSockets = [];
+    window.WebSocket = class {
+      static OPEN = 1;
+      constructor(url) {
+        this.protocol = 'wideboi.v5';
+        this.readyState = 0;
+        if (url.endsWith('/ws')) window.testSockets.push(this);
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+      open() { this.readyState = 1; this.onopen?.(); }
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+  await expect(page.getByText('Focus Pane:')).toBeVisible();
+  await expect(page.locator('.stats-overlay')).toHaveCount(0);
 });

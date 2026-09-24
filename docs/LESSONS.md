@@ -368,3 +368,16 @@ macOS reads EOF; Linux reads `ECONNRESET`. The handshake passed on macOS
 and failed in CI, where a server that found the session taken reset its
 owner. Treat a reset as a hang-up, and run socket-closing changes in a Linux
 container (`docker run golang:<go.mod version>`) before pushing.
+
+## Observing pane traffic changes it
+
+Any socket connection that closes triggers a layout broadcast, even one that
+never attached (`status`, `status --traffic`, `kill-session`). That broadcast
+ends with a forced full resend of every pane to every client. So does a pane
+flipping between working and idle, about 3 s after output stops. A
+measurement that polls `status --traffic` therefore adds a full snapshot per
+pane per poll to the numbers it reads. `scripts/traffic.py` reads counters
+over a sink's own WebSocket instead, and it waits out the idle flip around
+each workload. A render timed under heavy output also includes waiting on the
+emulator's write lock. Check its CPU profile before blaming rendering. See
+`docs/partial-pane-updates.md` (#179).

@@ -147,6 +147,7 @@ message ServerMessage {
     MsgPaneCreated pane_created = 4;
     MsgPaneClosed pane_closed = 5;
     MsgPaneMetadata pane_metadata = 6;
+    MsgTrafficStats traffic_stats = 7;
   }
 }
 
@@ -223,5 +224,42 @@ message ClientMessage {
     MsgDetach detach = 8;
     MsgShutdown shutdown = 9;
     MsgStatusRequest status_request = 10;
+    MsgTrafficRequest traffic_request = 11;
   }
+}
+
+// Traffic counters for `wideboi status --traffic` (#179). Counts and
+// timings only: never cell contents, titles, input or tokens.
+message MsgTrafficRequest {}
+
+message TimingStat {
+  uint64 count = 1;
+  uint64 total_nanos = 2;
+  uint64 max_nanos = 3;
+}
+
+message ClientTraffic {
+  int32 client_id = 1;
+  string transport = 2;           // "socket", "websocket", "inproc"
+  int64 connected_millis = 3;
+  uint64 full_updates = 4;
+  uint64 row_patches = 5;
+  uint64 shift_patches = 6;
+  uint64 changed_rows = 7;
+  uint64 resync_requests = 8;
+  uint64 send_failures = 9;
+  uint64 messages = 10;           // every message the transport encoded
+  uint64 payload_bytes = 11;      // protobuf envelope bytes, all messages
+  uint64 pane_payload_bytes = 12; // protobuf bytes of pane updates + patches
+  uint64 wire_bytes = 13;         // bytes written to the net.Conn
+  TimingStat encode = 14;
+}
+
+message MsgTrafficStats {
+  int64 uptime_millis = 1;
+  bool timing_enabled = 2;
+  repeated ClientTraffic clients = 3;
+  ClientTraffic departed = 4;     // sum over attached clients that have left
+  TimingStat render = 5;
+  TimingStat build_patch = 6;
 }

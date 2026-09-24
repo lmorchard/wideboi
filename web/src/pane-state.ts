@@ -2,6 +2,7 @@ import { create } from '@bufbuild/protobuf';
 import {
   LineDataSchema, type MsgPanePatch, type MsgPaneUpdate,
 } from './gen/internal/protocol/wirepb/wideboi_pb';
+import type { RenderStats } from './stats';
 
 export const CELL_HEIGHT = 14 * 1.2;
 export const FONT = '14px monospace';
@@ -20,13 +21,30 @@ export function measureCellWidth(): number {
 export class PaneStore {
   private panes = new Map<number, MsgPaneUpdate>();
 
+  // stats is only set with ?stats=1; when undefined no timing calls are made.
+  constructor(private readonly stats?: RenderStats) {}
+
   get(paneID: number): MsgPaneUpdate | undefined { return this.panes.get(paneID); }
-  update(pane: MsgPaneUpdate) { this.panes.set(pane.paneId, pane); }
+  update(pane: MsgPaneUpdate) {
+    const stats = this.stats;
+    const start = stats ? performance.now() : 0;
+    this.panes.set(pane.paneId, pane);
+    if (stats) stats.recordApply('full', performance.now() - start);
+  }
   close(paneID: number) { this.panes.delete(paneID); }
   mouseTracking(paneID: number): boolean { return this.panes.get(paneID)?.mouseTracking ?? false; }
 
-  // Generations are bigint (protobuf-es ignores jstype = JS_NUMBER).
   patch(patch: MsgPanePatch): boolean {
+    const stats = this.stats;
+    if (!stats) return this.applyPatch(patch);
+    const start = performance.now();
+    const applied = this.applyPatch(patch);
+    stats.recordApply(applied ? 'patch' : 'resync', performance.now() - start);
+    return applied;
+  }
+
+  // Generations are bigint (protobuf-es ignores jstype = JS_NUMBER).
+  private applyPatch(patch: MsgPanePatch): boolean {
     const base = this.panes.get(patch.paneId);
     if (!base || base.generation !== patch.baseGeneration ||
         base.cols !== patch.cols || base.rows !== patch.rows ||
