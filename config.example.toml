@@ -30,6 +30,10 @@ prefix = "ctrl+b"
 # E.g. ":8080" or "127.0.0.1:8080". Defaults to empty (disabled).
 # websocket = ":8080"
 
+# Optional fixed token for WebSocket clients. Without it, a token is generated
+# at server startup and shown once in a link on stderr.
+# websocket_token = "your-secret-token"
+
 # Shell executable to spawn in new panes.
 # Defaults to $SHELL, or /bin/sh if $SHELL is empty.
 # shell = "/bin/zsh"

@@ -3,7 +3,10 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { WideboiClient } from './client';
 import { GridRenderer } from './renderer';
 import { sendKeyboardInput, sendTextInput } from './input';
+import { consumeLinkToken } from './token';
 import type { WSEnvelope } from './protocol';
+
+const linkToken = consumeLinkToken(window.location, window.history);
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
@@ -132,7 +135,7 @@ export class WideboiApp extends LitElement {
   private wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
   @state()
-  private token = new URLSearchParams(window.location.search).get('token') || '';
+  private token = linkToken;
 
   @state()
   private errorMsg = '';
@@ -206,22 +209,22 @@ export class WideboiApp extends LitElement {
     
     this.errorMsg = '';
     
-    let url = this.wsUrl;
-    if (this.token) {
-        try {
-            const urlObj = new URL(url);
-            urlObj.searchParams.set('token', this.token);
-            url = urlObj.toString();
-        } catch (e) {
-            // Ignored, fallback to appending
-            if (url.includes('?')) {
-                url += `&token=${encodeURIComponent(this.token)}`;
-            } else {
-                url += `?token=${encodeURIComponent(this.token)}`;
-            }
-        }
+    let url: URL;
+    try {
+      url = new URL(this.wsUrl);
+      if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+        throw new Error('invalid WebSocket protocol');
+      }
+    } catch {
+      this.errorMsg = 'Enter a valid WebSocket URL.';
+      return;
     }
-    const client = new WideboiClient(url);
+    // Accept an older token-bearing WebSocket URL entered in the form, but
+    // remove its query credential before the browser opens the connection.
+    const token = this.token || new URLSearchParams(url.hash.slice(1)).get('token') || url.searchParams.get('token') || '';
+    url.searchParams.delete('token');
+    url.hash = '';
+    const client = new WideboiClient(url.toString(), token);
     this.client = client;
     
     client.onConnect = () => {
@@ -432,15 +435,6 @@ export class WideboiApp extends LitElement {
 
   private handleTokenChange(e: Event) {
     this.token = (e.target as HTMLInputElement).value;
-    
-    // Update URL bar without reloading
-    const newUrl = new URL(window.location.href);
-    if (this.token) {
-        newUrl.searchParams.set('token', this.token);
-    } else {
-        newUrl.searchParams.delete('token');
-    }
-    window.history.replaceState({}, '', newUrl);
   }
 
   private handleKeydown(e: KeyboardEvent) {
@@ -484,7 +478,7 @@ export class WideboiApp extends LitElement {
               placeholder=${`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
             />
             <input 
-              type="text" 
+              type="password" 
               .value=${this.token} 
               @input=${this.handleTokenChange}
               @keydown=${this.handleKeydown}
