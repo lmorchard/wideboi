@@ -11,7 +11,15 @@ export class GridRenderer {
   private layout: MsgLayoutSnapshot | null = null;
   private placements: PlacementData[] = [];
   
-  private animationFrameId = 0;
+  private animationFrameId: number | null = null;
+  private running = false;
+  private readonly onVisibilityChange = () => {
+    if (document.hidden) {
+      this.cancelFrame();
+    } else {
+      this.invalidate();
+    }
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -23,24 +31,41 @@ export class GridRenderer {
   }
 
   public start() {
-    const loop = () => {
-      this.draw();
-      this.animationFrameId = requestAnimationFrame(loop);
-    };
-    loop();
+    if (this.running) return;
+    this.running = true;
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.invalidate();
   }
 
   public stop() {
+    this.running = false;
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.cancelFrame();
+  }
+
+  private cancelFrame() {
+    if (this.animationFrameId === null) return;
     cancelAnimationFrame(this.animationFrameId);
+    this.animationFrameId = null;
+  }
+
+  private invalidate() {
+    if (!this.running || document.hidden || this.animationFrameId !== null) return;
+    this.animationFrameId = requestAnimationFrame(() => {
+      this.animationFrameId = null;
+      if (this.running && !document.hidden) this.draw();
+    });
   }
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
     this.layout = snapshot;
     this.recomputePlacements();
+    this.invalidate();
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
     this.panes.set(update.PaneID, update);
+    this.invalidate();
   }
 
   public resize(width: number, height: number) {
@@ -53,6 +78,7 @@ export class GridRenderer {
     this.ctx.scale(dpr, dpr);
     this.measureFont();
     this.recomputePlacements();
+    this.invalidate();
   }
 
   

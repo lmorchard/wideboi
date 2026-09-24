@@ -5,14 +5,142 @@ package server
 
 import (
 	"context"
+	"image"
 	"slices"
 	"sort"
 	"testing"
+	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server/ptyx"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
+
+type blockingDrawGrid struct {
+	*statusGrid
+	started chan struct{}
+	release chan struct{}
+}
+
+type changingDrawGrid struct{ *statusGrid }
+
+func (g *changingDrawGrid) Draw(uv.Screen, image.Rectangle) { g.bump() }
+
+type closeAwareGrid struct {
+	*statusGrid
+	drawing chan struct{}
+	release chan struct{}
+	closed  chan struct{}
+}
+
+func (g *closeAwareGrid) Draw(uv.Screen, image.Rectangle) {
+	close(g.drawing)
+	<-g.release
+}
+
+func (g *closeAwareGrid) Close() error {
+	close(g.closed)
+	return nil
+}
+
+func TestPaneCloseWaitsForActiveRender(t *testing.T) {
+	pty, err := ptyx.Spawn([]string{"/bin/cat"}, 10, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &closeAwareGrid{statusGrid: newStatusGrid(term.StatusIdle), drawing: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
+	p := &Pane{id: 1, pty: pty, grid: g, cols: 10, rows: 10, closed: make(chan struct{}), closeGrace: 10 * time.Millisecond}
+	rendered := make(chan struct{})
+	go func() {
+		_, _ = p.UpdateMessage()
+		close(rendered)
+	}()
+	select {
+	case <-g.drawing:
+	case <-time.After(time.Second):
+		t.Fatal("render did not start")
+	}
+	closed := make(chan struct{})
+	go func() {
+		_ = p.Close()
+		close(closed)
+	}()
+	select {
+	case <-p.closed:
+	case <-time.After(time.Second):
+		t.Fatal("close did not start")
+	}
+	select {
+	case <-g.closed:
+		t.Error("grid closed while render was active")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(g.release)
+	select {
+	case <-rendered:
+	case <-time.After(time.Second):
+		t.Fatal("render did not finish")
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish")
+	}
+}
+
+func TestGenerationChangingDuringRenderIsRetried(t *testing.T) {
+	s, _, tp := twoIdlePanes(t)
+	g := &changingDrawGrid{newStatusGrid(term.StatusIdle)}
+	s.panes[1].grid = g
+	s.broadcastPaneUpdates(context.Background(), false)
+	drainPaneUpdates(tp)
+	s.broadcastPaneUpdates(context.Background(), false)
+	if got := drainPaneUpdates(tp); !slices.Equal(got, []int{1}) {
+		t.Errorf("pane changed during render; retry sent %v, want [1]", got)
+	}
+}
+
+func (g *blockingDrawGrid) Draw(uv.Screen, image.Rectangle) {
+	close(g.started)
+	<-g.release
+}
+
+// A slow grid render must not hold the server mutex. The same mutex
+// protects input, focus, pane lifecycle, and shutdown bookkeeping.
+func TestPaneRenderDoesNotHoldServerMutex(t *testing.T) {
+	s, _, _ := twoIdlePanes(t)
+	g := &blockingDrawGrid{statusGrid: newStatusGrid(term.StatusIdle), started: make(chan struct{}), release: make(chan struct{})}
+	s.panes[1].grid = g
+	done := make(chan struct{})
+	go func() {
+		s.broadcastPaneUpdates(context.Background(), false)
+		close(done)
+	}()
+	select {
+	case <-g.started:
+	case <-time.After(time.Second):
+		t.Fatal("pane render did not start")
+	}
+	locked := make(chan struct{})
+	go func() {
+		s.mu.Lock()
+		s.mu.Unlock()
+		close(locked)
+	}()
+	select {
+	case <-locked:
+	case <-time.After(200 * time.Millisecond):
+		t.Error("server mutex remained locked during pane render")
+	}
+	close(g.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pane broadcast did not finish")
+	}
+}
 
 // drainPaneUpdates empties tp and returns the pane IDs of the updates
 // it held, sorted. Anything else in the buffer is discarded.
