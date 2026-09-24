@@ -274,3 +274,11 @@ type MsgPaneClosed struct {
 	PaneID   int
 	ExitCode int
 }
+
+// MsgPaneMetadata carries out-of-band pane metadata (CWD from OSC 7 and
+// user variables from OSC 1337 SetUserVar).
+type MsgPaneMetadata struct {
+	PaneID   int               `json:"pane_id"`
+	CWD      string            `json:"cwd"`
+	UserVars map[string]string `json:"user_vars"`
+}

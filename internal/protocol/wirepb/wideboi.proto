@@ -133,6 +133,12 @@ message MsgPaneClosed {
   int32 exit_code = 2;
 }
 
+message MsgPaneMetadata {
+  int32 pane_id = 1;
+  string cwd = 2;
+  map<string, string> user_vars = 3;
+}
+
 message ServerMessage {
   oneof msg {
     MsgPaneUpdate pane_update = 1;
@@ -140,6 +146,7 @@ message ServerMessage {
     MsgLayoutSnapshot layout_snapshot = 3;
     MsgPaneCreated pane_created = 4;
     MsgPaneClosed pane_closed = 5;
+    MsgPaneMetadata pane_metadata = 6;
   }
 }
 

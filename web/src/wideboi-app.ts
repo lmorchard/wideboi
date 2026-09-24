@@ -7,7 +7,7 @@ import { reconcileFocus } from './focus';
 import { WideboiPane } from './wideboi-pane';
 import { sendKeyboardInput, sendTextInput } from './input';
 import { consumeLinkToken } from './token';
-import { MouseKind, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { MouseKind, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 const linkToken = consumeLinkToken(window.location, window.history);
 
@@ -156,6 +156,9 @@ export class WideboiApp extends LitElement {
 
   @state()
   private paneTitles: Record<number, string> = {};
+
+  @state()
+  private paneMetadata: Record<number, MsgPaneMetadata> = {};
 
   @state()
   private focusedPaneId = 0;
@@ -351,6 +354,16 @@ export class WideboiApp extends LitElement {
           if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
           this.paneStatuses = snapshot.paneStatuses;
           this.paneTitles = snapshot.paneTitles;
+          const activeSet = new Set(this.activePanes);
+          let metaPruned = false;
+          const nextMeta = { ...this.paneMetadata };
+          for (const id of Object.keys(nextMeta)) {
+            if (!activeSet.has(Number(id))) {
+              delete nextMeta[Number(id)];
+              metaPruned = true;
+            }
+          }
+          if (metaPruned) this.paneMetadata = nextMeta;
           void this.updateComplete.then(() => {
             this.animateReorder(previous);
             this.revealFocus();
@@ -385,6 +398,11 @@ export class WideboiApp extends LitElement {
           if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
           if (this.pointer?.pane.paneId === closedId) this.pointer = undefined;
           if (this.selectedPane?.paneId === closedId) this.selectedPane = undefined;
+          if (this.paneMetadata[closedId]) {
+            const next = { ...this.paneMetadata };
+            delete next[closedId];
+            this.paneMetadata = next;
+          }
           void this.updateComplete.then(() => {
             if (focusChanged) {
               this.focusedPane()?.focusInput();
@@ -392,6 +410,11 @@ export class WideboiApp extends LitElement {
             }
             this.sendResizeIfChanged();
           });
+          break;
+        }
+        case 'paneMetadata': {
+          const meta = message.msg.value;
+          this.paneMetadata = { ...this.paneMetadata, [meta.paneId]: meta };
           break;
         }
       }
