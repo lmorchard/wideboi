@@ -1,16 +1,15 @@
 import { test, expect } from '@playwright/test';
 
 test('card layout overlaps persistent panes without resizing the terminal', async ({ page }) => {
-  test.setTimeout(30_000);
   await page.addInitScript(() => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
-      constructor(url) {
+      constructor(url, protocols) {
         this.protocol = 'wideboi.v3';
         this.readyState = 0;
         this.sent = [];
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v3')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -22,17 +21,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  try {
-    await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length), { timeout: 15_000 }).toBeGreaterThan(0);
-  } catch (error) {
-    console.log('attach diagnostic', await page.evaluate(() => {
-      const app = document.querySelector('wideboi-app');
-      return { connected: app.connected, client: Boolean(app.client), socketState: window.testSockets[0].readyState,
-        stripWidth: app.shadowRoot.querySelector('.pane-strip')?.clientWidth,
-        body: app.shadowRoot.textContent.slice(0, 300) };
-    }));
-    throw error;
-  }
+  await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length)).toBeGreaterThan(0);
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {

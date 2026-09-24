@@ -220,6 +220,11 @@ In overlapping cards, update positions before raising the newly focused card's
 card while that card is still sliding away, especially on right-to-left focus
 moves. Hold the old focus on top until the movement finishes.
 
+Browser tests that replace `window.WebSocket` also intercept Vite's development
+socket. Identify the app connection by its offered `wideboi.v3` subprotocol,
+not a URL suffix: on Linux CI, Vite's socket matched `/ws`, closed, and the test
+mistook it for the app socket.
+
 ## Change-only pane updates require complete bookkeeping
 
 Before #85, every 33 ms frame resent every pane and repaired missed updates.
