@@ -52,6 +52,7 @@ class Drainer:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._last_read: float | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -67,6 +68,7 @@ class Drainer:
                 return
             with self._lock:
                 self._buf.extend(data)
+                self._last_read = time.monotonic()
 
     def stop(self) -> None:
         self._stop.set()
@@ -76,6 +78,11 @@ class Drainer:
     def output(self) -> bytes:
         with self._lock:
             return bytes(self._buf)
+
+    def last_read_at(self) -> float | None:
+        """time.monotonic() of the most recent read, or None before any."""
+        with self._lock:
+            return self._last_read
 
     def saw(self, needle: bytes) -> bool:
         return needle in self.output()

@@ -6,13 +6,18 @@
 package term
 
 import (
+	"encoding/base64"
 	"image"
 	"io"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -85,6 +90,14 @@ type Grid interface {
 	// surfaces what was already being discarded.
 	Title() string
 
+	// CWD reports the pane's current working directory if announced via
+	// OSC 7, or "" if not set.
+	CWD() string
+
+	// UserVars returns a snapshot of agent or child metadata set via
+	// OSC 1337 SetUserVar.
+	UserVars() map[string]string
+
 	// Status reports the current agent/command status derived from OSC 133
 	// sequences or output heuristics.
 	Status() protocol.PaneStatus
@@ -155,7 +168,11 @@ type vtGrid struct {
 	// and read from the broadcast path, so it is atomic for the same
 	// reason cursorVisible is.
 	title                  atomic.Pointer[string]
+	cwd                    atomic.Pointer[string]
 	sawAuthoritativeStatus atomic.Bool
+
+	userVarsMu sync.Mutex
+	userVars   map[string]string
 
 	// osc repairs OSC strings x/ansi would cut at a 0x9C byte (#175).
 	// Only Write touches it, under writeResizeMu.
@@ -186,16 +203,16 @@ type vtGrid struct {
 	// dimension change go through se.mu for each call but never touch
 	// cell content outside the walk this lock protects.
 	//
-	// Three methods hold it: Write, Resize, and Draw's scrollback
-	// branch -- which holds it longest, for a whole frame's worth of
-	// ScrollbackCellAt/CellAt pointers handed to dst.SetCell, plus the
-	// scrollback-length and offset samples that decide where the
-	// history/live boundary falls. Draw's fast path (offset 0) is
-	// deliberately outside it.
+	// Three methods hold it: Write, Resize, and DrawAt's scrollback
+	// branch (reached directly or via Draw) -- which holds it longest,
+	// for a whole frame's worth of ScrollbackCellAt/CellAt pointers
+	// handed to dst.SetCell, plus the scrollback-length and offset
+	// samples that decide where the history/live boundary falls.
+	// DrawAt's fast path (offset <= 0) is deliberately outside it.
 	//
 	// Read is deliberately excluded -- it can block indefinitely (the
 	// same reason SafeEmulator's own Read is unlocked), and
-	// Write/Resize/Draw all terminate on their own, so nothing here can
+	// Write/Resize/Draw/DrawAt all terminate on their own, so nothing here can
 	// wedge against it.
 	writeResizeMu sync.Mutex
 }
@@ -329,6 +346,102 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 		return true
 	})
 
+	g.em.RegisterOscHandler(7, func(data []byte) bool {
+		parts := strings.SplitN(string(data), ";", 2)
+		if len(parts) < 2 {
+			return false
+		}
+		rawURL := parts[1]
+		u, err := url.Parse(rawURL)
+		if err != nil || u.Scheme != "file" {
+			return false
+		}
+		host := strings.ToLower(u.Hostname())
+		if host != "" && host != "localhost" {
+			localHost, err := os.Hostname()
+			if err != nil || !strings.EqualFold(host, localHost) {
+				return false
+			}
+		}
+		path := u.Path
+		if path == "" || !strings.HasPrefix(path, "/") {
+			return false
+		}
+		cleaned := filepath.Clean(path)
+		for i := 0; i < len(cleaned); i++ {
+			b := cleaned[i]
+			if b < 0x20 || b == 0x7f {
+				return false
+			}
+		}
+		g.cwd.Store(&cleaned)
+		return true
+	})
+
+	g.em.RegisterOscHandler(1337, func(data []byte) bool {
+		parts := strings.SplitN(string(data), ";", 2)
+		if len(parts) < 2 {
+			return false
+		}
+		cmd := parts[1]
+		if !strings.HasPrefix(cmd, "SetUserVar=") {
+			return false
+		}
+		kv := strings.TrimPrefix(cmd, "SetUserVar=")
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			return false
+		}
+		name := kv[:eq]
+		valBase64 := kv[eq+1:]
+
+		if len(name) == 0 || len(name) > 64 {
+			return false
+		}
+		for i := 0; i < len(name); i++ {
+			b := name[i]
+			if !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-') {
+				return false
+			}
+		}
+
+		if valBase64 == "" {
+			g.userVarsMu.Lock()
+			delete(g.userVars, name)
+			g.userVarsMu.Unlock()
+			return true
+		}
+
+		if len(valBase64) > base64.StdEncoding.EncodedLen(4096) {
+			return false
+		}
+
+		decoded, err := base64.StdEncoding.DecodeString(valBase64)
+		if err != nil {
+			return false
+		}
+		if len(decoded) == 0 {
+			g.userVarsMu.Lock()
+			delete(g.userVars, name)
+			g.userVarsMu.Unlock()
+			return true
+		}
+		if len(decoded) > 4096 || !utf8.Valid(decoded) {
+			return false
+		}
+
+		g.userVarsMu.Lock()
+		defer g.userVarsMu.Unlock()
+		if g.userVars == nil {
+			g.userVars = make(map[string]string)
+		}
+		if _, exists := g.userVars[name]; !exists && len(g.userVars) >= 64 {
+			return false
+		}
+		g.userVars[name] = string(decoded)
+		return true
+	})
+
 	return g
 }
 
@@ -362,6 +475,28 @@ func (g *vtGrid) Title() string {
 		return *t
 	}
 	return ""
+}
+
+// CWD reports the pane's current working directory. See the Grid interface.
+func (g *vtGrid) CWD() string {
+	if p := g.cwd.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// UserVars reports the pane's agent metadata. See the Grid interface.
+func (g *vtGrid) UserVars() map[string]string {
+	g.userVarsMu.Lock()
+	defer g.userVarsMu.Unlock()
+	if len(g.userVars) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(g.userVars))
+	for k, v := range g.userVars {
+		out[k] = v
+	}
+	return out
 }
 
 func (g *vtGrid) Status() protocol.PaneStatus {
@@ -559,13 +694,15 @@ func (g *vtGrid) Generation() uint64 { return g.generation.Load() }
 func (g *vtGrid) OutputGen() uint64  { return g.outputGen.Load() }
 
 // Draw delegates to DrawAt with the grid's current scroll offset.
+// See DrawAt for fast-path vs. scrollback locking behavior.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	g.DrawAt(dst, area, int(g.scrollOffset.Load()))
 }
 
 // DrawAt renders the grid into dst at the given scroll offset from bottom.
-// When offset is 0, live terminal cells are drawn via the fast path without
-// writeResizeMu contention. Positive offsets draw rows from scrollback history.
+// When offset is <= 0, live terminal cells are drawn via the fast path without
+// writeResizeMu contention. Positive offsets draw rows from scrollback history
+// under writeResizeMu to serialize against concurrent writes and resizes.
 func (g *vtGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
 	if offset <= 0 {
 		g.em.Draw(dst, area)

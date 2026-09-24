@@ -3,6 +3,7 @@ import { customElement, property, query } from 'lit/decorators.js';
 import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { CELL_HEIGHT, type CellPoint } from './pane-state';
 import { PanePainter } from './pane-painter';
+import type { RenderStats } from './stats';
 
 @customElement('wideboi-pane')
 export class WideboiPane extends LitElement {
@@ -64,13 +65,15 @@ export class WideboiPane extends LitElement {
   @property() cardLabel = '';
   @property({ type: Boolean }) running = false;
   @property({ type: Number }) cellWidth = 1;
+  // Read once when the painter is created; only set with ?stats=1.
+  @property({ attribute: false }) stats?: RenderStats;
 
   @query('canvas') private canvas!: HTMLCanvasElement;
   private painter?: PanePainter;
   private observer?: ResizeObserver;
 
   protected firstUpdated() {
-    this.painter = new PanePainter(this.canvas, this.cellWidth);
+    this.painter = new PanePainter(this.canvas, this.cellWidth, this.stats);
     this.observer = new ResizeObserver(entries => {
       for (const entry of entries) {
         this.painter?.resize(entry.contentRect.width, entry.contentRect.height);

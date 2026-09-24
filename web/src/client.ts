@@ -1,5 +1,6 @@
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { ClientMessageSchema, ServerMessageSchema, type ServerMessage } from "./gen/internal/protocol/wirepb/wideboi_pb";
+import type { RenderStats } from "./stats";
 
 // ClientMsg is one arm of the ClientMessage oneof, e.g.
 // { case: "resize", value: { cols, rows } }.
@@ -9,14 +10,18 @@ export class WideboiClient {
   private ws: WebSocket | null = null;
   private url: string;
   private token: string;
+  private stats?: RenderStats;
   
   public onMessage?: (message: ServerMessage) => void;
   public onConnect?: () => void;
   public onDisconnect?: () => void;
 
-  constructor(url: string, token = "") {
+  // stats, when given, records the byte size of each message (never its
+  // contents). It is undefined unless the page was opened with ?stats=1.
+  constructor(url: string, token = "", stats?: RenderStats) {
     this.url = url;
     this.token = token;
+    this.stats = stats;
   }
 
   public connect() {
@@ -29,7 +34,7 @@ export class WideboiClient {
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
     // The server must select this version before any shift patches arrive.
     // Browsers reject an upgrade that selects no offered subprotocol.
-    const versionProtocol = "wideboi.v3";
+    const versionProtocol = "wideboi.v5";
     const ws = new WebSocket(this.url, protocol ? [versionProtocol, protocol] : [versionProtocol]);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -60,9 +65,15 @@ export class WideboiClient {
 
     ws.onmessage = (event: MessageEvent) => {
       if (this.ws !== ws) return;
+      const stats = this.stats;
+      stats?.recordMessage((event.data as ArrayBuffer).byteLength);
       let message: ServerMessage;
       try {
+        // Decode is timed apart from the renderer's apply: for a full
+        // snapshot it is most of the browser's cost.
+        const start = stats ? performance.now() : 0;
         message = fromBinary(ServerMessageSchema, new Uint8Array(event.data as ArrayBuffer));
+        if (stats) stats.recordDecode(performance.now() - start);
       } catch (err) {
         console.error("[WideboiClient] Failed to decode message:", err);
         return;

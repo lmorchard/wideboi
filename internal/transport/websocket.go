@@ -21,6 +21,7 @@ const (
 // WebSocketServerConn implements Transport for WebSocket client connections.
 type WebSocketServerConn struct {
 	connErr
+	sendStats
 
 	conn       *websocket.Conn
 	ClientSend chan ClientMessage
@@ -31,11 +32,15 @@ type WebSocketServerConn struct {
 	mu sync.Mutex // serialize all websocket conn writes
 }
 
-func NewWebSocketServerConn(conn *websocket.Conn, bufSize int) *WebSocketServerConn {
+// NewWebSocketServerConn wraps an upgraded conn. wire counts the bytes
+// written to it, normally the CountingResponseWriter the upgrade was
+// given; nil leaves WireBytes at 0.
+func NewWebSocketServerConn(conn *websocket.Conn, bufSize int, wire WireCounter) *WebSocketServerConn {
 	if bufSize <= 0 {
 		bufSize = 256
 	}
 	return &WebSocketServerConn{
+		sendStats:  sendStats{wire: wire},
 		conn:       conn,
 		ClientSend: make(chan ClientMessage, bufSize),
 		ServerSend: make(chan ServerMessage, bufSize),
@@ -75,7 +80,7 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 
 			// One binary frame per protobuf ServerMessage; WebSocket
 			// does the framing the Unix socket needs a length prefix for.
-			payload, err := protocol.MarshalServer(msg)
+			payload, encode, err := wsConn.marshal(msg)
 			if err != nil {
 				// See ServerSocketConn.writeLoop: skip it, keep the peer (#175).
 				slog.Error("dropping unencodable message", "type", fmt.Sprintf("%T", msg), "err", err)
@@ -91,6 +96,7 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 				wsConn.set(fmt.Sprintf("sending WebSocket message %T", msg), err)
 				return
 			}
+			wsConn.record(msg, len(payload), encode)
 		}
 	}
 }

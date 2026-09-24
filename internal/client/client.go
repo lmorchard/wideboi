@@ -63,6 +63,7 @@ type Client struct {
 	mirrors            map[int]*PaneMirror
 	paneUpdates        map[int]protocol.MsgPaneUpdate
 	cursorInfos        map[int]cursorPos
+	paneMetadata       map[int]protocol.MsgPaneMetadata
 	prefixLabel        string
 	controlMode        bool
 	helpVisible        bool
@@ -109,14 +110,15 @@ func (c *Client) positionsLocked() map[int]int {
 // name it.
 func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Client {
 	return &Client{
-		transport:   tp,
-		cols:        cols,
-		rows:        rows,
-		strip:       layout.NewStrip(),
-		prefixLabel: prefixLabel,
-		mirrors:     make(map[int]*PaneMirror),
-		paneUpdates: make(map[int]protocol.MsgPaneUpdate),
-		cursorInfos: make(map[int]cursorPos),
+		transport:    tp,
+		cols:         cols,
+		rows:         rows,
+		strip:        layout.NewStrip(),
+		prefixLabel:  prefixLabel,
+		mirrors:      make(map[int]*PaneMirror),
+		paneUpdates:  make(map[int]protocol.MsgPaneUpdate),
+		cursorInfos:  make(map[int]cursorPos),
+		paneMetadata: make(map[int]protocol.MsgPaneMetadata),
 	}
 }
 
@@ -245,6 +247,11 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 				delete(c.mouseTracking, id)
 			}
 		}
+		for id := range c.paneMetadata {
+			if !live[id] {
+				delete(c.paneMetadata, id)
+			}
+		}
 
 	case protocol.MsgPaneUpdate:
 		c.applyPaneUpdateLocked(m)
@@ -263,6 +270,12 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		c.transport.SendClient(ctx, protocol.MsgPaneResync{PaneID: m.PaneID})
 		cancel()
+
+	case protocol.MsgPaneMetadata:
+		if c.paneMetadata == nil {
+			c.paneMetadata = make(map[int]protocol.MsgPaneMetadata)
+		}
+		c.paneMetadata[m.PaneID] = m
 	}
 }
 
@@ -1175,4 +1188,12 @@ func (c *Client) FocusedPaneID() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.focusPaneID
+}
+
+// PaneMetadata returns the metadata for a pane if known.
+func (c *Client) PaneMetadata(paneID int) (protocol.MsgPaneMetadata, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	meta, ok := c.paneMetadata[paneID]
+	return meta, ok
 }

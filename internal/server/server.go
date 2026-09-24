@@ -42,6 +42,8 @@ type Server struct {
 	// tell when either has changed.
 	lastStatuses map[int]protocol.PaneStatus
 	lastTitles   map[int]string
+	lastCWD      map[int]string
+	lastUserVars map[int]map[string]string
 	// Creation notices are retried until accepted, followed by a snapshot.
 	pendingPaneCreated      map[transport.Transport][]int
 	pendingCreationSnapshot map[transport.Transport]bool
@@ -90,6 +92,9 @@ type Server struct {
 	// client stale with nothing left to trigger a resend. Taken before
 	// s.mu, never while holding it.
 	paneSendMu sync.Mutex
+	// metaSendMu serializes broadcastMetadataIfChanged and sendPaneMetadataTo
+	// so concurrent status queries and ticker broadcasts deliver in order.
+	metaSendMu sync.Mutex
 
 	// owner is the connection of the client that launched this session,
 	// or nil when the session is ownerless: started as `wideboi
@@ -102,6 +107,20 @@ type Server struct {
 	// shuts it first, so nothing can attach to a session that is
 	// already being reaped.
 	listener *transport.SocketListener
+
+	// traffic holds per-connection delivery counts; see traffic.go.
+	// Entries are made on first use, so a Server literal works too.
+	// departed sums attached clients that have left, and started is
+	// when NewServer ran, for uptime. All under s.mu.
+	traffic      map[transport.Transport]*clientTraffic
+	nextClientID int
+	departed     protocol.ClientTraffic
+	started      time.Time
+	// timing turns on render, patch-build and encode timing; see
+	// SetTrafficTiming. renderTiming and buildTiming accumulate it.
+	timing       bool
+	renderTiming protocol.TimingStat
+	buildTiming  protocol.TimingStat
 
 	// closeGrace is handed to every pane this server spawns. Zero means
 	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
@@ -147,6 +166,16 @@ func (s *Server) SetOwner(tp transport.Transport) {
 	s.owner = tp
 }
 
+// SetTrafficTiming turns on render, patch-build and encode timing for
+// `wideboi status --traffic` (#179). Off by default: the hot paths
+// then never read the clock. Call it before Run; connections already
+// counted keep encode timing off.
+func (s *Server) SetTrafficTiming(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.timing = on
+}
+
 // SetWidthPresets configures the sequence of presets used by CycleWidth.
 func (s *Server) SetWidthPresets(presets []int) {
 	s.mu.Lock()
@@ -175,6 +204,7 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		pendingPaneCreated:      make(map[transport.Transport][]int),
 		pendingCreationSnapshot: make(map[transport.Transport]bool),
 		stopCh:                  make(chan struct{}),
+		started:                 time.Now(),
 	}
 	if tp != nil {
 		srv.transports = append(srv.transports, tp)
@@ -316,6 +346,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.clientSizes, tp)
 	delete(s.pendingPaneCreated, tp)
 	delete(s.pendingCreationSnapshot, tp)
+	s.forgetTrafficLocked(tp)
 	s.recomputeSessionSizeLocked()
 	s.resizePanesLocked()
 }
@@ -340,6 +371,7 @@ func (s *Server) Run(ctx context.Context) error {
 		case <-s.stopCh:
 			return nil
 		case <-frameTicker.C:
+			s.broadcastMetadataIfChanged(ctx)
 			// broadcastLayout already ends with a pane-update
 			// broadcast, so only send one separately when it did
 			// not fire.
@@ -354,16 +386,24 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	s.mu.Lock()
 	needBroadcast := false
 	needPaneBroadcast := false
+	sendMetadata := false
 	resyncPaneID := 0
 	createdPaneID := 0
+	var trafficReport *protocol.MsgTrafficStats
 
 	switch m := msg.(type) {
 	case protocol.MsgPaneResync:
 		resyncPaneID = m.PaneID
+		s.trafficLocked(tp).counts.ResyncRequests++
 	case protocol.MsgStatusRequest:
 		needBroadcast = true
+		sendMetadata = true
+	case protocol.MsgTrafficRequest:
+		report := s.trafficReportLocked()
+		trafficReport = &report
 
 	case protocol.MsgAttach:
+		s.markAttachedLocked(tp)
 		if m.Cols > 0 && m.Rows > 0 {
 			if s.clientSizes == nil {
 				s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
@@ -396,6 +436,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
+		sendMetadata = true
 
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
@@ -519,6 +560,11 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 
 	s.mu.Unlock()
+	if trafficReport != nil {
+		// Only the requester gets it. Sent outside s.mu: a socket
+		// SendServer can block on a full queue.
+		tp.SendServer(ctx, *trafficReport)
+	}
 	if resyncPaneID > 0 {
 		// Take the broadcast lane before invalidating the baseline. An
 		// in-flight patch may finish first, but the full resend follows it.
@@ -537,6 +583,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 	if needPaneBroadcast {
 		go s.broadcastPaneUpdates(ctx, false)
+	}
+	if sendMetadata && tp != nil {
+		s.sendPaneMetadataTo(ctx, tp)
 	}
 }
 
@@ -609,6 +658,8 @@ func (s *Server) onPaneExit(id int) {
 	s.strip.KillPane(id)
 	p := s.panes[id]
 	delete(s.panes, id)
+	delete(s.lastCWD, id)
+	delete(s.lastUserVars, id)
 	s.resizePanesLocked()
 	s.mu.Unlock()
 
@@ -623,6 +674,8 @@ func (s *Server) removePaneLocked(id int) {
 	}
 	s.strip.KillPane(id)
 	delete(s.panes, id)
+	delete(s.lastCWD, id)
+	delete(s.lastUserVars, id)
 	go p.Close()
 }
 
@@ -804,6 +857,103 @@ func sameStringMap(a, b map[int]string) bool {
 	return true
 }
 
+func sameUserVars(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) broadcastMetadataIfChanged(ctx context.Context) bool {
+	s.metaSendMu.Lock()
+	defer s.metaSendMu.Unlock()
+
+	s.mu.Lock()
+	type metaUpdate struct {
+		id   int
+		cwd  string
+		vars map[string]string
+	}
+	var updates []metaUpdate
+	for id, p := range s.panes {
+		cwd := p.CWD()
+		vars := p.UserVars()
+		lastCwd, okCwd := s.lastCWD[id]
+		lastVars, okVars := s.lastUserVars[id]
+		if !okCwd || cwd != lastCwd || !okVars || !sameUserVars(vars, lastVars) {
+			updates = append(updates, metaUpdate{id: id, cwd: cwd, vars: vars})
+		}
+	}
+	for id := range s.lastCWD {
+		if _, ok := s.panes[id]; !ok {
+			delete(s.lastCWD, id)
+		}
+	}
+	for id := range s.lastUserVars {
+		if _, ok := s.panes[id]; !ok {
+			delete(s.lastUserVars, id)
+		}
+	}
+	if len(updates) == 0 {
+		s.mu.Unlock()
+		return false
+	}
+	tps := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+
+	for _, u := range updates {
+		msg := protocol.MsgPaneMetadata{
+			PaneID:   u.id,
+			CWD:      u.cwd,
+			UserVars: u.vars,
+		}
+		delivered := true
+		for _, tp := range tps {
+			if !tp.SendServer(ctx, msg) {
+				delivered = false
+			}
+		}
+		if delivered {
+			s.mu.Lock()
+			if s.lastCWD == nil {
+				s.lastCWD = make(map[int]string)
+			}
+			if s.lastUserVars == nil {
+				s.lastUserVars = make(map[int]map[string]string)
+			}
+			s.lastCWD[u.id] = u.cwd
+			s.lastUserVars[u.id] = u.vars
+			s.mu.Unlock()
+		}
+	}
+	return true
+}
+
+func (s *Server) sendPaneMetadataTo(ctx context.Context, tp transport.Transport) {
+	s.metaSendMu.Lock()
+	defer s.metaSendMu.Unlock()
+
+	s.mu.Lock()
+	var msgs []protocol.MsgPaneMetadata
+	for id, p := range s.panes {
+		msgs = append(msgs, protocol.MsgPaneMetadata{
+			PaneID:   id,
+			CWD:      p.CWD(),
+			UserVars: p.UserVars(),
+		})
+	}
+	s.mu.Unlock()
+
+	for _, msg := range msgs {
+		tp.SendServer(ctx, msg)
+	}
+}
+
 // broadcastLayoutIfStatusChanged pushes a layout snapshot when any
 // pane's status glyph differs from the last one sent, and reports
 // whether it did.
@@ -941,6 +1091,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 
 	s.mu.Lock()
 	tps := append([]transport.Transport{}, s.transports...)
+	timing := s.timing
 	if s.paneGens == nil {
 		s.paneGens = make(map[transport.Transport]map[int]uint64)
 	}
@@ -1064,13 +1215,26 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	}
 
 	// Render distinct frames outside s.mu
+	// Timing locals, folded in under s.mu below. With timing off the
+	// clock is never read. Render time is the whole render call, which
+	// includes waiting for a pending pane resize or the grid's write
+	// lock, and counts calls that returned !ok: a high max may be a
+	// wait, not rendering.
+	var render, build protocol.TimingStat
 	renderedFrames := make(map[renderKey]protocol.MsgPaneUpdate, len(neededRenders))
 	for key := range neededRenders {
 		p := panesByID[key.paneID]
 		if p == nil {
 			continue
 		}
+		var start time.Time
+		if timing {
+			start = time.Now()
+		}
 		frame, ok := p.UpdateMessageForOffset(key.offset, key.unread)
+		if timing {
+			render.Add(time.Since(start))
+		}
 		if ok {
 			renderedFrames[key] = frame
 		}
@@ -1087,6 +1251,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		offset        int
 		unread        bool
 		frame         protocol.MsgPaneUpdate
+		message       transport.ServerMessage
 		accepted      bool
 	}
 
@@ -1110,7 +1275,15 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 
 		var message transport.ServerMessage = update
 		if target.hasBase {
-			if patch, ok := protocol.BuildPanePatch(target.baseline, update); ok {
+			var start time.Time
+			if timing {
+				start = time.Now()
+			}
+			patch, ok := protocol.BuildPanePatch(target.baseline, update)
+			if timing {
+				build.Add(time.Since(start))
+			}
+			if ok {
 				message = patch
 			}
 		}
@@ -1126,6 +1299,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 			offset:        target.offset,
 			unread:        target.unread,
 			frame:         update,
+			message:       message,
 			accepted:      accepted,
 		})
 	}
@@ -1133,6 +1307,8 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	// Update records under s.mu
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.renderTiming.Merge(render)
+	s.buildTiming.Merge(build)
 
 	present := make(map[transport.Transport]bool, len(s.transports))
 	for _, tp := range s.transports {
@@ -1140,7 +1316,18 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	}
 
 	for _, r := range results {
-		if !present[r.tp] || s.panes[r.paneID] != r.pane {
+		// A client dropped mid-send must not be re-added, and a pane
+		// that exited mid-send has nothing left to track. Its
+		// deliveries from this tick are not counted either: its entry
+		// has already folded into Departed, so traffic undercounts by
+		// at most one tick per departure, which is accepted.
+		if !present[r.tp] {
+			continue
+		}
+		// Count before the pane check: a failure to a live client
+		// counts even if the pane has since exited.
+		s.recordSendLocked(r.tp, r.message, r.accepted)
+		if s.panes[r.paneID] != r.pane {
 			continue
 		}
 		if !r.accepted {
@@ -1402,13 +1589,16 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 			return
 		}
 
-		conn, err := upgrader.Upgrade(w, r, nil)
+		// gorilla writes the 101 response and every frame to the
+		// hijacked conn, so counting that conn counts the wire.
+		cw := transport.NewCountingResponseWriter(w)
+		conn, err := upgrader.Upgrade(cw, r, nil)
 		if err != nil {
 			slog.Debug("websocket upgrade failed", "err", err)
 			return
 		}
 
-		sConn := transport.NewWebSocketServerConn(conn, 256)
+		sConn := transport.NewWebSocketServerConn(conn, 256, cw)
 		sConn.RunPumps(ctx)
 
 		s.mu.Lock()

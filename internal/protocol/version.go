@@ -17,4 +17,6 @@ package protocol
 // would ignore shift_rows and silently display stale retained rows.
 // 3 adds scroll_offset, scrollback_len, and unread_output to MsgPaneUpdate
 // and MsgPanePatch for independent per-client scrollback.
-const Version uint32 = 3
+// 4 adds MsgPaneMetadata carrying CWD and OSC 1337 user variables.
+// 5 adds MsgTrafficRequest/MsgTrafficStats (#179).
+const Version uint32 = 5

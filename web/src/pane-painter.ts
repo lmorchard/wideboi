@@ -1,6 +1,7 @@
 import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { decodeColor } from './colors';
 import { CELL_HEIGHT, FONT, type CellPoint } from './pane-state';
+import type { RenderStats } from './stats';
 
 // A pane paints only its own cells. CSS positions and clips its canvas.
 export class PanePainter {
@@ -17,7 +18,9 @@ export class PanePainter {
     else this.invalidate();
   };
 
-  constructor(private readonly canvas: HTMLCanvasElement, private cellWidth: number) {
+  // stats is only set with ?stats=1; when undefined no timing calls are made.
+  constructor(private readonly canvas: HTMLCanvasElement, private cellWidth: number,
+              private readonly stats?: RenderStats) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not get 2d context');
     this.ctx = ctx;
@@ -91,7 +94,17 @@ export class PanePainter {
     if (!this.running || document.hidden || this.frame !== null) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = null;
-      if (this.running && !document.hidden) this.draw();
+      if (!this.running || document.hidden) return;
+      const stats = this.stats;
+      if (!stats) {
+        this.draw();
+        return;
+      }
+      // Measures issuing the 2D canvas calls on the main thread, not
+      // rasterisation or compositing, which happen later.
+      const start = performance.now();
+      this.draw();
+      stats.recordDraw(performance.now() - start);
     });
   }
 

@@ -8,9 +8,11 @@ import { WideboiPane } from './wideboi-pane';
 import { cardLayout } from './card-layout';
 import { sendKeyboardInput, sendTextInput } from './input';
 import { consumeLinkToken } from './token';
-import { MouseKind, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { RenderStats, formatSummary, statsEnabled } from './stats';
+import { MouseKind, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 const linkToken = consumeLinkToken(window.location, window.history);
+const STATS_REPORT_MS = 5000;
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
@@ -147,6 +149,19 @@ export class WideboiApp extends LitElement {
     button:hover {
       background: #1177bb;
     }
+    .stats-overlay {
+      position: fixed;
+      right: 0.5rem;
+      bottom: 1.5rem;
+      margin: 0;
+      padding: 0.4rem 0.6rem;
+      background: rgba(37, 37, 38, 0.9);
+      border: 1px solid #3c3c3c;
+      color: #cccccc;
+      font: 11px monospace;
+      z-index: 30;
+      pointer-events: none;
+    }
     .error {
       color: #f14c4c;
       font-size: 0.9rem;
@@ -158,9 +173,15 @@ export class WideboiApp extends LitElement {
   private paneStrip!: HTMLElement;
 
   private client: WideboiClient | null = null;
-  private panes = new PaneStore();
+  // Present only with ?stats=1; everything downstream treats undefined as off.
+  private readonly stats = statsEnabled(window.location.search) ? new RenderStats() : undefined;
+  private panes = new PaneStore(this.stats);
   private resizeObserver: ResizeObserver;
   private cellWidth = 1;
+  private statsTimer?: ReturnType<typeof setInterval>;
+
+  @state()
+  private statsText = '';
 
   @state()
   private connected = false;
@@ -173,6 +194,9 @@ export class WideboiApp extends LitElement {
 
   @state()
   private paneTitles: Record<number, string> = {};
+
+  @state()
+  private paneMetadata: Record<number, MsgPaneMetadata> = {};
 
   @state()
   private focusedPaneId = 0;
@@ -324,6 +348,7 @@ export class WideboiApp extends LitElement {
     for (const animation of this.movement.values()) animation.cancel();
     this.movement.clear();
     this.resizeObserver.disconnect();
+    this.stopStatsReport();
     if (this.client) {
       this.client.disconnect();
       this.client = null;
@@ -331,15 +356,41 @@ export class WideboiApp extends LitElement {
     this.connected = false;
   }
 
+  private startStatsReport() {
+    const stats = this.stats;
+    if (!stats) return;
+    this.stopStatsReport();
+    stats.reset();
+    let windowStart = performance.now();
+    this.statsTimer = setInterval(() => {
+      const now = performance.now();
+      const line = formatSummary(stats.summary(now - windowStart));
+      stats.reset();
+      windowStart = now;
+      console.info('[wideboi stats]', line);
+      this.statsText = line.split(' | ').join('\n');
+    }, STATS_REPORT_MS);
+  }
+
+  // Clears the text too (startStatsReport calls this), so a reconnect shows
+  // "collecting…" rather than the previous connection's numbers.
+  private stopStatsReport() {
+    this.statsText = '';
+    if (this.statsTimer === undefined) return;
+    clearInterval(this.statsTimer);
+    this.statsTimer = undefined;
+  }
+
   private connectClient() {
     if (this.client) {
       this.client.disconnect();
     }
+    this.stopStatsReport();
     this.connected = false;
     this.lastSentSize = undefined;
     this.inPrefixMode = false;
     this.pendingFocusId = 0;
-    this.panes = new PaneStore();
+    this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
     this.columns = [];
     this.activePanes = [];
@@ -364,13 +415,14 @@ export class WideboiApp extends LitElement {
     const token = this.token || new URLSearchParams(url.hash.slice(1)).get('token') || url.searchParams.get('token') || '';
     url.searchParams.delete('token');
     url.hash = '';
-    const client = new WideboiClient(url.toString(), token);
+    const client = new WideboiClient(url.toString(), token, this.stats);
     this.client = client;
     
     client.onConnect = () => {
       if (this.client !== client) return;
       console.log('Connected to server');
       this.connected = true;
+      this.startStatsReport();
       this.errorMsg = '';
       void this.updateComplete.then(() => {
         if (this.client === client && this.connected) this.sendAttach();
@@ -381,6 +433,7 @@ export class WideboiApp extends LitElement {
       if (this.client !== client) return;
       this.connected = false;
       this.inPrefixMode = false;
+      this.stopStatsReport();
       this.errorMsg = 'Disconnected from server.';
     }
     client.onMessage = (message) => {
@@ -401,6 +454,16 @@ export class WideboiApp extends LitElement {
           if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
           this.paneStatuses = snapshot.paneStatuses;
           this.paneTitles = snapshot.paneTitles;
+          const activeSet = new Set(this.activePanes);
+          let metaPruned = false;
+          const nextMeta = { ...this.paneMetadata };
+          for (const id of Object.keys(nextMeta)) {
+            if (!activeSet.has(Number(id))) {
+              delete nextMeta[Number(id)];
+              metaPruned = true;
+            }
+          }
+          if (metaPruned) this.paneMetadata = nextMeta;
           void this.updateComplete.then(() => {
             this.animateReorder(previous);
             this.revealFocus();
@@ -436,6 +499,11 @@ export class WideboiApp extends LitElement {
           if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
           if (this.pointer?.pane.paneId === closedId) this.pointer = undefined;
           if (this.selectedPane?.paneId === closedId) this.selectedPane = undefined;
+          if (this.paneMetadata[closedId]) {
+            const next = { ...this.paneMetadata };
+            delete next[closedId];
+            this.paneMetadata = next;
+          }
           void this.updateComplete.then(() => {
             if (focusChanged) {
               this.focusedPane()?.focusInput();
@@ -443,6 +511,11 @@ export class WideboiApp extends LitElement {
             }
             this.sendResizeIfChanged();
           });
+          break;
+        }
+        case 'paneMetadata': {
+          const meta = message.msg.value;
+          this.paneMetadata = { ...this.paneMetadata, [meta.paneId]: meta };
           break;
         }
       }
@@ -728,6 +801,7 @@ export class WideboiApp extends LitElement {
               .cardLabel=${`[${column.paneId}] ${this.paneTitles[column.paneId] || 'Terminal'}`}
               .running=${this.connected}
               .cellWidth=${this.cellWidth}
+              .stats=${this.stats}
               aria-label=${`Pane ${column.paneId}`}
             ></wideboi-pane>
           `; })}
@@ -743,6 +817,7 @@ export class WideboiApp extends LitElement {
           return `${focusScroll}${items}`;
         })()}</div>
       </div>
+      ${this.stats ? html`<pre class="stats-overlay">${this.statsText || 'stats: collecting…'}</pre>` : ''}
       ${!this.connected ? html`
         <div class="overlay">
           <div class="connection-box">

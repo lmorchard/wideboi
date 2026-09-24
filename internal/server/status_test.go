@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"image"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -21,9 +22,12 @@ import (
 // statusGrid is a term.Grid that reports whatever status the test sets.
 // Every other method is a cheap stub; these tests do not exercise them.
 type statusGrid struct {
-	status atomic.Int32
-	title  atomic.Pointer[string]
-	gen    atomic.Uint64
+	status     atomic.Int32
+	title      atomic.Pointer[string]
+	cwd        atomic.Pointer[string]
+	userVarsMu sync.Mutex
+	userVars   map[string]string
+	gen        atomic.Uint64
 }
 
 func newStatusGrid(st protocol.PaneStatus) *statusGrid {
@@ -35,6 +39,21 @@ func newStatusGrid(st protocol.PaneStatus) *statusGrid {
 func (g *statusGrid) set(st protocol.PaneStatus) { g.status.Store(int32(st)) }
 
 func (g *statusGrid) setTitle(s string) { g.title.Store(&s) }
+
+func (g *statusGrid) setCWD(cwd string) { g.cwd.Store(&cwd) }
+
+func (g *statusGrid) setUserVar(k, v string) {
+	g.userVarsMu.Lock()
+	defer g.userVarsMu.Unlock()
+	if g.userVars == nil {
+		g.userVars = make(map[string]string)
+	}
+	if v == "" {
+		delete(g.userVars, k)
+	} else {
+		g.userVars[k] = v
+	}
+}
 
 // bump stands in for a write: anything that changes what a pane update
 // would carry.
@@ -48,6 +67,26 @@ func (g *statusGrid) Title() string {
 		return *t
 	}
 	return ""
+}
+
+func (g *statusGrid) CWD() string {
+	if p := g.cwd.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+func (g *statusGrid) UserVars() map[string]string {
+	g.userVarsMu.Lock()
+	defer g.userVarsMu.Unlock()
+	if len(g.userVars) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(g.userVars))
+	for k, v := range g.userVars {
+		out[k] = v
+	}
+	return out
 }
 
 func (g *statusGrid) Status() protocol.PaneStatus { return protocol.PaneStatus(g.status.Load()) }

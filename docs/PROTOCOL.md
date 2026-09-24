@@ -39,6 +39,7 @@ Each envelope is a protobuf `oneof`. It holds exactly one message.
 | `MsgScroll` | Scrolls a pane. |
 | `MsgPaneResync` | Asks for a full update of one pane. See section 5. |
 | `MsgStatusRequest` | Asks for a layout snapshot. `wideboi status` uses it. |
+| `MsgTrafficRequest` | Asks for traffic counters. `wideboi status --traffic` uses it. See section 7. |
 | `MsgDetach` | Disconnects this client. The session continues. |
 | `MsgShutdown` | Stops the session. |
 
@@ -51,6 +52,8 @@ Each envelope is a protobuf `oneof`. It holds exactly one message.
 | `MsgPaneUpdate` | Gives the full contents of one pane. |
 | `MsgPanePatch` | Gives the changed rows of one pane. |
 | `MsgPaneClosed` | Tells the client that a pane closed. The server does not send it at this time. |
+| `MsgPaneMetadata` | Gives the current working directory and user variables of one pane. |
+| `MsgTrafficStats` | Gives traffic counters. Only the client that sent `MsgTrafficRequest` receives it. See section 7. |
 
 Each client keeps its own focus and layout. The server does not send them.
 
@@ -122,7 +125,58 @@ The server then sends a `MsgPaneUpdate` for that pane.
 For more data about patches, see `docs/partial-pane-updates.md`. That document
 gives measurements for the earlier JSON encoding.
 
-## 6. A missing field is zero
+## 6. Pane metadata (OSC 7 and OSC 1337)
+
+Child processes and coding agents can emit out-of-band metadata for a pane:
+
+- **OSC 7 (Current Working Directory):**
+  Format: `ESC ] 7 ; file://[hostname]/path BEL` (or terminated by `ESC \`).
+  The hostname must be empty, `"localhost"`, or the machine hostname. Foreign
+  hostnames are ignored. The path must be an absolute path. It is percent-decoded
+  and cleaned before storage.
+- **OSC 1337 `SetUserVar` (User-defined metadata):**
+  Format: `ESC ] 1337 ; SetUserVar=<name>=<base64-value> BEL` (or `ESC \`).
+  `<name>` may contain letters, numbers, hyphens, and underscores (max 64 bytes).
+  `<base64-value>` is standard base64 encoding of UTF-8 text (max 4096 bytes
+  decoded).
+  If the decoded value is empty, the variable is deleted.
+  Each pane retains up to 64 variables.
+  Malformed base64, invalid UTF-8, keys or values over size limits, or other
+  OSC 1337 subcommands are dropped safely without error or side effect.
+
+The server transmits metadata to clients via `MsgPaneMetadata`, which carries
+`pane_id`, `cwd`, and `user_vars`. The server sends this message when a pane's
+metadata changes, when a new client connects, and in response to `MsgStatusRequest`.
+
+## 7. Traffic counters
+
+Protocol version 5 adds `MsgTrafficRequest` and `MsgTrafficStats` (#179).
+
+`MsgTrafficStats` gives counts and timings only. It never gives cell
+contents, titles, input, or tokens. The request changes nothing on the
+server. The server sends the reply only to the client that sent the request.
+
+The reply has these parts:
+
+- `clients`: one `ClientTraffic` for each attached client, in attach order.
+  An attached client is a client that sent `MsgAttach`. A connection that
+  only sends requests, for example `wideboi status --traffic`, is not in the
+  list.
+- `departed`: the sum of the counters of attached clients that have
+  disconnected. The totals of the session thus stay correct when a client
+  goes.
+- `uptime_millis`: the time since the server started.
+- `timing_enabled`, `render`, `build_patch`, and the `encode` field of each
+  `ClientTraffic`: wall-clock timings. The server measures them only when it
+  starts with `WIDEBOI_TRAFFIC_TIMING=1`. If not, they are zero.
+
+Each `ClientTraffic` counts from when that client attached. It counts the
+pane updates and patches that the client accepted, the rows in the patches,
+the resync requests, and the failed sends. The transport counts the payload
+bytes and the bytes written to the connection. The in-process transport
+counts no bytes.
+
+## 8. A missing field is zero
 
 Protobuf does not send a field that has its zero value. For example, it does
 not send `false`, `0`, an empty string, or an empty style. The receiver reads
@@ -135,7 +189,7 @@ fields.
 If you add a field that must mean "no change" when it is missing, use
 `optional` in the schema.
 
-## 7. Errors
+## 9. Errors
 
 On the Unix socket:
 
@@ -157,7 +211,7 @@ On the WebSocket:
   server ignores the message. The connection continues.
 - If a message is not binary, the server does the same.
 
-## 8. The Go code and the web code
+## 10. The Go code and the web code
 
 The Go code does not use the generated types in the server or the client. It
 uses its own structs in `internal/protocol`. The file
@@ -167,7 +221,7 @@ types. The conversion occurs only in the transports.
 The web client uses the generated TypeScript types directly. Generation
 numbers are `bigint` in TypeScript.
 
-## 9. How to change the protocol
+## 11. How to change the protocol
 
 To add a field or a message:
 

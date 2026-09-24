@@ -286,6 +286,12 @@ func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 // never set one.
 func (p *Pane) Title() string { return p.grid.Title() }
 
+// CWD reports the pane's current working directory, or "" if not set.
+func (p *Pane) CWD() string { return p.grid.CWD() }
+
+// UserVars reports the pane's agent metadata set via OSC 1337.
+func (p *Pane) UserVars() map[string]string { return p.grid.UserVars() }
+
 // Status reports the current agent status of the pane.
 func (p *Pane) Status() protocol.PaneStatus { return p.grid.Status() }
 
