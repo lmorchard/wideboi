@@ -51,6 +51,10 @@ jobs:
       if: steps.skip_check.outputs.skip != 'true'
       run: npm ci --prefix web
 
+    - name: Install browser for acceptance tests
+      if: steps.skip_check.outputs.skip != 'true'
+      run: cd web && npx playwright install --with-deps chromium
+
     - name: Set up Buf
       if: steps.skip_check.outputs.skip != 'true'
       uses: bufbuild/buf-action@v1

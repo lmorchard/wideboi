@@ -338,13 +338,15 @@ Flags:
 
 ## Development
 
-    make quick    # the edit loop: fmt, vet, seam boundary, unit tests (~5s)
-    make check    # the gate: adds race detector, exit contract, smoke, attach (~50s)
+    make quick    # fmt, vet, seam boundary, Go and web unit tests
+    make check    # adds browser acceptance, race, exit contract, smoke, attach
     make race     # go test -race -count=1 ./..., on its own
     make smoke    # scripted acceptance cases, asserted on the pty wire
     make proto    # regenerate the Go and TypeScript wire bindings
 
 `make check` runs its targets in parallel; `CHECK_JOBS=1` forces serial.
+For the browser acceptance test, install Chromium once with
+`cd web && npx playwright install chromium`. CI installs it automatically.
 
 `docs/LESSONS.md` is worth reading before changing anything.
 

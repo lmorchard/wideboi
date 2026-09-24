@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run src",
+    "test:browser": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@bufbuild/protoc-gen-es": "^2.15.0",
+    "@playwright/test": "^1.63.0",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
     "vitest": "^1.6.1"
