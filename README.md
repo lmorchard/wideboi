@@ -138,26 +138,43 @@ bypass (usually `Shift`-drag, or `Option`-drag in macOS terminals).
 To leave the mouse to your terminal entirely, put `mouse = false` in your
 config file.
 
-## Web Client
+## Web client
 
-wideboi includes a browser-based client that uses an HTML5 Canvas to render your terminal windows securely over a WebSocket connection.
-
-To enable the web client, you must explicitly opt-in to the WebSocket server when starting a background session:
+`make build` bundles the browser client into `bin/wideboi`. Start a separate
+server with the HTTP and WebSocket listener bound to your own machine:
 
 ```bash
-wideboi server --websocket :8080
+make build
+./bin/wideboi server --websocket 127.0.0.1:8080
 ```
 
-*Or via environment variable: `WIDEBOI_WEBSOCKET=":8080"`*
+Open the `http://127.0.0.1:8080/#token=...` link printed by the server in a
+browser on the same machine. The server serves the client and WebSocket endpoint
+on that address; no separate Vite server is needed. To attach a terminal client
+to the same session, run `./bin/wideboi attach` in another terminal. End the
+session with `./bin/wideboi kill-session`.
 
-Once the server is running, the Web Client allows you to view and interact with your terminal multiplexer natively in any modern browser.
+The listener is disabled unless you set `--websocket`,
+`WIDEBOI_WEBSOCKET`, or `websocket` in the config file. All three accept an
+address such as `127.0.0.1:8080`. Binding to `:8080` listens on network
+interfaces beyond loopback. The built-in server uses plain HTTP and WebSocket;
+for access from another machine, use an HTTPS/WSS reverse proxy and keep the
+token private. Remote exposure guidance and additional safeguards are tracked
+in [#147](https://github.com/lmorchard/wideboi/issues/147).
 
 When no token is configured, the server generates one at startup and prints a
 `#token=...` link once to its stderr. It also stores the token in an owner-only
 `<socket without .sock>.web-token` file. For the default session, that is
 `$TMPDIR/wideboi-<uid>/default.web-token`; this file lets you retrieve the
-token when the server was started in the background. It is removed on normal
-shutdown, and `wideboi cleanup` removes files left by dead sessions.
+token when the server's stderr is no longer available:
+
+```bash
+cat "${TMPDIR:-/tmp}/wideboi-$(id -u)/default.web-token"
+```
+
+Open `http://127.0.0.1:8080/` and paste that value into the connection form.
+The token file is removed on normal shutdown, and `wideboi cleanup` removes
+files left by dead sessions.
 
 Open the link to hand the token to the browser, or open the base URL and enter
 the token in the connection form. The browser removes the fragment from its
@@ -167,22 +184,24 @@ connection URL clean. Reloading the page clears the in-memory token, so use
 the original link or enter it again. Older `?token=...` links still work and
 are cleaned from the history entry when opened.
 
-To choose a token, set `WIDEBOI_WEBSOCKET_TOKEN`, `websocket_token` in the
-config file, or `--websocket-token`. Enter that value in the browser's
-connection form. To rotate a configured token, change its value and restart
-the server; to rotate a generated token, restart the server. The current token
-is required for new WebSocket connections. Keep the startup link private:
-anyone holding it can control the terminal session.
+To choose a token, set `--websocket-token <token>`,
+`WIDEBOI_WEBSOCKET_TOKEN`, or `websocket_token` in the config file. Enter that
+value in the browser's connection form. To rotate a configured token, change
+its value and restart the server; to rotate a generated token, restart the
+server. The current token is required for new WebSocket connections. Keep the
+startup link private: anyone holding it can control the terminal session.
 
-> Note: The Vite + Lit Web UI is currently hosted in the `web/` directory and requires running `npm run dev` to serve the static assets locally during development (see [Issue #126](https://github.com/lmorchard/wideboi/issues/126)).
+For frontend development only, run `cd web && npm run dev` to use Vite's
+development server alongside a wideboi server. Normal builds use the embedded
+client.
 
 ## Configuration
 
 wideboi reads configuration with the following precedence (highest to lowest):
 
-1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`)
-2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`, `WIDEBOI_WEBSOCKET`)
-3. **Configuration file** (TOML)
+1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`, `--websocket-token`)
+2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`, `WIDEBOI_WEBSOCKET`, `WIDEBOI_WEBSOCKET_TOKEN`)
+3. **Configuration file** (TOML, including `websocket` and `websocket_token`)
 4. **Defaults** (including `$SHELL` or `/bin/sh`)
 
 ### Config file
@@ -259,6 +278,8 @@ Flags:
   -L, --session <name>   Session to start or attach to (default: "default");
                          its socket is $TMPDIR/wideboi-<uid>/<name>.sock
   -s, --socket <path>    Unix domain socket path, instead of a session name
+      --websocket <addr> Address for WebSocket server (e.g. ":8080")
+      --websocket-token <token> Token required for WebSocket connections
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
   -v, --version          Print version and exit
@@ -271,6 +292,8 @@ Flags:
 - `WIDEBOI_PREFIX`: prefix key (`ctrl+<letter>` or `ctrl+space`)
 - `WIDEBOI_SESSION`: session name override
 - `WIDEBOI_SOCK`: unix domain socket path override, instead of a session name
+- `WIDEBOI_WEBSOCKET`: address for the HTTP and WebSocket listener (disabled by default)
+- `WIDEBOI_WEBSOCKET_TOKEN`: token required for WebSocket connections (generated at server startup if unset)
 - `WIDEBOI_SHELL`: shell path override (takes precedence over TOML `shell`)
 - `WIDEBOI_LOG_LEVEL`: log verbosity, `trace`, `debug`, `info` (default), `warn` or `error`. Logs go beside the session's socket, as `<socket without .sock>.{client,server}.log` (so `$TMPDIR/wideboi-<uid>/default.server.log` for the default session), and are appended to, so `trace`, which records every message a client receives, is for chasing something specific
 - `SHELL`: default shell path (used when shell is not set in config)
