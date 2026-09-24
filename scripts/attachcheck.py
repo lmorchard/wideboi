@@ -252,6 +252,7 @@ def case_attach_renders_pane_content(fail):
     srv = Server()
     try:
         c = Client()
+        c.type(b"\x02w")
         out = c.output()
         if ALT_SCREEN_ENTER not in out:
             fail("attached client never entered the alt screen")
@@ -281,6 +282,7 @@ def case_styled_output_does_not_kill_the_connection(fail):
         c = Client()
         c.type(b"printf '\\033[31mRED\\033[m \\033[38;5;200mIDX\\033[m \\033[38;2;1;2;3mRGB\\033[m\\n'\r")
         c.type(b"echo colour-survived\r")
+        c.type(b"\x02w")
         out = c.output()
         for needle in (b"RED", b"IDX", b"RGB"):
             if needle not in out:
@@ -311,6 +313,7 @@ def case_multibyte_title_does_not_kill_the_connection(fail):
         # The pane header draws the title, so "title-mk" belongs on
         # screen -- but only whole, after its U+2733. A bare occurrence is
         # the sequence's tail printed as text after the false ST.
+        c.type(b"\x02w")
         out = c.output()
         whole = "\u2733 title-mk".encode()
         if whole not in out:
@@ -333,6 +336,7 @@ def case_attached_control_mode_offers_detach(fail):
     try:
         c = Client()
         c.type(b"\x02", settle=1.0)
+        c.type(b"\x02w")
         out = c.output()
         if b"d detach" not in out:
             fail("attached control mode does not offer 'd detach'")
