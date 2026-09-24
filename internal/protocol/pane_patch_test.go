@@ -223,6 +223,31 @@ func TestPanePatchWholePaneShifts(t *testing.T) {
 	}
 }
 
+func TestPanePatchAcceptsWiderEdgeBandButRejectsInteriorReplacement(t *testing.T) {
+	base := paneFixture()
+	for y := range base.Lines {
+		base.Lines[y][0].Content = fmt.Sprint(y)
+	}
+	next := paneFixture()
+	next.Generation = 2
+	next.Lines[0] = base.Lines[1]
+	next.Lines[1] = base.Lines[2]
+	next.Lines[2][0].Content = "new 2"
+	next.Lines[3][0].Content = "new 3"
+	patch, ok := BuildPanePatch(base, next)
+	if !ok || patch.ShiftRows != -1 || len(patch.ChangedRows) != 2 {
+		t.Fatalf("wider edge band: patch=%+v ok=%v", patch, ok)
+	}
+	got, ok := ApplyPanePatch(base, patch)
+	if !ok || !reflect.DeepEqual(got, next) {
+		t.Fatalf("wider edge band reconstructed %+v, want %+v", got, next)
+	}
+	patch.ChangedRows[0].Y = 1
+	if _, ok := ApplyPanePatch(base, patch); ok {
+		t.Fatal("interior replacement accepted for a shift patch")
+	}
+}
+
 func TestPanePatchShiftNeedsExactUnambiguousInterior(t *testing.T) {
 	base := paneFixture()
 	for y := range base.Lines {

@@ -4,6 +4,10 @@
 
 `MsgPaneUpdate` is a complete pane snapshot with a generation. A new client, a resize, a layout resend, a missed send, or a resynchronization request receives one. `MsgPanePatch` names the exact `BaseGeneration` it extends, a new generation, complete replacement rows, and cursor and mouse state. Empty `ChangedRows` represents a cursor or mouse-only change. The server compares rendered rows instead of trusting the emulator's `Touched()` flags, which have known resize behavior (`docs/LESSONS.md`). When at least half the rows changed, it looks for a whole-pane `ShiftRows` and a contiguous replacement band at the exposed edge. Every retained row must match exactly, including style and wide-cell data. Ambiguous shifts, resize, and unrelated edits use a full snapshot.
 
+The shift field changes how a patch is applied. Protocol version 2 gates it on
+Unix sockets and WebSockets, so an older client cannot silently apply only the
+replacement edge rows.
+
 The server keeps the last accepted full state for each client and pane. `paneSendMu` orders successive sends. A client applies a patch only if its pane ID, dimensions, and generation match its baseline; otherwise it requests `MsgPaneResync`. A send rejected by the transport invalidates the server's baseline, so the next send is full. If a transport accepted but lost a message, the client detects the mismatch on a later patch and requests a full snapshot. Layout-triggered sends are full because a layout snapshot may replace a client's mirror. Both the terminal and browser clients reconstruct the same `MsgPaneUpdate` state from patches.
 
 ## Measurements

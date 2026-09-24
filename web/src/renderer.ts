@@ -97,11 +97,18 @@ export class GridRenderer {
       this.invalidate();
       return false;
     }
+    const band = patch.changedRows.length;
+    const shifted = patch.shiftRows !== 0;
+    if (shifted && (band < Math.abs(patch.shiftRows) || band > Math.floor(base.rows / 2))) {
+      this.panes.delete(patch.paneId);
+      this.invalidate();
+      return false;
+    }
     const lines = Array.from({ length: base.rows }, (_, y) => base.lines[y - patch.shiftRows]);
     const seen = new Set<number>();
     for (const row of patch.changedRows) {
       if (row.y < 0 || row.y >= base.rows || seen.has(row.y) || row.cells.length !== base.cols ||
-          (patch.shiftRows !== 0 && lines[row.y] !== undefined)) {
+          (shifted && (patch.shiftRows < 0 ? row.y < base.rows - band : row.y >= band))) {
         this.panes.delete(patch.paneId);
         this.invalidate();
         return false;

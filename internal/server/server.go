@@ -1076,10 +1076,11 @@ func (s *Server) Close() error {
 
 // ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
 func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
+	versionProtocol := fmt.Sprintf("wideboi.v%d", protocol.Version)
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
-		Subprotocols:    []string{"wideboi"},
+		Subprotocols:    []string{versionProtocol},
 		CheckOrigin:     webSocketOriginAllowed,
 	}
 
@@ -1091,6 +1092,17 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
+		}
+		versionOffered := false
+		for _, offered := range websocket.Subprotocols(r) {
+			if offered == versionProtocol {
+				versionOffered = true
+				break
+			}
+		}
+		if !versionOffered {
+			http.Error(w, "Unsupported wideboi protocol version", http.StatusUpgradeRequired)
+			return
 		}
 
 		conn, err := upgrader.Upgrade(w, r, nil)

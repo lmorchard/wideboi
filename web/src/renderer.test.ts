@@ -211,4 +211,22 @@ describe('GridRenderer frame scheduling', () => {
       cols: 1, rows: 4, lines }));
     expect(r.handlePanePatch({ ...patch, changedRows: [] })).toBe(false);
   });
+
+  it('applies a wider edge band and rejects interior replacements', () => {
+    const r = renderer();
+    const cell = (content: string) => create(CellDataSchema, { content, width: 1 });
+    const lines = ['A', 'B', 'C', 'D'].map(content => create(LineDataSchema, { cells: [cell(content)] }));
+    const full = create(MsgPaneUpdateSchema, { paneId: 1, generation: 1n, cols: 1, rows: 4, lines });
+    r.handlePaneUpdate(full);
+    const patch = create(MsgPanePatchSchema, { paneId: 1, cols: 1, rows: 4,
+      baseGeneration: 1n, generation: 2n, shiftRows: -1,
+      changedRows: [{ y: 2, cells: [cell('E')] }, { y: 3, cells: [cell('F')] }] });
+    const panes = (r as unknown as { panes: Map<number, MsgPaneUpdate> }).panes;
+    expect(r.handlePanePatch(patch)).toBe(true);
+    expect(panes.get(1)?.lines.map(line => line.cells[0].content)).toEqual(['B', 'C', 'E', 'F']);
+    r.handlePaneUpdate(full);
+    expect(r.handlePanePatch({ ...patch, changedRows: [
+      { ...patch.changedRows[0], y: 1 }, patch.changedRows[1],
+    ] })).toBe(false);
+  });
 });

@@ -81,6 +81,27 @@ func ApplyPanePatch(base MsgPaneUpdate, patch MsgPanePatch) (MsgPaneUpdate, bool
 		patch.ShiftRows <= -base.Rows || patch.ShiftRows >= base.Rows {
 		return MsgPaneUpdate{}, false
 	}
+	if patch.ShiftRows != 0 {
+		band := len(patch.ChangedRows)
+		magnitude := patch.ShiftRows
+		if magnitude < 0 {
+			magnitude = -magnitude
+		}
+		if band < magnitude || band > base.Rows/2 {
+			return MsgPaneUpdate{}, false
+		}
+		seen := make([]bool, band)
+		for _, row := range patch.ChangedRows {
+			index := row.Y
+			if patch.ShiftRows < 0 {
+				index -= base.Rows - band
+			}
+			if index < 0 || index >= band || seen[index] {
+				return MsgPaneUpdate{}, false
+			}
+			seen[index] = true
+		}
+	}
 	next := base
 	next.Lines = make([]LineData, base.Rows)
 	for y := range next.Lines {
