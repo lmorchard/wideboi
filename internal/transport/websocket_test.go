@@ -13,6 +13,36 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
+// sendClient writes msg the way the browser does: one binary frame
+// holding a protobuf ClientMessage.
+func sendClient(t *testing.T, conn *websocket.Conn, msg any) {
+	t.Helper()
+	payload, err := protocol.MarshalClient(msg)
+	if err != nil {
+		t.Fatalf("encode %T: %v", msg, err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, payload); err != nil {
+		t.Fatalf("write %T: %v", msg, err)
+	}
+}
+
+// readServer reads one frame, requires it to be binary, and decodes it.
+func readServer(t *testing.T, conn *websocket.Conn) any {
+	t.Helper()
+	kind, payload, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if kind != websocket.BinaryMessage {
+		t.Fatalf("frame kind %d, want binary", kind)
+	}
+	msg, err := protocol.UnmarshalServer(payload)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return msg
+}
+
 func TestWebSocketRoundTrip(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var serverWSConn *transport.WebSocketServerConn
@@ -44,14 +74,8 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		t.Fatalf("upgrade failed: %v", err)
 	}
 
-	// 1. Test Client -> Server (JSON Envelope)
-	env := transport.WSEnvelope{
-		Type:    "MsgAttach",
-		Payload: []byte(`{"Cols":80,"Rows":24}`),
-	}
-	if err := clientConn.WriteJSON(env); err != nil {
-		t.Fatalf("client write JSON failed: %v", err)
-	}
+	// 1. Client -> Server
+	sendClient(t, clientConn, protocol.MsgAttach{Cols: 80, Rows: 24})
 
 	select {
 	case msg := <-serverWSConn.ClientSendChan():
@@ -63,7 +87,7 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		t.Fatal("timeout waiting for client message on server")
 	}
 
-	// 2. Test Server -> Client (Go struct -> JSON Envelope)
+	// 2. Server -> Client
 	snapMsg := protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{{PaneID: 1, Width: 80, Height: 24}},
 	}
@@ -71,17 +95,11 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		t.Fatal("server SendServer failed")
 	}
 
-	var res transport.WSEnvelope
-	if err := clientConn.ReadJSON(&res); err != nil {
-		t.Fatalf("client read JSON failed: %v", err)
-	}
-	if res.Type != "MsgLayoutSnapshot" {
-		t.Errorf("got type %q, want MsgLayoutSnapshot", res.Type)
+	if got, ok := readServer(t, clientConn).(protocol.MsgLayoutSnapshot); !ok || len(got.Columns) != 1 || got.Columns[0].PaneID != 1 {
+		t.Errorf("got %#v, want the one-column snapshot", got)
 	}
 
-	if err := clientConn.WriteJSON(transport.WSEnvelope{Type: "MsgPaneResync", Payload: []byte(`{"PaneID":7}`)}); err != nil {
-		t.Fatalf("client resync write failed: %v", err)
-	}
+	sendClient(t, clientConn, protocol.MsgPaneResync{PaneID: 7})
 	select {
 	case msg := <-serverWSConn.ClientSendChan():
 		if msg != (protocol.MsgPaneResync{PaneID: 7}) {
@@ -93,11 +111,8 @@ func TestWebSocketRoundTrip(t *testing.T) {
 	if !serverWSConn.SendServer(ctx, protocol.MsgPanePatch{PaneID: 7, Cols: 2, Rows: 4, BaseGeneration: 1, Generation: 2}) {
 		t.Fatal("server patch send failed")
 	}
-	if err := clientConn.ReadJSON(&res); err != nil {
-		t.Fatalf("client patch read failed: %v", err)
-	}
-	if res.Type != "MsgPanePatch" || !strings.Contains(string(res.Payload), `"BaseGeneration":1`) {
-		t.Fatalf("patch envelope = %#v", res)
+	if got, ok := readServer(t, clientConn).(protocol.MsgPanePatch); !ok || got.BaseGeneration != 1 || got.Generation != 2 {
+		t.Fatalf("patch decoded as %#v", got)
 	}
 
 	serverWSConn.Close()
@@ -185,12 +200,58 @@ func TestWebSocketSlowPeerDoesNotBlockAnotherPeer(t *testing.T) {
 		t.Fatal("healthy peer was blocked")
 	}
 	_ = healthyClient.SetReadDeadline(time.Now().Add(time.Second))
-	var got transport.WSEnvelope
-	if err := healthyClient.ReadJSON(&got); err != nil {
+	if got, ok := readServer(t, healthyClient).(protocol.MsgLayoutSnapshot); !ok {
+		t.Fatalf("got %#v", got)
+	}
+}
+
+// A frame the server cannot decode -- text, or binary that is not a
+// ClientMessage -- is logged and skipped. The connection stays up and the
+// next valid message still arrives.
+func TestWebSocketSkipsUndecodableFrames(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	conns := make(chan *transport.WebSocketServerConn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			serverConn := transport.NewWebSocketServerConn(c, 4)
+			serverConn.RunPumps(ctx)
+			conns <- serverConn
+		}
+	}))
+	defer s.Close()
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	client, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Type != "MsgLayoutSnapshot" {
-		t.Fatalf("got %q", got.Type)
+	defer client.Close()
+	serverConn := <-conns
+	defer serverConn.Close()
+
+	if err := client.WriteMessage(websocket.TextMessage, []byte(`{"t":"MsgAttach","p":{"Cols":1,"Rows":1}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WriteMessage(websocket.BinaryMessage, []byte{0xff, 0xff, 0xff}); err != nil {
+		t.Fatal(err)
+	}
+	sendClient(t, client, protocol.MsgAttach{Cols: 80, Rows: 24})
+
+	select {
+	case msg, ok := <-serverConn.ClientSendChan():
+		if !ok {
+			t.Fatal("connection closed on an undecodable frame")
+		}
+		if msg != (protocol.MsgAttach{Cols: 80, Rows: 24}) {
+			t.Fatalf("first delivered message %#v, want the valid attach", msg)
+		}
+	case <-ctx.Done():
+		t.Fatal("valid message never arrived")
+	}
+	if err := serverConn.Err(); err != nil {
+		t.Fatalf("skipped frames recorded a connection error: %v", err)
 	}
 }
 

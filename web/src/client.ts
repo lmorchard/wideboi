@@ -1,11 +1,16 @@
-import type { WSEnvelope } from "./protocol";
+import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
+import { ClientMessageSchema, ServerMessageSchema, type ServerMessage } from "./gen/internal/protocol/wirepb/wideboi_pb";
+
+// ClientMsg is one arm of the ClientMessage oneof, e.g.
+// { case: "resize", value: { cols, rows } }.
+export type ClientMsg = NonNullable<MessageInitShape<typeof ClientMessageSchema>["msg"]>;
 
 export class WideboiClient {
   private ws: WebSocket | null = null;
   private url: string;
   private token: string;
   
-  public onMessage?: (envelope: WSEnvelope) => void;
+  public onMessage?: (message: ServerMessage) => void;
   public onConnect?: () => void;
   public onDisconnect?: () => void;
 
@@ -23,6 +28,7 @@ export class WideboiClient {
     for (const byte of bytes) binary += String.fromCharCode(byte);
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
     const ws = protocol ? new WebSocket(this.url, [protocol]) : new WebSocket(this.url);
+    ws.binaryType = "arraybuffer";
     this.ws = ws;
 
     ws.onopen = () => {
@@ -45,25 +51,24 @@ export class WideboiClient {
 
     ws.onmessage = (event: MessageEvent) => {
       if (this.ws !== ws) return;
+      let message: ServerMessage;
       try {
-        const envelope = JSON.parse(event.data) as WSEnvelope;
-        if (this.onMessage) {
-          this.onMessage(envelope);
-        }
+        message = fromBinary(ServerMessageSchema, new Uint8Array(event.data as ArrayBuffer));
       } catch (err) {
-        console.error("[WideboiClient] Failed to decode JSON message:", err);
+        console.error("[WideboiClient] Failed to decode message:", err);
+        return;
       }
+      if (this.onMessage) this.onMessage(message);
     };
   }
 
-  public send(type: string, payload: any) {
+  public send(msg: ClientMsg) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn("[WideboiClient] Cannot send, not connected");
       return;
     }
     
-    const env: WSEnvelope = { t: type, p: payload };
-    this.ws.send(JSON.stringify(env));
+    this.ws.send(toBinary(ClientMessageSchema, create(ClientMessageSchema, { msg })));
   }
 
   public disconnect() {

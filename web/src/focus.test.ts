@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { reconcileFocus } from './focus';
-import type { ColumnData } from './protocol';
+import { create } from '@bufbuild/protobuf';
+import { ColumnDataSchema, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 
-const columns = (ids: number[]): ColumnData[] => ids.map(PaneID => ({ PaneID, Width: 40, Height: 20 }));
+const columns = (ids: number[]): ColumnData[] => ids.map(paneId => create(ColumnDataSchema, { paneId, width: 40, height: 20 }));
 
 describe('reconcileFocus', () => {
   it('retains a pane that is still present', () => {
