@@ -145,6 +145,7 @@ func TestKeyInputSurvivesTheWire(t *testing.T) {
 func TestEveryMessageTypeRoundtrips(t *testing.T) {
 	msgs := []any{
 		protocol.MsgAttach{Cols: 80, Rows: 24},
+		protocol.MsgStatusRequest{},
 		protocol.MsgVerb{Verb: protocol.VerbSmartJump},
 		protocol.MsgMouse{PaneID: 2, Kind: protocol.MouseRelease, X: 4, Y: 5, Button: 1, Mod: 1},
 		protocol.MsgInput{PaneID: 1, Data: []byte("hi")},
@@ -157,6 +158,7 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 			Columns:      []protocol.ColumnData{{PaneID: 1, Width: 40, Height: 22}},
 			PaneStatuses: map[int]protocol.PaneStatus{1: protocol.StatusWorking},
 		},
+		protocol.MsgPaneCreated{PaneID: 3},
 		protocol.MsgPaneUpdate{
 			PaneID: 1, Cols: 2, Rows: 1,
 			Lines: []protocol.LineData{{

@@ -36,6 +36,12 @@ type Server struct {
 	// tell when either has changed.
 	lastStatuses map[int]protocol.PaneStatus
 	lastTitles   map[int]string
+	// Creation notices are retried until accepted, followed by a snapshot.
+	pendingPaneCreated      map[transport.Transport][]int
+	pendingCreationSnapshot map[transport.Transport]bool
+	// layoutSendMu orders each client's creation notices before the snapshot
+	// that includes them, even when broadcasts run concurrently.
+	layoutSendMu sync.Mutex
 
 	// paneGens records, per client, the grid generation each pane was
 	// at in the last update that client accepted. The frame tick sends a
@@ -104,13 +110,15 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		cwd, _ = os.Getwd()
 	}
 	srv := &Server{
-		strip:       layout.NewStrip(),
-		panes:       make(map[int]*Pane),
-		shell:       shell,
-		cwd:         cwd,
-		transports:  make([]transport.Transport, 0),
-		clientSizes: make(map[transport.Transport]protocol.MsgResize),
-		stopCh:      make(chan struct{}),
+		strip:                   layout.NewStrip(),
+		panes:                   make(map[int]*Pane),
+		shell:                   shell,
+		cwd:                     cwd,
+		transports:              make([]transport.Transport, 0),
+		clientSizes:             make(map[transport.Transport]protocol.MsgResize),
+		pendingPaneCreated:      make(map[transport.Transport][]int),
+		pendingCreationSnapshot: make(map[transport.Transport]bool),
+		stopCh:                  make(chan struct{}),
 	}
 	if tp != nil {
 		srv.transports = append(srv.transports, tp)
@@ -220,6 +228,8 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	s.transports = out
 	delete(s.paneGens, tp)
 	delete(s.clientSizes, tp)
+	delete(s.pendingPaneCreated, tp)
+	delete(s.pendingCreationSnapshot, tp)
 	s.recomputeSessionSizeLocked()
 	s.resizePanesLocked()
 }
@@ -341,11 +351,12 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			p.SetScrollOffset(p.ScrollOffset() + m.Delta)
 		}
 	}
+	if tp != nil && createdPaneID != 0 {
+		s.pendingPaneCreated[tp] = append(s.pendingPaneCreated[tp], createdPaneID)
+		s.pendingCreationSnapshot[tp] = true
+	}
 
 	s.mu.Unlock()
-	if tp != nil && createdPaneID != 0 {
-		tp.SendServer(ctx, protocol.MsgPaneCreated{PaneID: createdPaneID})
-	}
 
 	if needBroadcast {
 		s.broadcastLayout(ctx)
@@ -618,7 +629,8 @@ func sameStringMap(a, b map[int]string) bool {
 func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	s.mu.Lock()
 	changed := !sameStatusMap(s.statusGlyphsLocked(), s.lastStatuses) ||
-		!sameStringMap(s.paneTitlesLocked(), s.lastTitles)
+		!sameStringMap(s.paneTitlesLocked(), s.lastTitles) ||
+		len(s.pendingCreationSnapshot) > 0
 	s.mu.Unlock()
 
 	if !changed {
@@ -638,6 +650,9 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 }
 
 func (s *Server) broadcastLayout(ctx context.Context) {
+	s.layoutSendMu.Lock()
+	defer s.layoutSendMu.Unlock()
+
 	s.mu.Lock()
 	statuses := s.statusGlyphsLocked()
 	titles := s.paneTitlesLocked()
@@ -647,6 +662,10 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 		PaneTitles:   titles,
 	}
 	tps := append([]transport.Transport{}, s.transports...)
+	pending := make(map[transport.Transport][]int, len(s.pendingPaneCreated))
+	for tp, ids := range s.pendingPaneCreated {
+		pending[tp] = append([]int(nil), ids...)
+	}
 	s.mu.Unlock()
 
 	// Delivered means *every* attached client accepted it, not any
@@ -660,9 +679,32 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	// rather than retrying forever.
 	delivered := true
 	for _, tp := range tps {
-		if !tp.SendServer(ctx, snapshot) {
-			delivered = false
+		sent := 0
+		for _, id := range pending[tp] {
+			if !tp.SendServer(ctx, protocol.MsgPaneCreated{PaneID: id}) {
+				break
+			}
+			sent++
 		}
+		if sent > 0 {
+			s.mu.Lock()
+			if len(s.pendingPaneCreated[tp]) >= sent {
+				s.pendingPaneCreated[tp] = s.pendingPaneCreated[tp][sent:]
+				if len(s.pendingPaneCreated[tp]) == 0 {
+					delete(s.pendingPaneCreated, tp)
+				}
+			}
+			s.mu.Unlock()
+		}
+		if sent != len(pending[tp]) || !tp.SendServer(ctx, snapshot) {
+			delivered = false
+			continue
+		}
+		s.mu.Lock()
+		if len(s.pendingPaneCreated[tp]) == 0 {
+			delete(s.pendingCreationSnapshot, tp)
+		}
+		s.mu.Unlock()
 	}
 
 	// Mark the glyph set clean only once it actually went somewhere.

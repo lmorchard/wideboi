@@ -131,7 +131,7 @@ type MsgVerb struct {
 	PaneID int
 }
 
-// MsgInput carries decoded key events or pasted text destined for a
+// MouseKind identifies the kind of mouse event forwarded to a pane.
 type MouseKind int
 
 const (

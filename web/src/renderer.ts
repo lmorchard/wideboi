@@ -1,5 +1,6 @@
 import type { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData, Rectangle } from './protocol';
 import { decodeColor } from './colors';
+import { reconcileFocus } from './focus';
 
 export class GridRenderer {
   private canvas: HTMLCanvasElement;
@@ -36,10 +37,8 @@ export class GridRenderer {
   }
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
+    this.focusedPaneId = reconcileFocus(this.layout?.Columns || [], snapshot.Columns, this.focusedPaneId);
     this.layout = snapshot;
-    if (!snapshot.Columns.some(c => c.PaneID === this.focusedPaneId)) {
-      this.focusedPaneId = snapshot.Columns[0]?.PaneID || 0;
-    }
     this.recomputePlacements();
   }
 
