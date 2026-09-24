@@ -203,16 +203,16 @@ type vtGrid struct {
 	// dimension change go through se.mu for each call but never touch
 	// cell content outside the walk this lock protects.
 	//
-	// Three methods hold it: Write, Resize, and Draw's scrollback
-	// branch -- which holds it longest, for a whole frame's worth of
-	// ScrollbackCellAt/CellAt pointers handed to dst.SetCell, plus the
-	// scrollback-length and offset samples that decide where the
-	// history/live boundary falls. Draw's fast path (offset 0) is
-	// deliberately outside it.
+	// Three methods hold it: Write, Resize, and DrawAt's scrollback
+	// branch (reached directly or via Draw) -- which holds it longest,
+	// for a whole frame's worth of ScrollbackCellAt/CellAt pointers
+	// handed to dst.SetCell, plus the scrollback-length and offset
+	// samples that decide where the history/live boundary falls.
+	// DrawAt's fast path (offset <= 0) is deliberately outside it.
 	//
 	// Read is deliberately excluded -- it can block indefinitely (the
 	// same reason SafeEmulator's own Read is unlocked), and
-	// Write/Resize/Draw all terminate on their own, so nothing here can
+	// Write/Resize/Draw/DrawAt all terminate on their own, so nothing here can
 	// wedge against it.
 	writeResizeMu sync.Mutex
 }
@@ -694,13 +694,15 @@ func (g *vtGrid) Generation() uint64 { return g.generation.Load() }
 func (g *vtGrid) OutputGen() uint64  { return g.outputGen.Load() }
 
 // Draw delegates to DrawAt with the grid's current scroll offset.
+// See DrawAt for fast-path vs. scrollback locking behavior.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	g.DrawAt(dst, area, int(g.scrollOffset.Load()))
 }
 
 // DrawAt renders the grid into dst at the given scroll offset from bottom.
-// When offset is 0, live terminal cells are drawn via the fast path without
-// writeResizeMu contention. Positive offsets draw rows from scrollback history.
+// When offset is <= 0, live terminal cells are drawn via the fast path without
+// writeResizeMu contention. Positive offsets draw rows from scrollback history
+// under writeResizeMu to serialize against concurrent writes and resizes.
 func (g *vtGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
 	if offset <= 0 {
 		g.em.Draw(dst, area)
