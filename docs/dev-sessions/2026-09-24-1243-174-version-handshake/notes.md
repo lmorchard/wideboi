@@ -33,6 +33,15 @@
   mismatch printed "server exited during startup". Now only an EOF (no hello
   at all) takes that path. `TestOwnerReportsAMismatchedSpawnedServer`.
 
+## CI caught a Linux-only failure
+
+PR #187's first CI run failed: on Linux a peer that closes with our hello
+unread gives `ECONNRESET`, not EOF. The owner then missed "session taken"
+(attach-check `two plain wideboi at once`) and a server test read a reset.
+`readHello` now treats a reset as a hang-up wrapping `io.EOF`
+(`TestHandshakeResetIsEOF`). Verified in `golang:1.27.1` under Docker: the
+affected Go packages x4 and attachcheck x4, all green.
+
 ## Left alone / follow-ups
 
 - An old client talking to a new server still prints its old, vague error —

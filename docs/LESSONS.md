@@ -327,3 +327,9 @@ Without a version check, #166's switch from gob to protobuf showed up as
 read as a length prefix. The Unix socket now opens with a hello that carries
 `protocol.Version` (#174). The check only works if someone bumps the version.
 Increase it for any change an older peer would misread or reject.
+
+A peer that hangs up with your bytes unread looks different by platform.
+macOS reads EOF; Linux reads `ECONNRESET`. The handshake passed on macOS
+and failed in CI, where a server that found the session taken reset its
+owner. Treat a reset as a hang-up, and run socket-closing changes in a Linux
+container (`docker run golang:<go.mod version>`) before pushing.

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"syscall"
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
@@ -146,5 +147,28 @@ func TestHandshakeHangUpIsEOF(t *testing.T) {
 	_, err := handshakeWith(t, func(c net.Conn) {})
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("err = %v, want one wrapping io.EOF", err)
+	}
+}
+
+// resetConn reads as Linux does from a Unix socket whose peer closed
+// with our bytes still unread: ECONNRESET, not EOF.
+type resetConn struct{ net.Conn }
+
+func (resetConn) Read([]byte) (int, error) {
+	return 0, &net.OpError{Op: "read", Net: "unix", Err: syscall.ECONNRESET}
+}
+
+// A peer that hangs up without reading our hello -- a server that
+// found the session taken, a liveness probe -- resets the connection
+// on Linux. That is still a hang-up; CI caught the owner treating it
+// as something else and missing "session taken".
+func TestHandshakeResetIsEOF(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer theirs.Close()
+	go drainHello(theirs)
+	_, err := Handshake(resetConn{ours})
+	var mm *MismatchError
+	if !errors.Is(err, io.EOF) || !errors.As(err, &mm) || mm.Theirs != 0 {
+		t.Fatalf("err = %v, want a pre-handshake mismatch wrapping io.EOF", err)
 	}
 }

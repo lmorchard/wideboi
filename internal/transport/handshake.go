@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
@@ -102,6 +103,12 @@ func readHello(conn net.Conn) (Hello, error) {
 	case err == nil:
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
 		return Hello{}, predates(fmt.Errorf("it hung up without a hello: %w", err))
+	case errors.Is(err, syscall.ECONNRESET):
+		// Linux resets instead of EOF when the peer closed with our
+		// hello unread. Still a hang-up, and callers test for one with
+		// io.EOF: the owner to spot its server's startup exit, the
+		// server to keep liveness probes out of its warnings.
+		return Hello{}, predates(fmt.Errorf("it hung up without a hello (%v): %w", err, io.EOF))
 	case errors.Is(err, errFrameTooLarge):
 		return Hello{}, predates(errors.New("its first bytes are not a wideboi frame, as from a gob-era server"))
 	default:

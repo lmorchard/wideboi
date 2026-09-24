@@ -6,10 +6,12 @@ package server
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -96,7 +98,9 @@ func TestMismatchedPeerLeavesSessionRunning(t *testing.T) {
 			}
 			// The server answers with its own hello and hangs up.
 			_ = c.SetReadDeadline(time.Now().Add(transport.HandshakeCeiling + time.Second))
-			if _, err := io.ReadAll(c); err != nil {
+			// On Linux a close with our greeting partly unread is a reset,
+			// which is as much a hang-up as EOF.
+			if _, err := io.ReadAll(c); err != nil && !errors.Is(err, syscall.ECONNRESET) {
 				t.Fatalf("server did not hang up on the mismatched peer: %v", err)
 			}
 			if n := s.transportCount(); n != 1 {
