@@ -214,6 +214,9 @@ func (m LayoutMode) String() string {
 	return fmt.Sprintf("LayoutMode(%d)", int(m))
 }
 
+// MsgStatusRequest is sent by a client to request a MsgLayoutSnapshot without altering layout or panes.
+type MsgStatusRequest struct{}
+
 // MsgLayoutSnapshot broadcasts shared columns and statuses. Focus, placements,
 // and layout mode belong to each client.
 type MsgLayoutSnapshot struct {

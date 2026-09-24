@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -33,6 +34,7 @@ func (t *closableTransport) Close() error {
 func TestDroppedTransportIsClosed(t *testing.T) {
 	tp := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
 	s := &Server{
+		strip:      layout.NewStrip(),
 		panes:      make(map[int]*Pane),
 		stopCh:     make(chan struct{}),
 		transports: []transport.Transport{tp},
@@ -72,6 +74,7 @@ func TestDroppedTransportIsClosed(t *testing.T) {
 func TestDroppedNonClosableTransportIsStillRemoved(t *testing.T) {
 	tp := transport.NewInProcChannel(8)
 	s := &Server{
+		strip:      layout.NewStrip(),
 		panes:      make(map[int]*Pane),
 		stopCh:     make(chan struct{}),
 		transports: []transport.Transport{tp},

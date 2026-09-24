@@ -56,7 +56,7 @@ check-targets: fmt-check lint seam-check test race verify-exit smoke attach-chec
 # gets slower, which is noticeable and self-correcting rather than silent.
 quick: fmt-check lint seam-check test
 
-test:
+test: web/dist
 	go test ./...
 
 # The race detector belongs in the gate: a data race that only appears
@@ -65,10 +65,10 @@ test:
 # an already-cached package -- silently skipping the very detector this
 # target exists to run. Roughly 3x slower than plain `test`, which is
 # worth it here.
-race:
+race: web/dist
 	go test -race -count=1 ./...
 
-lint:
+lint: web/dist
 	go vet ./...
 
 # fmt rewrites. fmt-check reports and fails. Keep them separate.
@@ -89,7 +89,7 @@ fmt-check:
 seam-check:
 	./scripts/seam-check.sh
 
-build:
+build: web/dist
 	go build -ldflags "$(LDFLAGS)" -o bin/wideboi ./cmd/wideboi
 
 run: build
@@ -170,3 +170,7 @@ smoke: build
 # tearing down.
 attach-check: build
 	python3 scripts/attachcheck.py
+
+web/dist: web/package.json $(shell find web/src -type f) web/index.html web/tsconfig.json
+	cd web && npm install && npm run build
+

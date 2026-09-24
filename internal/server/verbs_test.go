@@ -23,7 +23,7 @@ func TestMoveVerbsReorderWithoutResizing(t *testing.T) {
 	s, order := threeIdlePanes(t)
 	s.strip.FocusPaneID(order[2])
 
-	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbMoveLeft, PaneID: order[2]})
+	s.handleClientMsg(context.Background(), nil, protocol.MsgVerb{Verb: protocol.VerbMoveLeft, PaneID: order[2]})
 
 	want := []int{order[0], order[2], order[1]}
 	if got := s.strip.PaneIDs(); !slices.Equal(got, want) {
@@ -38,11 +38,8 @@ func TestMoveVerbsReorderWithoutResizing(t *testing.T) {
 		}
 	}
 
-	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbMoveRight, PaneID: order[2]})
+	s.handleClientMsg(context.Background(), nil, protocol.MsgVerb{Verb: protocol.VerbMoveRight, PaneID: order[2]})
 	if got := s.strip.PaneIDs(); !slices.Equal(got, order) {
 		t.Fatalf("after VerbMoveRight: order = %v, want %v", got, order)
 	}
 }
-
-// A click away and back through the verb: the server records focus the
-// same way whatever moved it.

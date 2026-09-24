@@ -31,6 +31,9 @@ func TestParseCLISubcommands(t *testing.T) {
 		{args: []string{"server"}, wantSub: "server"},
 		{args: []string{"attach"}, wantSub: "attach"},
 		{args: []string{"kill-session"}, wantSub: "kill-session"},
+		{args: []string{"status"}, wantSub: "status"},
+		{args: []string{"ls"}, wantSub: "ls"},
+		{args: []string{"list-sessions"}, wantSub: "ls"},
 		{args: []string{"version"}, wantSub: "version", wantVer: true},
 		{args: []string{"--version"}, wantVer: true},
 		{args: []string{"-v"}, wantVer: true},
@@ -64,6 +67,7 @@ func TestParseCLIFlags(t *testing.T) {
 		"-p", "ctrl+space",
 		"-s", "/tmp/custom.sock",
 		"--shell", "/bin/zsh",
+		"--json",
 	}
 	opts, err := parseCLI(args)
 	if err != nil {
@@ -83,6 +87,9 @@ func TestParseCLIFlags(t *testing.T) {
 	}
 	if opts.flags.Shell != "/bin/zsh" {
 		t.Errorf("Shell = %q, want /bin/zsh", opts.flags.Shell)
+	}
+	if !opts.jsonOut {
+		t.Errorf("jsonOut = %v, want true", opts.jsonOut)
 	}
 }
 

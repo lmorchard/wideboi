@@ -19,8 +19,9 @@ import (
 
 // Config represents the resolved, fully-validated configuration for wideboi.
 type Config struct {
-	Socket    string `toml:"socket"`
-	Websocket string `toml:"websocket"`
+	Socket         string `toml:"socket"`
+	Websocket      string `toml:"websocket"`
+	WebsocketToken string `toml:"websocket_token"`
 	// Session is the resolved session name, or empty when a socket path
 	// was chosen instead. Socket is what is used.
 	Session      string              `toml:"session"`
@@ -43,13 +44,14 @@ type Config struct {
 
 // ConfigFlags contains command-line flag overrides passed into Load.
 type ConfigFlags struct {
-	ConfigFile string
-	Layout     string
-	Prefix     string
-	Socket     string
-	Session    string
-	Websocket  string
-	Shell      string
+	ConfigFile     string
+	Layout         string
+	Prefix         string
+	Socket         string
+	Session        string
+	Websocket      string
+	WebsocketToken string
+	Shell          string
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -142,64 +144,101 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	// serves as the baseline default when not configured in TOML. WIDEBOI_SHELL
 	// is the wideboi-specific environment override that takes precedence over TOML.
 	cfg := Config{
-		Layout:    "cards",
-		Prefix:    "ctrl+b",
-		Socket:    DefaultSocketPath(),
-		Session:   "default",
-		Shell:     getenv("SHELL"),
-		Websocket: "",
+		Layout:         "cards",
+		Prefix:         "ctrl+b",
+		Socket:         DefaultSocketPath(),
+		Session:        "default",
+		Shell:          getenv("SHELL"),
+		Websocket:      "",
+		WebsocketToken: "",
 	}
 	if cfg.Shell == "" {
 		cfg.Shell = "/bin/sh"
 	}
 
-	// 2. Discover or read TOML config file
-	cfgFile := flags.ConfigFile
-	explicitFile := cfgFile != ""
-	if !explicitFile {
-		cfgFile = DefaultConfigPath(getenv)
-	}
-
-	if cfgFile != "" {
+	// 2. Discover or read TOML config files
+	applyFile := func(cfgFile string, explicit bool) error {
+		if cfgFile == "" {
+			return nil
+		}
 		data, err := os.ReadFile(cfgFile)
 		if err != nil {
-			if explicitFile || !os.IsNotExist(err) {
-				return Config{}, nil, fmt.Errorf("config file %q: %w", cfgFile, err)
+			if explicit || !os.IsNotExist(err) {
+				return fmt.Errorf("config file %q: %w", cfgFile, err)
 			}
-			// Default discovered file not existing is ignored
-		} else {
-			var fileCfg Config
-			if err := toml.Unmarshal(data, &fileCfg); err != nil {
-				return Config{}, nil, fmt.Errorf("parsing config file %q: %w", cfgFile, err)
+			// Implicit file not existing is ignored
+			return nil
+		}
+		var fileCfg Config
+		if err := toml.Unmarshal(data, &fileCfg); err != nil {
+			return fmt.Errorf("parsing config file %q: %w", cfgFile, err)
+		}
+		if fileCfg.Layout != "" {
+			cfg.Layout = fileCfg.Layout
+		}
+		if fileCfg.Prefix != "" {
+			cfg.Prefix = fileCfg.Prefix
+		}
+		if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
+			return err
+		}
+		if fileCfg.Shell != "" {
+			cfg.Shell = fileCfg.Shell
+		}
+		if len(fileCfg.Keys) > 0 {
+			if cfg.Keys == nil {
+				cfg.Keys = make(map[string]any)
 			}
-			if fileCfg.Layout != "" {
-				cfg.Layout = fileCfg.Layout
+			for k, v := range fileCfg.Keys {
+				cfg.Keys[k] = v
 			}
-			if fileCfg.Prefix != "" {
-				cfg.Prefix = fileCfg.Prefix
-			}
-			if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
-				return Config{}, nil, err
-			}
-			if fileCfg.Shell != "" {
-				cfg.Shell = fileCfg.Shell
-			}
-			if len(fileCfg.Keys) > 0 {
-				cfg.Keys = fileCfg.Keys
-			}
-			if fileCfg.Mouse != nil {
-				cfg.Mouse = fileCfg.Mouse
-			}
-			if len(fileCfg.WidthPresets) > 0 {
-				cfg.WidthPresets = fileCfg.WidthPresets
-			}
-			if fileCfg.Websocket != "" {
-				cfg.Websocket = fileCfg.Websocket
-			}
-			if fileCfg.LogLevelName != "" {
-				cfg.LogLevelName = fileCfg.LogLevelName
-			}
+		}
+		if fileCfg.Layout != "" {
+			cfg.Layout = fileCfg.Layout
+		}
+		if fileCfg.Prefix != "" {
+			cfg.Prefix = fileCfg.Prefix
+		}
+		if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
+			return err
+		}
+		if fileCfg.Shell != "" {
+			cfg.Shell = fileCfg.Shell
+		}
+		if fileCfg.Mouse != nil {
+			cfg.Mouse = fileCfg.Mouse
+		}
+		if len(fileCfg.WidthPresets) > 0 {
+			cfg.WidthPresets = fileCfg.WidthPresets
+		}
+		if fileCfg.Websocket != "" {
+			cfg.Websocket = fileCfg.Websocket
+		}
+		if fileCfg.WebsocketToken != "" {
+			cfg.WebsocketToken = fileCfg.WebsocketToken
+		}
+		if fileCfg.LogLevelName != "" {
+			cfg.LogLevelName = fileCfg.LogLevelName
+		}
+
+		if cfg.ConfigFile == "" {
 			cfg.ConfigFile = cfgFile
+		} else {
+			cfg.ConfigFile += ", " + cfgFile
+		}
+		return nil
+	}
+
+	if flags.ConfigFile != "" {
+		if err := applyFile(flags.ConfigFile, true); err != nil {
+			return Config{}, nil, err
+		}
+	} else {
+		if err := applyFile(DefaultConfigPath(getenv), false); err != nil {
+			return Config{}, nil, err
+		}
+		if err := applyFile(".wideboi.toml", false); err != nil {
+			return Config{}, nil, err
 		}
 	}
 
@@ -209,6 +248,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if envWS := getenv("WIDEBOI_WEBSOCKET"); envWS != "" {
 		cfg.Websocket = envWS
+	}
+	if envToken := getenv("WIDEBOI_WEBSOCKET_TOKEN"); envToken != "" {
+		cfg.WebsocketToken = envToken
 	}
 	if envPrefix := getenv("WIDEBOI_PREFIX"); envPrefix != "" {
 		cfg.Prefix = envPrefix
@@ -229,6 +271,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if flags.Websocket != "" {
 		cfg.Websocket = flags.Websocket
+	}
+	if flags.WebsocketToken != "" {
+		cfg.WebsocketToken = flags.WebsocketToken
 	}
 	if flags.Prefix != "" {
 		cfg.Prefix = flags.Prefix

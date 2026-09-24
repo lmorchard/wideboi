@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -42,6 +43,11 @@ type Server struct {
 	// client gets everything and a dropped update is retried for the
 	// client that missed it. See broadcastPaneUpdates.
 	paneGens map[transport.Transport]map[int]uint64
+
+	// clientSizes records the last known window dimensions of each connected
+	// client. The server session size is the minimum among all clients,
+	// preventing a large client from cropping a smaller one.
+	clientSizes map[transport.Transport]protocol.MsgResize
 
 	// paneSendMu serializes broadcastPaneUpdates. The Run loop, every
 	// client's message loop (via broadcastLayout) and onPaneExit all
@@ -98,12 +104,13 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		cwd, _ = os.Getwd()
 	}
 	srv := &Server{
-		strip:      layout.NewStrip(),
-		panes:      make(map[int]*Pane),
-		shell:      shell,
-		cwd:        cwd,
-		transports: make([]transport.Transport, 0),
-		stopCh:     make(chan struct{}),
+		strip:       layout.NewStrip(),
+		panes:       make(map[int]*Pane),
+		shell:       shell,
+		cwd:         cwd,
+		transports:  make([]transport.Transport, 0),
+		clientSizes: make(map[transport.Transport]protocol.MsgResize),
+		stopCh:      make(chan struct{}),
 	}
 	if tp != nil {
 		srv.transports = append(srv.transports, tp)
@@ -149,7 +156,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 			return
 		case msg, ok := <-tp.ClientSendChan():
 			if !ok {
-				if s.dropClient(tp) {
+				if s.dropClient(ctx, tp) {
 					slog.Info("owning client left without detaching; ending the session")
 					_ = s.Close()
 				}
@@ -168,17 +175,17 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				// session. Returning here means the EOF that follows
 				// is never read as an owner leaving: this goroutine is
 				// the only reader of this connection, and it stops.
-				s.dropClient(tp)
+				s.dropClient(ctx, tp)
 				return
 			}
-			s.handleClientMsgFrom(ctx, tp, msg)
+			s.handleClientMsg(ctx, tp, msg)
 		}
 	}
 }
 
 // dropClient removes tp from the broadcast set and closes it. It reports
 // whether tp was the owner, and clears ownership under the same lock.
-func (s *Server) dropClient(tp transport.Transport) (wasOwner bool) {
+func (s *Server) dropClient(ctx context.Context, tp transport.Transport) (wasOwner bool) {
 	s.mu.Lock()
 	s.removeTransportLocked(tp)
 	if tp == s.owner {
@@ -186,6 +193,8 @@ func (s *Server) dropClient(tp transport.Transport) (wasOwner bool) {
 		wasOwner = true
 	}
 	s.mu.Unlock()
+	// Broadcast layout outside the lock to push the resized panes to remaining clients
+	s.broadcastLayout(ctx)
 	// Close outside s.mu. Close can block, and
 	// Issue #43 records holding s.mu across a
 	// blocking call as the shape behind the server that
@@ -210,6 +219,9 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	}
 	s.transports = out
 	delete(s.paneGens, tp)
+	delete(s.clientSizes, tp)
+	s.recomputeSessionSizeLocked()
+	s.resizePanesLocked()
 }
 
 // Run executes the main server event loop, processing client messages and polling descendants.
@@ -242,19 +254,19 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessage) {
-	s.handleClientMsgFrom(ctx, nil, msg)
-}
-
-func (s *Server) handleClientMsgFrom(ctx context.Context, sender transport.Transport, msg transport.ClientMessage) {
+func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
 	needBroadcast := false
 	createdPaneID := 0
 
 	switch m := msg.(type) {
+	case protocol.MsgStatusRequest:
+		needBroadcast = true
+
 	case protocol.MsgAttach:
 		if m.Cols > 0 && m.Rows > 0 {
-			s.cols, s.rows = m.Cols, m.Rows
+			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
+			s.recomputeSessionSizeLocked()
 		}
 		if len(s.panes) == 0 {
 			_, _ = s.spawnPaneLocked(0)
@@ -265,7 +277,8 @@ func (s *Server) handleClientMsgFrom(ctx context.Context, sender transport.Trans
 
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
-			s.cols, s.rows = m.Cols, m.Rows
+			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
+			s.recomputeSessionSizeLocked()
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
@@ -330,8 +343,8 @@ func (s *Server) handleClientMsgFrom(ctx context.Context, sender transport.Trans
 	}
 
 	s.mu.Unlock()
-	if sender != nil && createdPaneID != 0 {
-		sender.SendServer(ctx, protocol.MsgPaneCreated{PaneID: createdPaneID})
+	if tp != nil && createdPaneID != 0 {
+		tp.SendServer(ctx, protocol.MsgPaneCreated{PaneID: createdPaneID})
 	}
 
 	if needBroadcast {
@@ -411,6 +424,30 @@ func (s *Server) removePaneLocked(id int) {
 	s.strip.KillPane(id)
 	delete(s.panes, id)
 	go p.Close()
+}
+
+// recomputeSessionSizeLocked updates s.cols and s.rows to the minimum dimensions
+// among all connected clients.
+func (s *Server) recomputeSessionSizeLocked() {
+	if len(s.clientSizes) == 0 {
+		return
+	}
+	minCols, minRows := 0, 0
+	first := true
+	for _, sz := range s.clientSizes {
+		if first {
+			minCols, minRows = sz.Cols, sz.Rows
+			first = false
+		} else {
+			if sz.Cols < minCols {
+				minCols = sz.Cols
+			}
+			if sz.Rows < minRows {
+				minRows = sz.Rows
+			}
+		}
+	}
+	s.cols, s.rows = minCols, minRows
 }
 
 // resizePanesLocked pushes each pane's current column width and available
@@ -831,7 +868,7 @@ func (s *Server) Close() error {
 }
 
 // ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
-func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux) {
+func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
@@ -841,13 +878,33 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux) {
 			if origin == "" {
 				return true // Direct connections (like wscat or curl) are allowed
 			}
-			return origin == "http://127.0.0.1:5173" || origin == "http://localhost:5173" ||
-				origin == "http://127.0.0.1:8080" || origin == "http://localhost:8080" ||
-				origin == "http://127.0.0.1:8081" || origin == "http://localhost:8081"
+
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+
+			// Allow if the origin matches the host the request was sent to.
+			if u.Host == r.Host {
+				return true
+			}
+
+			return u.Host == "127.0.0.1:5173" || u.Host == "localhost:5173" ||
+				u.Host == "127.0.0.1:8080" || u.Host == "localhost:8080" ||
+				u.Host == "127.0.0.1:8081" || u.Host == "localhost:8081"
 		},
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if token != "" {
+			reqToken := r.URL.Query().Get("token")
+			if reqToken != token {
+				slog.Warn("websocket connection rejected: invalid token", "remote", r.RemoteAddr)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			slog.Debug("websocket upgrade failed", "err", err)

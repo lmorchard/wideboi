@@ -58,21 +58,25 @@ prefix = "ctrl+a"
 socket = "/tmp/toml.sock"
 shell = "/bin/tomlsh"
 websocket = ":8080"
+websocket_token = "secret1"
 `
 	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	env := map[string]string{
-		"WIDEBOI_LAYOUT":    "cards",
-		"WIDEBOI_PREFIX":    "ctrl+p",
-		"WIDEBOI_WEBSOCKET": ":8081",
+		"WIDEBOI_LAYOUT":          "cards",
+		"WIDEBOI_PREFIX":          "ctrl+x",
+		"WIDEBOI_WEBSOCKET":       ":8081",
+		"WIDEBOI_WEBSOCKET_TOKEN": "secret2",
+		"SHELL":                   "/bin/envsh",
 	}
 
 	flags := config.ConfigFlags{
-		ConfigFile: tomlPath,
-		Prefix:     "ctrl+k",
-		Websocket:  ":8082",
+		ConfigFile:     tomlPath,
+		Prefix:         "ctrl+k",
+		Websocket:      ":8082",
+		WebsocketToken: "secret3",
 	}
 
 	cfg, _, err := config.Load(flags, mockEnv(env))
@@ -114,6 +118,10 @@ websocket = ":8080"
 	// Websocket: flag overrides env and TOML
 	if cfg.Websocket != ":8082" {
 		t.Errorf("Websocket = %q, want ':8082' from flag", cfg.Websocket)
+	}
+	// WebsocketToken: flag overrides env and TOML
+	if cfg.WebsocketToken != "secret3" {
+		t.Errorf("WebsocketToken = %q, want 'secret3' from flag", cfg.WebsocketToken)
 	}
 }
 
@@ -501,5 +509,45 @@ func TestSessionNameRecognisesOnlySessionDirSockets(t *testing.T) {
 	}
 	if _, ok := config.SessionName(filepath.Join(config.SessionDir(), "bad name.sock")); ok {
 		t.Error("an invalid name in the session dir was taken for a named session")
+	}
+}
+
+func TestLoadProjectConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	if err := os.WriteFile(".wideboi.toml", []byte("layout = \"scroll\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	xdgDir := filepath.Join(tmpDir, "xdg")
+	if err := os.MkdirAll(filepath.Join(xdgDir, "wideboi"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdgDir, "wideboi", "config.toml"), []byte("layout = \"cards\"\nprefix = \"ctrl+j\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	env := map[string]string{
+		"XDG_CONFIG_HOME": xdgDir,
+	}
+
+	cfg, _, err := config.Load(config.ConfigFlags{}, mockEnv(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Layout != "scroll" {
+		t.Errorf("Layout = %q, want 'scroll' from project config overriding 'cards' from XDG", cfg.Layout)
+	}
+	if cfg.Prefix != "ctrl+j" {
+		t.Errorf("Prefix = %q, want 'ctrl+j' from XDG (not overridden)", cfg.Prefix)
 	}
 }

@@ -8,12 +8,6 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
-// A click names the pane it landed on, so the server must be able to
-// focus by ID rather than only step left and right.
-
-// A stale click -- the pane closed between the draw and the press --
-// must not move focus anywhere.
-
 // A forwarded event reaches the named pane's queue, decoded back into
 // the concrete uv type vt's encoder switches on. The drain into the
 // grid runs on Start's key-writer goroutine, which needs a real pty;
@@ -23,7 +17,7 @@ func TestMouseMessageQueuesForNamedPane(t *testing.T) {
 	p := s.panes[2]
 	p.input = make(chan uv.Event, 1)
 
-	s.handleClientMsg(context.Background(), protocol.MsgMouse{
+	s.handleClientMsg(context.Background(), nil, protocol.MsgMouse{
 		PaneID: 2, Kind: protocol.MouseRelease, X: 4, Y: 5, Button: int(uv.MouseLeft),
 	})
 

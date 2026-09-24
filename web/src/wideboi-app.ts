@@ -128,7 +128,10 @@ export class WideboiApp extends LitElement {
   private focusedPaneId = 0;
 
   @state()
-  private wsUrl = `ws://${window.location.hostname}:8080/ws`;
+  private wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+
+  @state()
+  private token = new URLSearchParams(window.location.search).get('token') || '';
 
   @state()
   private errorMsg = '';
@@ -191,7 +194,23 @@ export class WideboiApp extends LitElement {
     }
     
     this.errorMsg = '';
-    this.client = new WideboiClient(this.wsUrl);
+    
+    let url = this.wsUrl;
+    if (this.token) {
+        try {
+            const urlObj = new URL(url);
+            urlObj.searchParams.set('token', this.token);
+            url = urlObj.toString();
+        } catch (e) {
+            // Ignored, fallback to appending
+            if (url.includes('?')) {
+                url += `&token=${encodeURIComponent(this.token)}`;
+            } else {
+                url += `?token=${encodeURIComponent(this.token)}`;
+            }
+        }
+    }
+    this.client = new WideboiClient(url);
     
     this.client.onConnect = () => {
       console.log('Connected to server');
@@ -407,6 +426,23 @@ export class WideboiApp extends LitElement {
         });
       }
     });
+
+    this.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (!this.connected || !this.renderer || !this.client) return;
+      
+      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
+      const hit = this.renderer.getPaneHit(x, y);
+      
+      if (hit.paneID > 0) {
+        // e.deltaY > 0 means scrolling down (towards bottom/newer).
+        // e.deltaY < 0 means scrolling up (towards top/older).
+        // In MsgScroll, Delta > 0 is up (older), Delta < 0 is down (newer).
+        // A standard wheel step is often 3 lines.
+        const delta = e.deltaY > 0 ? -3 : 3;
+        this.client.send('MsgScroll', { PaneID: hit.paneID, Delta: delta });
+      }
+    }, { passive: false });
   }
 
   private sendAttach() {
@@ -417,6 +453,19 @@ export class WideboiApp extends LitElement {
 
   private handleUrlChange(e: Event) {
     this.wsUrl = (e.target as HTMLInputElement).value;
+  }
+
+  private handleTokenChange(e: Event) {
+    this.token = (e.target as HTMLInputElement).value;
+    
+    // Update URL bar without reloading
+    const newUrl = new URL(window.location.href);
+    if (this.token) {
+        newUrl.searchParams.set('token', this.token);
+    } else {
+        newUrl.searchParams.delete('token');
+    }
+    window.history.replaceState({}, '', newUrl);
   }
 
   private handleKeydown(e: KeyboardEvent) {
@@ -457,7 +506,14 @@ export class WideboiApp extends LitElement {
               .value=${this.wsUrl} 
               @input=${this.handleUrlChange}
               @keydown=${this.handleKeydown}
-              placeholder="ws://localhost:8080/ws"
+              placeholder=${`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
+            />
+            <input 
+              type="text" 
+              .value=${this.token} 
+              @input=${this.handleTokenChange}
+              @keydown=${this.handleKeydown}
+              placeholder="Token (optional)"
             />
             <button @click=${this.connectClient}>Connect</button>
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}

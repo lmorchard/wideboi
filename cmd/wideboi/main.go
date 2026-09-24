@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
+	"github.com/lmorchard/wideboi/web"
 )
 
 const signalExitMargin = 500 * time.Millisecond
@@ -50,6 +52,7 @@ type cliOptions struct {
 	flags      config.ConfigFlags
 	showVer    bool
 	showHelp   bool
+	jsonOut    bool
 	// ownerFD is the inherited connection a spawning plain wideboi owns
 	// this server through, or -1. Internal: see spawnServer.
 	ownerFD int
@@ -67,7 +70,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "cleanup" || arg == "version" || arg == "help") {
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help") {
 			opts.subcommand = arg
 			continue
 		}
@@ -101,12 +104,14 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Session, "L", "", "session name")
 	fs.StringVar(&opts.flags.Session, "session", "", "session name")
 	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \":8080\")")
+	fs.StringVar(&opts.flags.WebsocketToken, "websocket-token", "", "token required for websocket connections")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
 	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
 	fs.BoolVar(&opts.showHelp, "h", false, "show help and usage information")
 	fs.BoolVar(&opts.showHelp, "help", false, "show help and usage information")
+	fs.BoolVar(&opts.jsonOut, "json", false, "output JSON instead of a table (status only)")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return opts, err
@@ -128,6 +133,8 @@ func printHelp(w io.Writer) {
   wideboi [flags] attach     Attach a client to a running server
   wideboi [flags] kill-session
                              End the session: close every pane and stop the server
+  wideboi [flags] status [--json]
+                             Show the layout snapshot and pane statuses
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
@@ -144,6 +151,7 @@ Flags:
                          its socket is $TMPDIR/wideboi-<uid>/<name>.sock
   -s, --socket <path>    Unix domain socket path, instead of a session name
       --websocket <addr> Address for WebSocket server (e.g. ":8080")
+      --websocket-token <token> Token required for WebSocket connections
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
   -v, --version          Print version and exit
@@ -192,6 +200,8 @@ func main() {
 		fatal(runAttach(cfg, bindings))
 	case "kill-session":
 		fatal(runKillSession(cfg))
+	case "status":
+		fatal(runStatus(cfg, opts.jsonOut, os.Stdout))
 	case "cleanup":
 		fatal(runCleanup(os.Stdout, config.SessionDir()))
 	case "ls":
@@ -295,8 +305,24 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 	var httpSrv *http.Server
 	if cfg.Websocket != "" {
+		generatedToken := false
+		if cfg.WebsocketToken == "" {
+			b := make([]byte, 16)
+			if _, err := crypto_rand.Read(b); err != nil {
+				return fmt.Errorf("generate websocket token: %w", err)
+			}
+			cfg.WebsocketToken = fmt.Sprintf("%x", b)
+			generatedToken = true
+		}
+
 		mux := http.NewServeMux()
-		srv.ListenWebSocket(ctx, mux)
+		srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
+
+		distFS, err := web.DistFS()
+		if err != nil {
+			return fmt.Errorf("failed to load web dist: %w", err)
+		}
+		mux.Handle("/", http.FileServer(distFS))
 
 		httpSrv = &http.Server{
 			Handler: mux,
@@ -309,8 +335,18 @@ func runServer(cfg config.Config, ownerFD int) error {
 		}
 
 		go func() {
-			fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws\n", cfg.Websocket)
-			slog.Info("websocket server listening", "addr", cfg.Websocket)
+			host := cfg.Websocket
+			if host != "" && host[0] == ':' {
+				host = "localhost" + host
+			}
+
+			if generatedToken {
+				fmt.Fprintf(os.Stderr, "wideboi: web client listening at http://%s/?token=%s\n", host, cfg.WebsocketToken)
+				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
+			} else {
+				fmt.Fprintf(os.Stderr, "wideboi: web client listening at http://%s/ (token configured)\n", host)
+				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", "***REDACTED***")
+			}
 			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("websocket server failed", "err", err)
 			}
