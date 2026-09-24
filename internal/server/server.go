@@ -720,6 +720,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	defer s.paneSendMu.Unlock()
 
 	type outgoing struct {
+		pane   *Pane
 		update protocol.MsgPaneUpdate
 		gen    uint64
 		to     []transport.Transport
@@ -740,21 +741,35 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 			}
 		}
 		if len(to) > 0 {
-			out = append(out, outgoing{update: p.UpdateMessage(), gen: gen, to: to})
+			out = append(out, outgoing{pane: p, gen: gen, to: to})
 		}
 	}
 	s.mu.Unlock()
 
+	// Rendering copies the entire grid and can wait for a pane resize.
+	// Neither operation may hold the server mutex: focus, input, close,
+	// and other panes must remain responsive during that work.
+	for i := range out {
+		out[i].update = out[i].pane.UpdateMessage()
+	}
+
 	type result struct {
 		tp       transport.Transport
 		id       int
+		pane     *Pane
 		gen      uint64
 		accepted bool
 	}
 	var results []result
 	for _, o := range out {
+		s.mu.Lock()
+		current := s.panes[o.update.PaneID] == o.pane
+		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		for _, tp := range o.to {
-			results = append(results, result{tp, o.update.PaneID, o.gen, tp.SendServer(ctx, o.update)})
+			results = append(results, result{tp, o.update.PaneID, o.pane, o.gen, tp.SendServer(ctx, o.update)})
 		}
 	}
 
@@ -775,13 +790,19 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		if !present[r.tp] {
 			continue
 		}
-		if _, ok := s.panes[r.id]; !ok {
+		if s.panes[r.id] != r.pane {
 			continue
 		}
 		if !r.accepted {
 			// Forget rather than leave alone: a forced resend goes to
 			// clients whose record may already equal gen, and leaving
 			// that in place would mean no later tick retries it.
+			delete(s.paneGens[r.tp], r.id)
+			continue
+		}
+		// Content can change while the update is being rendered or sent.
+		// Leave this client behind so the next tick sends the new state.
+		if r.pane.Generation() != r.gen {
 			delete(s.paneGens[r.tp], r.id)
 			continue
 		}

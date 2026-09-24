@@ -280,8 +280,8 @@ func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport.
 func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 	p.resizeMu.Lock()
+	defer p.resizeMu.Unlock()
 	cols, rows := p.cols, p.rows
-	p.resizeMu.Unlock()
 
 	buf := uv.NewScreenBuffer(cols, rows)
 	p.Draw(buf, image.Rect(0, 0, cols, rows))

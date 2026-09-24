@@ -5,14 +5,79 @@ package server
 
 import (
 	"context"
+	"image"
 	"slices"
 	"sort"
 	"testing"
+	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
+
+type blockingDrawGrid struct {
+	*statusGrid
+	started chan struct{}
+	release chan struct{}
+}
+
+type changingDrawGrid struct{ *statusGrid }
+
+func (g *changingDrawGrid) Draw(uv.Screen, image.Rectangle) { g.bump() }
+
+func TestGenerationChangingDuringRenderIsRetried(t *testing.T) {
+	s, _, tp := twoIdlePanes(t)
+	g := &changingDrawGrid{newStatusGrid(term.StatusIdle)}
+	s.panes[1].grid = g
+	s.broadcastPaneUpdates(context.Background(), false)
+	drainPaneUpdates(tp)
+	s.broadcastPaneUpdates(context.Background(), false)
+	if got := drainPaneUpdates(tp); !slices.Equal(got, []int{1}) {
+		t.Errorf("pane changed during render; retry sent %v, want [1]", got)
+	}
+}
+
+func (g *blockingDrawGrid) Draw(uv.Screen, image.Rectangle) {
+	close(g.started)
+	<-g.release
+}
+
+// A slow grid render must not hold the server mutex. The same mutex
+// protects input, focus, pane lifecycle, and shutdown bookkeeping.
+func TestPaneRenderDoesNotHoldServerMutex(t *testing.T) {
+	s, _, _ := twoIdlePanes(t)
+	g := &blockingDrawGrid{statusGrid: newStatusGrid(term.StatusIdle), started: make(chan struct{}), release: make(chan struct{})}
+	s.panes[1].grid = g
+	done := make(chan struct{})
+	go func() {
+		s.broadcastPaneUpdates(context.Background(), false)
+		close(done)
+	}()
+	select {
+	case <-g.started:
+	case <-time.After(time.Second):
+		t.Fatal("pane render did not start")
+	}
+	locked := make(chan struct{})
+	go func() {
+		s.mu.Lock()
+		s.mu.Unlock()
+		close(locked)
+	}()
+	select {
+	case <-locked:
+	case <-time.After(200 * time.Millisecond):
+		t.Error("server mutex remained locked during pane render")
+	}
+	close(g.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("pane broadcast did not finish")
+	}
+}
 
 // drainPaneUpdates empties tp and returns the pane IDs of the updates
 // it held, sorted. Anything else in the buffer is discarded.
