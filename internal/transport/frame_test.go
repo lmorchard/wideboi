@@ -3,6 +3,8 @@ package transport
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
@@ -31,5 +33,25 @@ func TestFrameRejectsOversizedPayload(t *testing.T) {
 	binary.BigEndian.PutUint32(header[:], maxFrameSize+1)
 	if _, err := readFrame(bytes.NewReader(header[:])); err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("got error %v, want oversized frame", err)
+	}
+}
+
+func TestTruncatedFrameIsNotACleanClose(t *testing.T) {
+	cases := [][]byte{
+		{0, 0},            // partial length prefix
+		{0, 0, 0, 3, 'a'}, // partial protobuf payload
+	}
+	for _, data := range cases {
+		_, err := readFrame(bytes.NewReader(data))
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("got %v, want unexpected EOF", err)
+		}
+		if isCleanClose(err) {
+			t.Fatalf("truncated frame classified as clean close: %v", err)
+		}
+	}
+	_, err := readFrame(bytes.NewReader(nil))
+	if !errors.Is(err, io.EOF) || !isCleanClose(err) {
+		t.Fatalf("frame boundary EOF classified incorrectly: %v", err)
 	}
 }

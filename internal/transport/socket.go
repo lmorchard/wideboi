@@ -51,7 +51,6 @@ func isCleanClose(err error) bool {
 	// roughly every time, so treating them as faults would file an error
 	// on every ordinary C-b d.
 	return errors.Is(err, io.EOF) ||
-		errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, net.ErrClosed) ||
 		errors.Is(err, syscall.EPIPE) ||
 		errors.Is(err, syscall.ECONNRESET) ||

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -24,6 +25,7 @@ type WebSocketServerConn struct {
 }
 
 func NewWebSocketServerConn(conn *websocket.Conn, bufSize int) *WebSocketServerConn {
+	conn.SetReadLimit(maxFrameSize)
 	if bufSize <= 0 {
 		bufSize = 256
 	}
@@ -80,7 +82,7 @@ func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 		default:
 			messageType, payload, err := wsConn.conn.ReadMessage()
 			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				if errors.Is(err, websocket.ErrReadLimit) || websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					wsConn.set("reading websocket", err)
 				}
 				return
