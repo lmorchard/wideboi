@@ -369,10 +369,13 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
 			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
+			oldCols, oldRows := s.cols, s.rows
 			s.recomputeSessionSizeLocked()
+			if s.cols != oldCols || s.rows != oldRows {
+				s.resizePanesLocked()
+				needBroadcast = true
+			}
 		}
-		s.resizePanesLocked()
-		needBroadcast = true
 
 	case protocol.MsgVerb:
 		switch m.Verb {

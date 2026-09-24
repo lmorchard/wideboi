@@ -99,6 +99,15 @@ describe('GridRenderer frame scheduling', () => {
     r.stop();
   });
 
+  it('keeps layout sizing in CSS while resizing the drawing buffer', () => {
+    const r = renderer();
+    const canvas = (r as unknown as { canvas: HTMLCanvasElement }).canvas;
+    r.resize(80, 40);
+    expect(canvas.style.width).toBe('');
+    expect(canvas.style.height).toBe('');
+    expect(r.getGridSize()).toEqual({ cols: 10, rows: 2 });
+  });
+
   it('pauses while hidden or stopped and resumes with the latest state', () => {
     const r = renderer();
     r.start();

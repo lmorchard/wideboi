@@ -13,6 +13,14 @@ task changes or running a build that writes artifacts. Commit, test, and open
 the PR from that worktree. Leave other worktrees and their uncommitted changes
 alone.
 
+## Retry GitHub CLI outside the sandbox before using the browser
+
+The managed sandbox can make a valid `gh` keyring login appear invalid and
+block access to `api.github.com`. If `gh auth status` or an API call fails
+there, retry the command with sandbox escalation. A keyring login may work
+normally outside the sandbox; use `gh` for issues and PRs before turning to
+computer use.
+
 ## Probe the pinned terminal dependencies
 
 `charmbracelet/x/vt` has no tagged release, and `charmbracelet/ultraviolet` is
@@ -183,6 +191,12 @@ value stays the same. `GridRenderer.resize` checks both backing dimensions
 before assigning them. A `ResizeObserver` callback can arrive without a real
 size change; in an idle, change-only browser session, no new frame may arrive
 to repaint a canvas cleared by that callback.
+
+Keep the observed canvas's CSS dimensions under flex layout control. Writing
+inline width and height from its own `ResizeObserver` callback can feed layout
+changes back into the observer. Send `MsgResize` only when the cell grid changes,
+and have the server broadcast only when the shared minimum dimensions change:
+each layout broadcast forces a full pane resend to every client.
 
 ## Change-only pane updates require complete bookkeeping
 
