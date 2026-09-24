@@ -147,6 +147,67 @@ func TestGridDrawAt(t *testing.T) {
 	}
 }
 
+// TestGridDrawAtWrappedScrollback verifies that DrawAt renders lines in correct
+// chronological order when the scrollback buffer has exceeded capacity and wrapped.
+func TestGridDrawAtWrappedScrollback(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	// Write 10,050 lines to fill and wrap the 10,000-line scrollback buffer.
+	// Lines 0..4 fill the 5-row screen.
+	// The next 10,045 lines (5..10049) scroll lines 0..10044 into scrollback.
+	// With 10,000 scrollback capacity, lines 0..44 are evicted.
+	// Line 45 is the oldest retained line; lines 10045..10049 are live on screen.
+	totalLines := 10050
+	for i := 0; i < totalLines; i++ {
+		if i > 0 {
+			fmt.Fprint(g, "\r\n")
+		}
+		fmt.Fprintf(g, "L%06d", i)
+	}
+
+	if sbLen := g.ScrollbackLen(); sbLen != 10000 {
+		t.Fatalf("ScrollbackLen = %d, want 10000", sbLen)
+	}
+
+	readRow := func(dst compose.Surface, y int) string {
+		var b strings.Builder
+		for x := 0; x < 20; x++ {
+			c := dst.CellAt(x, y)
+			if c != nil {
+				b.WriteString(c.Content)
+			}
+		}
+		return strings.TrimRight(b.String(), " ")
+	}
+
+	// At offset 0: bottom row is the live line 10049.
+	s0 := compose.NewSurface(20, 5)
+	g.DrawAt(s0, s0.Bounds(), 0)
+	if got := readRow(s0, 4); got != "L010049" {
+		t.Errorf("DrawAt(0) bottom row = %q, want L010049", got)
+	}
+
+	// At offset 10000 (scrolled all the way to top of history):
+	// Top row should be the oldest retained line (L000045).
+	stop := compose.NewSurface(20, 5)
+	g.DrawAt(stop, stop.Bounds(), 10000)
+	if got := readRow(stop, 0); got != "L000045" {
+		t.Errorf("DrawAt(10000) top row = %q, want L000045", got)
+	}
+	if got := readRow(stop, 1); got != "L000046" {
+		t.Errorf("DrawAt(10000) second row = %q, want L000046", got)
+	}
+
+	// At offset 5000: midpoint in history
+	// sbY = (10000 - 5000) + 0 = 5000th line in history -> line 45 + 5000 = 5045
+	smid := compose.NewSurface(20, 5)
+	g.DrawAt(smid, smid.Bounds(), 5000)
+	if got := readRow(smid, 0); got != "L005045" {
+		t.Errorf("DrawAt(5000) top row = %q, want L005045", got)
+	}
+}
+
 // TestCloseUnblocksRead pins the one behaviour vtGrid.Close's bypass of
 // (*vt.Emulator).Close rests on: a pending Read must still return io.EOF
 // once Close runs, exactly as (*vt.Emulator).Close would have produced
