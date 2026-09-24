@@ -1,10 +1,13 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
+import { repeat } from 'lit/directives/repeat.js';
 import { WideboiClient } from './client';
-import { GridRenderer } from './renderer';
+import { CELL_HEIGHT, measureCellWidth, PaneStore, selectionText, type CellPoint } from './pane-state';
+import { reconcileFocus } from './focus';
+import { WideboiPane } from './wideboi-pane';
 import { sendKeyboardInput, sendTextInput } from './input';
 import { consumeLinkToken } from './token';
-import { MouseKind, PaneStatus, VerbType } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { MouseKind, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 const linkToken = consumeLinkToken(window.location, window.history);
 
@@ -21,11 +24,33 @@ export class WideboiApp extends LitElement {
       background: #1e1e1e;
       position: relative;
     }
-    canvas {
-      display: block;
-      width: 100%;
+    .terminal-shell {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-height: 0;
+      min-width: 0;
+      font: 14px monospace;
+      color: #ccc;
+    }
+    .title, .status {
+      height: 16.8px;
+      line-height: 16.8px;
+      flex: none;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .pane-strip {
+      display: flex;
       flex: 1;
       min-height: 0;
+      min-width: 0;
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: thin;
+      overscroll-behavior-x: contain;
+      background: #1e1e1e;
     }
 
     .toolbar {
@@ -112,18 +137,22 @@ export class WideboiApp extends LitElement {
     }
   `;
 
-  @query('canvas')
-  private canvas!: HTMLCanvasElement;
+  @query('.pane-strip')
+  private paneStrip!: HTMLElement;
 
   private client: WideboiClient | null = null;
-  private renderer?: GridRenderer;
+  private panes = new PaneStore();
   private resizeObserver: ResizeObserver;
+  private cellWidth = 1;
 
   @state()
   private connected = false;
 
   @state()
   private activePanes: number[] = [];
+
+  @state()
+  private columns: ColumnData[] = [];
 
   @state()
   private paneTitles: Record<number, string> = {};
@@ -143,46 +172,86 @@ export class WideboiApp extends LitElement {
   private inPrefixMode = false;
   private previousFocusId = 0;
   private pendingFocusId = 0;
+  @state()
   private paneStatuses: Record<number, PaneStatus> = {};
   private listeners?: AbortController;
-  private pointer?: { id: number; paneID: number; placement: import('./protocol').PlacementData; button: number; tracking: boolean; focusOnClick: boolean; dragged: boolean; startX: number; startY: number };
+  private pointer?: { id: number; pane: WideboiPane; button: number; tracking: boolean; focusOnClick: boolean; dragged: boolean; start: CellPoint };
+  private selectedPane?: WideboiPane;
+  private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
 
   private focusPane(paneID: number) {
-    if (!this.renderer || !this.activePanes.includes(paneID)) return;
+    if (!this.activePanes.includes(paneID)) return;
     if (paneID !== this.focusedPaneId) this.previousFocusId = this.focusedPaneId;
     this.focusedPaneId = paneID;
-    this.renderer.setFocusedPaneId(paneID);
+    void this.updateComplete.then(() => {
+      this.focusedPane()?.focusInput();
+      this.revealFocus();
+    });
+  }
+
+  private focusedPane(): WideboiPane | undefined {
+    return Array.from(this.paneStrip?.querySelectorAll('wideboi-pane') || [])
+      .find(element => element.paneId === this.focusedPaneId);
+  }
+
+  private revealFocus() {
+    const pane = this.focusedPane();
+    if (!pane) return;
+    pane.scrollIntoView({ block: 'nearest', inline: 'nearest',
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  }
+
+  private panePositions(): Map<number, number> {
+    return new Map(Array.from(this.paneStrip?.querySelectorAll('wideboi-pane') || [])
+      .map(pane => [pane.paneId, pane.getBoundingClientRect().left]));
+  }
+
+  private animateReorder(previous: Map<number, number>) {
+    for (const animation of this.movement.values()) animation.cancel();
+    this.movement.clear();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (const pane of this.paneStrip.querySelectorAll('wideboi-pane')) {
+      const oldLeft = previous.get(pane.paneId);
+      if (oldLeft === undefined) continue;
+      const offset = oldLeft - pane.getBoundingClientRect().left;
+      if (Math.abs(offset) < 1) continue;
+      const animation = pane.animate(
+        [{ transform: `translateX(${offset}px)` }, { transform: 'translateX(0)' }],
+        { duration: 180, easing: 'ease-out' });
+      this.movement.set(pane.paneId, animation);
+      animation.onfinish = () => this.movement.delete(pane.paneId);
+    }
+  }
+
+  private getGridSize() {
+    return {
+      cols: Math.floor(this.paneStrip.clientWidth / this.cellWidth),
+      rows: Math.floor(this.paneStrip.clientHeight / CELL_HEIGHT) + 2,
+    };
+  }
+
+  private sendResizeIfChanged() {
+    if (!this.client || !this.connected || !this.lastSentSize) return;
+    const size = this.getGridSize();
+    if (size.cols > 0 && size.rows > 2 &&
+        (size.cols !== this.lastSentSize.cols || size.rows !== this.lastSentSize.rows)) {
+      this.client.send({ case: 'resize', value: size });
+      this.lastSentSize = size;
+    }
   }
 
   constructor() {
     super();
 
-    this.resizeObserver = new ResizeObserver((entries) => {
-      if (!this.renderer) return;
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        this.renderer.resize(width, height);
-        
-        if (this.client && this.connected) {
-          const size = this.renderer.getGridSize();
-          if (size.cols > 0 && size.rows > 0 &&
-              (size.cols !== this.lastSentSize?.cols || size.rows !== this.lastSentSize?.rows)) {
-            this.client.send({ case: 'resize', value: size });
-            this.lastSentSize = size;
-          }
-        }
-      }
-    });
+    this.resizeObserver = new ResizeObserver(() => this.sendResizeIfChanged());
   }
 
   firstUpdated() {
     this.listeners = new AbortController();
-    this.renderer = new GridRenderer(this.canvas);
-    this.resizeObserver.observe(this.canvas);
-    
-    const rect = this.canvas.getBoundingClientRect();
-    this.renderer.resize(rect.width, rect.height);
+    this.cellWidth = measureCellWidth();
+    this.resizeObserver.observe(this.paneStrip);
+    this.requestUpdate();
     
     this.setupKeyboard();
     this.setupMouse();
@@ -190,10 +259,9 @@ export class WideboiApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    if (this.renderer && !this.listeners) {
+    if (this.paneStrip && !this.listeners) {
       this.listeners = new AbortController();
-      this.resizeObserver.observe(this.canvas);
-      if (this.connected) this.renderer.start();
+      this.resizeObserver.observe(this.paneStrip);
       this.setupKeyboard();
       this.setupMouse();
     }
@@ -205,10 +273,9 @@ export class WideboiApp extends LitElement {
     this.listeners = undefined;
     this.pointer = undefined;
     this.inPrefixMode = false;
+    for (const animation of this.movement.values()) animation.cancel();
+    this.movement.clear();
     this.resizeObserver.disconnect();
-    if (this.renderer) {
-      this.renderer.stop();
-    }
     if (this.client) {
       this.client.disconnect();
       this.client = null;
@@ -224,6 +291,12 @@ export class WideboiApp extends LitElement {
     this.lastSentSize = undefined;
     this.inPrefixMode = false;
     this.pendingFocusId = 0;
+    this.panes = new PaneStore();
+    this.selectedPane = undefined;
+    this.columns = [];
+    this.activePanes = [];
+    this.focusedPaneId = 0;
+    this.previousFocusId = 0;
     
     this.errorMsg = '';
     
@@ -249,27 +322,28 @@ export class WideboiApp extends LitElement {
       if (this.client !== client) return;
       console.log('Connected to server');
       this.connected = true;
-      this.renderer?.start();
       this.errorMsg = '';
-      this.sendAttach();
+      void this.updateComplete.then(() => {
+        if (this.client === client && this.connected) this.sendAttach();
+      });
     };
 
     client.onDisconnect = () => {
       if (this.client !== client) return;
       this.connected = false;
       this.inPrefixMode = false;
-      this.renderer?.stop();
       this.errorMsg = 'Disconnected from server.';
     }
     client.onMessage = (message) => {
-      if (this.client !== client || !this.renderer) return;
+      if (this.client !== client) return;
 
       switch (message.msg.case) {
         case 'layoutSnapshot': {
           const snapshot = message.msg.value;
-          this.renderer.handleLayoutSnapshot(snapshot);
+          const previous = this.panePositions();
+          this.focusedPaneId = reconcileFocus(this.columns, snapshot.columns, this.focusedPaneId);
+          this.columns = snapshot.columns;
           this.activePanes = snapshot.columns.map(c => c.paneId);
-          this.focusedPaneId = this.renderer.getFocusedPaneId();
           if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
             this.focusPane(this.pendingFocusId);
             this.pendingFocusId = 0;
@@ -277,23 +351,47 @@ export class WideboiApp extends LitElement {
           if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
           this.paneStatuses = snapshot.paneStatuses;
           this.paneTitles = snapshot.paneTitles;
+          void this.updateComplete.then(() => {
+            this.animateReorder(previous);
+            this.revealFocus();
+            this.sendResizeIfChanged();
+          });
           break;
         }
         case 'paneCreated':
           this.pendingFocusId = message.msg.value.paneId;
           break;
         case 'paneUpdate':
-          this.renderer.handlePaneUpdate(message.msg.value);
+          this.panes.update(message.msg.value);
+          this.requestUpdate();
           break;
         case 'panePatch':
-          if (!this.renderer.handlePanePatch(message.msg.value)) {
+          if (!this.panes.patch(message.msg.value)) {
             client.send({ case: 'paneResync', value: { paneId: message.msg.value.paneId } });
           }
+          this.requestUpdate();
           break;
         case 'paneClosed': {
           const closedId = message.msg.value.paneId;
-          this.renderer.handlePaneClosed(closedId);
-          this.activePanes = this.activePanes.filter(id => id !== closedId);
+          this.panes.close(closedId);
+          const previousColumns = this.columns;
+          const nextColumns = previousColumns.filter(column => column.paneId !== closedId);
+          const nextFocus = reconcileFocus(previousColumns, nextColumns, this.focusedPaneId);
+          const focusChanged = nextFocus !== this.focusedPaneId;
+          this.columns = nextColumns;
+          this.activePanes = nextColumns.map(column => column.paneId);
+          this.focusedPaneId = nextFocus;
+          if (this.previousFocusId === closedId) this.previousFocusId = 0;
+          if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
+          if (this.pointer?.pane.paneId === closedId) this.pointer = undefined;
+          if (this.selectedPane?.paneId === closedId) this.selectedPane = undefined;
+          void this.updateComplete.then(() => {
+            if (focusChanged) {
+              this.focusedPane()?.focusInput();
+              this.revealFocus();
+            }
+            this.sendResizeIfChanged();
+          });
           break;
         }
       }
@@ -304,7 +402,7 @@ export class WideboiApp extends LitElement {
 
   private setupKeyboard() {
     document.addEventListener('keydown', (e) => {
-      if (!this.connected || !this.renderer || !this.client) return;
+      if (!this.connected || !this.client) return;
       if (e.target instanceof HTMLInputElement) return; 
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
@@ -368,9 +466,9 @@ export class WideboiApp extends LitElement {
           }
           
         } else if (key === 'j') {
-          this.client.send({ case: 'scroll', value: { paneId: this.renderer.getFocusedPaneId(), delta: -10 } });
+          this.client.send({ case: 'scroll', value: { paneId: this.focusedPaneId, delta: -10 } });
         } else if (key === 'k') {
-          this.client.send({ case: 'scroll', value: { paneId: this.renderer.getFocusedPaneId(), delta: 10 } });
+          this.client.send({ case: 'scroll', value: { paneId: this.focusedPaneId, delta: 10 } });
         } else {
            // Unknown key breaks out of prefix mode
            this.inPrefixMode = false;
@@ -380,52 +478,50 @@ export class WideboiApp extends LitElement {
       }
 
       
-      if (sendKeyboardInput(this.client, this.renderer.getFocusedPaneId(), e)) e.preventDefault();
+      if (sendKeyboardInput(this.client, this.focusedPaneId, e)) e.preventDefault();
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('paste', (e) => {
-      if (!this.connected || !this.renderer || !this.client || e.target instanceof HTMLInputElement) return;
+      if (!this.connected || !this.client || e.target instanceof HTMLInputElement) return;
       const value = e.clipboardData?.getData('text/plain') || '';
-      if (!sendTextInput(this.client, this.renderer.getFocusedPaneId(), value)) return;
+      if (!sendTextInput(this.client, this.focusedPaneId, value)) return;
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('compositionend', (e) => {
-      if (!this.connected || !this.renderer || !this.client || e.target instanceof HTMLInputElement) return;
-      sendTextInput(this.client, this.renderer.getFocusedPaneId(), (e as CompositionEvent).data);
+      if (!this.connected || !this.client || e.target instanceof HTMLInputElement) return;
+      sendTextInput(this.client, this.focusedPaneId, (e as CompositionEvent).data);
     }, { signal: this.listeners?.signal });
   }
 
   private setupMouse() {
-    if (!this.canvas) return;
-    this.canvas.addEventListener('pointerdown', (e) => {
-      if (!this.connected || !this.renderer || !this.client) return;
-      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      const hit = this.renderer.getPaneHit(x, y);
-      if (!hit.paneID || !hit.placement) return;
+    this.paneStrip.addEventListener('pointerdown', (e) => {
+      if (!this.connected || !this.client) return;
+      const pane = this.eventPane(e);
+      if (!pane) return;
+      const start = pane.cellAt(e.clientX, e.clientY);
       this.pointer = {
-        id: e.pointerId, paneID: hit.paneID, placement: hit.placement,
+        id: e.pointerId, pane,
         button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
-        tracking: hit.paneID === this.focusedPaneId && this.renderer.mouseTracking(hit.paneID),
-        focusOnClick: hit.paneID !== this.focusedPaneId, dragged: false,
-        startX: x, startY: y
+        tracking: pane.paneId === this.focusedPaneId && this.panes.mouseTracking(pane.paneId),
+        focusOnClick: pane.paneId !== this.focusedPaneId, dragged: false, start,
       };
-      this.canvas.setPointerCapture(e.pointerId);
-      this.renderer.clearSelection();
+      pane.setPointerCapture(e.pointerId);
+      this.selectedPane?.clearSelection();
+      this.selectedPane = undefined;
       if (this.pointer.tracking) this.sendPointerMouse(MouseKind.PRESS, e);
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
-    this.canvas.addEventListener('pointermove', (e) => {
+    this.paneStrip.addEventListener('pointermove', (e) => {
       const press = this.pointer;
-      if (!press || press.id !== e.pointerId || !this.renderer) return;
-      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      if (x !== press.startX || y !== press.startY) press.dragged = true;
+      if (!press || press.id !== e.pointerId) return;
+      const end = press.pane.cellAt(e.clientX, e.clientY);
+      if (end.x !== press.start.x || end.y !== press.start.y) press.dragged = true;
       if (press.tracking) this.sendPointerMouse(MouseKind.MOTION, e);
       else if (press.button === 1) {
-        const start = this.pointerCell(press.startX, press.startY, press.placement);
-        const end = this.pointerCell(x, y, press.placement);
-        this.renderer.setSelection(press.paneID, start, end);
+        press.pane.setSelection(press.start, end);
+        this.selectedPane = press.pane;
       }
       e.preventDefault();
     }, { signal: this.listeners?.signal });
@@ -433,63 +529,60 @@ export class WideboiApp extends LitElement {
     const release = (e: PointerEvent) => {
       if (!this.pointer || this.pointer.id !== e.pointerId) return;
       if (this.pointer.tracking) this.sendPointerMouse(MouseKind.RELEASE, e);
-      else if (this.renderer) {
+      else {
         if (e.type === 'pointerup' && this.pointer.focusOnClick && !this.pointer.dragged) {
-          this.renderer.clearSelection();
-          this.focusPane(this.pointer.paneID);
+          this.pointer.pane.clearSelection();
+          this.focusPane(this.pointer.pane.paneId);
         } else {
-          const text = this.renderer.selectionText();
+          const press = this.pointer;
+          const text = selectionText(this.panes.get(press.pane.paneId), press.start,
+            press.pane.cellAt(e.clientX, e.clientY));
           if (text && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
         }
       }
+      const pane = this.pointer.pane;
       this.pointer = undefined;
-      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+      if (pane.hasPointerCapture(e.pointerId)) pane.releasePointerCapture(e.pointerId);
       e.preventDefault();
     };
-    this.canvas.addEventListener('pointerup', release, { signal: this.listeners?.signal });
-    this.canvas.addEventListener('pointercancel', release, { signal: this.listeners?.signal });
+    this.paneStrip.addEventListener('pointerup', release, { signal: this.listeners?.signal });
+    this.paneStrip.addEventListener('pointercancel', release, { signal: this.listeners?.signal });
 
-    this.canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      if (!this.connected || !this.renderer || !this.client) return;
-      
-      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      const hit = this.renderer.getPaneHit(x, y);
-      
-      if (hit.paneID > 0) {
+    this.paneStrip.addEventListener('wheel', (e) => {
+      if (!this.connected || !this.client) return;
+      // Leave horizontal wheel and trackpad gestures to the native strip.
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      const pane = this.eventPane(e);
+      if (pane) {
+        e.preventDefault();
         // e.deltaY > 0 means scrolling down (towards bottom/newer).
         // e.deltaY < 0 means scrolling up (towards top/older).
         // In MsgScroll, Delta > 0 is up (older), Delta < 0 is down (newer).
         // A standard wheel step is often 3 lines.
         const delta = e.deltaY > 0 ? -3 : 3;
-        this.client.send({ case: 'scroll', value: { paneId: hit.paneID, delta } });
+        this.client.send({ case: 'scroll', value: { paneId: pane.paneId, delta } });
       }
     }, { passive: false, signal: this.listeners?.signal });
   }
 
+  private eventPane(e: Event): WideboiPane | undefined {
+    return e.composedPath().find(node => node instanceof WideboiPane) as WideboiPane | undefined;
+  }
+
   private sendPointerMouse(kind: MouseKind, e: PointerEvent) {
     const press = this.pointer;
-    if (!press || !this.client || !this.renderer || !this.connected) return;
-    const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-    const p = press.placement;
-    const { x: localX, y: localY } = this.pointerCell(x, y, p);
+    if (!press || !this.client || !this.connected) return;
+    const { x, y } = press.pane.cellAt(e.clientX, e.clientY);
     this.client.send({ case: 'mouse', value: {
-      paneId: press.paneID, kind, x: localX, y: localY,
+      paneId: press.pane.paneId, kind, x, y,
       button: press.button,
       mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
     } });
   }
 
-  private pointerCell(x: number, y: number, p: import('./protocol').PlacementData) {
-    return {
-      x: Math.max(p.Src.Min.X, Math.min(p.Src.Max.X - 1, p.Src.Min.X + x - p.Dst.Min.X)),
-      y: Math.max(p.Src.Min.Y, Math.min(p.Src.Max.Y - 1, p.Src.Min.Y + y - p.Dst.Min.Y))
-    };
-  }
-
   private sendAttach() {
-     if (!this.renderer || !this.client) return;
-     const size = this.renderer.getGridSize();
+     if (!this.client) return;
+     const size = this.getGridSize();
      this.client.send({ case: 'attach', value: { cols: size.cols, rows: size.rows } });
      this.lastSentSize = size;
   }
@@ -516,7 +609,6 @@ export class WideboiApp extends LitElement {
     if (paneID > 0 && this.client && this.connected) {
       this.focusPane(paneID);
     }
-    this.canvas.focus();
   }
 
   render() {
@@ -524,13 +616,34 @@ export class WideboiApp extends LitElement {
       ${this.connected ? html`
         <div class="toolbar">
           <label>Focus Pane:</label>
-          <select .value=${this.focusedPaneId.toString()} @change=${this.handlePaneSelect}>
-            ${this.activePanes.map(id => html`<option value=${id}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>`)}
+          <select @change=${this.handlePaneSelect}>
+            ${repeat(this.activePanes, id => id, id => html`
+              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
+            `)}
           </select>
           <span style="color: #666; margin-left: auto;">(Tip: Ctrl+B then left/right arrow to switch)</span>
         </div>
       ` : ''}
-      <canvas tabindex="0"></canvas>
+      <div class="terminal-shell">
+        <div class="title">${this.paneTitles[this.focusedPaneId] ||
+          (this.focusedPaneId ? `Pane ${this.focusedPaneId}` : '')}</div>
+        <div class="pane-strip">
+          ${repeat(this.columns, column => column.paneId, column => html`
+            <wideboi-pane
+              style=${`width: ${column.width * this.cellWidth}px; --divider-width: ${this.cellWidth}px`}
+              .paneId=${column.paneId}
+              .pane=${this.panes.get(column.paneId)}
+              .focused=${column.paneId === this.focusedPaneId}
+              .running=${this.connected}
+              .cellWidth=${this.cellWidth}
+              aria-label=${`Pane ${column.paneId}`}
+            ></wideboi-pane>
+          `)}
+        </div>
+        <div class="status">${this.columns.map(column =>
+          `[${column.paneId}] ${PaneStatus[this.paneStatuses[column.paneId] ?? PaneStatus.IDLE] || ''}`
+        ).join('  ')}</div>
+      </div>
       ${!this.connected ? html`
         <div class="overlay">
           <div class="connection-box">

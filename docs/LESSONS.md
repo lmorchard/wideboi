@@ -187,16 +187,26 @@ orphans.
 ## Skip canvas resets when its size has not changed
 
 Assigning `canvas.width` or `canvas.height` clears the bitmap even when the
-value stays the same. `GridRenderer.resize` checks both backing dimensions
-before assigning them. A `ResizeObserver` callback can arrive without a real
-size change; in an idle, change-only browser session, no new frame may arrive
-to repaint a canvas cleared by that callback.
+value stays the same. Each pane's `PanePainter.resize` checks both backing
+dimensions before assigning them. A `ResizeObserver` callback can arrive
+without a real size change; in an idle, change-only browser session, no new
+frame may arrive to repaint a canvas cleared by that callback.
 
 Keep the observed canvas's CSS dimensions under flex layout control. Writing
 inline width and height from its own `ResizeObserver` callback can feed layout
 changes back into the observer. Send `MsgResize` only when the cell grid changes,
 and have the server broadcast only when the shared minimum dimensions change:
 each layout broadcast forces a full pane resend to every client.
+
+The web client's reported grid must come from the pane strip's actual
+`clientWidth`/`clientHeight`, with two rows added for title and status. The
+outer shell can include scrollbar space, and measuring before the connected
+toolbar renders reports too many rows. Wait for Lit's connected layout before
+`MsgAttach`; observe the strip and send later resizes only for changed cells.
+When a focused pane closes, reconcile focus immediately rather than waiting
+for the next snapshot. For the pane selector, bind each option's `selected`
+property: setting the select's value before Lit removes an option can leave
+the browser displaying a different selection than client focus state.
 
 ## Change-only pane updates require complete bookkeeping
 
@@ -325,7 +335,7 @@ server's lifetime (#86). Keep these ordering rules:
 
 Proto3 omits zero values. A patch that hides the cursor sends no
 `cursor_visible` field, and the receiver decodes it as `false`. Today
-`protocol.ApplyPanePatch` and `GridRenderer.handlePanePatch` always replace
+`protocol.ApplyPanePatch` and `PaneStore.patch` always replace
 cursor and mouse fields, so this works. If patches ever update individual
 fields, use schema `optional` presence; otherwise absence could be mistaken
 for “unchanged.” Go and browser tests pin the current hidden-cursor behavior.
