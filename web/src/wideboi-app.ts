@@ -146,7 +146,7 @@ export class WideboiApp extends LitElement {
         
         if (this.client && this.connected) {
             const size = this.renderer.getGridSize();
-            this.client.send('MsgResize', { Cols: size.cols, Rows: size.rows + 2 });
+            this.client.send('MsgResize', { Cols: size.cols, Rows: size.rows });
         }
       }
     });
@@ -394,7 +394,7 @@ export class WideboiApp extends LitElement {
   private sendAttach() {
      if (!this.renderer || !this.client) return;
      const size = this.renderer.getGridSize();
-     this.client.send('MsgAttach', { Cols: size.cols, Rows: size.rows + 2 });
+     this.client.send('MsgAttach', { Cols: size.cols, Rows: size.rows });
   }
 
   private handleUrlChange(e: Event) {

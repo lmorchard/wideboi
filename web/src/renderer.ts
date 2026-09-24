@@ -115,7 +115,7 @@ export class GridRenderer {
       if (!this.layout) return;
       
       const grid = this.getGridSize();
-      const availHeight = Math.max(grid.rows, 1);
+      const availHeight = Math.max(grid.rows - 2, 1);
       const w = grid.cols;
       
       let focusIdx = -1;
@@ -159,10 +159,10 @@ export class GridRenderer {
               drawW = w - currentX;
           }
           
-          const dst: Rectangle = { Min: {X: currentX, Y: 0}, Max: {X: currentX+drawW, Y: availHeight} };
+          const dst: Rectangle = { Min: {X: currentX, Y: 1}, Max: {X: currentX+drawW, Y: 1+availHeight} };
           
           // Src
-          const srcY = dst.Min.Y;
+          const srcY = dst.Min.Y - 1;
           const src: Rectangle = { Min: {X: 0, Y: srcY}, Max: {X: drawW, Y: srcY + (dst.Max.Y - dst.Min.Y)} };
           
           places.push({
