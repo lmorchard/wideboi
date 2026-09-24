@@ -215,6 +215,11 @@ is already visible and leave it offscreen when the animation ends. Reveal the
 focused pane after the move animations settle, including when reduced motion
 skips them.
 
+In overlapping cards, update positions before raising the newly focused card's
+`z-index`. Raising it in the same render makes it cover the previously focused
+card while that card is still sliding away, especially on right-to-left focus
+moves. Hold the old focus on top until the movement finishes.
+
 ## Change-only pane updates require complete bookkeeping
 
 Before #85, every 33 ms frame resent every pane and repaired missed updates.

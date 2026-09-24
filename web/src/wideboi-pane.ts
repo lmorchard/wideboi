@@ -21,6 +21,12 @@ export class WideboiPane extends LitElement {
       border-right-color: #007fd4;
       box-shadow: inset 0 2px #007fd4;
     }
+    :host([card-mode]) {
+      box-shadow: inset 3px 0 #777, inset 0 2px #777;
+    }
+    :host([card-mode][focused]) {
+      box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
+    }
     .card-label { display: none; }
     :host([card-mode]:not([focused])) .card-label {
       display: block;

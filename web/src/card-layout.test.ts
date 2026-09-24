@@ -24,4 +24,11 @@ describe('card layout', () => {
     const layout = cardLayout(columns, 5, 25, 0);
     expect(layout.placements.filter(p => p.visible).map(p => p.paneId)).toEqual([5]);
   });
+
+  it('can keep the previous focus above a right-to-left slide', () => {
+    const layout = cardLayout(columns, 5, 42, 2, 6);
+    const oldFocus = layout.placements.find(p => p.paneId === 6)!;
+    const newFocus = layout.placements.find(p => p.paneId === 5)!;
+    expect(oldFocus.z).toBeGreaterThan(newFocus.z);
+  });
 });

@@ -196,18 +196,36 @@ export class WideboiApp extends LitElement {
   private selectedPane?: WideboiPane;
   private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
-  @state() private layoutMode: 'scroll' | 'cards' = 'scroll';
+  @state() private layoutMode: 'scroll' | 'cards' = 'cards';
   private cardFirst = 0;
   private cardViewportWidth = 0;
   private stripScrollLeft = 0;
+  private stackFocusId = 0;
 
   private focusPane(paneID: number) {
     if (!this.activePanes.includes(paneID)) return;
+    if (paneID === this.focusedPaneId) {
+      void this.updateComplete.then(() => {
+        this.focusedPane()?.focusInput();
+        this.revealFocus();
+      });
+      return;
+    }
     const previous = this.panePositions();
-    if (paneID !== this.focusedPaneId) this.previousFocusId = this.focusedPaneId;
+    if (this.layoutMode === 'cards') this.stackFocusId = this.focusedPaneId;
+    this.previousFocusId = this.focusedPaneId;
     this.focusedPaneId = paneID;
     void this.updateComplete.then(() => {
-      if (this.layoutMode === 'cards') this.animateReorder(previous);
+      if (this.layoutMode === 'cards') {
+        this.animateReorder(previous);
+        const animations = Array.from(this.movement.values());
+        void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+          if (this.layoutMode === 'cards' && this.focusedPaneId === paneID) {
+            this.stackFocusId = paneID;
+            this.requestUpdate();
+          }
+        });
+      }
       this.focusedPane()?.focusInput();
       this.revealFocus();
     });
@@ -327,6 +345,7 @@ export class WideboiApp extends LitElement {
     this.activePanes = [];
     this.focusedPaneId = 0;
     this.previousFocusId = 0;
+    this.stackFocusId = 0;
     
     this.errorMsg = '';
     
@@ -374,6 +393,7 @@ export class WideboiApp extends LitElement {
           this.focusedPaneId = reconcileFocus(this.columns, snapshot.columns, this.focusedPaneId);
           this.columns = snapshot.columns;
           this.activePanes = snapshot.columns.map(c => c.paneId);
+          if (!this.activePanes.includes(this.stackFocusId)) this.stackFocusId = this.focusedPaneId;
           if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
             this.focusPane(this.pendingFocusId);
             this.pendingFocusId = 0;
@@ -411,6 +431,7 @@ export class WideboiApp extends LitElement {
           this.columns = nextColumns;
           this.activePanes = nextColumns.map(column => column.paneId);
           this.focusedPaneId = nextFocus;
+          if (this.stackFocusId === closedId) this.stackFocusId = nextFocus;
           if (this.previousFocusId === closedId) this.previousFocusId = 0;
           if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
           if (this.pointer?.pane.paneId === closedId) this.pointer = undefined;
@@ -651,6 +672,7 @@ export class WideboiApp extends LitElement {
     if (mode !== 'cards' && mode !== 'scroll') return;
     const previous = this.panePositions();
     if (mode === 'cards') {
+      this.stackFocusId = this.focusedPaneId;
       this.stripScrollLeft = this.paneStrip.scrollLeft;
       // Cancel a smooth focus reveal still in progress in the strip.
       this.paneStrip.scrollTo({ left: 0, behavior: 'instant' });
@@ -668,8 +690,9 @@ export class WideboiApp extends LitElement {
 
   render() {
     const cards = this.layoutMode === 'cards';
+    const stackFocusId = this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId;
     const layout = cards ? cardLayout(this.columns, this.focusedPaneId,
-      Math.floor(this.cardViewportWidth / this.cellWidth), this.cardFirst) : undefined;
+      Math.floor(this.cardViewportWidth / this.cellWidth), this.cardFirst, stackFocusId) : undefined;
     if (layout) this.cardFirst = layout.first;
     const placements = new Map(layout?.placements.map(p => [p.paneId, p]));
     return html`

@@ -18,7 +18,7 @@ const MIN_SLIVER_WIDTH = 4;
 
 // Positions are in terminal cells. The elements retain their full logical widths;
 // later cards cover their predecessors to leave visible slivers.
-export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewportWidth: number, previousFirst: number): CardLayout {
+export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewportWidth: number, previousFirst: number, stackFocusId = focusedPaneId): CardLayout {
   if (!columns.length || viewportWidth <= 0) {
     return { first: 0, placements: columns.map(c => ({ paneId: c.paneId, left: 0, visible: false, z: 0 })), hiddenLeft: 0, hiddenRight: 0 };
   }
@@ -48,7 +48,7 @@ export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewpor
       x += Math.min(share, column.width);
       sliverIndex++;
     }
-    return { paneId: column.paneId, left, visible: true, z: index === focus ? columns.length + 1 : index + 1 };
+    return { paneId: column.paneId, left, visible: true, z: column.paneId === stackFocusId ? columns.length + 1 : index + 1 };
   });
   return { first, placements, hiddenLeft: first, hiddenRight: columns.length - last - 1 };
 }

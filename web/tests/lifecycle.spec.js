@@ -100,6 +100,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
   await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length)).toBeGreaterThan(0);
+  await page.getByRole('combobox', { name: 'Layout' }).selectOption('scroll');
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
