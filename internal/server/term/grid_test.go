@@ -218,6 +218,7 @@ func TestGridEncodesKeysForTheChild(t *testing.T) {
 		{"printable", uv.KeyPressEvent{Code: 'a', Text: "a"}, "a"},
 		{"printable m", uv.KeyPressEvent{Code: 'm', Text: "m"}, "m"},
 		{"ctrl+c", uv.KeyPressEvent{Code: 'c', Mod: uv.ModCtrl}, "\x03"},
+		{"ctrl+c with text and repeat", uv.KeyPressEvent{Code: 'c', Text: "c", Mod: uv.ModCtrl, IsRepeat: true}, "\x03"},
 		{"enter", uv.KeyPressEvent{Code: uv.KeyEnter}, "\r"},
 		{"up arrow", uv.KeyPressEvent{Code: uv.KeyUp}, "\x1b[A"},
 		{"tab", uv.KeyPressEvent{Code: uv.KeyTab}, "\t"},

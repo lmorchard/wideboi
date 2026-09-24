@@ -392,7 +392,14 @@ func (g *vtGrid) SendKey(k uv.KeyEvent) {
 		g.em.SendText(key.Text)
 		return
 	}
-	g.em.SendKey(k)
+
+	// Workaround for charmbracelet/x/vt: its SendKey method compares the entire
+	// struct, so fields like Text and IsRepeat prevent modified keys (like Ctrl+C)
+	// from matching its switch cases.
+	key.Text = ""
+	key.IsRepeat = false
+
+	g.em.SendKey(uv.KeyPressEvent(key))
 }
 
 func (g *vtGrid) SendText(text string) { g.em.SendText(text) }
