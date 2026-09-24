@@ -743,6 +743,25 @@ def case_quit_restores_and_reaps(fail):
         fail(f"leaked pane processes: {s.leaked}")
 
 
+def case_exit_from_control_mode_restores_cursor(fail):
+    s = Session()
+    s.type("\x02")  # The control menu hides the host cursor.
+    if cursor_visible(s.output()) is not False:
+        fail("control mode did not hide the cursor before exit")
+    status = s.quit_and_reap()
+    if status is None:
+        fail("did not exit after a signal")
+        return
+    out = s.output()
+    alt_exit = out.rfind(ALT_SCREEN_EXIT)
+    if alt_exit < 0:
+        fail("never left the alt screen")
+    elif cursor_visible(out[alt_exit:]) is not True:
+        fail("cursor remained hidden after leaving the alt screen")
+    if s.leaked:
+        fail(f"leaked pane processes: {s.leaked}")
+
+
 def case_status_line_names_the_prefix(fail):
     # Normal mode's only affordance is the hint. If it goes missing, a
     # new user has no way to discover that any verbs exist.
@@ -1055,6 +1074,7 @@ CASES = [
     ("card layout toggles", case_card_layout_toggles),
     ("scroll mode marks off-screen panes", case_scroll_mode_marks_off_screen_panes),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),
+    ("exit from control mode restores cursor", case_exit_from_control_mode_restores_cursor),
     ("status line names the prefix", case_status_line_names_the_prefix),
     ("control mode names every entry at 80 columns", case_control_mode_names_every_entry_at_80_columns),
     ("ctrl repeats control mode", case_ctrl_repeats_control_mode),

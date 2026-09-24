@@ -563,6 +563,10 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		screenLock.Lock()
 		defer screenLock.Unlock()
 		if started.Load() {
+			// The control menu can leave the screen's cursor state hidden.
+			// ExitAltScreen carries that state to the parent screen, and
+			// Terminal.Stop's Reset does not show a hidden cursor.
+			scr.ShowCursor()
 			scr.ExitAltScreen()
 			_ = scr.Flush()
 			err = t.Stop()
@@ -679,6 +683,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					scr.EnterAltScreen()
 					enableMouse(scr, cfg)
 					if err := t.Start(); err != nil {
+						scr.ShowCursor()
 						scr.ExitAltScreen()
 						_ = scr.Flush()
 						_ = t.Stop()
