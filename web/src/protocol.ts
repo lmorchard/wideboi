@@ -43,6 +43,8 @@ export interface CellData {
   Style: StyleData;
 }
 
+// One entry per terminal column. Width describes paint width and does not
+// change the index of the following entry.
 export type LineData = CellData[];
 
 export interface MsgLayoutSnapshot {

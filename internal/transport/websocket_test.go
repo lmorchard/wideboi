@@ -126,3 +126,83 @@ func TestWebSocketCloseBehavior(t *testing.T) {
 		t.Fatal("timeout waiting for server to notice disconnect")
 	}
 }
+
+func TestWebSocketSlowPeerDoesNotBlockAnotherPeer(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	conns := make(chan *transport.WebSocketServerConn, 2)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			conns <- transport.NewWebSocketServerConn(c, 1)
+		}
+	}))
+	defer s.Close()
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	slowClient, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slowClient.Close()
+	slow := <-conns
+	healthyClient, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer healthyClient.Close()
+	healthy := <-conns
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	healthy.RunPumps(ctx)
+	defer healthy.Close()
+	msg := protocol.MsgLayoutSnapshot{FocusPaneID: 42}
+	if !slow.SendServer(ctx, msg) {
+		t.Fatal("first queued send failed")
+	}
+	if slow.SendServer(ctx, msg) {
+		t.Fatal("full queue should disconnect slow peer")
+	}
+	if !healthy.SendServer(ctx, msg) {
+		t.Fatal("healthy peer was blocked")
+	}
+	_ = healthyClient.SetReadDeadline(time.Now().Add(time.Second))
+	var got transport.WSEnvelope
+	if err := healthyClient.ReadJSON(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Type != "MsgLayoutSnapshot" {
+		t.Fatalf("got %q", got.Type)
+	}
+}
+
+func TestWebSocketRejectsOversizedInput(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	conns := make(chan *transport.WebSocketServerConn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			serverConn := transport.NewWebSocketServerConn(c, 1)
+			serverConn.RunPumps(ctx)
+			conns <- serverConn
+		}
+	}))
+	defer s.Close()
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	client, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	serverConn := <-conns
+	// The server may close the connection before the client finishes writing.
+	_ = client.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("x", (1<<20)+1)))
+	select {
+	case _, ok := <-serverConn.ClientSendChan():
+		if ok {
+			t.Fatal("oversized input reached server")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("oversized input did not close reader")
+	}
+}

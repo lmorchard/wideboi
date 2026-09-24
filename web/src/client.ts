@@ -13,24 +13,30 @@ export class WideboiClient {
   }
 
   public connect() {
-    this.ws = new WebSocket(this.url);
+    this.disconnect();
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
 
-    this.ws.onopen = () => {
-      console.log("[WideboiClient] Connected to", this.url);
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
+      console.log("[WideboiClient] Connected");
       if (this.onConnect) this.onConnect();
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (this.ws !== ws) return;
       console.log("[WideboiClient] Disconnected");
       this.ws = null;
       if (this.onDisconnect) this.onDisconnect();
     };
 
-    this.ws.onerror = (err) => {
-      console.error("[WideboiClient] WebSocket error:", err);
+    ws.onerror = () => {
+      if (this.ws !== ws) return;
+      console.error("[WideboiClient] WebSocket error");
     };
 
-    this.ws.onmessage = (event: MessageEvent) => {
+    ws.onmessage = (event: MessageEvent) => {
+      if (this.ws !== ws) return;
       try {
         const envelope = JSON.parse(event.data) as WSEnvelope;
         if (this.onMessage) {
