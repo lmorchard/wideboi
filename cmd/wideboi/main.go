@@ -52,6 +52,7 @@ type cliOptions struct {
 	flags      config.ConfigFlags
 	showVer    bool
 	showHelp   bool
+	jsonOut    bool
 	// ownerFD is the inherited connection a spawning plain wideboi owns
 	// this server through, or -1. Internal: see spawnServer.
 	ownerFD int
@@ -69,7 +70,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "cleanup" || arg == "version" || arg == "help") {
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help") {
 			opts.subcommand = arg
 			continue
 		}
@@ -110,6 +111,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
 	fs.BoolVar(&opts.showHelp, "h", false, "show help and usage information")
 	fs.BoolVar(&opts.showHelp, "help", false, "show help and usage information")
+	fs.BoolVar(&opts.jsonOut, "json", false, "output JSON instead of a table (status only)")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return opts, err
@@ -131,6 +133,8 @@ func printHelp(w io.Writer) {
   wideboi [flags] attach     Attach a client to a running server
   wideboi [flags] kill-session
                              End the session: close every pane and stop the server
+  wideboi [flags] status [--json]
+                             Show the layout snapshot and pane statuses
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
@@ -196,6 +200,8 @@ func main() {
 		fatal(runAttach(cfg, bindings))
 	case "kill-session":
 		fatal(runKillSession(cfg))
+	case "status":
+		fatal(runStatus(cfg, opts.jsonOut, os.Stdout))
 	case "cleanup":
 		fatal(runCleanup(os.Stdout, config.SessionDir()))
 	case "ls":

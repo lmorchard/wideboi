@@ -248,6 +248,9 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 	needBroadcast := false
 
 	switch m := msg.(type) {
+	case protocol.MsgStatusRequest:
+		needBroadcast = true
+
 	case protocol.MsgAttach:
 		if m.Cols > 0 && m.Rows > 0 {
 			s.cols, s.rows = m.Cols, m.Rows
