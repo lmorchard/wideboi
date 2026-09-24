@@ -140,6 +140,7 @@ export class WideboiApp extends LitElement {
   private previousFocusId = 0;
   private pendingFocusId = 0;
   private paneStatuses: Record<number, number> = {};
+  private focusClickPending = false;
 
   private focusPane(paneID: number) {
     if (!this.renderer || !this.activePanes.includes(paneID)) return;
@@ -363,6 +364,7 @@ export class WideboiApp extends LitElement {
     if (!this.canvas) return;
     this.canvas.addEventListener('mousedown', (e) => {
       if (!this.connected || !this.renderer || !this.client) return;
+      this.focusClickPending = false;
       
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
       const hit = this.renderer.getPaneHit(x, y);
@@ -370,6 +372,7 @@ export class WideboiApp extends LitElement {
       if (hit.paneID > 0 && hit.placement) {
         if (hit.paneID !== this.focusedPaneId) {
           this.focusPane(hit.paneID);
+          this.focusClickPending = true;
           return;
         }
         
@@ -389,6 +392,10 @@ export class WideboiApp extends LitElement {
 
     this.canvas.addEventListener('mouseup', (e) => {
       if (!this.connected || !this.renderer || !this.client) return;
+      if (this.focusClickPending) {
+        this.focusClickPending = false;
+        return;
+      }
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
       const hit = this.renderer.getPaneHit(x, y);
       if (hit.paneID > 0 && hit.placement) {
@@ -408,6 +415,7 @@ export class WideboiApp extends LitElement {
 
     this.canvas.addEventListener('mousemove', (e) => {
       if (!this.connected || !this.renderer || !this.client) return;
+      if (this.focusClickPending) return;
       if (e.buttons === 0) return; // Only send drags
       
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);

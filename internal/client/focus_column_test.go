@@ -28,8 +28,8 @@ func outOfOrderClient(t *testing.T, cols int, ids ...int) (*Client, *transport.I
 	return cli, ch
 }
 
-// A digit resolves against the client's strip and goes out as the same
-// MsgFocusPane a click sends. Out of range sends nothing.
+// A digit resolves against the client's strip and changes local focus.
+// Out of range leaves focus unchanged.
 func TestFocusColumnSendsPaneAtPosition(t *testing.T) {
 	cli, _ := outOfOrderClient(t, 100, 5, 2, 9)
 	ctx := context.Background()

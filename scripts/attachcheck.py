@@ -803,6 +803,36 @@ def case_toggle_affects_only_its_own_client(fail):
         srv.stop()
 
 
+def case_focus_affects_only_its_own_client(fail):
+    """A focus change and later layout broadcast cannot move another client."""
+    srv = Server()
+    a = b = None
+    try:
+        a = Client()
+        b = Client()
+        if focus_pane_id(a.output(), ROWS) != 1 or focus_pane_id(b.output(), ROWS) != 1:
+            fail("clients did not both start on pane 1")
+            return
+        a.type(b"\x02l")
+        if focus_pane_id(a.output(), ROWS) != 2:
+            fail("client a did not focus pane 2")
+        if focus_pane_id(b.output(), ROWS) != 1:
+            fail("client a's focus change moved client b")
+        a.type(b"\x02w")  # width change broadcasts a fresh snapshot
+        settle_output(b.drainer, timeout=SETTLE)
+        if focus_pane_id(a.output(), ROWS) != 2 or focus_pane_id(b.output(), ROWS) != 1:
+            fail("the width snapshot changed one client's local focus")
+        a.type(b"\x02n")
+        settle_output(b.drainer, timeout=SETTLE)
+        if focus_pane_id(a.output(), ROWS) != 3 or focus_pane_id(b.output(), ROWS) != 1:
+            fail("the new pane did not focus only in its requesting client")
+    finally:
+        for c in (a, b):
+            if c is not None:
+                c.kill()
+        srv.stop()
+
+
 def case_attach_layout_flag_is_honoured(fail):
     """An attaching client starts in the layout its own config names.
     Before #92 attach resolved --layout and threw it away."""
@@ -816,6 +846,10 @@ def case_attach_layout_flag_is_honoured(fail):
         clients.append(scroll)
         cards = Client(args=["--layout", "cards"])
         clients.append(cards)
+        # Focus is local to each client. Compare the two layouts while
+        # all three clients are looking at the same pane.
+        scroll.type(b"\x022")  # new pane 3 is inserted at position 2
+        cards.type(b"\x022")
         a_col = cursor_col(a.output())
         scroll_col = cursor_col(scroll.output())
         cards_col = cursor_col(cards.output())
@@ -853,6 +887,7 @@ def case_reattach_starts_from_the_configured_layout(fail):
             return
 
         c = Client(startup=SETTLE * 2)
+        c.type(b"\x022")  # restore the same local focus for the comparison
         col2 = cursor_col(c.output())
         if col2 != col0:
             fail(f"reattached client's cursor is at column {col2}, want the "
@@ -909,6 +944,7 @@ CASES = [
     ("plain wideboi attaches to a running server", case_plain_wideboi_attaches_to_a_running_server),
     ("two plain wideboi at once share one session", case_two_plain_wideboi_at_once_share_one_session),
     ("layout toggle affects only its own client", case_toggle_affects_only_its_own_client),
+    ("focus affects only its own client", case_focus_affects_only_its_own_client),
     ("attach honours its own layout flag", case_attach_layout_flag_is_honoured),
     ("reattach starts from the configured layout", case_reattach_starts_from_the_configured_layout),
 ]
