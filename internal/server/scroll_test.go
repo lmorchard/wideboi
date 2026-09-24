@@ -265,13 +265,14 @@ func TestResizeDoesNotTriggerUnreadOutputWhenScrolled(t *testing.T) {
 		fmt.Fprintf(grid, "line %02d\r\n", i)
 	}
 
-	pane := &Pane{id: 1, grid: grid, cols: 20, rows: 5}
+	pane := &Pane{id: 1, grid: grid, cols: 20, rows: 22}
 	s := &Server{
 		strip: layout.NewStrip(),
 		panes: map[int]*Pane{1: pane},
 		cols:  80,
 		rows:  24,
 	}
+	s.strip.AddColumn(1, 20, 22, 0)
 
 	tp := transport.NewInProcChannel(16)
 	s.transports = []transport.Transport{tp}
@@ -288,7 +289,7 @@ func TestResizeDoesNotTriggerUnreadOutputWhenScrolled(t *testing.T) {
 	}
 
 	// Session/pane resize occurs without new output
-	s.handleClientMsg(ctx, tp, protocol.MsgResize{Cols: 90, Rows: 24})
+	s.handleClientMsg(ctx, tp, protocol.MsgResize{Cols: 90, Rows: 30})
 	s.broadcastPaneUpdates(ctx, false)
 
 	// Offset must still be 5, and unreadOutput must still be false

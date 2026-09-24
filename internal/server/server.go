@@ -39,14 +39,19 @@ type Server struct {
 
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
-	// tell when either has changed.
+	// tell when either has changed. lastColumns tracks the last broadcast
+	// column set and dimensions to determine whether mirrors were affected.
 	lastStatuses map[int]protocol.PaneStatus
 	lastTitles   map[int]string
+	lastColumns  []protocol.ColumnData
 	lastCWD      map[int]string
 	lastUserVars map[int]map[string]string
 	// Creation notices are retried until accepted, followed by a snapshot.
 	pendingPaneCreated      map[transport.Transport][]int
 	pendingCreationSnapshot map[transport.Transport]bool
+	// attachedTransports tracks which transports have sent MsgAttach.
+	// Only attached clients trigger a layout broadcast on disconnect.
+	attachedTransports map[transport.Transport]bool
 	// layoutSendMu orders each client's creation notices before the snapshot
 	// that includes them, even when broadcasts run concurrently.
 	layoutSendMu sync.Mutex
@@ -203,6 +208,7 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		clientSizes:             make(map[transport.Transport]protocol.MsgResize),
 		pendingPaneCreated:      make(map[transport.Transport][]int),
 		pendingCreationSnapshot: make(map[transport.Transport]bool),
+		attachedTransports:      make(map[transport.Transport]bool),
 		stopCh:                  make(chan struct{}),
 		started:                 time.Now(),
 	}
@@ -302,14 +308,18 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 // whether tp was the owner, and clears ownership under the same lock.
 func (s *Server) dropClient(ctx context.Context, tp transport.Transport) (wasOwner bool) {
 	s.mu.Lock()
+	attached := s.attachedTransports != nil && s.attachedTransports[tp]
 	s.removeTransportLocked(tp)
 	if tp == s.owner {
 		s.owner = nil
 		wasOwner = true
 	}
 	s.mu.Unlock()
-	// Broadcast layout outside the lock to push the resized panes to remaining clients
-	s.broadcastLayout(ctx)
+	// Broadcast layout outside the lock to push the resized panes to remaining clients,
+	// but only if the disconnected peer had attached (not a status query or probe).
+	if attached {
+		s.broadcastLayout(ctx)
+	}
 	// Close outside s.mu. Close can block, and
 	// Issue #43 records holding s.mu across a
 	// blocking call as the shape behind the server that
@@ -346,6 +356,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.clientSizes, tp)
 	delete(s.pendingPaneCreated, tp)
 	delete(s.pendingCreationSnapshot, tp)
+	delete(s.attachedTransports, tp)
 	s.forgetTrafficLocked(tp)
 	s.recomputeSessionSizeLocked()
 	s.resizePanesLocked()
@@ -404,6 +415,12 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	case protocol.MsgAttach:
 		s.markAttachedLocked(tp)
+		if s.attachedTransports == nil {
+			s.attachedTransports = make(map[transport.Transport]bool)
+		}
+		if tp != nil {
+			s.attachedTransports[tp] = true
+		}
 		if m.Cols > 0 && m.Rows > 0 {
 			if s.clientSizes == nil {
 				s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
@@ -869,6 +886,26 @@ func sameUserVars(a, b map[string]string) bool {
 	return true
 }
 
+// sameColumnSetAndSizes reports whether two column slices have the same
+// set of pane IDs with identical width and height. Order changes (like
+// moving columns left/right) do not change the set or sizes.
+func sameColumnSetAndSizes(a, b []protocol.ColumnData) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := make(map[int]protocol.ColumnData, len(a))
+	for _, col := range a {
+		m[col.PaneID] = col
+	}
+	for _, col := range b {
+		other, ok := m[col.PaneID]
+		if !ok || other.Width != col.Width || other.Height != col.Height {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) broadcastMetadataIfChanged(ctx context.Context) bool {
 	s.metaSendMu.Lock()
 	defer s.metaSendMu.Unlock()
@@ -995,8 +1032,10 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	s.mu.Lock()
 	statuses := s.statusGlyphsLocked()
 	titles := s.paneTitlesLocked()
+	cols := layout.ToColumnData(s.strip.Columns())
+	columnsChanged := !sameColumnSetAndSizes(cols, s.lastColumns)
 	snapshot := protocol.MsgLayoutSnapshot{
-		Columns:      layout.ToColumnData(s.strip.Columns()),
+		Columns:      cols,
 		PaneStatuses: statuses,
 		PaneTitles:   titles,
 	}
@@ -1053,18 +1092,19 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 		s.mu.Lock()
 		s.lastStatuses = statuses
 		s.lastTitles = titles
+		s.lastColumns = cols
 		s.mu.Unlock()
 	}
 
-	s.broadcastPaneUpdates(ctx, true)
+	s.broadcastPaneUpdates(ctx, columnsChanged)
 }
 
 // broadcastPaneUpdates sends each pane to every client that has not
 // accepted its current view state. force sends every pane to every
-// client: broadcastLayout needs that, because a snapshot can prune a
-// client's mirror or replace it with a blank one (client.go, the
-// MsgLayoutSnapshot case), so an unchanged pane must still be resent
-// after one.
+// client: broadcastLayout needs that when the column set or pane sizes
+// change, because a snapshot can prune a client's mirror or replace it
+// with a blank one (client.go, the MsgLayoutSnapshot case). For status-
+// or title-only snapshots where columns are unchanged, force is false.
 func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	s.paneSendMu.Lock()
 	defer s.paneSendMu.Unlock()
