@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
-	"github.com/lmorchard/wideboi/internal/server/term"
+	
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -33,7 +33,7 @@ func drainPaneUpdates(tp *transport.InProcChannel) []int {
 
 func twoIdlePanes(t *testing.T) (*Server, map[int]*statusGrid, *transport.InProcChannel) {
 	t.Helper()
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle})
 	return s, grids, s.transports[0].(*transport.InProcChannel)
 }
 
@@ -156,7 +156,7 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 // so without invalidating it no later tick would retry -- and the
 // snapshot in front of it may just have pruned or blanked that mirror.
 func TestDroppedForcedResendIsRetried(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle})
 	ctx := context.Background()
 	tp := transport.NewInProcChannel(4)
 	s.transports = []transport.Transport{tp}

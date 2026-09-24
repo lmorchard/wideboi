@@ -14,7 +14,7 @@ func TestStripInitializesWithOneColumn(t *testing.T) {
 		t.Fatalf("ColCount() = %d, want 0", s.ColCount())
 	}
 
-	s.AddColumn(1, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
 	if s.ColCount() != 1 {
 		t.Fatalf("ColCount() = %d, want 1", s.ColCount())
 	}
@@ -25,8 +25,8 @@ func TestStripInitializesWithOneColumn(t *testing.T) {
 
 func TestStripNavigationLeftRight(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 40, 20, 0)
 
 	if got := s.FocusedPaneID(); got != 2 {
 		t.Fatalf("FocusedPaneID() after 2nd add = %d, want 2", got)
@@ -50,8 +50,8 @@ func TestStripNavigationLeftRight(t *testing.T) {
 
 func TestStripComputesPlacements(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 23)
-	s.AddColumn(2, 39, 23) // 40 + 1 divider + 39 = 80 total width
+	s.AddColumn(1, 40, 23, 0)
+	s.AddColumn(2, 39, 23, 0) // 40 + 1 divider + 39 = 80 total width
 	s.FocusLeft()          // focus column 1
 
 	placements := s.ComputePlacements(80, 24)
@@ -73,9 +73,9 @@ func TestStripComputesPlacements(t *testing.T) {
 
 func TestStripScrollsToKeepFocusVisible(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 50, 23)
-	s.AddColumn(2, 50, 23)
-	s.AddColumn(3, 50, 23) // Total strip width = 150, viewport = 80
+	s.AddColumn(1, 50, 23, 0)
+	s.AddColumn(2, 50, 23, 0)
+	s.AddColumn(3, 50, 23, 0) // Total strip width = 150, viewport = 80
 
 	// Focused on column 3 (rightmost)
 	placements := s.ComputePlacements(80, 24)
@@ -97,9 +97,9 @@ func TestStripScrollsToKeepFocusVisible(t *testing.T) {
 
 func TestStripKillPaneAdjustsFocus(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 40, 20)
-	s.AddColumn(3, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 40, 20, 0)
+	s.AddColumn(3, 40, 20, 0)
 
 	s.FocusLeft() // focus pane 2
 	s.KillPane(2)
@@ -115,32 +115,32 @@ func TestStripKillPaneAdjustsFocus(t *testing.T) {
 
 func TestCycleWidthTransitionsPresets(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 99, 20) // Custom initial width (e.g. 200-col host)
+	s.AddColumn(1, 99, 20, 0) // Custom initial width (e.g. 200-col host)
 
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 40 {
 		t.Errorf("after 1st cycle from 99: width = %d, want 40", w)
 	}
 
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 60 {
 		t.Errorf("after 2nd cycle: width = %d, want 60", w)
 	}
 
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 80 {
 		t.Errorf("after 3rd cycle: width = %d, want 80", w)
 	}
 
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 40 {
 		t.Errorf("after 4th cycle: width = %d, want 40", w)
 	}
 
 	// Also verify 50 (100-col host spawn width)
 	s2 := layout.NewStrip()
-	s2.AddColumn(1, 50, 20)
-	s2.CycleWidth()
+	s2.AddColumn(1, 50, 20, 0)
+	s2.CycleWidth(1)
 	if w, _ := s2.ColumnWidth(1); w != 60 {
 		t.Errorf("from 50: width = %d, want 60", w)
 	}
@@ -149,25 +149,25 @@ func TestCycleWidthTransitionsPresets(t *testing.T) {
 func TestCustomWidthPresets(t *testing.T) {
 	s := layout.NewStrip()
 	s.SetWidthPresets([]int{50, 100, 150})
-	s.AddColumn(1, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
 
 	// 40 -> next higher preset is 50
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 50 {
 		t.Errorf("width = %d, want 50", w)
 	}
 	// 50 -> 100
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 100 {
 		t.Errorf("width = %d, want 100", w)
 	}
 	// 100 -> 150
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 150 {
 		t.Errorf("width = %d, want 150", w)
 	}
 	// 150 -> wraps to 50
-	s.CycleWidth()
+	s.CycleWidth(1)
 	if w, _ := s.ColumnWidth(1); w != 50 {
 		t.Errorf("width = %d, want 50", w)
 	}
@@ -182,29 +182,29 @@ func TestCustomWidthPresets(t *testing.T) {
 
 func TestGrowAndShrinkWidth(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 50, 20)
+	s.AddColumn(1, 50, 20, 0)
 
-	s.GrowWidth(10)
+	s.GrowWidth(1, 10)
 	if w, _ := s.ColumnWidth(1); w != 60 {
 		t.Errorf("after GrowWidth(10): width = %d, want 60", w)
 	}
 
-	s.ShrinkWidth(10)
+	s.ShrinkWidth(1, 10)
 	if w, _ := s.ColumnWidth(1); w != 50 {
 		t.Errorf("after ShrinkWidth(10): width = %d, want 50", w)
 	}
 
 	// Shrink clamped to MinColumnWidth
-	s.ShrinkWidth(40)
+	s.ShrinkWidth(1, 40)
 	if w, _ := s.ColumnWidth(1); w != layout.MinColumnWidth {
 		t.Errorf("after excessive shrink: width = %d, want MinColumnWidth (%d)", w, layout.MinColumnWidth)
 	}
 
 	// Non-positive delta no-ops
-	s.GrowWidth(0)
-	s.GrowWidth(-5)
-	s.ShrinkWidth(0)
-	s.ShrinkWidth(-5)
+	s.GrowWidth(1, 0)
+	s.GrowWidth(1, -5)
+	s.ShrinkWidth(1, 0)
+	s.ShrinkWidth(1, -5)
 	if w, _ := s.ColumnWidth(1); w != layout.MinColumnWidth {
 		t.Errorf("after no-op grow/shrink: width = %d, want %d", w, layout.MinColumnWidth)
 	}
@@ -217,7 +217,7 @@ func genStrip(t *rapid.T) (*layout.Strip, map[int]int) {
 	for i := 1; i <= numCols; i++ {
 		w := rapid.IntRange(20, 100).Draw(t, "colWidth")
 		h := rapid.IntRange(10, 50).Draw(t, "colHeight")
-		s.AddColumn(i, w, h)
+		s.AddColumn(i, w, h, 0)
 		initialWidths[i] = w
 	}
 	moves := rapid.IntRange(0, 15).Draw(t, "focusMoves")
@@ -291,20 +291,20 @@ func TestLayoutPropertyInvariants(t *testing.T) {
 // pane's logical width is its column's width wherever the column sits.
 func TestMoveLeftAndRightSwapWithNeighbourAndKeepFocus(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 50, 20)
-	s.AddColumn(3, 60, 20) // focus on 3
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 50, 20, 0)
+	s.AddColumn(3, 60, 20, 0) // focus on 3
 
 	steps := []struct {
 		move func()
 		want []int
 	}{
-		{s.MoveLeft, []int{1, 3, 2}},
-		{s.MoveLeft, []int{3, 1, 2}},
-		{s.MoveLeft, []int{3, 1, 2}}, // left edge: no-op
-		{s.MoveRight, []int{1, 3, 2}},
-		{s.MoveRight, []int{1, 2, 3}},
-		{s.MoveRight, []int{1, 2, 3}}, // right edge: no-op
+		{func() { s.MoveLeft(1) }, []int{1, 3, 2}},
+		{func() { s.MoveLeft(1) }, []int{3, 1, 2}},
+		{func() { s.MoveLeft(1) }, []int{3, 1, 2}}, // left edge: no-op
+		{func() { s.MoveRight(1) }, []int{1, 3, 2}},
+		{func() { s.MoveRight(1) }, []int{1, 2, 3}},
+		{func() { s.MoveRight(1) }, []int{1, 2, 3}}, // right edge: no-op
 	}
 	for i, st := range steps {
 		st.move()
@@ -321,8 +321,8 @@ func TestMoveLeftAndRightSwapWithNeighbourAndKeepFocus(t *testing.T) {
 	}
 
 	empty := layout.NewStrip()
-	empty.MoveLeft()
-	empty.MoveRight()
+	empty.MoveLeft(1)
+	empty.MoveRight(1)
 	if empty.ColCount() != 0 {
 		t.Fatalf("moves on an empty strip changed it")
 	}
@@ -332,9 +332,9 @@ func TestMoveLeftAndRightSwapWithNeighbourAndKeepFocus(t *testing.T) {
 // the new previous one, so pressing it twice is a round trip.
 func TestFocusLastTogglesBetweenTwoPanes(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 40, 20)
-	s.AddColumn(3, 40, 20) // focus 3
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 40, 20, 0)
+	s.AddColumn(3, 40, 20, 0) // focus 3
 
 	s.FocusPaneID(1)
 	s.FocusLast()
@@ -354,13 +354,13 @@ func TestFocusLastTracksEveryFocusMove(t *testing.T) {
 		"FocusLeft":   func(s *layout.Strip) { s.FocusLeft() },
 		"FocusRight":  func(s *layout.Strip) { s.FocusRight() },
 		"FocusPaneID": func(s *layout.Strip) { s.FocusPaneID(3) },
-		"AddColumn":   func(s *layout.Strip) { s.AddColumn(4, 40, 20) },
+		"AddColumn":   func(s *layout.Strip) { s.AddColumn(4, 40, 20, 0) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := layout.NewStrip()
-			s.AddColumn(1, 40, 20)
-			s.AddColumn(2, 40, 20)
-			s.AddColumn(3, 40, 20)
+			s.AddColumn(1, 40, 20, 0)
+			s.AddColumn(2, 40, 20, 0)
+			s.AddColumn(3, 40, 20, 0)
 			s.FocusPaneID(2)
 
 			move(s)
@@ -377,8 +377,8 @@ func TestFocusLastTracksEveryFocusMove(t *testing.T) {
 // unknown ID, and not reordering (the focused pane is the same pane).
 func TestFocusLastIgnoresNoOpsAndMoves(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 40, 20, 0)
 	s.FocusPaneID(1) // record: 2
 	// Ordered: after MoveRight, pane 1 is no longer at the left edge.
 	for _, step := range []struct {
@@ -388,8 +388,8 @@ func TestFocusLastIgnoresNoOpsAndMoves(t *testing.T) {
 		{"FocusLeft at edge", s.FocusLeft},
 		{"same pane", func() { s.FocusPaneID(1) }},
 		{"unknown pane", func() { s.FocusPaneID(99) }},
-		{"MoveRight", s.MoveRight},
-		{"MoveLeft", s.MoveLeft},
+		{"MoveRight", func() { s.MoveRight(1) }},
+		{"MoveLeft", func() { s.MoveLeft(1) }},
 	} {
 		step.noop()
 		if got := s.LastFocusPaneID(); got != 2 {
@@ -402,9 +402,9 @@ func TestFocusLastIgnoresNoOpsAndMoves(t *testing.T) {
 // leaving tab to silently do nothing forever.
 func TestKillingLastFocusedPaneForgetsIt(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 40, 20)
-	s.AddColumn(3, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 40, 20, 0)
+	s.AddColumn(3, 40, 20, 0)
 	s.FocusPaneID(1)
 	s.FocusPaneID(3) // record: 1
 

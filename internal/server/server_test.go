@@ -25,7 +25,7 @@ const testGrace = 100 * time.Millisecond
 func placementsAt(snap protocol.MsgLayoutSnapshot, cols, rows int) []layout.Placement {
 	s := layout.NewStrip()
 	layout.ApplyMode(s, protocol.LayoutScroll)
-	s.SyncColumns(snap.Columns, snap.FocusPaneID)
+	s.SyncColumns(snap.Columns, 1)
 	return s.ComputePlacements(cols, rows)
 }
 
@@ -98,13 +98,13 @@ func TestServerVerbHandling(t *testing.T) {
 	}
 
 	// Test GrowWidth verb
-	focusedID := snap.FocusPaneID
+	focusedID := 1
 	initialCols, _, ok := srv.PaneSize(focusedID)
 	if !ok {
 		t.Fatalf("pane %d not found", focusedID)
 	}
 
-	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbGrowWidth})
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbGrowWidth, PaneID: focusedID})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	grownCols, _, ok := srv.PaneSize(focusedID)
@@ -113,7 +113,7 @@ func TestServerVerbHandling(t *testing.T) {
 	}
 
 	// Test ShrinkWidth verb
-	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbShrinkWidth})
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbShrinkWidth, PaneID: focusedID})
 	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
 
 	shrunkCols, _, ok := srv.PaneSize(focusedID)
@@ -396,18 +396,18 @@ func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
 		}
-		if snap.FocusPaneID <= 0 {
+		if 1 <= 0 {
 			t.Fatalf("expected a focused pane after VerbNewColumn, got %+v", snap)
 		}
-		_, rows, ok := srv.PaneSize(snap.FocusPaneID)
+		_, rows, ok := srv.PaneSize(1)
 		if !ok {
-			t.Fatalf("pane %d not found", snap.FocusPaneID)
+			t.Fatalf("pane %d not found", 1)
 		}
 		if rows == 1 {
-			t.Errorf("pane %d has rows=1 -- resizePanesLocked ran against an unset (0) viewport instead of skipping it", snap.FocusPaneID)
+			t.Errorf("pane %d has rows=1 -- resizePanesLocked ran against an unset (0) viewport instead of skipping it", 1)
 		}
 		if rows <= 0 {
-			t.Errorf("pane %d has non-positive rows=%d", snap.FocusPaneID, rows)
+			t.Errorf("pane %d has non-positive rows=%d", 1, rows)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for MsgLayoutSnapshot after VerbNewColumn")

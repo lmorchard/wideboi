@@ -39,7 +39,7 @@ type cursorPos struct {
 type frameState struct {
 	placements   []protocol.PlacementData
 	focusPaneID  int
-	paneStatuses map[int]string
+	paneStatuses map[int]protocol.PaneStatus
 	paneTitles   map[int]string
 	// positions is each pane's 1-based column position, which is what
 	// the digit keys index. A pane missing from it gets no number.
@@ -55,7 +55,7 @@ type Client struct {
 	strip        *layout.Strip
 	placements   []protocol.PlacementData
 	focusPaneID  int
-	paneStatuses map[int]string
+	paneStatuses map[int]protocol.PaneStatus
 	paneTitles   map[int]string
 	layoutMode   protocol.LayoutMode
 	mirrors      map[int]*PaneMirror
@@ -134,8 +134,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 
 	switch m := msg.(type) {
 	case protocol.MsgLayoutSnapshot:
-		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", m.FocusPaneID)
-		oldFocus := c.focusPaneID
+		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", c.focusPaneID)
 		// Two different "previous" values, and the distinction
 		// matters.
 		//
@@ -162,13 +161,15 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		//
 		// The layout mode is not read from the snapshot: it is this
 		// client's own (#92), set by SetLayoutMode and ToggleLayout.
-		c.strip.SyncColumns(m.Columns, m.FocusPaneID)
+		if c.focusPaneID == 0 && len(m.Columns) > 0 {
+			c.focusPaneID = m.Columns[0].PaneID
+		}
+		c.strip.SyncColumns(m.Columns, c.focusPaneID)
 
 		// With no columns ComputePlacements returns nil, which is what
 		// an empty session should draw. The server sent its own
 		// placements for that case until #47; they were always nil.
 		c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
-		c.focusPaneID = m.FocusPaneID
 		c.paneStatuses = m.PaneStatuses
 		c.paneTitles = m.PaneTitles
 		if c.sel != nil && !c.selectionStillPlacedLocked() {
@@ -180,7 +181,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// Starting from what is currently on screen rather than from
 		// the pre-animation layout is what lets a second change
 		// mid-flight continue rather than jump.
-		if oldFocus != 0 && !placementsEqual(prevTarget, c.placements) {
+		if c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
 			c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
 		}
 
@@ -524,7 +525,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 		frame := c.frameLocked(*p)
 		headerW := frame.Dx()
 		if headerW > 0 {
-			glyph := st.paneStatuses[p.PaneID]
+			glyph := st.paneStatuses[p.PaneID].Glyph()
 			header := fmt.Sprintf(" [%d]", p.PaneID)
 			if pos := st.positions[p.PaneID]; pos > 0 {
 				header = fmt.Sprintf(" %d [%d]", pos, p.PaneID)
@@ -635,7 +636,7 @@ func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st f
 		return
 	}
 
-	glyph := st.paneStatuses[p.PaneID]
+	glyph := st.paneStatuses[p.PaneID].Glyph()
 	if glyph == " " {
 		glyph = ""
 	}
@@ -838,8 +839,8 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 func (c *Client) normalStatusLocked(budget int) string {
 	status := fmt.Sprintf("focus: [pane %d ★]", c.focusPaneID)
 	for _, p := range c.placements {
-		if glyph, ok := c.paneStatuses[p.PaneID]; ok && glyph != "" && glyph != " " {
-			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyph)
+		if glyphStr, ok := c.paneStatuses[p.PaneID]; ok && glyphStr.Glyph() != " " {
+			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyphStr.Glyph())
 		}
 	}
 	// The right-hand side is the layout tag and then the hint, and it
@@ -910,6 +911,23 @@ func (c *Client) SetLayoutMode(mode protocol.LayoutMode) {
 	c.setLayoutModeLocked(mode)
 }
 
+// updatePlacementsLocked recalculates placements after a local geometry/focus/mode change,
+// arming motion if they moved.
+func (c *Client) updatePlacementsLocked() {
+	prevTarget := c.placements
+	prevOnScreen := c.currentPlacementsLocked()
+
+	c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+
+	if c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
+		c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
+	}
+
+	if c.sel != nil && !c.selectionStillPlacedLocked() {
+		c.sel = nil
+	}
+}
+
 // ToggleLayout flips between the card fan and the scrolling strip.
 // Nothing is sent: other clients keep their own mode, and this one is
 // forgotten on detach. It animates like any other change of geometry.
@@ -920,18 +938,9 @@ func (c *Client) ToggleLayout() {
 	if c.layoutMode == protocol.LayoutCards {
 		next = protocol.LayoutScroll
 	}
-	// Same two "previous" values HandleServerMsg keeps, for the same
-	// reasons: prevTarget decides whether anything moved, prevOnScreen
-	// is where the animation starts.
-	prevTarget := c.placements
-	prevOnScreen := c.currentPlacementsLocked()
-	c.setLayoutModeLocked(next)
-	if c.sel != nil && !c.selectionStillPlacedLocked() {
-		c.sel = nil
-	}
-	if c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
-		c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
-	}
+	c.layoutMode = next
+	layout.ApplyMode(c.strip, next)
+	c.updatePlacementsLocked()
 }
 
 // setLayoutModeLocked installs mode and recomputes placements from the
@@ -968,29 +977,81 @@ func truncateRunes(s string, n int) string {
 	return string(r[:n])
 }
 
-// SendVerb forwards a layout action request to the server.
+// SendVerb forwards a layout action request to the server, appending the currently focused pane.
 func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
-	c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	switch v {
+	case protocol.VerbFocusLeft:
+		c.strip.FocusLeft()
+		c.focusPaneID = c.strip.FocusedPaneID()
+		c.updatePlacementsLocked()
+	case protocol.VerbFocusRight:
+		c.strip.FocusRight()
+		c.focusPaneID = c.strip.FocusedPaneID()
+		c.updatePlacementsLocked()
+	case protocol.VerbFocusLast:
+		c.strip.FocusLast()
+		c.focusPaneID = c.strip.FocusedPaneID()
+		c.updatePlacementsLocked()
+	case protocol.VerbSmartJump:
+		if id := c.smartJumpTargetLocked(); id > 0 {
+			c.strip.FocusPaneID(id)
+			c.focusPaneID = c.strip.FocusedPaneID()
+			c.updatePlacementsLocked()
+		}
+	default:
+		focused := c.focusPaneID
+		c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v, PaneID: focused})
+	}
+}
+
+func (c *Client) smartJumpTargetLocked() int {
+	rank := func(st protocol.PaneStatus) int {
+		switch st {
+		case protocol.StatusFailed:
+			return 3
+		case protocol.StatusDone:
+			return 2
+		case protocol.StatusNeedsInput:
+			return 1
+		default:
+			return 0
+		}
+	}
+
+	bestID, bestRank := 0, 0
+	for _, p := range c.strip.Columns() {
+		id := p.PaneID
+		r := rank(c.paneStatuses[id])
+		switch {
+		case r == 0:
+		case r > bestRank:
+			bestID, bestRank = id, r
+		case r == bestRank && (bestID == 0 || id < bestID):
+			bestID, bestRank = id, r
+		}
+	}
+	return bestID
 }
 
 // FocusColumn focuses the n'th column from the left, or the rightmost
-// for keys.LastColumn. It resolves against this client's strip and sends
-// the same MsgFocusPane a click sends, so the server's guard against a
-// pane that closed in the meantime covers it too. Out of range is a
-// no-op.
+// for keys.LastColumn.
 func (c *Client) FocusColumn(ctx context.Context, n int) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	ids := c.strip.PaneIDs()
-	c.mu.Unlock()
-
+	
 	i := n - 1
 	if n == keys.LastColumn {
 		i = len(ids) - 1
 	}
-	if i < 0 || i >= len(ids) {
-		return
+	if i >= 0 && i < len(ids) {
+		c.strip.FocusPaneID(ids[i])
+		c.focusPaneID = ids[i]
+		c.updatePlacementsLocked()
 	}
-	c.transport.SendClient(ctx, protocol.MsgFocusPane{PaneID: ids[i]})
 }
 
 // SendKey forwards a decoded key event for the focused pane to the server.

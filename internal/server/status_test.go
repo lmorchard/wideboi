@@ -14,7 +14,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
-	"github.com/lmorchard/wideboi/internal/server/term"
+	
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -26,13 +26,13 @@ type statusGrid struct {
 	gen    atomic.Uint64
 }
 
-func newStatusGrid(st term.PaneStatus) *statusGrid {
+func newStatusGrid(st protocol.PaneStatus) *statusGrid {
 	g := &statusGrid{}
 	g.status.Store(int32(st))
 	return g
 }
 
-func (g *statusGrid) set(st term.PaneStatus) { g.status.Store(int32(st)) }
+func (g *statusGrid) set(st protocol.PaneStatus) { g.status.Store(int32(st)) }
 
 func (g *statusGrid) setTitle(s string) { g.title.Store(&s) }
 
@@ -49,7 +49,7 @@ func (g *statusGrid) Title() string {
 	return ""
 }
 
-func (g *statusGrid) Status() term.PaneStatus { return term.PaneStatus(g.status.Load()) }
+func (g *statusGrid) Status() protocol.PaneStatus { return protocol.PaneStatus(g.status.Load()) }
 
 func (g *statusGrid) Write(p []byte) (int, error)     { return len(p), nil }
 func (g *statusGrid) Read(p []byte) (int, error)      { return 0, nil }
@@ -70,7 +70,7 @@ func (g *statusGrid) Close() error                    { return nil }
 
 // serverWithStatuses builds a server holding one pane per entry, with
 // pane IDs taken from the map keys.
-func serverWithStatuses(t *testing.T, statuses map[int]term.PaneStatus) (*Server, map[int]*statusGrid) {
+func serverWithStatuses(t *testing.T, statuses map[int]protocol.PaneStatus) (*Server, map[int]*statusGrid) {
 	t.Helper()
 	s := &Server{
 		strip:      layout.NewStrip(),
@@ -85,7 +85,7 @@ func serverWithStatuses(t *testing.T, statuses map[int]term.PaneStatus) (*Server
 		g := newStatusGrid(st)
 		grids[id] = g
 		s.panes[id] = &Pane{id: id, grid: g, cols: 40, rows: 22}
-		s.strip.AddColumn(id, 40, 22)
+		s.strip.AddColumn(id, 40, 22, 0)
 	}
 	return s, grids
 }
@@ -96,7 +96,7 @@ func serverWithStatuses(t *testing.T, statuses map[int]term.PaneStatus) (*Server
 // press a verb key -- which is exactly what happened when the handler
 // was first fixed: unit tests green, nothing on the wire.
 func TestStatusChangeTriggersALayoutBroadcast(t *testing.T) {
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
 	ctx := context.Background()
 
 	// First call always reports a change: lastStatuses starts nil.
@@ -108,7 +108,7 @@ func TestStatusChangeTriggersALayoutBroadcast(t *testing.T) {
 		t.Error("broadcast fired with no status change")
 	}
 
-	grids[1].set(term.StatusFailed)
+	grids[1].set(protocol.StatusFailed)
 	if !s.broadcastLayoutIfStatusChanged(ctx) {
 		t.Error("broadcast did not fire after a status change")
 	}
@@ -121,9 +121,9 @@ func TestStatusChangeTriggersALayoutBroadcast(t *testing.T) {
 // snapshot on every tick would be 30 full layout messages a second per
 // client for no reason.
 func TestUnchangedStatusesDoNotBroadcast(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{
-		1: term.StatusWorking,
-		2: term.StatusIdle,
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{
+		1: protocol.StatusWorking,
+		2: protocol.StatusIdle,
 	})
 	ctx := context.Background()
 	s.broadcastLayoutIfStatusChanged(ctx) // baseline
@@ -140,7 +140,7 @@ func TestUnchangedStatusesDoNotBroadcast(t *testing.T) {
 // until some later, unrelated status change. Marking the glyph set
 // delivered before the send succeeds is what would cause that.
 func TestUndeliveredStatusBroadcastIsRetried(t *testing.T) {
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
 	ctx := context.Background()
 
 	// Drain nothing and fill the buffer, so SendServer's non-blocking
@@ -150,7 +150,7 @@ func TestUndeliveredStatusBroadcastIsRetried(t *testing.T) {
 		tp.ServerSend <- struct{}{}
 	}
 
-	grids[1].set(term.StatusFailed)
+	grids[1].set(protocol.StatusFailed)
 	if !s.broadcastLayoutIfStatusChanged(ctx) {
 		t.Fatal("no broadcast attempted after a status change")
 	}
@@ -177,7 +177,7 @@ func TestUndeliveredStatusBroadcastIsRetried(t *testing.T) {
 // reserved verb; it must change nothing -- above all not a column
 // width, which is the no-shrink premise.
 func TestReservedToggleVerbChangesNothing(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle, 3: term.StatusIdle})
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle, 3: protocol.StatusIdle})
 	ctx := context.Background()
 
 	before := map[int]int{}
@@ -217,7 +217,7 @@ func TestReservedToggleVerbChangesNothing(t *testing.T) {
 // their own schedule (an agent harness rewrites its title mid-turn).
 // A title change with no status change must still reach the client.
 func TestTitleChangeTriggersALayoutBroadcast(t *testing.T) {
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
 	ctx := context.Background()
 
 	s.broadcastLayoutIfStatusChanged(ctx) // baseline
@@ -236,7 +236,7 @@ func TestTitleChangeTriggersALayoutBroadcast(t *testing.T) {
 
 // The title has to survive the trip, not just trigger a send.
 func TestPaneTitlesReachTheSnapshot(t *testing.T) {
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
 	grids[1].setTitle("◑ Pong reply")
 
 	s.broadcastLayout(context.Background())
@@ -258,7 +258,7 @@ func TestPaneTitlesReachTheSnapshot(t *testing.T) {
 // buffer was full when it fired never sees that change again -- the
 // session goes inconsistent between clients and nothing retries.
 func TestUndeliveredToOneOfTwoClientsIsRetried(t *testing.T) {
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
 	ctx := context.Background()
 
 	healthy := s.transports[0].(*transport.InProcChannel)
@@ -268,7 +268,7 @@ func TestUndeliveredToOneOfTwoClientsIsRetried(t *testing.T) {
 		wedged.ServerSend <- struct{}{}
 	}
 
-	grids[1].set(term.StatusFailed)
+	grids[1].set(protocol.StatusFailed)
 	if !s.broadcastLayoutIfStatusChanged(ctx) {
 		t.Fatal("no broadcast attempted after a status change")
 	}

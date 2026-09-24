@@ -146,7 +146,6 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 	msgs := []any{
 		protocol.MsgAttach{Cols: 80, Rows: 24},
 		protocol.MsgVerb{Verb: protocol.VerbSmartJump},
-		protocol.MsgFocusPane{PaneID: 3},
 		protocol.MsgMouse{PaneID: 2, Kind: protocol.MouseRelease, X: 4, Y: 5, Button: 1, Mod: 1},
 		protocol.MsgInput{PaneID: 1, Data: []byte("hi")},
 		protocol.MsgInput{PaneID: 1, Key: protocol.EncodeKey(uv.KeyPressEvent{Code: 'z', Text: "z"})},
@@ -156,8 +155,7 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgDetach{},
 		protocol.MsgLayoutSnapshot{
 			Columns:      []protocol.ColumnData{{PaneID: 1, Width: 40, Height: 22}},
-			FocusPaneID:  1,
-			PaneStatuses: map[int]string{1: "»"},
+			PaneStatuses: map[int]protocol.PaneStatus{1: protocol.StatusWorking},
 		},
 		protocol.MsgPaneUpdate{
 			PaneID: 1, Cols: 2, Rows: 1,

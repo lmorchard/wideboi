@@ -35,7 +35,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
-	"github.com/lmorchard/wideboi/internal/server/term"
+	
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -64,7 +64,7 @@ func (g *blockingGrid) MouseTracking() bool             { return false }
 func (g *blockingGrid) SendMouse(uv.MouseEvent)         {}
 func (g *blockingGrid) CursorPosition() image.Point     { return image.Point{} }
 func (g *blockingGrid) CursorVisible() bool             { return false }
-func (g *blockingGrid) Status() term.PaneStatus         { return term.StatusIdle }
+func (g *blockingGrid) Status() protocol.PaneStatus         { return protocol.StatusIdle }
 func (g *blockingGrid) Title() string                   { return "" }
 func (g *blockingGrid) ScrollbackLen() int              { return 0 }
 func (g *blockingGrid) ScrollOffset() int               { return 0 }

@@ -99,16 +99,18 @@ func TestSocketListenerAndConnRoundTrip(t *testing.T) {
 	}
 
 	// Send server -> client message (MsgLayoutSnapshot)
-	snapMsg := protocol.MsgLayoutSnapshot{FocusPaneID: 42}
+	snapMsg := protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{{PaneID: 1, Width: 80, Height: 24}},
+	}
 	if !srvConn.SendServer(ctx, snapMsg) {
 		t.Fatal("server SendServer failed")
 	}
 
 	select {
 	case msg := <-clientConn.ServerSendChan():
-		got, ok := msg.(protocol.MsgLayoutSnapshot)
-		if !ok || got.FocusPaneID != 42 {
-			t.Fatalf("got client msg %+v, want MsgLayoutSnapshot {FocusPaneID: 42}", msg)
+		_, ok := msg.(protocol.MsgLayoutSnapshot)
+		if !ok {
+			t.Fatalf("client received %T, want MsgLayoutSnapshot", msg)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for server message on client")

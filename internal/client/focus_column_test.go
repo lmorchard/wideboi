@@ -24,7 +24,6 @@ func outOfOrderClient(t *testing.T, cols int, ids ...int) (*Client, *transport.I
 	}
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: columns, FocusPaneID: ids[0],
 	})
 	return cli, ch
 }

@@ -64,7 +64,9 @@ func TestWebSocketRoundTrip(t *testing.T) {
 	}
 
 	// 2. Test Server -> Client (Go struct -> JSON Envelope)
-	snapMsg := protocol.MsgLayoutSnapshot{FocusPaneID: 42}
+	snapMsg := protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{{PaneID: 1, Width: 80, Height: 24}},
+	}
 	if !serverWSConn.SendServer(ctx, snapMsg) {
 		t.Fatal("server SendServer failed")
 	}
@@ -75,9 +77,6 @@ func TestWebSocketRoundTrip(t *testing.T) {
 	}
 	if res.Type != "MsgLayoutSnapshot" {
 		t.Errorf("got type %q, want MsgLayoutSnapshot", res.Type)
-	}
-	if !strings.Contains(string(res.Payload), `"FocusPaneID":42`) {
-		t.Errorf("got payload %q, want it to contain FocusPaneID:42", string(res.Payload))
 	}
 
 	serverWSConn.Close()

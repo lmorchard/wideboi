@@ -27,6 +27,33 @@ const (
 	VerbFocusLast
 )
 
+// PaneStatus represents the current state of a pane's process.
+type PaneStatus int
+
+const (
+	StatusIdle PaneStatus = iota
+	StatusWorking
+	StatusNeedsInput
+	StatusDone
+	StatusFailed
+)
+
+// Glyph returns a single-character representation of the status for display.
+func (s PaneStatus) Glyph() string {
+	switch s {
+	case StatusWorking:
+		return "»"
+	case StatusNeedsInput:
+		return "!"
+	case StatusDone:
+		return "✓"
+	case StatusFailed:
+		return "✗"
+	default:
+		return " "
+	}
+}
+
 // ColumnData describes a column's logical width and height.
 type ColumnData struct {
 	PaneID int
@@ -100,17 +127,11 @@ type MsgAttach struct {
 
 // MsgVerb is sent by the client to request a layout navigation or action.
 type MsgVerb struct {
-	Verb VerbType
-}
-
-// MsgFocusPane asks the server to focus a specific pane. A mouse click
-// names its target, unlike the relative focus verbs, so it cannot ride
-// on MsgVerb without giving every other verb a field it ignores.
-type MsgFocusPane struct {
+	Verb   VerbType
 	PaneID int
 }
 
-// MouseKind says which of uv's mouse event types a MsgMouse carries.
+// MsgInput carries decoded key events or pasted text destined for a
 type MouseKind int
 
 const (
@@ -196,8 +217,7 @@ func (m LayoutMode) String() string {
 // MsgLayoutSnapshot is sent by the server to update the client on columns, focus, and statuses. Placements and layout mode are the client's own (#47, #92).
 type MsgLayoutSnapshot struct {
 	Columns      []ColumnData
-	FocusPaneID  int
-	PaneStatuses map[int]string
+	PaneStatuses map[int]PaneStatus
 	// PaneTitles is each pane's terminal title, for chrome that wants
 	// to say what a pane is doing rather than show a sliver of it.
 	PaneTitles map[int]string

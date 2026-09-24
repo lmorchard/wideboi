@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
-	"github.com/lmorchard/wideboi/internal/server/term"
+	
 )
 
 func threeIdlePanes(t *testing.T) (*Server, []int) {
 	t.Helper()
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{
-		1: term.StatusIdle, 2: term.StatusIdle, 3: term.StatusIdle,
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{
+		1: protocol.StatusIdle, 2: protocol.StatusIdle, 3: protocol.StatusIdle,
 	})
 	// serverWithStatuses adds columns in map order, so read it back.
 	return s, s.strip.PaneIDs()
@@ -24,7 +24,7 @@ func TestMoveVerbsReorderWithoutResizing(t *testing.T) {
 	s, order := threeIdlePanes(t)
 	s.strip.FocusPaneID(order[2])
 
-	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbMoveLeft})
+	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbMoveLeft, PaneID: order[2]})
 
 	want := []int{order[0], order[2], order[1]}
 	if got := s.strip.PaneIDs(); !slices.Equal(got, want) {
@@ -39,7 +39,7 @@ func TestMoveVerbsReorderWithoutResizing(t *testing.T) {
 		}
 	}
 
-	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbMoveRight})
+	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbMoveRight, PaneID: order[2]})
 	if got := s.strip.PaneIDs(); !slices.Equal(got, order) {
 		t.Fatalf("after VerbMoveRight: order = %v, want %v", got, order)
 	}
@@ -47,15 +47,3 @@ func TestMoveVerbsReorderWithoutResizing(t *testing.T) {
 
 // A click away and back through the verb: the server records focus the
 // same way whatever moved it.
-func TestFocusLastVerbFlipsBack(t *testing.T) {
-	s, order := threeIdlePanes(t)
-	ctx := context.Background()
-	s.handleClientMsg(ctx, protocol.MsgFocusPane{PaneID: order[0]})
-	s.handleClientMsg(ctx, protocol.MsgFocusPane{PaneID: order[2]})
-
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbFocusLast})
-
-	if got := s.strip.FocusedPaneID(); got != order[0] {
-		t.Errorf("focus after VerbFocusLast = %d, want %d", got, order[0])
-	}
-}

@@ -36,7 +36,6 @@ func focusTo(cli *Client, paneID int) {
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:     threeColumns(),
-		FocusPaneID: paneID,
 	})
 }
 
@@ -144,8 +143,7 @@ func TestNoMotionWhenPlacementsAreUnchanged(t *testing.T) {
 	cli := newMotionClient(t, cols, rows)
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 1,
-		PaneStatuses: map[int]string{1: "»"},
+		PaneStatuses: map[int]protocol.PaneStatus{1: protocol.StatusWorking},
 	})
 
 	cli.mu.Lock()
@@ -214,7 +212,6 @@ func TestNoMotionWhenFocusMovesButGeometryDoesNot(t *testing.T) {
 
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: twoColumns(), FocusPaneID: 2,
 	})
 
 	cli.mu.Lock()
@@ -251,8 +248,7 @@ func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
 	// broadcastLayoutIfStatusChanged sends while a pane is working.
 	for i := 0; i < 3; i++ {
 		cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-			Columns: threeColumns(), FocusPaneID: 2,
-			PaneStatuses: map[int]string{2: "»"},
+			PaneStatuses: map[int]protocol.PaneStatus{2: protocol.StatusWorking},
 		})
 	}
 

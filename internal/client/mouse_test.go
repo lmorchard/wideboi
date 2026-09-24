@@ -23,7 +23,6 @@ func newMouseClient(t *testing.T) (*Client, *transport.InProcChannel) {
 			{PaneID: 1, Width: 40, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: 1,
 	})
 	return cli, ch
 }
@@ -54,7 +53,7 @@ func click(cli *Client, x, y int) {
 func focusRequests(msgs []transport.ClientMessage) []int {
 	var ids []int
 	for _, m := range msgs {
-		if f, ok := m.(protocol.MsgFocusPane); ok {
+		if f, ok := m.(protocol.MsgVerb); ok {
 			ids = append(ids, f.PaneID)
 		}
 	}
@@ -62,7 +61,7 @@ func focusRequests(msgs []transport.ClientMessage) []int {
 }
 
 func TestClickFocusesPaneUnderPointer(t *testing.T) {
-	cli, ch := newMouseClient(t)
+	cli, _ := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 	if p2.Dst.Empty() {
 		t.Fatal("pane 2 has no placement; fixture is wrong")
@@ -70,32 +69,32 @@ func TestClickFocusesPaneUnderPointer(t *testing.T) {
 
 	click(cli, p2.Dst.Min.X+2, p2.Dst.Min.Y+2)
 
-	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
-		t.Errorf("focus requests = %v, want [2]", got)
+	if got := cli.FocusedPaneID(); got != 2 {
+		t.Errorf("focus requests = %d, want [2]", got)
 	}
 }
 
 // The header row is chrome drawn above the pane, not inside its Dst,
 // and it is the most obvious thing to click.
 func TestClickOnHeaderRowFocuses(t *testing.T) {
-	cli, ch := newMouseClient(t)
+	cli, _ := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 
 	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
 
-	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
-		t.Errorf("focus requests = %v, want [2]", got)
+	if got := cli.FocusedPaneID(); got != 2 {
+		t.Errorf("focus requests = %d, want [2]", got)
 	}
 }
 
 func TestClickOnFocusedPaneSendsNothing(t *testing.T) {
-	cli, ch := newMouseClient(t)
+	cli, _ := newMouseClient(t)
 	p1 := placementFor(cli, 1)
 
 	click(cli, p1.Dst.Min.X+2, p1.Dst.Min.Y+2)
 
-	if got := focusRequests(sent(ch)); len(got) != 0 {
-		t.Errorf("focus requests = %v, want none", got)
+	if got := cli.FocusedPaneID(); got != 1 {
+		t.Errorf("focus requests = %d, want none", got)
 	}
 }
 
@@ -106,7 +105,6 @@ func TestClickHitsTopmostCard(t *testing.T) {
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2,
 	})
 	p1, p2 := placementFor(cli, 1), placementFor(cli, 2)
 	overlap := p1.Dst.Intersect(p2.Dst)
@@ -118,12 +116,12 @@ func TestClickHitsTopmostCard(t *testing.T) {
 	}
 
 	click(cli, overlap.Min.X, overlap.Min.Y+1)
-	if got := focusRequests(sent(ch)); len(got) != 0 {
+	if got := cli.FocusedPaneID(); got != 1 {
 		t.Errorf("click on overlap sent focus %v; pane 2 is on top and already focused", got)
 	}
 
 	click(cli, p1.Dst.Min.X, p1.Dst.Min.Y+1)
-	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 1 {
+	if got := cli.FocusedPaneID(); got != 1 {
 		t.Errorf("click on pane 1's visible edge sent %v, want [1]", got)
 	}
 }
@@ -180,8 +178,8 @@ func TestWheelScrollsPaneUnderPointer(t *testing.T) {
 	if len(got) != 1 || got[0] != (protocol.MsgScroll{PaneID: 2, Delta: wheelStep}) {
 		t.Errorf("scrolls = %v, want [{2 %d}]", got, wheelStep)
 	}
-	if f := focusRequests(msgs); len(f) != 0 {
-		t.Errorf("wheel sent focus requests %v, want none", f)
+	if got := cli.FocusedPaneID(); got != 1 {
+		t.Errorf("wheel sent focus requests %d, want none", got)
 	}
 }
 
@@ -408,7 +406,6 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 			{PaneID: 1, Width: 40, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: 1,
 	})
 	cli.mu.Lock()
 	survived := cli.sel != nil
@@ -424,7 +421,6 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 			{PaneID: 1, Width: 60, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: 1,
 	})
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
@@ -445,7 +441,6 @@ func newTrackingClient(t *testing.T, focus int) (*Client, *transport.InProcChann
 			{PaneID: 1, Width: 40, Height: 22},
 			{PaneID: 2, Width: 40, Height: 22},
 		},
-		FocusPaneID: focus,
 	})
 	upd := paneLines(2, 40, 22, "TRACKING CHILD")
 	upd.MouseTracking = true
@@ -492,8 +487,8 @@ func TestPressOnUnfocusedTrackingPaneOnlyFocuses(t *testing.T) {
 	copied := cli.HandleMouse(context.Background(), release(d.Min.X+3, d.Min.Y+2))
 
 	msgs := sent(ch)
-	if f := focusRequests(msgs); len(f) != 1 || f[0] != 2 {
-		t.Errorf("focus requests = %v, want [2]", f)
+	if got := cli.FocusedPaneID(); got != 2 {
+		t.Errorf("focus requests = %d, want [2]", got)
 	}
 	if m := mice(msgs); len(m) != 0 {
 		t.Errorf("forwarded %+v to a pane that was not focused", m)
@@ -526,8 +521,8 @@ func TestForwardedDragFollowsGrabOutsidePane(t *testing.T) {
 	if got[2].Kind != protocol.MouseRelease || got[2].X != 0 {
 		t.Errorf("release = %+v, want MouseRelease clamped to X=0", got[2])
 	}
-	if f := focusRequests(msgs); len(f) != 0 {
-		t.Errorf("drag into pane 1 sent focus %v", f)
+	if got := cli.FocusedPaneID(); got != 1 {
+		t.Errorf("drag into pane 1 sent focus %v", got)
 	}
 	if copied != "" {
 		t.Errorf("a forwarded drag copied %q; the child owns this pane's mouse", copied)
@@ -585,7 +580,6 @@ func TestCardSelectionStopsAtTheCardAbove(t *testing.T) {
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2,
 	})
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER-CARD-TEXT-THAT-RUNS-UNDER-THE-NEXT", "LOWER-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(2, 60, 10, "TOP-CARD", "TOP-ROW-TWO"))
@@ -614,7 +608,6 @@ func TestCardSelectionCopiesNoBorder(t *testing.T) {
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2,
 	})
 	cli.HandleServerMsg(paneLines(3, 60, 10, "RIGHT-CARD"))
 	cli.Draw(newFakeHostScreen(100, 24))
@@ -633,14 +626,13 @@ func TestClickOnCardBorderFocusesThatCard(t *testing.T) {
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 1,
 	})
 	cli.Draw(newFakeHostScreen(100, 24))
 	sent(ch)
 	d2 := placementFor(cli, 2).Dst
 
 	click(cli, d2.Min.X-1, d2.Min.Y+2)
-	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
+	if got := cli.FocusedPaneID(); got != 2 {
 		t.Errorf("click on pane 2's border requested focus %v, want [2]", got)
 	}
 }
@@ -668,14 +660,18 @@ func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-	snap := protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2}
+	
+	snap := protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{{PaneID: 1, Width: 60, Height: 10}},
+	}
+	
 	cli.HandleServerMsg(snap)
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER"))
 	cli.Draw(newFakeHostScreen(100, 24))
 	d1 := placementFor(cli, 1).Dst
 	drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d1.Min.X+4, d1.Min.Y))
 
-	snap.PaneStatuses = map[int]string{3: "»"}
+	snap.PaneStatuses = map[int]protocol.PaneStatus{3: protocol.StatusWorking}
 	cli.HandleServerMsg(snap)
 
 	cli.mu.Lock()
@@ -691,7 +687,7 @@ func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 // clicks therefore focus on release, and only if the pointer did not
 // move.
 func TestDragOnUnfocusedPaneSelectsWithoutFocusing(t *testing.T) {
-	cli, ch, _ := newSelectClient(t)
+	cli, _, _ := newSelectClient(t)
 	d := placementFor(cli, 2).Dst
 
 	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+8, d.Min.Y))
@@ -699,20 +695,20 @@ func TestDragOnUnfocusedPaneSelectsWithoutFocusing(t *testing.T) {
 	if got != "NEIGHBOUR" {
 		t.Errorf("copied %q, want %q", got, "NEIGHBOUR")
 	}
-	if f := focusRequests(sent(ch)); len(f) != 0 {
-		t.Errorf("a drag on an unfocused pane sent focus %v", f)
+	if got := cli.FocusedPaneID(); got != 1 {
+		t.Errorf("a drag on an unfocused pane sent focus %v", got)
 	}
 }
 
 // The header is not content and cannot start a selection, so there is
 // no reason to wait for the release there.
 func TestHeaderPressFocusesImmediately(t *testing.T) {
-	cli, ch := newMouseClient(t)
+	cli, _ := newMouseClient(t)
 	p2 := placementFor(cli, 2)
 
 	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
 
-	if got := focusRequests(sent(ch)); len(got) != 1 || got[0] != 2 {
+	if got := cli.FocusedPaneID(); got != 2 {
 		t.Errorf("focus requests after header press = %v, want [2]", got)
 	}
 }

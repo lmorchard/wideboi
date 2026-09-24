@@ -13,7 +13,6 @@ import (
 
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
-	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -34,7 +33,7 @@ type Server struct {
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
 	// tell when either has changed.
-	lastStatuses map[int]string
+	lastStatuses map[int]protocol.PaneStatus
 	lastTitles   map[int]string
 
 	// paneGens records, per client, the grid generation each pane was
@@ -253,9 +252,8 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 			s.cols, s.rows = m.Cols, m.Rows
 		}
 		if len(s.panes) == 0 {
-			_, _ = s.spawnPaneLocked()
-			_, _ = s.spawnPaneLocked()
-			s.strip.FocusLeft()
+			_, _ = s.spawnPaneLocked(0)
+			_, _ = s.spawnPaneLocked(0)
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
@@ -269,40 +267,29 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 
 	case protocol.MsgVerb:
 		switch m.Verb {
-		case protocol.VerbFocusLeft:
-			s.strip.FocusLeft()
-		case protocol.VerbFocusRight:
-			s.strip.FocusRight()
 		case protocol.VerbNewColumn:
-			_, _ = s.spawnPaneLocked()
+			_, _ = s.spawnPaneLocked(m.PaneID)
 			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
-			s.strip.CycleWidth()
+			s.strip.CycleWidth(m.PaneID)
 			s.resizePanesLocked()
 		case protocol.VerbGrowWidth:
-			s.strip.GrowWidth(10)
+			s.strip.GrowWidth(m.PaneID, 10)
 			s.resizePanesLocked()
 		case protocol.VerbShrinkWidth:
-			s.strip.ShrinkWidth(10)
+			s.strip.ShrinkWidth(m.PaneID, 10)
 			s.resizePanesLocked()
 		case protocol.VerbMoveLeft:
-			s.strip.MoveLeft()
+			s.strip.MoveLeft(m.PaneID)
 		case protocol.VerbMoveRight:
 			// Neither move calls resizePanesLocked, for the same
 			// reason a layout toggle never did: order is presentation,
 			// and a column's width goes wherever the column goes.
-			s.strip.MoveRight()
-		case protocol.VerbFocusLast:
-			s.strip.FocusLast()
+			s.strip.MoveRight(m.PaneID)
 		case protocol.VerbKillPane:
-			focusedID := s.strip.FocusedPaneID()
-			if focusedID > 0 {
-				s.removePaneLocked(focusedID)
+			if m.PaneID > 0 {
+				s.removePaneLocked(m.PaneID)
 				s.resizePanesLocked()
-			}
-		case protocol.VerbSmartJump:
-			if id := s.smartJumpTargetLocked(); id > 0 {
-				s.strip.FocusPaneID(id)
 			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client
@@ -312,14 +299,6 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 		// nothing, and a snapshot costs a forced resend of every pane to
 		// every client, so it must not broadcast.
 		if m.Verb != protocol.VerbToggleCards {
-			needBroadcast = true
-		}
-
-	case protocol.MsgFocusPane:
-		// Guarded: the pane may have closed between the client's draw
-		// and the click.
-		if _, ok := s.panes[m.PaneID]; ok {
-			s.strip.FocusPaneID(m.PaneID)
 			needBroadcast = true
 		}
 
@@ -354,7 +333,7 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 func (s *Server) SpawnPane() (int, error) {
 	s.mu.Lock()
 
-	p, err := s.spawnPaneLocked()
+	p, err := s.spawnPaneLocked(0)
 	if err != nil {
 		s.mu.Unlock()
 		return 0, err
@@ -365,7 +344,7 @@ func (s *Server) SpawnPane() (int, error) {
 	return p.ID(), nil
 }
 
-func (s *Server) spawnPaneLocked() (*Pane, error) {
+func (s *Server) spawnPaneLocked(afterPaneID int) (*Pane, error) {
 	// Close reaps the panes it snapshotted; one spawned after that --
 	// an attach or a new column during the reap -- would be nobody's
 	// to reap.
@@ -387,7 +366,7 @@ func (s *Server) spawnPaneLocked() (*Pane, error) {
 	p.closeGrace = s.closeGrace
 
 	s.panes[id] = p
-	s.strip.AddColumn(id, paneCols, paneRows)
+	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
 
 	p.Start(func() {
 		// Called when PTY reader hits EOF
@@ -532,40 +511,13 @@ func (s *Server) resizePanesLocked() {
 // a prompt. Working and Idle are never targets: a busy pane does not
 // want you and an empty one has nothing to say. Ties break on the
 // lowest pane ID so repeated presses are deterministic.
-func (s *Server) smartJumpTargetLocked() int {
-	rank := func(st term.PaneStatus) int {
-		switch st {
-		case term.StatusFailed:
-			return 3
-		case term.StatusDone:
-			return 2
-		case term.StatusNeedsInput:
-			return 1
-		default:
-			return 0
-		}
-	}
-
-	bestID, bestRank := 0, 0
-	for id, p := range s.panes {
-		r := rank(p.Status())
-		switch {
-		case r == 0:
-		case r > bestRank:
-			bestID, bestRank = id, r
-		case r == bestRank && id < bestID:
-			bestID = id
-		}
-	}
-	return bestID
-}
 
 // statusGlyphsLocked renders the current per-pane status glyphs.
 // s.mu must be held.
-func (s *Server) statusGlyphsLocked() map[int]string {
-	out := make(map[int]string, len(s.panes))
+func (s *Server) statusGlyphsLocked() map[int]protocol.PaneStatus {
+	out := make(map[int]protocol.PaneStatus, len(s.panes))
 	for id, p := range s.panes {
-		out[id] = p.Status().Glyph()
+		out[id] = p.Status()
 	}
 	return out
 }
@@ -578,6 +530,18 @@ func (s *Server) paneTitlesLocked() map[int]string {
 		out[id] = p.Title()
 	}
 	return out
+}
+
+func sameStatusMap(a, b map[int]protocol.PaneStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // sameStringMap reports whether two pane-keyed string maps agree.
@@ -606,7 +570,7 @@ func sameStringMap(a, b map[int]string) bool {
 // unless the glyph set actually moved.
 func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	s.mu.Lock()
-	changed := !sameStringMap(s.statusGlyphsLocked(), s.lastStatuses) ||
+	changed := !sameStatusMap(s.statusGlyphsLocked(), s.lastStatuses) ||
 		!sameStringMap(s.paneTitlesLocked(), s.lastTitles)
 	s.mu.Unlock()
 
@@ -632,7 +596,6 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	titles := s.paneTitlesLocked()
 	snapshot := protocol.MsgLayoutSnapshot{
 		Columns:      layout.ToColumnData(s.strip.Columns()),
-		FocusPaneID:  s.strip.FocusedPaneID(),
 		PaneStatuses: statuses,
 		PaneTitles:   titles,
 	}
