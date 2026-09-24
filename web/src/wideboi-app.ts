@@ -455,10 +455,16 @@ export class WideboiApp extends LitElement {
         case 'layoutSnapshot': {
           const snapshot = message.msg.value;
           const previous = this.panePositions();
+          const previousFocus = this.focusedPaneId;
           this.focusedPaneId = reconcileFocus(this.columns, snapshot.columns, this.focusedPaneId);
           this.columns = snapshot.columns;
           this.activePanes = snapshot.columns.map(c => c.paneId);
-          if (this.stackFocusId !== null && !this.activePanes.includes(this.stackFocusId)) this.stackFocusId = this.focusedPaneId;
+          if (this.focusedPaneId !== previousFocus) {
+            this.stackFocusId = this.focusedPaneId;
+            this.focusTransition++;
+          } else if (this.stackFocusId !== null && !this.activePanes.includes(this.stackFocusId)) {
+            this.stackFocusId = this.focusedPaneId;
+          }
           if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
             this.focusPane(this.pendingFocusId);
             this.pendingFocusId = 0;
@@ -498,6 +504,7 @@ export class WideboiApp extends LitElement {
           break;
         case 'paneClosed': {
           const closedId = message.msg.value.paneId;
+          const previous = this.panePositions();
           this.panes.close(closedId);
           const previousColumns = this.columns;
           const nextColumns = previousColumns.filter(column => column.paneId !== closedId);
@@ -506,9 +513,10 @@ export class WideboiApp extends LitElement {
           this.columns = nextColumns;
           this.activePanes = nextColumns.map(column => column.paneId);
           this.focusedPaneId = nextFocus;
+          let transition = this.focusTransition;
           if (this.stackFocusId === closedId || focusChanged) {
-            this.stackFocusId = nextFocus;
-            this.focusTransition++;
+            this.stackFocusId = this.layoutMode === 'cards' && focusChanged ? null : nextFocus;
+            transition = ++this.focusTransition;
           }
           if (this.previousFocusId === closedId) this.previousFocusId = 0;
           if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
@@ -520,10 +528,15 @@ export class WideboiApp extends LitElement {
             this.paneMetadata = next;
           }
           void this.updateComplete.then(() => {
+            this.animateReorder(previous);
             if (focusChanged) {
               this.focusedPane()?.focusInput();
-              this.revealFocus();
+              if (this.layoutMode === 'cards') this.finishFocusStack(nextFocus, transition);
             }
+            const animations = Array.from(this.movement.values());
+            void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+              if (this.focusedPaneId === nextFocus) this.revealFocus();
+            });
             this.sendResizeIfChanged();
           });
           break;

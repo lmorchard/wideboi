@@ -182,11 +182,11 @@ test('?stats=1 shows the stats overlay and reports periodically', async ({ page 
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
-      constructor(url) {
+      constructor(url, protocols) {
         this.protocol = 'wideboi.v5';
         this.readyState = 0;
         this.sent = [];
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -228,10 +228,10 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
-      constructor(url) {
+      constructor(url, protocols) {
         this.protocol = 'wideboi.v5';
         this.readyState = 0;
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
       }
       send() {}
       close() { this.readyState = 3; this.onclose?.(); }

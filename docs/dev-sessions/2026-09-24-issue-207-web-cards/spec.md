@@ -35,3 +35,8 @@ deliberately changed to an incorrect value, then restored.
 The browser WebSocket mocks select the app connection by its offered protocol;
 matching only `/ws` also caught and then lost Vite's development socket on
 Linux CI.
+
+Copilot review prompted a check of the remaining browser mocks: all now filter
+the version subprotocol. The browser test also checks that each card label is
+anchored to its positioned pane, a close animates surviving cards, and a
+snapshot that removes focus restores a settled stacking level.

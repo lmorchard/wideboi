@@ -45,6 +45,13 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await expect(panes).toHaveCount(7);
   await expect(panes.first()).toHaveAttribute('card-mode', '');
   await expect(panes.nth(1)).toHaveCSS('box-shadow', /rgb\(184, 184, 184\)/);
+  const labelPosition = await panes.nth(1).evaluate(pane => ({
+    host: pane.getBoundingClientRect().left,
+    label: pane.shadowRoot.querySelector('.card-label').getBoundingClientRect().left,
+    position: getComputedStyle(pane).position,
+  }));
+  expect(labelPosition.position).toBe('absolute');
+  expect(labelPosition.label).toBeCloseTo(labelPosition.host, 0);
   expect(await page.evaluate(() => window.paneOne === document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane'))).toBe(true);
   await expect(page.locator('.card-count.right')).toContainText('+');
   await settleLayout();
@@ -132,4 +139,44 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
     .toEqual([7, 6, 5, 4, 3, 2, 1]);
   expect(await page.evaluate(() => window.cardAnimations)).toBe(0);
   expect(await page.evaluate(() => window.paneOne === [...document.querySelector('wideboi-app').shadowRoot.querySelectorAll('wideboi-pane')].at(-1))).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.evaluate(async () => {
+    window.closeAnimations = 0;
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (...args) {
+      if (this.matches?.('wideboi-pane')) window.closeAnimations++;
+      return animate.apply(this, args);
+    };
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({ case: 'paneClosed', value: { paneId: 4 } }));
+  });
+  await expect(panes).toHaveCount(6);
+  await expect.poll(() => page.evaluate(() => window.closeAnimations)).toBeGreaterThan(0);
+
+  await expect.poll(() => panes.evaluateAll(elements => elements.some(element => element.getAnimations().length))).toBe(false);
+  await page.evaluate(() => {
+    window.pausedMoves = [];
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (...args) {
+      const animation = animate.apply(this, args);
+      if (this.matches?.('wideboi-pane')) {
+        animation.pause();
+        window.pausedMoves.push(animation);
+      }
+      return animation;
+    };
+  });
+  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('6');
+  await expect.poll(() => page.evaluate(() => window.pausedMoves.length)).toBeGreaterThan(0);
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [7, 5, 3, 2, 1].map(paneId => ({ paneId, width: 40, height: 20 })),
+    } }));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    return app.stackFocusId === app.focusedPaneId && app.stackFocusId !== null;
+  })).toBe(true);
 });
