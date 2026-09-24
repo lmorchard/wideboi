@@ -24,6 +24,7 @@ var wireTypes = []any{
 	MsgPanePatch{},
 	MsgPaneResync{},
 	MsgPaneClosed{},
+	MsgPaneMetadata{},
 }
 
 // TestWireTypesCarryNoInterfaces is the structural guard for the defect

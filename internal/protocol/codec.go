@@ -139,6 +139,18 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_PanePatch{PanePatch: patch}
 	case MsgPaneClosed:
 		env.Msg = &wirepb.ServerMessage_PaneClosed{PaneClosed: &wirepb.MsgPaneClosed{PaneId: int32(m.PaneID), ExitCode: int32(m.ExitCode)}}
+	case MsgPaneMetadata:
+		meta := &wirepb.MsgPaneMetadata{
+			PaneId: int32(m.PaneID),
+			Cwd:    validUTF8(m.CWD),
+		}
+		if m.UserVars != nil {
+			meta.UserVars = make(map[string]string, len(m.UserVars))
+			for k, v := range m.UserVars {
+				meta.UserVars[validUTF8(k)] = validUTF8(v)
+			}
+		}
+		env.Msg = &wirepb.ServerMessage_PaneMetadata{PaneMetadata: meta}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -214,6 +226,19 @@ func UnmarshalServer(data []byte) (any, error) {
 		return patch, nil
 	case *wirepb.ServerMessage_PaneClosed:
 		return MsgPaneClosed{PaneID: int(m.PaneClosed.PaneId), ExitCode: int(m.PaneClosed.ExitCode)}, nil
+	case *wirepb.ServerMessage_PaneMetadata:
+		src := m.PaneMetadata
+		meta := MsgPaneMetadata{
+			PaneID: int(src.PaneId),
+			CWD:    src.Cwd,
+		}
+		if src.UserVars != nil {
+			meta.UserVars = make(map[string]string, len(src.UserVars))
+			for k, v := range src.UserVars {
+				meta.UserVars[k] = v
+			}
+		}
+		return meta, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}

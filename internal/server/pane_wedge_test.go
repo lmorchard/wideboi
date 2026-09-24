@@ -66,6 +66,8 @@ func (g *blockingGrid) CursorPosition() image.Point            { return image.Po
 func (g *blockingGrid) CursorVisible() bool                    { return false }
 func (g *blockingGrid) Status() protocol.PaneStatus            { return protocol.StatusIdle }
 func (g *blockingGrid) Title() string                          { return "" }
+func (g *blockingGrid) CWD() string                            { return "" }
+func (g *blockingGrid) UserVars() map[string]string            { return nil }
 func (g *blockingGrid) ScrollbackLen() int                     { return 0 }
 func (g *blockingGrid) ScrollOffset() int                      { return 0 }
 func (g *blockingGrid) SetScrollOffset(int)                    {}

@@ -16,7 +16,7 @@ it('keeps the credential out of the browser WebSocket URL', () => {
 
   expect(opened).toEqual([{
     url: 'ws://localhost:8080/ws',
-    protocols: ['wideboi.v3', 'wideboi-token.c2VjcmV0MTIz'],
+    protocols: ['wideboi.v4', 'wideboi-token.c2VjcmV0MTIz'],
   }]);
   expect(JSON.stringify(opened[0].url)).not.toContain('secret123');
 });
@@ -28,7 +28,7 @@ it('always offers the wire version, even without a token', () => {
   }
   vi.stubGlobal('WebSocket', FakeWebSocket);
   new WideboiClient('ws://localhost:8080/ws').connect();
-  expect(offered).toEqual(['wideboi.v3']);
+  expect(offered).toEqual(['wideboi.v4']);
 });
 
 it('refuses an opened connection that selected another protocol', () => {

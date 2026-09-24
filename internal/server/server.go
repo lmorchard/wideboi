@@ -42,6 +42,8 @@ type Server struct {
 	// tell when either has changed.
 	lastStatuses map[int]protocol.PaneStatus
 	lastTitles   map[int]string
+	lastCWD      map[int]string
+	lastUserVars map[int]map[string]string
 	// Creation notices are retried until accepted, followed by a snapshot.
 	pendingPaneCreated      map[transport.Transport][]int
 	pendingCreationSnapshot map[transport.Transport]bool
@@ -90,6 +92,9 @@ type Server struct {
 	// client stale with nothing left to trigger a resend. Taken before
 	// s.mu, never while holding it.
 	paneSendMu sync.Mutex
+	// metaSendMu serializes broadcastMetadataIfChanged and sendPaneMetadataTo
+	// so concurrent status queries and ticker broadcasts deliver in order.
+	metaSendMu sync.Mutex
 
 	// owner is the connection of the client that launched this session,
 	// or nil when the session is ownerless: started as `wideboi
@@ -340,6 +345,7 @@ func (s *Server) Run(ctx context.Context) error {
 		case <-s.stopCh:
 			return nil
 		case <-frameTicker.C:
+			s.broadcastMetadataIfChanged(ctx)
 			// broadcastLayout already ends with a pane-update
 			// broadcast, so only send one separately when it did
 			// not fire.
@@ -354,6 +360,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	s.mu.Lock()
 	needBroadcast := false
 	needPaneBroadcast := false
+	sendMetadata := false
 	resyncPaneID := 0
 	createdPaneID := 0
 
@@ -362,6 +369,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		resyncPaneID = m.PaneID
 	case protocol.MsgStatusRequest:
 		needBroadcast = true
+		sendMetadata = true
 
 	case protocol.MsgAttach:
 		if m.Cols > 0 && m.Rows > 0 {
@@ -396,6 +404,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
+		sendMetadata = true
 
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
@@ -538,6 +547,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	if needPaneBroadcast {
 		go s.broadcastPaneUpdates(ctx, false)
 	}
+	if sendMetadata && tp != nil {
+		s.sendPaneMetadataTo(ctx, tp)
+	}
 }
 
 // SpawnPane adds a new pane and column to the layout strip.
@@ -609,6 +621,8 @@ func (s *Server) onPaneExit(id int) {
 	s.strip.KillPane(id)
 	p := s.panes[id]
 	delete(s.panes, id)
+	delete(s.lastCWD, id)
+	delete(s.lastUserVars, id)
 	s.resizePanesLocked()
 	s.mu.Unlock()
 
@@ -623,6 +637,8 @@ func (s *Server) removePaneLocked(id int) {
 	}
 	s.strip.KillPane(id)
 	delete(s.panes, id)
+	delete(s.lastCWD, id)
+	delete(s.lastUserVars, id)
 	go p.Close()
 }
 
@@ -802,6 +818,103 @@ func sameStringMap(a, b map[int]string) bool {
 		}
 	}
 	return true
+}
+
+func sameUserVars(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) broadcastMetadataIfChanged(ctx context.Context) bool {
+	s.metaSendMu.Lock()
+	defer s.metaSendMu.Unlock()
+
+	s.mu.Lock()
+	type metaUpdate struct {
+		id   int
+		cwd  string
+		vars map[string]string
+	}
+	var updates []metaUpdate
+	for id, p := range s.panes {
+		cwd := p.CWD()
+		vars := p.UserVars()
+		lastCwd, okCwd := s.lastCWD[id]
+		lastVars, okVars := s.lastUserVars[id]
+		if !okCwd || cwd != lastCwd || !okVars || !sameUserVars(vars, lastVars) {
+			updates = append(updates, metaUpdate{id: id, cwd: cwd, vars: vars})
+		}
+	}
+	for id := range s.lastCWD {
+		if _, ok := s.panes[id]; !ok {
+			delete(s.lastCWD, id)
+		}
+	}
+	for id := range s.lastUserVars {
+		if _, ok := s.panes[id]; !ok {
+			delete(s.lastUserVars, id)
+		}
+	}
+	if len(updates) == 0 {
+		s.mu.Unlock()
+		return false
+	}
+	tps := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+
+	for _, u := range updates {
+		msg := protocol.MsgPaneMetadata{
+			PaneID:   u.id,
+			CWD:      u.cwd,
+			UserVars: u.vars,
+		}
+		delivered := true
+		for _, tp := range tps {
+			if !tp.SendServer(ctx, msg) {
+				delivered = false
+			}
+		}
+		if delivered {
+			s.mu.Lock()
+			if s.lastCWD == nil {
+				s.lastCWD = make(map[int]string)
+			}
+			if s.lastUserVars == nil {
+				s.lastUserVars = make(map[int]map[string]string)
+			}
+			s.lastCWD[u.id] = u.cwd
+			s.lastUserVars[u.id] = u.vars
+			s.mu.Unlock()
+		}
+	}
+	return true
+}
+
+func (s *Server) sendPaneMetadataTo(ctx context.Context, tp transport.Transport) {
+	s.metaSendMu.Lock()
+	defer s.metaSendMu.Unlock()
+
+	s.mu.Lock()
+	var msgs []protocol.MsgPaneMetadata
+	for id, p := range s.panes {
+		msgs = append(msgs, protocol.MsgPaneMetadata{
+			PaneID:   id,
+			CWD:      p.CWD(),
+			UserVars: p.UserVars(),
+		})
+	}
+	s.mu.Unlock()
+
+	for _, msg := range msgs {
+		tp.SendServer(ctx, msg)
+	}
 }
 
 // broadcastLayoutIfStatusChanged pushes a layout snapshot when any
