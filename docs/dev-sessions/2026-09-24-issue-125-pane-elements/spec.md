@@ -26,8 +26,10 @@ input routing, and the existing PTY sizing protocol intact.
 The browser test first failed because the old renderer had no pane elements.
 It now checks fixed widths, focus visibility, independent canvases, local
 mouse coordinates, click-to-focus, resize stability, and element identity
-after reorder. Unit tests cover patch reconstruction, selection, idle frame
-scheduling, and redundant canvas resize.
+after reorder. Follow-up review tests also cover actual canvas focus after
+pointer selection, visible row count against the reported grid, and focus and
+input routing immediately after a pane closes. Unit tests cover patch
+reconstruction, selection, idle frame scheduling, and redundant canvas resize.
 
 ## Later work
 

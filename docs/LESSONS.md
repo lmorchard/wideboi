@@ -198,6 +198,16 @@ changes back into the observer. Send `MsgResize` only when the cell grid changes
 and have the server broadcast only when the shared minimum dimensions change:
 each layout broadcast forces a full pane resend to every client.
 
+The web client's reported grid must come from the pane strip's actual
+`clientWidth`/`clientHeight`, with two rows added for title and status. The
+outer shell can include scrollbar space, and measuring before the connected
+toolbar renders reports too many rows. Wait for Lit's connected layout before
+`MsgAttach`; observe the strip and send later resizes only for changed cells.
+When a focused pane closes, reconcile focus immediately rather than waiting
+for the next snapshot. For the pane selector, bind each option's `selected`
+property: setting the select's value before Lit removes an option can leave
+the browser displaying a different selection than client focus state.
+
 ## Change-only pane updates require complete bookkeeping
 
 Before #85, every 33 ms frame resent every pane and repaired missed updates.

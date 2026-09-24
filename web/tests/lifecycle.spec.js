@@ -99,6 +99,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
+  await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length)).toBeGreaterThan(0);
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
@@ -125,6 +126,10 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     const { clientMessages } = await import('/tests/browser-fixture.ts');
     return clientMessages(window.testSockets[0].sent).map(msg => msg);
   });
+  const attachedRows = (await messages()).find(msg => msg.case === 'attach').value.rows;
+  const canvasHeight = await page.locator('wideboi-pane canvas').nth(3)
+    .evaluate(canvas => canvas.getBoundingClientRect().height);
+  expect(canvasHeight).toBeGreaterThanOrEqual((attachedRows - 2) * 16.8);
   const resizeCount = (await messages()).filter(msg => msg.case === 'resize').length;
   await page.locator('wideboi-pane canvas').nth(3).click({ position: { x: 20, y: 26 } });
   await expect.poll(async () => (await messages()).find(msg => msg.case === 'mouse')?.value)
@@ -132,6 +137,11 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(resizeCount);
   await page.locator('wideboi-pane canvas').first().click({ position: { x: 20, y: 26 } });
   await expect(page.getByRole('combobox')).toHaveValue('1');
+  expect(await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    const pane = app.shadowRoot.querySelector('wideboi-pane');
+    return app.shadowRoot.activeElement === pane && pane.shadowRoot.activeElement?.tagName === 'CANVAS';
+  })).toBe(true);
 
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
@@ -144,4 +154,20 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     .toEqual([4, 3, 2, 1]);
   expect(await page.evaluate(() => window.paneCanvas === document.querySelector('wideboi-app').shadowRoot
     .querySelectorAll('wideboi-pane')[3].shadowRoot.querySelector('canvas'))).toBe(true);
+
+  await page.getByRole('combobox').selectOption('4');
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({ case: 'paneClosed', value: { paneId: 4 } }));
+  });
+  await expect(page.getByRole('combobox')).toHaveValue('3');
+  expect(await page.evaluate(() => document.querySelector('wideboi-app').focusedPaneId)).toBe(3);
+  expect(await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    const pane = [...app.shadowRoot.querySelectorAll('wideboi-pane')].find(element => element.paneId === 3);
+    return app.shadowRoot.activeElement === pane && pane.shadowRoot.activeElement?.tagName === 'CANVAS';
+  })).toBe(true);
+  await page.keyboard.type('q');
+  await expect.poll(async () => (await messages()).some(msg =>
+    msg.case === 'input' && msg.value.paneId === 3 && msg.value.key?.text === 'q')).toBe(true);
 });

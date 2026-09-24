@@ -92,7 +92,7 @@ export class WideboiPane extends LitElement {
 
   setSelection(start: CellPoint, end: CellPoint) { this.painter?.setSelection(start, end); }
   clearSelection() { this.painter?.clearSelection(); }
-  focusInput() { this.canvas.focus(); }
+  focusInput() { this.canvas.focus({ preventScroll: true }); }
 
   render() { return html`<canvas tabindex=${this.focused ? 0 : -1}></canvas>`; }
 }

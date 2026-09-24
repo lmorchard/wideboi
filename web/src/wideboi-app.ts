@@ -137,9 +137,6 @@ export class WideboiApp extends LitElement {
     }
   `;
 
-  @query('.terminal-shell')
-  private terminalShell!: HTMLElement;
-
   @query('.pane-strip')
   private paneStrip!: HTMLElement;
 
@@ -147,8 +144,6 @@ export class WideboiApp extends LitElement {
   private panes = new PaneStore();
   private resizeObserver: ResizeObserver;
   private cellWidth = 1;
-  private viewportWidth = 0;
-  private viewportHeight = 0;
 
   @state()
   private connected = false;
@@ -189,12 +184,19 @@ export class WideboiApp extends LitElement {
     if (!this.activePanes.includes(paneID)) return;
     if (paneID !== this.focusedPaneId) this.previousFocusId = this.focusedPaneId;
     this.focusedPaneId = paneID;
-    void this.updateComplete.then(() => this.revealFocus());
+    void this.updateComplete.then(() => {
+      this.focusedPane()?.focusInput();
+      this.revealFocus();
+    });
+  }
+
+  private focusedPane(): WideboiPane | undefined {
+    return Array.from(this.paneStrip?.querySelectorAll('wideboi-pane') || [])
+      .find(element => element.paneId === this.focusedPaneId);
   }
 
   private revealFocus() {
-    const pane = Array.from(this.paneStrip?.querySelectorAll('wideboi-pane') || [])
-      .find(element => element.paneId === this.focusedPaneId);
+    const pane = this.focusedPane();
     if (!pane) return;
     pane.scrollIntoView({ block: 'nearest', inline: 'nearest',
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
@@ -224,39 +226,31 @@ export class WideboiApp extends LitElement {
 
   private getGridSize() {
     return {
-      cols: Math.floor(this.viewportWidth / this.cellWidth),
-      rows: Math.floor(this.viewportHeight / CELL_HEIGHT),
+      cols: Math.floor(this.paneStrip.clientWidth / this.cellWidth),
+      rows: Math.floor(this.paneStrip.clientHeight / CELL_HEIGHT) + 2,
     };
+  }
+
+  private sendResizeIfChanged() {
+    if (!this.client || !this.connected || !this.lastSentSize) return;
+    const size = this.getGridSize();
+    if (size.cols > 0 && size.rows > 2 &&
+        (size.cols !== this.lastSentSize.cols || size.rows !== this.lastSentSize.rows)) {
+      this.client.send({ case: 'resize', value: size });
+      this.lastSentSize = size;
+    }
   }
 
   constructor() {
     super();
 
-    this.resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        this.viewportWidth = width;
-        this.viewportHeight = height;
-        
-        if (this.client && this.connected) {
-          const size = this.getGridSize();
-          if (size.cols > 0 && size.rows > 0 &&
-              (size.cols !== this.lastSentSize?.cols || size.rows !== this.lastSentSize?.rows)) {
-            this.client.send({ case: 'resize', value: size });
-            this.lastSentSize = size;
-          }
-        }
-      }
-    });
+    this.resizeObserver = new ResizeObserver(() => this.sendResizeIfChanged());
   }
 
   firstUpdated() {
     this.listeners = new AbortController();
     this.cellWidth = measureCellWidth();
-    this.resizeObserver.observe(this.terminalShell);
-    const rect = this.terminalShell.getBoundingClientRect();
-    this.viewportWidth = rect.width;
-    this.viewportHeight = rect.height;
+    this.resizeObserver.observe(this.paneStrip);
     this.requestUpdate();
     
     this.setupKeyboard();
@@ -265,9 +259,9 @@ export class WideboiApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    if (this.terminalShell && !this.listeners) {
+    if (this.paneStrip && !this.listeners) {
       this.listeners = new AbortController();
-      this.resizeObserver.observe(this.terminalShell);
+      this.resizeObserver.observe(this.paneStrip);
       this.setupKeyboard();
       this.setupMouse();
     }
@@ -329,7 +323,9 @@ export class WideboiApp extends LitElement {
       console.log('Connected to server');
       this.connected = true;
       this.errorMsg = '';
-      this.sendAttach();
+      void this.updateComplete.then(() => {
+        if (this.client === client && this.connected) this.sendAttach();
+      });
     };
 
     client.onDisconnect = () => {
@@ -358,6 +354,7 @@ export class WideboiApp extends LitElement {
           void this.updateComplete.then(() => {
             this.animateReorder(previous);
             this.revealFocus();
+            this.sendResizeIfChanged();
           });
           break;
         }
@@ -377,8 +374,24 @@ export class WideboiApp extends LitElement {
         case 'paneClosed': {
           const closedId = message.msg.value.paneId;
           this.panes.close(closedId);
-          this.activePanes = this.activePanes.filter(id => id !== closedId);
-          this.columns = this.columns.filter(column => column.paneId !== closedId);
+          const previousColumns = this.columns;
+          const nextColumns = previousColumns.filter(column => column.paneId !== closedId);
+          const nextFocus = reconcileFocus(previousColumns, nextColumns, this.focusedPaneId);
+          const focusChanged = nextFocus !== this.focusedPaneId;
+          this.columns = nextColumns;
+          this.activePanes = nextColumns.map(column => column.paneId);
+          this.focusedPaneId = nextFocus;
+          if (this.previousFocusId === closedId) this.previousFocusId = 0;
+          if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
+          if (this.pointer?.pane.paneId === closedId) this.pointer = undefined;
+          if (this.selectedPane?.paneId === closedId) this.selectedPane = undefined;
+          void this.updateComplete.then(() => {
+            if (focusChanged) {
+              this.focusedPane()?.focusInput();
+              this.revealFocus();
+            }
+            this.sendResizeIfChanged();
+          });
           break;
         }
       }
@@ -596,10 +609,6 @@ export class WideboiApp extends LitElement {
     if (paneID > 0 && this.client && this.connected) {
       this.focusPane(paneID);
     }
-    void this.updateComplete.then(() => {
-      Array.from(this.paneStrip.querySelectorAll('wideboi-pane'))
-        .find(element => element.paneId === paneID)?.focusInput();
-    });
   }
 
   render() {
@@ -607,8 +616,10 @@ export class WideboiApp extends LitElement {
       ${this.connected ? html`
         <div class="toolbar">
           <label>Focus Pane:</label>
-          <select .value=${this.focusedPaneId.toString()} @change=${this.handlePaneSelect}>
-            ${this.activePanes.map(id => html`<option value=${id}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>`)}
+          <select @change=${this.handlePaneSelect}>
+            ${repeat(this.activePanes, id => id, id => html`
+              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
+            `)}
           </select>
           <span style="color: #666; margin-left: auto;">(Tip: Ctrl+B then left/right arrow to switch)</span>
         </div>
