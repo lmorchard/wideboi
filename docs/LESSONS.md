@@ -29,6 +29,7 @@ found that way, none of which were guessable:
 - Writing a wide glyph's placeholder cell explicitly trips `uv.Line.Set`'s partial-overwrite protection and blanks the whole glyph. Advance by each cell's own `Width`.
 - There is no public cursor setter — `setCursor` is unexported.
 - `TerminalScreen.Flush` calls `rend.MoveTo` to position the cursor, but `MoveTo` writes to `rend.buf`, which only flushes to the screen's output buffer on the *next* `TerminalScreen.Render`. A single `Render(); Flush()` therefore shows the cursor on the last cell drawn, which with busy background cards means a cursor flickering between them (#72). `cmd/wideboi/present.go` runs the pair twice, inside one mode-2026 synchronized update, so every frame ends with the cursor where it was asked to be. `SetSynchronizedUpdates` would not do: it brackets each `Flush` on its own, leaving the gap between the two open.
+- `TerminalScreen.ExitAltScreen` repeats the screen's cursor visibility on the parent screen, and `Terminal.Stop` only emits show-cursor during `Reset` if the stored cursor is already visible. A control menu left the cursor hidden on both screens after exit. Explicitly call `ShowCursor` before `ExitAltScreen` on every client teardown path, and assert the final state on the PTY wire.
 
 The `term.Grid` interface exists precisely so upstream surprises stay confined to
 one file. Keep it narrow, and fix upstream gaps behind it rather than forking.
