@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 )
 
@@ -18,18 +20,21 @@ func TestListenWebSocketAuth(t *testing.T) {
 		expectedToken   string
 		requestQuery    string
 		requestProtocol string
-		browserProtocol bool
+		omitVersion     bool
+		oldVersion      bool
 		wantSuccess     bool
 	}{
 		{name: "no token expected, no token provided", expectedToken: "", requestQuery: "", wantSuccess: true},
 		{name: "no token expected, random token provided", expectedToken: "", requestQuery: "token=xyz", wantSuccess: true},
 		{name: "token expected, matching token provided", expectedToken: "secret123", requestQuery: "token=secret123", wantSuccess: true},
-		{name: "generated token via browser protocol", expectedToken: "secret123", requestProtocol: "wideboi-token.c2VjcmV0MTIz", wantSuccess: true},
-		{name: "browser selects fixed protocol", expectedToken: "secret123", requestProtocol: "wideboi-token.c2VjcmV0MTIz", browserProtocol: true, wantSuccess: true},
+		{name: "browser selects version protocol", expectedToken: "secret123", requestProtocol: "wideboi-token.c2VjcmV0MTIz", wantSuccess: true},
 		{name: "configured token via browser protocol", expectedToken: "configured!", requestProtocol: "wideboi-token.Y29uZmlndXJlZCE", wantSuccess: true},
 		{name: "wrong browser protocol token", expectedToken: "secret123", requestProtocol: "wideboi-token.d3Jvbmc", wantSuccess: false},
 		{name: "token expected, no token provided", expectedToken: "secret123", requestQuery: "", wantSuccess: false},
 		{name: "token expected, mismatching token provided", expectedToken: "secret123", requestQuery: "token=wrong", wantSuccess: false},
+		{name: "old browser version", expectedToken: "", oldVersion: true},
+		{name: "old browser version with valid token", expectedToken: "secret123", requestProtocol: "wideboi-token.c2VjcmV0MTIz", oldVersion: true},
+		{name: "missing browser version", expectedToken: "", omitVersion: true},
 	}
 
 	for _, tc := range cases {
@@ -52,11 +57,15 @@ func TestListenWebSocketAuth(t *testing.T) {
 			dialer := websocket.Dialer{
 				HandshakeTimeout: 2 * time.Second,
 			}
-			if tc.requestProtocol != "" {
-				dialer.Subprotocols = []string{tc.requestProtocol}
+			versionProtocol := fmt.Sprintf("wideboi.v%d", protocol.Version)
+			if tc.oldVersion {
+				versionProtocol = "wideboi.v1"
 			}
-			if tc.browserProtocol {
-				dialer.Subprotocols = []string{"wideboi", tc.requestProtocol}
+			if !tc.omitVersion {
+				dialer.Subprotocols = []string{versionProtocol}
+			}
+			if tc.requestProtocol != "" {
+				dialer.Subprotocols = append(dialer.Subprotocols, tc.requestProtocol)
 			}
 			conn, resp, err := dialer.Dial(wsURL.String(), nil)
 
@@ -64,8 +73,8 @@ func TestListenWebSocketAuth(t *testing.T) {
 				if err != nil {
 					t.Fatalf("expected successful connection, got error: %v (resp: %+v)", err, resp)
 				}
-				if tc.browserProtocol && conn.Subprotocol() != "wideboi" {
-					t.Fatalf("selected subprotocol = %q, want wideboi", conn.Subprotocol())
+				if conn.Subprotocol() != versionProtocol {
+					t.Fatalf("selected subprotocol = %q, want %s", conn.Subprotocol(), versionProtocol)
 				}
 				conn.Close()
 			} else {
@@ -76,8 +85,12 @@ func TestListenWebSocketAuth(t *testing.T) {
 				if resp == nil {
 					t.Fatalf("expected HTTP response, got nil (err: %v)", err)
 				}
-				if resp.StatusCode != http.StatusUnauthorized {
-					t.Errorf("expected status %d Unauthorized, got %d", http.StatusUnauthorized, resp.StatusCode)
+				wantStatus := http.StatusUnauthorized
+				if tc.oldVersion || tc.omitVersion {
+					wantStatus = http.StatusUpgradeRequired
+				}
+				if resp.StatusCode != wantStatus {
+					t.Errorf("expected status %d, got %d", wantStatus, resp.StatusCode)
 				}
 			}
 		})
@@ -115,7 +128,8 @@ func TestListenWebSocketOrigins(t *testing.T) {
 			if tc.origin != "" {
 				headers.Set("Origin", tc.origin)
 			}
-			dialer := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
+			dialer := websocket.Dialer{HandshakeTimeout: 2 * time.Second,
+				Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)}}
 			conn, resp, err := dialer.Dial(wsURL, headers)
 			if err == nil {
 				conn.Close()

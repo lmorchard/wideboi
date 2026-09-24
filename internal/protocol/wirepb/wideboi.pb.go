@@ -701,6 +701,7 @@ type MsgPanePatch struct {
 	CursorY        int32                  `protobuf:"varint,8,opt,name=cursor_y,json=cursorY,proto3" json:"cursor_y,omitempty"`
 	CursorVisible  bool                   `protobuf:"varint,9,opt,name=cursor_visible,json=cursorVisible,proto3" json:"cursor_visible,omitempty"`
 	MouseTracking  bool                   `protobuf:"varint,10,opt,name=mouse_tracking,json=mouseTracking,proto3" json:"mouse_tracking,omitempty"`
+	ShiftRows      int32                  `protobuf:"varint,11,opt,name=shift_rows,json=shiftRows,proto3" json:"shift_rows,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -803,6 +804,13 @@ func (x *MsgPanePatch) GetMouseTracking() bool {
 		return x.MouseTracking
 	}
 	return false
+}
+
+func (x *MsgPanePatch) GetShiftRows() int32 {
+	if x != nil {
+		return x.ShiftRows
+	}
+	return 0
 }
 
 type ColumnData struct {
@@ -1987,7 +1995,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x0emouse_tracking\x18\t \x01(\bR\rmouseTracking\"I\n" +
 	"\aPaneRow\x12\f\n" +
 	"\x01y\x18\x01 \x01(\x05R\x01y\x120\n" +
-	"\x05cells\x18\x02 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\xda\x02\n" +
+	"\x05cells\x18\x02 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\xf9\x02\n" +
 	"\fMsgPanePatch\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x12\n" +
 	"\x04cols\x18\x02 \x01(\x05R\x04cols\x12\x12\n" +
@@ -2001,7 +2009,9 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\bcursor_y\x18\b \x01(\x05R\acursorY\x12%\n" +
 	"\x0ecursor_visible\x18\t \x01(\bR\rcursorVisible\x12%\n" +
 	"\x0emouse_tracking\x18\n" +
-	" \x01(\bR\rmouseTracking\"S\n" +
+	" \x01(\bR\rmouseTracking\x12\x1d\n" +
+	"\n" +
+	"shift_rows\x18\v \x01(\x05R\tshiftRows\"S\n" +
 	"\n" +
 	"ColumnData\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x14\n" +

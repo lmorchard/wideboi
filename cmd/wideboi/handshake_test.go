@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -65,9 +66,9 @@ func TestCommandsReportAMismatchedServer(t *testing.T) {
 		greeting []byte
 		want     []string
 	}{
-		{"other version", otherVersionHello(4242), []string{"(pid 4242)", "speaks protocol v2", "this client speaks v1"}},
+		{"other version", otherVersionHello(4242), []string{"(pid 4242)", fmt.Sprintf("speaks protocol v%d", protocol.Version+1), fmt.Sprintf("this client speaks v%d", protocol.Version)}},
 		// What a pre-protobuf server sent in #174.
-		{"gob stream", []byte{0xFF, 0xA0, 0x10, 0x00, 0x01}, []string{"older than protocol versioning", "this client speaks v1"}},
+		{"gob stream", []byte{0xFF, 0xA0, 0x10, 0x00, 0x01}, []string{"older than protocol versioning", fmt.Sprintf("this client speaks v%d", protocol.Version)}},
 	}
 	commands := []struct {
 		name string
@@ -128,7 +129,7 @@ func TestServerExitsOnAMismatchedOwner(t *testing.T) {
 	go func() { done <- runServer(config.Config{Socket: sock, Shell: "/bin/sh"}, fds[1]) }()
 	select {
 	case err := <-done:
-		if err == nil || !strings.Contains(err.Error(), "protocol v2") {
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("protocol v%d", protocol.Version+1)) {
 			t.Fatalf("runServer = %v, want a protocol mismatch", err)
 		}
 	case <-time.After(5 * time.Second):
@@ -162,7 +163,7 @@ func TestOwnerReportsAMismatchedSpawnedServer(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 	err = runClient(config.Config{Socket: filepath.Join(dir, "s.sock")}, nil, ours, exited)
-	if err == nil || !strings.Contains(err.Error(), "speaks protocol v2") {
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("speaks protocol v%d", protocol.Version+1)) {
 		t.Fatalf("runClient = %v, want the protocol mismatch", err)
 	}
 }

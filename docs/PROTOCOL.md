@@ -81,8 +81,11 @@ the versions are different, the connection closes. The code is in
 ### 4.2 WebSocket
 
 Each WebSocket message holds one envelope as a binary frame. The WebSocket
-does the framing, so there is no length prefix. There is no hello: the same
-binary serves the web client and the server, so their versions match.
+does the framing, so there is no length prefix. There is no hello. Before
+upgrading, the client offers `wideboi.v<Version>` as a subprotocol and the
+server selects it only when it matches `protocol.Version`. Missing or older
+versions receive HTTP 426. The token may be offered as a separate subprotocol;
+it is never selected as the negotiated protocol.
 
 If a web client sends a message that is larger than 1 MiB, the server closes
 the connection. The server sends a ping each 30 seconds.
@@ -148,6 +151,8 @@ On the Unix socket:
 
 On the WebSocket:
 
+- A missing or mismatched version subprotocol receives HTTP 426 before the
+  connection is upgraded.
 - If a message does not decode, the server writes a warning to the log. The
   server ignores the message. The connection continues.
 - If a message is not binary, the server does the same.
@@ -173,7 +178,8 @@ To add a field or a message:
 5. For a new message, add it to `wireTypes` in
    `internal/protocol/wire_test.go`.
 6. If a peer of the old version would misread or reject the change, increase
-   `Version` in `internal/protocol/version.go`.
+   `Version` in `internal/protocol/version.go` and the browser's offered
+   subprotocol in `web/src/client.ts`.
 7. Do `make check`.
 
 The tests find these errors:
@@ -185,5 +191,5 @@ The tests find these errors:
   the schema.
 
 `make proto` needs `buf` and Node 22 or later. Do `npm ci --prefix web` first.
-The server and the clients must use the same protocol version. The hello
-detects a difference; there is no negotiation.
+The server and the clients must use the same protocol version. The Unix hello
+and WebSocket subprotocol check detect a difference; there is no negotiation.

@@ -106,7 +106,7 @@ func MarshalServer(msg any) ([]byte, error) {
 		}
 		env.Msg = &wirepb.ServerMessage_PaneUpdate{PaneUpdate: update}
 	case MsgPanePatch:
-		patch := &wirepb.MsgPanePatch{PaneId: int32(m.PaneID), Cols: int32(m.Cols), Rows: int32(m.Rows), BaseGeneration: m.BaseGeneration, Generation: m.Generation, CursorX: int32(m.CursorX), CursorY: int32(m.CursorY), CursorVisible: m.CursorVisible, MouseTracking: m.MouseTracking}
+		patch := &wirepb.MsgPanePatch{PaneId: int32(m.PaneID), Cols: int32(m.Cols), Rows: int32(m.Rows), BaseGeneration: m.BaseGeneration, Generation: m.Generation, ShiftRows: int32(m.ShiftRows), CursorX: int32(m.CursorX), CursorY: int32(m.CursorY), CursorVisible: m.CursorVisible, MouseTracking: m.MouseTracking}
 		for _, row := range m.ChangedRows {
 			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{Y: int32(row.Y), Cells: encodeLine(row.Cells)})
 		}
@@ -155,7 +155,7 @@ func UnmarshalServer(data []byte) (any, error) {
 		return update, nil
 	case *wirepb.ServerMessage_PanePatch:
 		src := m.PanePatch
-		patch := MsgPanePatch{PaneID: int(src.PaneId), Cols: int(src.Cols), Rows: int(src.Rows), BaseGeneration: src.BaseGeneration, Generation: src.Generation, CursorX: int(src.CursorX), CursorY: int(src.CursorY), CursorVisible: src.CursorVisible, MouseTracking: src.MouseTracking}
+		patch := MsgPanePatch{PaneID: int(src.PaneId), Cols: int(src.Cols), Rows: int(src.Rows), BaseGeneration: src.BaseGeneration, Generation: src.Generation, ShiftRows: int(src.ShiftRows), CursorX: int(src.CursorX), CursorY: int(src.CursorY), CursorVisible: src.CursorVisible, MouseTracking: src.MouseTracking}
 		for _, row := range src.ChangedRows {
 			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: int(row.Y), Cells: decodeLine(row.Cells)})
 		}

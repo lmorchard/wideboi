@@ -58,6 +58,10 @@ in `internal/server/status_test.go`, `internal/server/server.go:240`,
 
 ## Working here
 
+Always create and work in a dedicated Git worktree for each task. The main
+checkout is shared and must not be used for edits, builds that write artifacts,
+or commits. Preserve existing worktrees and uncommitted changes.
+
     make quick    # the edit loop: fmt, vet, seam, go tests. ~5s
     make check    # the gate: adds race, exit contract, smoke, attach. ~50s
 

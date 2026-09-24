@@ -27,14 +27,21 @@ export class WideboiClient {
     let binary = "";
     for (const byte of bytes) binary += String.fromCharCode(byte);
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
-    // The server selects this fixed protocol during the handshake. Browsers
-    // reject a handshake that offers protocols but receives no selection.
-    const ws = protocol ? new WebSocket(this.url, ["wideboi", protocol]) : new WebSocket(this.url);
+    // The server must select this version before any shift patches arrive.
+    // Browsers reject an upgrade that selects no offered subprotocol.
+    const versionProtocol = "wideboi.v2";
+    const ws = new WebSocket(this.url, protocol ? [versionProtocol, protocol] : [versionProtocol]);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      if (ws.protocol !== versionProtocol) {
+        ws.close();
+        this.ws = null;
+        if (this.onDisconnect) this.onDisconnect();
+        return;
+      }
       console.log("[WideboiClient] Connected");
       if (this.onConnect) this.onConnect();
     };

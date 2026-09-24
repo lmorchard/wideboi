@@ -94,6 +94,15 @@ func TestHandshakeReportsMismatch(t *testing.T) {
 		wantPID    uint32
 	}{
 		{
+			name: "version 1 cannot apply shift patches",
+			peer: func(c net.Conn) {
+				_ = writeFrame(c, helloFrame(1, 76))
+				drainHello(c)
+			},
+			wantTheirs: 1,
+			wantPID:    76,
+		},
+		{
 			name: "other version",
 			peer: func(c net.Conn) {
 				_ = writeFrame(c, helloFrame(protocol.Version+1, 77))

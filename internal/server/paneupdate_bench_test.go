@@ -21,8 +21,8 @@ func BenchmarkPaneUpdateRender(b *testing.B) {
 }
 
 // Compares the protobuf envelopes sent by socket and WebSocket transports.
-// Scroll-like changes fall back to full snapshots; the all-row patch
-// measures why that fallback helps.
+// The all-row patch measures why a full snapshot remains the fallback
+// when no whole-pane shift matches.
 func BenchmarkPaneWirePayload(b *testing.B) {
 	for _, tc := range []struct {
 		name                string

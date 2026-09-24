@@ -107,11 +107,14 @@ type MsgPanePatch struct {
 	Cols, Rows     int
 	BaseGeneration uint64
 	Generation     uint64
-	ChangedRows    []PaneRow
-	CursorX        int
-	CursorY        int
-	CursorVisible  bool
-	MouseTracking  bool
+	// ShiftRows moves retained rows down when positive, up when negative.
+	// ChangedRows supplies the edge replacement band after the shift.
+	ShiftRows     int
+	ChangedRows   []PaneRow
+	CursorX       int
+	CursorY       int
+	CursorVisible bool
+	MouseTracking bool
 }
 
 // MsgPaneResync asks for a full snapshot after a missing or stale patch.

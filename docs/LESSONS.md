@@ -4,6 +4,15 @@ Keep lessons here when they could save the next person a wasted round. Put sessi
 history in `docs/dev-sessions/`. The former roadmap, `docs/BEYOND-V1.md`, now
 lives as GitHub issues.
 
+## Start each task in a worktree
+
+The main checkout is shared. Another task can change its branch or stash its
+working tree while an agent is editing there; that happened to the #180 patch
+before it could be committed. Create a dedicated Git worktree before making
+task changes or running a build that writes artifacts. Commit, test, and open
+the PR from that worktree. Leave other worktrees and their uncommitted changes
+alone.
+
 ## Probe the pinned terminal dependencies
 
 `charmbracelet/x/vt` has no tagged release, and `charmbracelet/ultraviolet` is
@@ -326,7 +335,9 @@ Without a version check, #166's switch from gob to protobuf showed up as
 `protobuf frame too large: 4288679936`: the first gob bytes, `0xFFA01000`,
 read as a length prefix. The Unix socket now opens with a hello that carries
 `protocol.Version` (#174). The check only works if someone bumps the version.
-Increase it for any change an older peer would misread or reject.
+Increase it for any change an older peer would misread or reject. The browser
+also offers `wideboi.v<Version>` as a WebSocket subprotocol; update that value
+with the Go version or an older browser could silently misapply a patch.
 
 A peer that hangs up with your bytes unread looks different by platform.
 macOS reads EOF; Linux reads `ECONNRESET`. The handshake passed on macOS
