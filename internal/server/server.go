@@ -155,15 +155,15 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 		select {
 		case <-ctx.Done():
 			return
-			case msg, ok := <-tp.ClientSendChan():
-				if !ok {
-					if s.dropClient(ctx, tp) {
-						slog.Info("owning client left without detaching; ending the session")
-						_ = s.Close()
-					}
-					return
+		case msg, ok := <-tp.ClientSendChan():
+			if !ok {
+				if s.dropClient(ctx, tp) {
+					slog.Info("owning client left without detaching; ending the session")
+					_ = s.Close()
 				}
-				if _, ok := msg.(protocol.MsgShutdown); ok {
+				return
+			}
+			if _, ok := msg.(protocol.MsgShutdown); ok {
 				// Close hangs up on every transport, this one
 				// included, and only after reaping. Called here,
 				// not under s.mu, for the same reason dropClient
@@ -171,14 +171,14 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				_ = s.Close()
 				return
 			}
-				if _, ok := msg.(protocol.MsgDetach); ok {
-					// An owner detaching gives up ownership, not the
-					// session. Returning here means the EOF that follows
-					// is never read as an owner leaving: this goroutine is
-					// the only reader of this connection, and it stops.
-					s.dropClient(ctx, tp)
-					return
-				}
+			if _, ok := msg.(protocol.MsgDetach); ok {
+				// An owner detaching gives up ownership, not the
+				// session. Returning here means the EOF that follows
+				// is never read as an owner leaving: this goroutine is
+				// the only reader of this connection, and it stops.
+				s.dropClient(ctx, tp)
+				return
+			}
 			s.handleClientMsg(ctx, tp, msg)
 		}
 	}
