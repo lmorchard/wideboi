@@ -60,7 +60,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_EXIT, Drainer, spawn_in_pty, pane_children, ps_rows, still_alive,
     server_child, wait_for_exit, force_cleanup, parse_size, parse_signal,
-    private_run_dir, run_main,
+    private_run_dir, run_main, harness_args,
 )
 
 def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
@@ -120,7 +120,7 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     label = f"{cols}x{rows}" if set_winsize else f"{cols}x{rows} (no winsize set)"
     print(f"--- size={label} signal={signal.Signals(sig).name} ---")
 
-    argv = [os.path.abspath(binary)]
+    argv = harness_args(os.path.abspath(binary))
     # Private to this run. A plain wideboi attaches to whatever answers
     # its socket, and an unrelated server on the default path would
     # leave this child with no session of its own. Nothing is listening
