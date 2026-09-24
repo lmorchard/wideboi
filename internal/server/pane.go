@@ -214,6 +214,11 @@ func (p *Pane) Draw(dst uv.Screen, area image.Rectangle) {
 	p.grid.Draw(dst, area)
 }
 
+// DrawAt renders the pane's cell state at the given scroll offset onto dst inside area.
+func (p *Pane) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
+	p.grid.DrawAt(dst, area, offset)
+}
+
 // Resize changes the pane's logical size: the emulator's grid and the
 // child's PTY window, in that order.
 //
@@ -248,6 +253,9 @@ func (p *Pane) Resize(cols, rows int) error {
 // cannot hold callers (including Server.handleClientMsg under s.mu)
 // indefinitely.
 func (p *Pane) Write(b []byte) (int, error) {
+	if p.pty == nil {
+		return len(b), nil
+	}
 	n, err := p.pty.WriteBounded(b, ptyWriteTimeout)
 	if errors.Is(err, os.ErrDeadlineExceeded) && n < len(b) {
 		p.dropped.Add(uint64(len(b) - n))
@@ -281,9 +289,17 @@ func (p *Pane) Title() string { return p.grid.Title() }
 // Status reports the current agent status of the pane.
 func (p *Pane) Status() protocol.PaneStatus { return p.grid.Status() }
 
-// UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport.
+// UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport at the
+// pane's current scroll offset.
 // It returns false if the pane began closing before rendering could start.
 func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
+	return p.UpdateMessageForOffset(p.ScrollOffset(), false)
+}
+
+// UpdateMessageForOffset constructs a protocol.MsgPaneUpdate for wire transport
+// at a specific scroll offset. When offset > 0, cursor visibility is suppressed.
+// It returns false if the pane began closing before rendering could start.
+func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.MsgPaneUpdate, bool) {
 	p.resizeMu.Lock()
 	defer p.resizeMu.Unlock()
 	p.renderMu.RLock()
@@ -296,7 +312,7 @@ func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
 	cols, rows := p.cols, p.rows
 
 	buf := uv.NewScreenBuffer(cols, rows)
-	p.Draw(buf, image.Rect(0, 0, cols, rows))
+	p.DrawAt(buf, image.Rect(0, 0, cols, rows), offset)
 
 	lines := make([]protocol.LineData, rows)
 	for y := 0; y < rows; y++ {
@@ -325,6 +341,10 @@ func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
 	}
 
 	cp := p.CursorPosition()
+	cursorVisible := p.CursorVisible()
+	if offset > 0 {
+		cursorVisible = false
+	}
 	return protocol.MsgPaneUpdate{
 		PaneID:        p.id,
 		Cols:          cols,
@@ -332,13 +352,19 @@ func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
 		Lines:         lines,
 		CursorX:       cp.X,
 		CursorY:       cp.Y,
-		CursorVisible: p.CursorVisible(),
+		CursorVisible: cursorVisible,
 		MouseTracking: p.grid.MouseTracking(),
+		ScrollOffset:  offset,
+		ScrollbackLen: p.ScrollbackLen(),
+		UnreadOutput:  unreadOutput,
 	}, true
 }
 
 // Generation reports the grid's change counter; see term.Grid.Generation.
 func (p *Pane) Generation() uint64 { return p.grid.Generation() }
+
+// OutputGen reports the child terminal output counter; see term.Grid.OutputGen.
+func (p *Pane) OutputGen() uint64 { return p.grid.OutputGen() }
 
 func (p *Pane) ScrollbackLen() int         { return p.grid.ScrollbackLen() }
 func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }

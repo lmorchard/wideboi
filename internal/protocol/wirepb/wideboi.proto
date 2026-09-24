@@ -81,6 +81,9 @@ message MsgPaneUpdate {
   int32 cursor_y = 7;
   bool cursor_visible = 8;
   bool mouse_tracking = 9;
+  int32 scroll_offset = 10;
+  int32 scrollback_len = 11;
+  bool unread_output = 12;
 }
 
 // PaneRow replaces one complete row, style and wide-glyph continuations
@@ -104,6 +107,9 @@ message MsgPanePatch {
   bool cursor_visible = 9;
   bool mouse_tracking = 10;
   int32 shift_rows = 11;
+  int32 scroll_offset = 12;
+  int32 scrollback_len = 13;
+  bool unread_output = 14;
 }
 
 message ColumnData {

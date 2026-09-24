@@ -105,10 +105,16 @@ type Grid interface {
 	// unrelated changes the pane.
 	Generation() uint64
 
+	// OutputGen advances strictly when new bytes are written to the
+	// emulator via Write, distinguishing child process terminal output
+	// from layout resizes and view adjustments.
+	OutputGen() uint64
+
 	// Resize changes the emulator's dimensions, reflowing the visible
 	// screen so narrowing does not destroy text.
 	Resize(cols, rows int)
 	Draw(dst uv.Screen, area image.Rectangle)
+	DrawAt(dst uv.Screen, area image.Rectangle, offset int)
 	CellAt(x, y int) *uv.Cell
 	Size() (cols, rows int)
 	Close() error
@@ -158,6 +164,7 @@ type vtGrid struct {
 
 	// generation backs Generation; see the Grid interface.
 	generation atomic.Uint64
+	outputGen  atomic.Uint64
 
 	// idleTimeout is how long Status waits before the fallback calls a
 	// pane idle. Zero means DefaultIdleTimeout; resolved in Status
@@ -342,6 +349,7 @@ func (g *vtGrid) Write(p []byte) (int, error) {
 		}
 	}, func(title string) { g.title.Store(&title) })
 	g.generation.Add(1)
+	g.outputGen.Add(1)
 	if err != nil {
 		return 0, err
 	}
@@ -548,16 +556,25 @@ func (g *vtGrid) SetScrollOffset(offset int) {
 }
 
 func (g *vtGrid) Generation() uint64 { return g.generation.Load() }
+func (g *vtGrid) OutputGen() uint64  { return g.outputGen.Load() }
 
-// Draw's fast path (no scrollback in view) delegates to g.em.Draw, which
-// runs entirely inside SafeEmulator's own se.mu.RLock and never leaks a
-// cell pointer past it -- no extra locking needed. The scrollback branch
-// below is different; see the comment where it takes writeResizeMu.
+// Draw delegates to DrawAt with the grid's current scroll offset.
 func (g *vtGrid) Draw(dst uv.Screen, area image.Rectangle) {
+	g.DrawAt(dst, area, int(g.scrollOffset.Load()))
+}
+
+// DrawAt renders the grid into dst at the given scroll offset from bottom.
+// When offset is 0, live terminal cells are drawn via the fast path without
+// writeResizeMu contention. Positive offsets draw rows from scrollback history.
+func (g *vtGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
+	if offset <= 0 {
+		g.em.Draw(dst, area)
+		return
+	}
+
 	g.writeResizeMu.Lock()
 	defer g.writeResizeMu.Unlock()
 
-	offset := int(g.scrollOffset.Load())
 	sbLen := g.em.ScrollbackLen()
 	if offset > sbLen {
 		offset = sbLen

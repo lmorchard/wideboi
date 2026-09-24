@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -104,6 +105,46 @@ func TestDrawScrollbackDoesNotRaceWrite(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+func TestGridDrawAt(t *testing.T) {
+	g := term.NewVT(20, 5)
+	for i := 0; i < 20; i++ {
+		if i > 0 {
+			fmt.Fprint(g, "\r\n")
+		}
+		fmt.Fprintf(g, "line %02d", i)
+	}
+	if g.ScrollOffset() != 0 {
+		t.Fatalf("initial ScrollOffset = %d, want 0", g.ScrollOffset())
+	}
+
+	readRow := func(dst compose.Surface, y int) string {
+		var b strings.Builder
+		for x := 0; x < 20; x++ {
+			c := dst.CellAt(x, y)
+			if c != nil {
+				b.WriteString(c.Content)
+			}
+		}
+		return strings.TrimRight(b.String(), " ")
+	}
+
+	s0 := compose.NewSurface(20, 5)
+	g.DrawAt(s0, s0.Bounds(), 0)
+	if got := readRow(s0, 4); got != "line 19" {
+		t.Errorf("DrawAt(0) bottom row = %q, want %q", got, "line 19")
+	}
+
+	s5 := compose.NewSurface(20, 5)
+	g.DrawAt(s5, s5.Bounds(), 5)
+	if got := readRow(s5, 4); got != "line 14" {
+		t.Errorf("DrawAt(5) bottom row = %q, want %q", got, "line 14")
+	}
+
+	if g.ScrollOffset() != 0 {
+		t.Errorf("ScrollOffset after DrawAt calls was mutated to %d, want 0", g.ScrollOffset())
+	}
 }
 
 // TestCloseUnblocksRead pins the one behaviour vtGrid.Close's bypass of

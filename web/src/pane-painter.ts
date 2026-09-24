@@ -163,5 +163,20 @@ export class PanePainter {
         }
       }
     }
+    if (pane.scrollOffset > 0 && this.height > CELL_HEIGHT) {
+      const footerY = Math.floor(this.height / CELL_HEIGHT) * CELL_HEIGHT - CELL_HEIGHT;
+      ctx.fillStyle = '#333333';
+      ctx.fillRect(0, footerY, this.width, CELL_HEIGHT);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px monospace';
+      let footerText = ` [▲ scroll +${pane.scrollOffset}/${pane.scrollbackLen}`;
+      if (pane.unreadOutput) {
+        footerText += '  ▼ new output]';
+      } else {
+        footerText += ']';
+      }
+      ctx.fillText(footerText, 0, footerY);
+      ctx.font = FONT;
+    }
   }
 }

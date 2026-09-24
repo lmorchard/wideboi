@@ -5,9 +5,11 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,6 +43,14 @@ func (g *gatedDrawGrid) Draw(dst uv.Screen, area image.Rectangle) {
 	g.Grid.Draw(dst, area)
 }
 
+func (g *gatedDrawGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
+	g.once.Do(func() {
+		close(g.started)
+		<-g.release
+	})
+	g.Grid.DrawAt(dst, area, offset)
+}
+
 type cellGrid struct {
 	*statusGrid
 	content atomic.Pointer[string]
@@ -55,6 +65,10 @@ func (g *cellGrid) Draw(dst uv.Screen, _ image.Rectangle) {
 	if text := g.content.Load(); text != nil {
 		dst.SetCell(0, 0, &uv.Cell{Content: *text, Width: 1})
 	}
+}
+
+func (g *cellGrid) DrawAt(dst uv.Screen, area image.Rectangle, _ int) {
+	g.Draw(dst, area)
 }
 
 func takePaneMessage(t *testing.T, tp *transport.InProcChannel) any {
@@ -235,7 +249,8 @@ func TestConcurrentInputResizeCloseWithSlowTransport(t *testing.T) {
 
 type changingDrawGrid struct{ *statusGrid }
 
-func (g *changingDrawGrid) Draw(uv.Screen, image.Rectangle) { g.bump() }
+func (g *changingDrawGrid) Draw(uv.Screen, image.Rectangle)                   { g.bump() }
+func (g *changingDrawGrid) DrawAt(dst uv.Screen, area image.Rectangle, _ int) { g.Draw(dst, area) }
 
 type closeAwareGrid struct {
 	*statusGrid
@@ -244,10 +259,8 @@ type closeAwareGrid struct {
 	closed  chan struct{}
 }
 
-func (g *closeAwareGrid) Draw(uv.Screen, image.Rectangle) {
-	close(g.drawing)
-	<-g.release
-}
+func (g *closeAwareGrid) Draw(uv.Screen, image.Rectangle)                   { close(g.drawing); <-g.release }
+func (g *closeAwareGrid) DrawAt(dst uv.Screen, area image.Rectangle, _ int) { g.Draw(dst, area) }
 
 func (g *closeAwareGrid) Close() error {
 	close(g.closed)
@@ -314,6 +327,10 @@ func TestGenerationChangingDuringRenderIsRetried(t *testing.T) {
 func (g *blockingDrawGrid) Draw(uv.Screen, image.Rectangle) {
 	close(g.started)
 	<-g.release
+}
+
+func (g *blockingDrawGrid) DrawAt(dst uv.Screen, area image.Rectangle, _ int) {
+	g.Draw(dst, area)
 }
 
 // A slow grid render must not hold the server mutex. The same mutex
@@ -526,5 +543,61 @@ func TestDroppedForcedResendIsRetried(t *testing.T) {
 	s.broadcastPaneUpdates(ctx, false)
 	if got := drainPaneUpdates(tp); !slices.Equal(got, []int{1, 2}) {
 		t.Errorf("after a dropped forced resend, next tick sent %v, want [1 2]", got)
+	}
+}
+
+func TestPaneUpdateMessageForOffset(t *testing.T) {
+	grid := term.NewVT(20, 5)
+	t.Cleanup(func() { _ = grid.Close() })
+	for i := 0; i < 10; i++ {
+		if i > 0 {
+			fmt.Fprint(grid, "\r\n")
+		}
+		fmt.Fprintf(grid, "line %02d", i)
+	}
+	pane := &Pane{id: 1, grid: grid, cols: 20, rows: 5}
+
+	// Offset 0: live view, cursor visible
+	msg0, ok := pane.UpdateMessageForOffset(0, false)
+	if !ok {
+		t.Fatal("UpdateMessageForOffset(0) failed")
+	}
+	if msg0.ScrollOffset != 0 {
+		t.Errorf("msg0.ScrollOffset = %d, want 0", msg0.ScrollOffset)
+	}
+	if !msg0.CursorVisible {
+		t.Error("msg0.CursorVisible = false, want true at offset 0")
+	}
+	if msg0.UnreadOutput {
+		t.Error("msg0.UnreadOutput = true, want false")
+	}
+	var bottom0 strings.Builder
+	for _, c := range msg0.Lines[4] {
+		bottom0.WriteString(c.Content)
+	}
+	if got := strings.TrimRight(bottom0.String(), " "); got != "line 09" {
+		t.Errorf("msg0 bottom row = %q, want %q", got, "line 09")
+	}
+
+	// Offset 3: scrolled up, cursor suppressed, unreadOutput flag propagated
+	msg3, ok := pane.UpdateMessageForOffset(3, true)
+	if !ok {
+		t.Fatal("UpdateMessageForOffset(3) failed")
+	}
+	if msg3.ScrollOffset != 3 {
+		t.Errorf("msg3.ScrollOffset = %d, want 3", msg3.ScrollOffset)
+	}
+	if msg3.CursorVisible {
+		t.Error("msg3.CursorVisible = true, want false when scrolled up")
+	}
+	if !msg3.UnreadOutput {
+		t.Error("msg3.UnreadOutput = false, want true")
+	}
+	var bottom3 strings.Builder
+	for _, c := range msg3.Lines[4] {
+		bottom3.WriteString(c.Content)
+	}
+	if got := strings.TrimRight(bottom3.String(), " "); got != "line 06" {
+		t.Errorf("msg3 bottom row = %q, want %q", got, "line 06")
 	}
 }

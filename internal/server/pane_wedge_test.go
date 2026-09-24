@@ -56,23 +56,25 @@ func newBlockingGrid() *blockingGrid {
 	}
 }
 
-func (g *blockingGrid) Write(p []byte) (int, error)     { return len(p), nil }
-func (g *blockingGrid) Read(p []byte) (int, error)      { return 0, nil }
-func (g *blockingGrid) SendKey(uv.KeyEvent)             {}
-func (g *blockingGrid) SendText(string)                 {}
-func (g *blockingGrid) MouseTracking() bool             { return false }
-func (g *blockingGrid) SendMouse(uv.MouseEvent)         {}
-func (g *blockingGrid) CursorPosition() image.Point     { return image.Point{} }
-func (g *blockingGrid) CursorVisible() bool             { return false }
-func (g *blockingGrid) Status() protocol.PaneStatus     { return protocol.StatusIdle }
-func (g *blockingGrid) Title() string                   { return "" }
-func (g *blockingGrid) ScrollbackLen() int              { return 0 }
-func (g *blockingGrid) ScrollOffset() int               { return 0 }
-func (g *blockingGrid) SetScrollOffset(int)             {}
-func (g *blockingGrid) Generation() uint64              { return 0 }
-func (g *blockingGrid) Draw(uv.Screen, image.Rectangle) {}
-func (g *blockingGrid) CellAt(x, y int) *uv.Cell        { return nil }
-func (g *blockingGrid) Size() (int, int)                { return 10, 10 }
+func (g *blockingGrid) Write(p []byte) (int, error)            { return len(p), nil }
+func (g *blockingGrid) Read(p []byte) (int, error)             { return 0, nil }
+func (g *blockingGrid) SendKey(uv.KeyEvent)                    {}
+func (g *blockingGrid) SendText(string)                        {}
+func (g *blockingGrid) MouseTracking() bool                    { return false }
+func (g *blockingGrid) SendMouse(uv.MouseEvent)                {}
+func (g *blockingGrid) CursorPosition() image.Point            { return image.Point{} }
+func (g *blockingGrid) CursorVisible() bool                    { return false }
+func (g *blockingGrid) Status() protocol.PaneStatus            { return protocol.StatusIdle }
+func (g *blockingGrid) Title() string                          { return "" }
+func (g *blockingGrid) ScrollbackLen() int                     { return 0 }
+func (g *blockingGrid) ScrollOffset() int                      { return 0 }
+func (g *blockingGrid) SetScrollOffset(int)                    {}
+func (g *blockingGrid) Generation() uint64                     { return 0 }
+func (g *blockingGrid) OutputGen() uint64                      { return 0 }
+func (g *blockingGrid) Draw(uv.Screen, image.Rectangle)        {}
+func (g *blockingGrid) DrawAt(uv.Screen, image.Rectangle, int) {}
+func (g *blockingGrid) CellAt(x, y int) *uv.Cell               { return nil }
+func (g *blockingGrid) Size() (int, int)                       { return 10, 10 }
 
 // Resize blocks until Close is called, standing in for term.Reflow's real
 // read-out/write-back blocking on an unbuffered pipe nobody is draining.

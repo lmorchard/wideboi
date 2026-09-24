@@ -61,6 +61,8 @@ export class PaneStore {
       ...base, lines, generation: patch.generation,
       cursorX: patch.cursorX, cursorY: patch.cursorY,
       cursorVisible: patch.cursorVisible, mouseTracking: patch.mouseTracking,
+      scrollOffset: patch.scrollOffset, scrollbackLen: patch.scrollbackLen,
+      unreadOutput: patch.unreadOutput,
     });
     return true;
   }

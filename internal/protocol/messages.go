@@ -91,6 +91,9 @@ type MsgPaneUpdate struct {
 	// snapshot because it changes when the child writes bytes, and
 	// writing bytes is what sends a pane update.
 	MouseTracking bool
+	ScrollOffset  int
+	ScrollbackLen int
+	UnreadOutput  bool
 }
 
 // PaneRow replaces one complete row. Complete rows keep wide glyph
@@ -115,6 +118,9 @@ type MsgPanePatch struct {
 	CursorY       int
 	CursorVisible bool
 	MouseTracking bool
+	ScrollOffset  int
+	ScrollbackLen int
+	UnreadOutput  bool
 }
 
 // MsgPaneResync asks for a full snapshot after a missing or stale patch.

@@ -298,3 +298,59 @@ func TestClientDrawDirtyDetectionDuringMotion(t *testing.T) {
 		t.Fatal("settled post-motion frame: expected dirty=false, got true")
 	}
 }
+
+func TestScrollbackFooterAndStatusLine(t *testing.T) {
+	const cols, rows = 80, 12
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 35, Height: 10},
+			{PaneID: 2, Width: 35, Height: 10},
+		},
+	})
+	cli.HandleServerMsg(paneUpdate(1, 35, 10, "PANE-ONE"))
+	cli.HandleServerMsg(paneUpdate(2, 35, 10, "PANE-TWO"))
+
+	// 1. Initially offset 0: no scroll footer, no scroll in status
+	scr0 := newFakeHostScreen(cols, rows)
+	cli.Draw(scr0)
+	got0 := strings.Join(scr0.text(), "\n")
+	if strings.Contains(got0, "[scroll") {
+		t.Errorf("at offset 0, screen unexpectedly contains '[scroll':\n%s", got0)
+	}
+
+	// 2. Scrolled up, no unread output
+	updateScrolled := paneUpdate(1, 35, 10, "PANE-ONE")
+	updateScrolled.ScrollOffset = 7
+	updateScrolled.ScrollbackLen = 50
+	cli.HandleServerMsg(updateScrolled)
+
+	scr1 := newFakeHostScreen(cols, rows)
+	cli.Draw(scr1)
+	got1 := strings.Join(scr1.text(), "\n")
+	if !strings.Contains(got1, "[▲ scroll +7/50]") {
+		t.Errorf("expected pane footer '[▲ scroll +7/50]', got:\n%s", got1)
+	}
+	if !strings.Contains(got1, "[scroll +7]") {
+		t.Errorf("expected status line '[scroll +7]', got:\n%s", got1)
+	}
+	if strings.Contains(got1, "new output") {
+		t.Errorf("expected no 'new output' indicator, got:\n%s", got1)
+	}
+
+	// 3. New output arrives while scrolled
+	updateUnread := updateScrolled
+	updateUnread.UnreadOutput = true
+	cli.HandleServerMsg(updateUnread)
+
+	scr2 := newFakeHostScreen(cols, rows)
+	cli.Draw(scr2)
+	got2 := strings.Join(scr2.text(), "\n")
+	if !strings.Contains(got2, "[▲ scroll +7/50  ▼ new output]") {
+		t.Errorf("expected pane footer with new output, got:\n%s", got2)
+	}
+	if !strings.Contains(got2, "[scroll +7 ⤓]") {
+		t.Errorf("expected status line '[scroll +7 ⤓]', got:\n%s", got2)
+	}
+}
