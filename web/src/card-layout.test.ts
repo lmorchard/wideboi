@@ -25,10 +25,12 @@ describe('card layout', () => {
     expect(layout.placements.filter(p => p.visible).map(p => p.paneId)).toEqual([5]);
   });
 
-  it('can keep the previous focus above a right-to-left slide', () => {
-    const layout = cardLayout(columns, 5, 42, 2, 6);
-    const oldFocus = layout.placements.find(p => p.paneId === 6)!;
-    const newFocus = layout.placements.find(p => p.paneId === 5)!;
-    expect(oldFocus.z).toBeGreaterThan(newFocus.z);
+  it('stacks cards from left to right during a focus slide', () => {
+    for (const focus of [4, 5]) {
+      const layout = cardLayout(columns, focus, 42, 2, null);
+      const z = [4, 5, 6].map(paneId => layout.placements.find(p => p.paneId === paneId)!.z);
+      expect(z[0]).toBeLessThan(z[1]);
+      expect(z[1]).toBeLessThan(z[2]);
+    }
   });
 });

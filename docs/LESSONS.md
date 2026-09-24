@@ -215,10 +215,11 @@ is already visible and leave it offscreen when the animation ends. Reveal the
 focused pane after the move animations settle, including when reduced motion
 skips them.
 
-In overlapping cards, update positions before raising the newly focused card's
-`z-index`. Raising it in the same render makes it cover the previously focused
-card while that card is still sliding away, especially on right-to-left focus
-moves. Hold the old focus on top until the movement finishes.
+In overlapping cards, use natural left-to-right stacking while focus slides.
+The card to the right must cover the card to its left in either focus direction.
+Raising the new focus immediately covers its right neighbor; keeping the old
+focus on top instead covers its right neighbor. Raise the new focus only after
+the movement finishes.
 
 Browser tests that replace `window.WebSocket` also intercept Vite's development
 socket. Identify the app connection by its offered version subprotocol,

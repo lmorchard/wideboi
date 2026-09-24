@@ -44,6 +44,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   const panes = page.locator('wideboi-pane');
   await expect(panes).toHaveCount(7);
   await expect(panes.first()).toHaveAttribute('card-mode', '');
+  await expect(panes.nth(1)).toHaveCSS('box-shadow', /rgb\(184, 184, 184\)/);
   expect(await page.evaluate(() => window.paneOne === document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane'))).toBe(true);
   await expect(page.locator('.card-count.right')).toContainText('+');
   await settleLayout();
@@ -77,8 +78,9 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await settleLayout();
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(beforeResize);
 
-  // Hold the right-to-left slide so its stacking order can be inspected mid-flight.
-  await expect.poll(() => panes.nth(6).evaluate(element => element.getAnimations().length)).toBe(0);
+  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('5');
+  await expect.poll(() => panes.nth(4).evaluate(element => element.getAnimations().length)).toBe(0);
+  // Pause both directions and inspect the three adjacent cards mid-slide.
   await page.evaluate(() => {
     window.pausedMoves = [];
     window.originalAnimate = Element.prototype.animate;
@@ -91,16 +93,18 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
       return animation;
     };
   });
-  const cardEdges = await panes.evaluateAll(elements => [5, 6].map(index => elements[index].getBoundingClientRect().left));
-  await page.mouse.click((cardEdges[0] + cardEdges[1]) / 2, 120);
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('6');
-  const zOrder = () => panes.evaluateAll(elements => [5, 6].map(index => Number(getComputedStyle(elements[index]).zIndex)));
-  expect((await zOrder())[1]).toBeGreaterThan((await zOrder())[0]);
-  await page.evaluate(() => {
-    window.pausedMoves.forEach(animation => animation.finish());
-    Element.prototype.animate = window.originalAnimate;
-  });
-  await expect.poll(async () => (await zOrder())[0]).toBeGreaterThan((await zOrder())[1]);
+  const zOrder = () => panes.evaluateAll(elements => [3, 4, 5].map(index => Number(getComputedStyle(elements[index]).zIndex)));
+  for (const target of ['4', '5']) {
+    await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption(target);
+    await expect.poll(() => page.evaluate(() => window.pausedMoves.length)).toBeGreaterThan(0);
+    const [left, middle, right] = await zOrder();
+    expect(left).toBeLessThan(middle);
+    expect(middle).toBeLessThan(right);
+    await page.evaluate(() => window.pausedMoves.splice(0).forEach(animation => animation.finish()));
+    const focusedIndex = Number(target) - 4;
+    await expect.poll(async () => (await zOrder())[focusedIndex]).toBeGreaterThan(right);
+  }
+  await page.evaluate(() => { Element.prototype.animate = window.originalAnimate; });
 
   await page.getByRole('combobox', { name: 'Layout' }).selectOption('scroll');
   await expect(panes.first()).not.toHaveAttribute('card-mode', '');

@@ -23,7 +23,7 @@ export class WideboiPane extends LitElement {
       box-shadow: inset 0 2px #007fd4;
     }
     :host([card-mode]) {
-      box-shadow: inset 3px 0 #777, inset 0 2px #777;
+      box-shadow: inset 3px 0 #b8b8b8, inset 0 2px #b8b8b8;
     }
     :host([card-mode][focused]) {
       box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
@@ -43,7 +43,7 @@ export class WideboiPane extends LitElement {
       white-space: nowrap;
       color: #ddd;
       background: #303030;
-      border-right: 1px solid #666;
+      border-right: 1px solid #b8b8b8;
       font: 12px sans-serif;
       pointer-events: none;
     }

@@ -16,8 +16,9 @@ keep the existing terminal sizing protocol.
   changing canvas dimensions.
 - The existing FLIP element animation handles focus, reorder, and mode changes.
   Reduced motion skips it. Returning to the strip reveals focus after the
-  animation, when its final rectangle is available. During a focus slide, the
-  old focused card keeps the top stacking level until the movement ends.
+  animation, when its final rectangle is available. During a focus slide,
+  cards stack in strip order; the new focus rises above the fan only when the
+  movement ends.
 - The card layout uses the strip's existing viewport dimensions. Switching
   modes changes neither the reported cell grid nor PTY size. A stable scrollbar
   gutter preserves the available cell height, and card mode holds the strip's
@@ -26,7 +27,7 @@ keep the existing terminal sizing protocol.
 ## Verification
 
 Unit tests cover crowded and narrow card geometry. Browser tests cover overlap,
-stacking (including a paused right-to-left focus slide), pane identity, sliver
+stacking (including paused slides in both directions), pane identity, sliver
 click-to-focus, pane-local mouse coordinates, crowded focus, mode changes
 without resize messages, and reduced motion. The
 geometry tests were observed failing when the minimum sliver width was
