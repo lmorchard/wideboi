@@ -26,6 +26,7 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
+	"github.com/lmorchard/wideboi/web"
 )
 
 const signalExitMargin = 500 * time.Millisecond
@@ -297,6 +298,12 @@ func runServer(cfg config.Config, ownerFD int) error {
 	if cfg.Websocket != "" {
 		mux := http.NewServeMux()
 		srv.ListenWebSocket(ctx, mux)
+
+		distFS, err := web.DistFS()
+		if err != nil {
+			return fmt.Errorf("failed to load web dist: %w", err)
+		}
+		mux.Handle("/", http.FileServer(distFS))
 
 		httpSrv = &http.Server{
 			Handler: mux,
