@@ -31,7 +31,7 @@ func TestListenWebSocketAuth(t *testing.T) {
 			s := server.NewServer(nil, "/bin/sh", "")
 			mux := http.NewServeMux()
 			s.ListenWebSocket(context.Background(), mux, tc.expectedToken)
-			
+
 			ts := httptest.NewServer(mux)
 			defer ts.Close()
 

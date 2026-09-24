@@ -27,6 +27,7 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
+	"github.com/lmorchard/wideboi/web"
 )
 
 const signalExitMargin = 500 * time.Millisecond
@@ -296,44 +297,50 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 	srv.ListenSocket(ctx, sl)
 
-		var httpSrv *http.Server
-		if cfg.Websocket != "" {
-			generatedToken := false
-			if cfg.WebsocketToken == "" {
-				b := make([]byte, 16)
-				if _, err := crypto_rand.Read(b); err != nil {
-					return fmt.Errorf("generate websocket token: %w", err)
-				}
-				cfg.WebsocketToken = fmt.Sprintf("%x", b)
-				generatedToken = true
+	var httpSrv *http.Server
+	if cfg.Websocket != "" {
+		generatedToken := false
+		if cfg.WebsocketToken == "" {
+			b := make([]byte, 16)
+			if _, err := crypto_rand.Read(b); err != nil {
+				return fmt.Errorf("generate websocket token: %w", err)
 			}
-
-			mux := http.NewServeMux()
-			srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
-
-			httpSrv = &http.Server{
-				Handler: mux,
-			}
-
-			wsListener, err := net.Listen("tcp", cfg.Websocket)
-			if err != nil {
-				slog.Error("cannot listen on websocket address", "err", err)
-				return err
-			}
-
-			go func() {
-				if generatedToken {
-					fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws?token=%s\n", cfg.Websocket, cfg.WebsocketToken)
-					slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
-				} else {
-					fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws (token configured)\n", cfg.Websocket)
-					slog.Info("websocket server listening", "addr", cfg.Websocket, "token", "***REDACTED***")
-				}
-				if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-					slog.Error("websocket server failed", "err", err)
-				}
-			}()
+			cfg.WebsocketToken = fmt.Sprintf("%x", b)
+			generatedToken = true
 		}
+
+		mux := http.NewServeMux()
+		srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
+
+		distFS, err := web.DistFS()
+		if err != nil {
+			return fmt.Errorf("failed to load web dist: %w", err)
+		}
+		mux.Handle("/", http.FileServer(distFS))
+
+		httpSrv = &http.Server{
+			Handler: mux,
+		}
+
+		wsListener, err := net.Listen("tcp", cfg.Websocket)
+		if err != nil {
+			slog.Error("cannot listen on websocket address", "err", err)
+			return err
+		}
+
+		go func() {
+			if generatedToken {
+				fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws?token=%s\n", cfg.Websocket, cfg.WebsocketToken)
+				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
+			} else {
+				fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws (token configured)\n", cfg.Websocket)
+				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", "***REDACTED***")
+			}
+			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("websocket server failed", "err", err)
+			}
+		}()
+	}
 
 	err = srv.Run(ctx)
 	if httpSrv != nil {
