@@ -4,6 +4,15 @@ Keep lessons here when they could save the next person a wasted round. Put sessi
 history in `docs/dev-sessions/`. The former roadmap, `docs/BEYOND-V1.md`, now
 lives as GitHub issues.
 
+## Start each task in a worktree
+
+The main checkout is shared. Another task can change its branch or stash its
+working tree while an agent is editing there; that happened to the #180 patch
+before it could be committed. Create a dedicated Git worktree before making
+task changes or running a build that writes artifacts. Commit, test, and open
+the PR from that worktree. Leave other worktrees and their uncommitted changes
+alone.
+
 ## Probe the pinned terminal dependencies
 
 `charmbracelet/x/vt` has no tagged release, and `charmbracelet/ultraviolet` is
