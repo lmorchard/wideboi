@@ -85,6 +85,30 @@ func paneUpdate(paneID, cols, rows int, text string) protocol.MsgPaneUpdate {
 	}
 }
 
+func TestPaneUpdateKeepsColumnPositionsAfterWideGlyph(t *testing.T) {
+	cli := NewClient(transport.NewInProcChannel(16), 10, 4, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:     []protocol.ColumnData{{PaneID: 1, Width: 4, Height: 2}},
+		FocusPaneID: 1,
+	})
+	cli.HandleServerMsg(protocol.MsgPaneUpdate{
+		PaneID: 1, Cols: 4, Rows: 2,
+		Lines: []protocol.LineData{{
+			{Content: "界", Width: 2},
+			{Content: " ", Width: 1},
+			{Content: "B", Width: 1},
+			{Content: " ", Width: 1},
+		}},
+	})
+	surface := cli.mirrors[1].Surface
+	if cell := surface.CellAt(0, 0); cell == nil || cell.Content != "界" {
+		t.Fatalf("column 0 = %+v, want wide glyph", cell)
+	}
+	if cell := surface.CellAt(2, 0); cell == nil || cell.Content != "B" {
+		t.Fatalf("column 2 = %+v, want B after wide glyph", cell)
+	}
+}
+
 // newTestClientWithTwoPanes returns a client holding populated mirrors
 // for panes 1 and 2, focused on pane 1.
 //

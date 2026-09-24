@@ -190,6 +190,7 @@ export class WideboiApp extends LitElement {
     this.listeners?.abort();
     this.listeners = undefined;
     this.pointer = undefined;
+    this.inPrefixMode = false;
     this.resizeObserver.disconnect();
     if (this.renderer) {
       this.renderer.stop();
@@ -206,6 +207,7 @@ export class WideboiApp extends LitElement {
       this.client.disconnect();
     }
     this.connected = false;
+    this.inPrefixMode = false;
     
     this.errorMsg = '';
     
@@ -238,6 +240,7 @@ export class WideboiApp extends LitElement {
     client.onDisconnect = () => {
       if (this.client !== client) return;
       this.connected = false;
+      this.inPrefixMode = false;
       this.errorMsg = 'Disconnected from server.';
     }
     client.onMessage = (env: WSEnvelope) => {
