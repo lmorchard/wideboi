@@ -405,9 +405,9 @@ def scroll_ran(run: Run, delta: dict) -> list[str]:
 
 def scroll_paced(run: Run, args) -> None:
     # One line at typing pace, so the pane is still between frames. The
-    # seq burst above cannot exercise shift patches: when a pane changes
-    # while it is being rendered, broadcastPaneUpdates drops that
-    # client's baseline, so sustained output goes out as full updates.
+    # seq burst above cannot exercise shift patches: consecutive frames share
+    # no rows. Prior to #206, mid-send output dropped the baseline and forced
+    # fulls; now shift patches are maintained.
     path = os.path.join(run.dir, "paced.sh")
     count = max(1, int(args.seconds * TYPE_HZ))
     with open(path, "w") as f:

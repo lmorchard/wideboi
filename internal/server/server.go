@@ -1339,14 +1339,9 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 			continue
 		}
 		// Content can change while update was being rendered or sent.
-		if r.pane.Generation() != r.underlyingGen {
-			delete(s.paneGens[r.tp], r.paneID)
-			delete(s.paneFrames[r.tp], r.paneID)
-			delete(s.paneUnderlyingGens[r.tp], r.paneID)
-			delete(s.paneOutputGens[r.tp], r.paneID)
-			delete(s.paneSbLens[r.tp], r.paneID)
-			continue
-		}
+		// Retain r.frame and r.wireGen as the baseline: the client accepted and
+		// applied exactly this frame. On the next tick, wireGen != lastWireGen
+		// will trigger a resend as a patch against this baseline.
 
 		if s.paneGens[r.tp] == nil {
 			s.paneGens[r.tp] = make(map[int]uint64)
