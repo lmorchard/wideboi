@@ -77,5 +77,18 @@ func runCleanup(w io.Writer, dir string) error {
 		}
 	}
 
+	// 4. Remove credentials left behind by servers that exited abruptly.
+	tokens, err := filepath.Glob(filepath.Join(dir, "*.web-token"))
+	if err == nil {
+		for _, token := range tokens {
+			name := strings.TrimSuffix(filepath.Base(token), ".web-token")
+			if !isActive(name) {
+				if err := os.Remove(token); err == nil {
+					fmt.Fprintf(w, "removed dead web token %s\n", filepath.Base(token))
+				}
+			}
+		}
+	}
+
 	return nil
 }
