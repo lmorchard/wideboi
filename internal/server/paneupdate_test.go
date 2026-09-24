@@ -537,6 +537,10 @@ func TestDroppedForcedResendIsRetried(t *testing.T) {
 	for len(tp.ServerSend) < cap(tp.ServerSend)-1 {
 		tp.ServerSend <- struct{}{}
 	}
+	s.mu.Lock()
+	s.strip.GrowWidth(1, 10)
+	s.resizePanesLocked()
+	s.mu.Unlock()
 	s.broadcastLayout(ctx)
 	drainPaneUpdates(tp) // filler plus the snapshot; both pane updates were dropped
 
@@ -599,5 +603,110 @@ func TestPaneUpdateMessageForOffset(t *testing.T) {
 	}
 	if got := strings.TrimRight(bottom3.String(), " "); got != "line 06" {
 		t.Errorf("msg3 bottom row = %q, want %q", got, "line 06")
+	}
+}
+
+// An unattached connection (such as `wideboi status` or `wideboi ls`)
+// dialing in and hanging up must not trigger a layout broadcast or
+// force pane resends to existing attached clients.
+func TestUnattachedDisconnectDoesNotResendPanes(t *testing.T) {
+	s, _, tpAttached := twoIdlePanes(t)
+	ctx := context.Background()
+
+	// Attached client sends MsgAttach and consumes initial updates
+	s.handleClientMsg(ctx, tpAttached, protocol.MsgAttach{Cols: 80, Rows: 24})
+	s.broadcastPaneUpdates(ctx, false)
+	drainPaneUpdates(tpAttached)
+
+	// An unattached query connection connects
+	tpQuery := transport.NewInProcChannel(16)
+	s.mu.Lock()
+	s.transports = append(s.transports, tpQuery)
+	s.mu.Unlock()
+
+	// Query connection leaves without ever sending MsgAttach
+	s.dropClient(ctx, tpQuery)
+
+	// Attached client should receive nothing: no layout snapshot, no pane updates
+	if got := drainPaneUpdates(tpAttached); len(got) != 0 {
+		t.Fatalf("unattached disconnect triggered pane resends: %v, want none", got)
+	}
+
+	// Verify no layout snapshot was queued for the attached client either
+	select {
+	case msg := <-tpAttached.ServerSendChan():
+		t.Fatalf("unattached disconnect sent unexpected message: %+v", msg)
+	default:
+	}
+}
+
+// A layout change that only updates status or title must not force
+// resends of unchanged panes.
+func TestStatusOnlyChangeDoesNotResendUnchangedPanes(t *testing.T) {
+	s, grids, tp := twoIdlePanes(t)
+	ctx := context.Background()
+
+	// Initial broadcast establishes baseline layout, statuses, and pane generations
+	s.broadcastLayout(ctx)
+	drainPaneUpdates(tp)
+	// Clear snapshot message
+	select {
+	case <-tp.ServerSendChan():
+	default:
+	}
+
+	// Flip pane 1 status from idle to working (e.g. prompt command started)
+	grids[1].set(protocol.StatusWorking)
+	if !s.broadcastLayoutIfStatusChanged(ctx) {
+		t.Fatal("broadcastLayoutIfStatusChanged reported false after status change")
+	}
+
+	// Attached client must receive the layout snapshot reflecting the new status
+	select {
+	case msg := <-tp.ServerSendChan():
+		snap, ok := msg.(protocol.MsgLayoutSnapshot)
+		if !ok {
+			t.Fatalf("got %T, want MsgLayoutSnapshot", msg)
+		}
+		if snap.PaneStatuses[1] != protocol.StatusWorking {
+			t.Errorf("pane 1 status = %v, want StatusWorking", snap.PaneStatuses[1])
+		}
+	default:
+		t.Fatal("did not receive layout snapshot after status change")
+	}
+
+	// Unchanged panes (pane 1 and pane 2 have no cell/cursor changes) must not be resent
+	if got := drainPaneUpdates(tp); len(got) != 0 {
+		t.Fatalf("status-only broadcast resent unchanged panes: %v, want none", got)
+	}
+}
+
+// When a column is added, removed, or resized, broadcastLayout must
+// force pane resends so clients can reallocate/populate their mirrors.
+func TestColumnOrSizeChangeForcesPaneResend(t *testing.T) {
+	s, _, tp := twoIdlePanes(t)
+	ctx := context.Background()
+
+	// Initial broadcast
+	s.broadcastLayout(ctx)
+	drainPaneUpdates(tp)
+	// Drain snapshot
+	for len(tp.ServerSend) > 0 {
+		<-tp.ServerSendChan()
+	}
+
+	// Resize pane 1 width
+	s.mu.Lock()
+	s.strip.GrowWidth(1, 10)
+	s.resizePanesLocked()
+	s.mu.Unlock()
+
+	s.broadcastLayout(ctx)
+
+	// Since pane dimensions changed, broadcastLayout must force resend
+	got := drainPaneUpdates(tp)
+	sort.Ints(got)
+	if !slices.Equal(got, []int{1, 2}) {
+		t.Fatalf("size change did not force resend of all panes: got %v, want [1 2]", got)
 	}
 }

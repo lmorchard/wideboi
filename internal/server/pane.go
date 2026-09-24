@@ -244,7 +244,10 @@ func (p *Pane) Resize(cols, rows int) error {
 	}
 	p.cols, p.rows = cols, rows
 	p.grid.Resize(cols, rows)
-	return p.pty.Resize(cols, rows)
+	if p.pty != nil {
+		return p.pty.Resize(cols, rows)
+	}
+	return nil
 }
 
 // Write forwards raw bytes to the child process.
