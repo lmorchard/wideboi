@@ -145,7 +145,7 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 		t.Errorf("%d record(s) survived the last pane exiting", n)
 	}
 
-	s.dropClient(tp)
+	s.dropClient(context.Background(), tp)
 	if _, ok := s.paneGens[tp]; ok {
 		t.Error("records for a dropped client survived dropClient")
 	}

@@ -335,11 +335,16 @@ func runServer(cfg config.Config, ownerFD int) error {
 		}
 
 		go func() {
+			host := cfg.Websocket
+			if host != "" && host[0] == ':' {
+				host = "localhost" + host
+			}
+
 			if generatedToken {
-				fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws?token=%s\n", cfg.Websocket, cfg.WebsocketToken)
+				fmt.Fprintf(os.Stderr, "wideboi: web client listening at http://%s/?token=%s\n", host, cfg.WebsocketToken)
 				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
 			} else {
-				fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws (token configured)\n", cfg.Websocket)
+				fmt.Fprintf(os.Stderr, "wideboi: web client listening at http://%s/ (token configured)\n", host)
 				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", "***REDACTED***")
 			}
 			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
