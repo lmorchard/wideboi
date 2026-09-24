@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test web-test proto race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+.PHONY: check check-targets quick test web-test proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -182,3 +182,8 @@ web/dist: web/package.json $(shell find web/src -type f) web/index.html web/tsco
 # protoc-gen-go runs from go.mod.
 proto:
 	buf generate
+
+# Verify that committed bindings were regenerated after schema changes.
+# Keep this outside make check so local checks do not require buf.
+proto-check: proto
+	git diff --exit-code -- internal/protocol/wirepb web/src/gen

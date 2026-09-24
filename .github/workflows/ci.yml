@@ -39,6 +39,31 @@ jobs:
       if: steps.skip_check.outputs.skip != 'true'
       run: go mod download
 
+    - name: Set up Node.js
+      if: steps.skip_check.outputs.skip != 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install web dependencies
+      if: steps.skip_check.outputs.skip != 'true'
+      run: npm ci --prefix web
+
+    - name: Set up Buf
+      if: steps.skip_check.outputs.skip != 'true'
+      uses: bufbuild/buf-action@v1
+      with:
+        version: 1.73.0
+        setup_only: true
+
+    - name: Check protobuf bindings
+      if: steps.skip_check.outputs.skip != 'true'
+      run: |
+        buf lint
+        make proto-check
+
     # make check, not a hand-rolled list of steps. It is the project's
     # own gate -- fmt-check, lint, seam-check, test, race, verify-exit,
     # smoke, golden, attach-check -- and running anything narrower here
