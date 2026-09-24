@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -21,9 +20,10 @@ func BenchmarkPaneUpdateRender(b *testing.B) {
 	}
 }
 
-// Compares the actual JSON payload types. Scroll-like changes fall back
-// to full snapshots; the all-row patch measures why that fallback helps.
-func BenchmarkPaneJSONPayload(b *testing.B) {
+// Compares the protobuf envelopes sent by socket and WebSocket transports.
+// Scroll-like changes fall back to full snapshots; the all-row patch
+// measures why that fallback helps.
+func BenchmarkPaneWirePayload(b *testing.B) {
 	for _, tc := range []struct {
 		name                string
 		cols, rows, changed int
@@ -52,14 +52,14 @@ func BenchmarkPaneJSONPayload(b *testing.B) {
 			{"full", full}, {"rows", patch},
 		} {
 			b.Run(tc.name+"/"+variant.name, func(b *testing.B) {
-				data, err := json.Marshal(variant.value)
+				data, err := protocol.MarshalServer(variant.value)
 				if err != nil {
 					b.Fatal(err)
 				}
 				b.ReportMetric(float64(len(data)), "wire_B")
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					if _, err := json.Marshal(variant.value); err != nil {
+					if _, err := protocol.MarshalServer(variant.value); err != nil {
 						b.Fatal(err)
 					}
 				}
