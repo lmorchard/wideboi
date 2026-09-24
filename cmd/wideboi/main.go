@@ -102,6 +102,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Session, "L", "", "session name")
 	fs.StringVar(&opts.flags.Session, "session", "", "session name")
 	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \":8080\")")
+	fs.StringVar(&opts.flags.WebsocketToken, "websocket-token", "", "token required for websocket connections")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
@@ -145,6 +146,7 @@ Flags:
                          its socket is $TMPDIR/wideboi-<uid>/<name>.sock
   -s, --socket <path>    Unix domain socket path, instead of a session name
       --websocket <addr> Address for WebSocket server (e.g. ":8080")
+      --websocket-token <token> Token required for WebSocket connections
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
   -v, --version          Print version and exit
@@ -294,37 +296,44 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 	srv.ListenSocket(ctx, sl)
 
-	var httpSrv *http.Server
-	if cfg.Websocket != "" {
-		if cfg.WebsocketToken == "" {
-			b := make([]byte, 16)
-			if _, err := crypto_rand.Read(b); err != nil {
-				return fmt.Errorf("generate websocket token: %w", err)
+		var httpSrv *http.Server
+		if cfg.Websocket != "" {
+			generatedToken := false
+			if cfg.WebsocketToken == "" {
+				b := make([]byte, 16)
+				if _, err := crypto_rand.Read(b); err != nil {
+					return fmt.Errorf("generate websocket token: %w", err)
+				}
+				cfg.WebsocketToken = fmt.Sprintf("%x", b)
+				generatedToken = true
 			}
-			cfg.WebsocketToken = fmt.Sprintf("%x", b)
-		}
 
-		mux := http.NewServeMux()
-		srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
+			mux := http.NewServeMux()
+			srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
 
-		httpSrv = &http.Server{
-			Handler: mux,
-		}
-
-		wsListener, err := net.Listen("tcp", cfg.Websocket)
-		if err != nil {
-			slog.Error("cannot listen on websocket address", "err", err)
-			return err
-		}
-
-		go func() {
-			fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws?token=%s\n", cfg.Websocket, cfg.WebsocketToken)
-			slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
-			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("websocket server failed", "err", err)
+			httpSrv = &http.Server{
+				Handler: mux,
 			}
-		}()
-	}
+
+			wsListener, err := net.Listen("tcp", cfg.Websocket)
+			if err != nil {
+				slog.Error("cannot listen on websocket address", "err", err)
+				return err
+			}
+
+			go func() {
+				if generatedToken {
+					fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws?token=%s\n", cfg.Websocket, cfg.WebsocketToken)
+					slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
+				} else {
+					fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws (token configured)\n", cfg.Websocket)
+					slog.Info("websocket server listening", "addr", cfg.Websocket, "token", "***REDACTED***")
+				}
+				if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+					slog.Error("websocket server failed", "err", err)
+				}
+			}()
+		}
 
 	err = srv.Run(ctx)
 	if httpSrv != nil {
