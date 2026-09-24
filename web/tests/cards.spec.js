@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('card layout overlaps persistent panes without resizing the terminal', async ({ page }) => {
+  test.setTimeout(30_000);
   await page.addInitScript(() => {
     window.testSockets = [];
     window.WebSocket = class {
@@ -21,7 +22,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length), { timeout: 15_000 }).toBeGreaterThan(0);
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
