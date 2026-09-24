@@ -50,7 +50,14 @@ func isCleanClose(err error) bool {
 	// closes its socket while the server's broadcast ticker is mid-frame
 	// roughly every time, so treating them as faults would file an error
 	// on every ordinary C-b d.
+	//
+	// ErrUnexpectedEOF is the reader's side of the same race: a server
+	// shutting down closes each conn from outside the write pump, so a
+	// pane update can be cut off mid-frame. That is an ordinary shutdown,
+	// not a protocol fault; a frame that arrives whole but will not
+	// decode is still reported.
 	return errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
 		errors.Is(err, net.ErrClosed) ||
 		errors.Is(err, syscall.EPIPE) ||
 		errors.Is(err, syscall.ECONNRESET) ||
