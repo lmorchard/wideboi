@@ -31,6 +31,7 @@ type Config struct {
 	PrefixLabel  string              `toml:"-"`
 	Shell        string              `toml:"shell"`
 	WidthPresets []int               `toml:"width_presets"`
+	Startup      []StartupPane       `toml:"startup"`
 	Keys         map[string]any      `toml:"keys"`
 	// Mouse is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read MouseEnabled, not this.
@@ -41,6 +42,18 @@ type Config struct {
 	LogLevel     slog.Level `toml:"-"`
 	ConfigFile   string     `toml:"-"`
 }
+
+// StartupPane describes a column opened when a new session first attaches.
+// An empty command starts the configured interactive shell.
+type StartupPane struct {
+	Command string `toml:"command"`
+	Width   int    `toml:"width"`
+}
+
+// Limit explicit startup widths before allocating a VT grid or converting
+// the width to the PTY's uint16 winsize. This still leaves ample room for
+// intentionally wide columns.
+const maxStartupWidth = 4096
 
 // ConfigFlags contains command-line flag overrides passed into Load.
 type ConfigFlags struct {
@@ -211,6 +224,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if len(fileCfg.WidthPresets) > 0 {
 			cfg.WidthPresets = fileCfg.WidthPresets
 		}
+		if fileCfg.Startup != nil {
+			cfg.Startup = fileCfg.Startup
+		}
 		if fileCfg.Websocket != "" {
 			cfg.Websocket = fileCfg.Websocket
 		}
@@ -343,6 +359,14 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	for _, p := range cfg.WidthPresets {
 		if p < 20 {
 			return Config{}, nil, fmt.Errorf("width_presets: invalid preset %d (must be at least 20)", p)
+		}
+	}
+	for i, pane := range cfg.Startup {
+		if pane.Width != 0 && (pane.Width < 20 || pane.Width > maxStartupWidth) {
+			return Config{}, nil, fmt.Errorf("startup pane %d: width %d must be between 20 and %d", i+1, pane.Width, maxStartupWidth)
+		}
+		if pane.Command != "" && strings.TrimSpace(pane.Command) == "" {
+			return Config{}, nil, fmt.Errorf("startup pane %d: command must not be blank", i+1)
 		}
 	}
 

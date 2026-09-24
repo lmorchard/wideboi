@@ -169,7 +169,6 @@ export class WideboiApp extends LitElement {
     const rect = this.canvas.getBoundingClientRect();
     this.renderer.resize(rect.width, rect.height);
     
-    this.renderer.start();
     this.setupKeyboard();
     this.setupMouse();
   }
@@ -179,7 +178,7 @@ export class WideboiApp extends LitElement {
     if (this.renderer && !this.listeners) {
       this.listeners = new AbortController();
       this.resizeObserver.observe(this.canvas);
-      this.renderer.start();
+      if (this.connected) this.renderer.start();
       this.setupKeyboard();
       this.setupMouse();
     }
@@ -233,6 +232,7 @@ export class WideboiApp extends LitElement {
       if (this.client !== client) return;
       console.log('Connected to server');
       this.connected = true;
+      this.renderer?.start();
       this.errorMsg = '';
       this.sendAttach();
     };
@@ -241,11 +241,11 @@ export class WideboiApp extends LitElement {
       if (this.client !== client) return;
       this.connected = false;
       this.inPrefixMode = false;
+      this.renderer?.stop();
       this.errorMsg = 'Disconnected from server.';
     }
     client.onMessage = (env: WSEnvelope) => {
-      if (this.client !== client) return;
-      if (!this.renderer) return;
+      if (this.client !== client || !this.renderer) return;
 
       if (env.t === 'MsgLayoutSnapshot') {
         this.renderer.handleLayoutSnapshot(env.p);

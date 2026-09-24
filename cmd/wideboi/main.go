@@ -286,6 +286,13 @@ func runServer(cfg config.Config, ownerFD int) error {
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
 	}
+	if len(cfg.Startup) > 0 {
+		panes := make([]server.StartupPane, len(cfg.Startup))
+		for i, pane := range cfg.Startup {
+			panes[i] = server.StartupPane{Command: pane.Command, Width: pane.Width}
+		}
+		srv.SetStartupPanes(panes)
+	}
 
 	// The server is responsible for its panes, and there is no
 	// terminal to restore: teardown is the whole job. Without this,

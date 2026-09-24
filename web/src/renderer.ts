@@ -13,7 +13,15 @@ export class GridRenderer {
   private scrollX = 0;
   private selection?: { paneID: number; start: { x: number; y: number }; end: { x: number; y: number } };
   
-  private animationFrameId = 0;
+  private animationFrameId: number | null = null;
+  private running = false;
+  private readonly onVisibilityChange = () => {
+    if (document.hidden) {
+      this.cancelFrame();
+    } else {
+      this.invalidate();
+    }
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -25,29 +33,47 @@ export class GridRenderer {
   }
 
   public start() {
-    const loop = () => {
-      this.draw();
-      this.animationFrameId = requestAnimationFrame(loop);
-    };
-    loop();
+    if (this.running) return;
+    this.running = true;
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.invalidate();
   }
 
   public stop() {
+    this.running = false;
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.cancelFrame();
+  }
+
+  private cancelFrame() {
+    if (this.animationFrameId === null) return;
     cancelAnimationFrame(this.animationFrameId);
+    this.animationFrameId = null;
+  }
+
+  private invalidate() {
+    if (!this.running || document.hidden || this.animationFrameId !== null) return;
+    this.animationFrameId = requestAnimationFrame(() => {
+      this.animationFrameId = null;
+      if (this.running && !document.hidden) this.draw();
+    });
   }
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
     this.layout = snapshot;
     this.recomputePlacements();
+    this.invalidate();
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
     this.panes.set(update.PaneID, update);
+    this.invalidate();
   }
 
   public handlePaneClosed(paneID: number) {
     this.panes.delete(paneID);
     if (this.selection?.paneID === paneID) this.selection = undefined;
+    this.invalidate();
   }
 
   public mouseTracking(paneID: number): boolean {
@@ -56,10 +82,12 @@ export class GridRenderer {
 
   public setSelection(paneID: number, start: { x: number; y: number }, end: { x: number; y: number }) {
     this.selection = { paneID, start, end };
+    this.invalidate();
   }
 
   public clearSelection() {
     this.selection = undefined;
+    this.invalidate();
   }
 
   public selectionText(): string {
@@ -98,6 +126,7 @@ export class GridRenderer {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.measureFont();
     this.recomputePlacements();
+    this.invalidate();
   }
 
   

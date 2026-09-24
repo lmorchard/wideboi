@@ -2,6 +2,9 @@ package server_test
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +14,54 @@ import (
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
+
+func TestConfiguredStartupPanes(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	marker := filepath.Join(t.TempDir(), "started")
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Command: fmt.Sprintf("printf started > %q; exec sleep 30", marker), Width: 77},
+		{Width: 90},
+		{Command: "exec sleep 30", Width: 55},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Columns) != 3 {
+		t.Fatalf("startup columns = %d, want 3", len(snap.Columns))
+	}
+	for i, width := range []int{77, 90, 55} {
+		if snap.Columns[i].Width != width {
+			t.Errorf("column %d width = %d, want %d", i, snap.Columns[i].Width, width)
+		}
+		if cols, _, ok := srv.PaneSize(snap.Columns[i].PaneID); !ok || cols != width {
+			t.Errorf("pane %d PTY width = %d (exists %v), want %d", i, cols, ok, width)
+		}
+	}
+	if snap.FocusPaneID != snap.Columns[0].PaneID {
+		t.Errorf("focus = %d, want first pane %d", snap.FocusPaneID, snap.Columns[0].PaneID)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		} else if !os.IsNotExist(err) || time.Now().After(deadline) {
+			t.Fatalf("startup command did not run: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	snap = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Columns) != 3 {
+		t.Errorf("reattach created more panes: %d", len(snap.Columns))
+	}
+}
 
 // testGrace is the hangup grace these tests tear down with. None of them
 // asserts anything about teardown -- that contract belongs to

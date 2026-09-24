@@ -127,6 +127,11 @@ func TestCloseDoesNotHangOnWedgedResize(t *testing.T) {
 	}
 	// Resize is now inside grid.Resize, holding p.resizeMu, and stays there
 	// until something calls grid.Close -- nothing does yet.
+	renderDone := make(chan bool, 1)
+	go func() {
+		_, ok := p.UpdateMessage()
+		renderDone <- ok
+	}()
 
 	closeDone := make(chan error, 1)
 	go func() {
@@ -149,6 +154,14 @@ func TestCloseDoesNotHangOnWedgedResize(t *testing.T) {
 	case <-resizeDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Resize never returned even after Close ran -- grid.Close should have unblocked it")
+	}
+	select {
+	case ok := <-renderDone:
+		if ok {
+			t.Fatal("render started after pane close")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("render waiting behind resize did not finish after close")
 	}
 }
 
