@@ -180,6 +180,7 @@ func (sl *SocketListener) Close() error {
 // ServerSocketConn bridges a server-side net.Conn to ClientSend/ServerSend channels.
 type ServerSocketConn struct {
 	connErr
+	sendStats
 	conn       net.Conn
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
@@ -191,12 +192,16 @@ type ServerSocketConn struct {
 }
 
 // NewServerSocketConn wraps a server-side net.Conn with buffered channels.
+// Wire bytes are counted from here on, so the hello handshake, which
+// happens before, is not.
 func NewServerSocketConn(conn net.Conn, bufSize int) *ServerSocketConn {
 	if bufSize <= 0 {
 		bufSize = 128
 	}
+	cc := &countingConn{Conn: conn}
 	return &ServerSocketConn{
-		conn:       conn,
+		sendStats:  sendStats{wire: cc},
+		conn:       cc,
 		ClientSend: make(chan ClientMessage, bufSize),
 		ServerSend: make(chan ServerMessage, bufSize),
 		closed:     make(chan struct{}),
@@ -221,7 +226,7 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			payload, err := protocol.MarshalServer(msg)
+			payload, encode, err := sc.marshal(msg)
 			if err != nil {
 				// A message we cannot encode is a server bug, not a dead
 				// peer: dropping it costs one frame, where dropping the
@@ -233,6 +238,7 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 				sc.set(fmt.Sprintf("writing %T to client", msg), err)
 				return
 			}
+			sc.record(msg, len(payload), encode)
 		}
 	}
 }

@@ -18,4 +18,5 @@ package protocol
 // 3 adds scroll_offset, scrollback_len, and unread_output to MsgPaneUpdate
 // and MsgPanePatch for independent per-client scrollback.
 // 4 adds MsgPaneMetadata carrying CWD and OSC 1337 user variables.
-const Version uint32 = 4
+// 5 adds MsgTrafficRequest/MsgTrafficStats (#179).
+const Version uint32 = 5

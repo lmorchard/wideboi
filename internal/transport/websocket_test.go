@@ -57,7 +57,7 @@ func TestWebSocketRoundTrip(t *testing.T) {
 			connErr <- err
 			return
 		}
-		serverWSConn = transport.NewWebSocketServerConn(c, 16)
+		serverWSConn = transport.NewWebSocketServerConn(c, 16, nil)
 		serverWSConn.RunPumps(ctx)
 		connErr <- nil
 	}))
@@ -132,7 +132,7 @@ func TestWebSocketCloseBehavior(t *testing.T) {
 			connErr <- err
 			return
 		}
-		serverWSConn = transport.NewWebSocketServerConn(c, 1)
+		serverWSConn = transport.NewWebSocketServerConn(c, 1, nil)
 		serverWSConn.RunPumps(ctx)
 		connErr <- nil
 	}))
@@ -168,7 +168,7 @@ func TestWebSocketSlowPeerDoesNotBlockAnotherPeer(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err == nil {
-			conns <- transport.NewWebSocketServerConn(c, 1)
+			conns <- transport.NewWebSocketServerConn(c, 1, nil)
 		}
 	}))
 	defer s.Close()
@@ -216,7 +216,7 @@ func TestWebSocketSkipsUndecodableFrames(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err == nil {
-			serverConn := transport.NewWebSocketServerConn(c, 4)
+			serverConn := transport.NewWebSocketServerConn(c, 4, nil)
 			serverConn.RunPumps(ctx)
 			conns <- serverConn
 		}
@@ -263,7 +263,7 @@ func TestWebSocketRejectsOversizedInput(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err == nil {
-			serverConn := transport.NewWebSocketServerConn(c, 1)
+			serverConn := transport.NewWebSocketServerConn(c, 1, nil)
 			serverConn.RunPumps(ctx)
 			conns <- serverConn
 		}
@@ -303,7 +303,7 @@ func TestWebSocketWritePumpSkipsAnUnencodableMessage(t *testing.T) {
 			connErr <- err
 			return
 		}
-		serverWSConn = transport.NewWebSocketServerConn(c, 16)
+		serverWSConn = transport.NewWebSocketServerConn(c, 16, nil)
 		serverWSConn.RunPumps(ctx)
 		connErr <- nil
 	}))

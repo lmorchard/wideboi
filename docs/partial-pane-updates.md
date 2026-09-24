@@ -62,7 +62,7 @@ go test ./internal/protocol -run '^$' -bench BenchmarkPanePatchBuildAndApply -be
 go test ./internal/protocol -run '^$' -bench BenchmarkScrollPatchVsSnapshot -benchmem
 ```
 
-The shift benchmark on an Apple M5 Max measured 5.1 µs and 2.2 KB allocated to build a shift patch. Protobuf encoding took 3.4 µs and 8.0 KB for the shift versus 78.9 µs and 186 KB for the full frame; protocol application took 0.09 µs and 640 B. Gzip reduced the synthetic full frame to 242 B and the shift to 71 B, but cost about 80 µs and 1 MB allocated per message with a fresh compressor. This is a comparison of application payloads and a standalone compressor, not actual socket or WebSocket bytes. Issue #179 still calls for live session traffic and client painting measurements.
+The shift benchmark on an Apple M5 Max measured 5.1 µs and 2.2 KB allocated to build a shift patch. Protobuf encoding took 3.4 µs and 8.0 KB for the shift versus 78.9 µs and 186 KB for the full frame; protocol application took 0.09 µs and 640 B. Gzip reduced the synthetic full frame to 242 B and the shift to 71 B, but cost about 80 µs and 1 MB allocated per message with a fresh compressor. This is a comparison of application payloads and a standalone compressor, not actual socket or WebSocket bytes. The live measurements below (#179) replace it for decisions.
 
 Applying a fresh gzip compressor to every message in the emulator scrolling
 workload produced 2,724 B for 30 shift patches versus 8,798 B for 30 full
@@ -71,3 +71,150 @@ transports do not currently enable this compressor; these figures are a
 comparison, not actual transport bytes.
 
 Tests cover one-row edits, styled and wide cells, cursor-only changes, whole-pane shifts in both directions, unrelated edits and resize fallback, new clients, a missed patch followed by a full snapshot, and a client generation mismatch followed by resynchronization. The deterministic server workload reconstructs every delivered patch against a full render. The server concurrency test also runs input, resize, pane close, and frame delivery while one transport does not read.
+
+## Live measurements (#179)
+
+### Reproducing
+
+```sh
+make traffic                                  # five scenarios, ~2 minutes
+make traffic TRAFFIC_ARGS="--profile"         # also writes pprof files per process
+make traffic TRAFFIC_ARGS="--only scroll --seconds 3"
+wideboi status --traffic [--json]             # any running session
+go test ./internal/client -run '^$' -bench BenchmarkClientApplyAndDraw -benchmem
+```
+
+`scripts/traffic.py` starts a real `wideboi server` on a private socket.
+Terminal clients attach in ptys, and `scripts/wssink` clients attach over
+WebSocket. The script drives fixed inputs, then reads the server's counters
+through a sink's own connection. It prints per-client tables and writes raw
+JSON under `tmp/traffic/`. Each scenario checks that its workload really ran;
+for example, `seq` must finish and vim must page deep into its file.
+`WIDEBOI_TRAFFIC_TIMING=1` adds server render, patch-build and encode timing.
+`WIDEBOI_CPUPROFILE` / `WIDEBOI_MEMPROFILE` write pprof files when the
+process exits. In the browser, `?stats=1` adds a per-5-second console line
+and an overlay with decode, per-kind apply and draw timings.
+
+The byte columns mean different things:
+
+- **Payload:** protobuf envelope bytes.
+- **Wire:** bytes written to the `net.Conn`, which adds the socket length
+  prefix or the WebSocket frame headers, the 101 response, and pings.
+- **Deflate:** an estimate made on payload bytes. The sink runs `compress/flate`
+  at level 1 in two ways:
+  - without context takeover, which is what gorilla/websocket v1.5.3 would
+    send if `EnableCompression` were turned on;
+  - with context takeover, which gorilla cannot do.
+
+### Results
+
+Apple M5 Max, darwin/arm64, 10 s scenarios, run 2026-09-24. Every client in a
+scenario received the same stream. The socket and WebSocket clients had
+identical payload counts, and the sinks' own counts matched the server's.
+"Active" is the time from workload start to the last pty output. The forced
+full snapshot when the pane goes idle falls in the quiet tail after it and is
+included in the counts.
+
+| Scenario | Active | Updates/s | Full × B | Patch × B | Pane payload | Wire overhead | Deflate saved (as-is / ctx) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Typing, 80×24, socket + WS | 10.0 s | 15.1 | 2 × 13,528 | 149 × 468 | 96,862 B | 0.6% | 84.5% / 92.9% |
+| `seq 1 200000`, 80×24 | 1.8 s | 30.8 | 56 × 13,529 | 0 | 757,644 B | 0.0% | 98.0% / 98.1% |
+| Paced scroll (15 lines/s), 80×24 | 11.4 s | 13.4 | 2 × 13,528 | 151 × 1,075 | 189,320 B | 0.3% | 92.1% / 97.4% |
+| vim paging, 80×24 | 11.6 s | 15.5 | 38 × 13,528 | 141 × 1,024 | 658,440 B | 0.1% | 93.9% / 97.9% |
+| Typing, 160×48, 2 socket + 2 WS | 10.0 s | 15.2 | 2 × 53,922 | 149 × 915 | 244,205 B per client | 0.2–0.3% | 92.8% / 96.5% |
+
+Deflate costs about 13–19 µs per message as-is, or 5–13 µs with context
+takeover. Server encode is 12–36 µs per message, rising to about 110 µs for
+fulls. Rendering takes about 100 µs per frame at 80×24 and 320 µs at 160×48
+when output is moderate. Patch build takes 5–18 µs.
+
+During the `seq` burst, a render reads about 3.9 ms, but only about
+0.14 ms of that is CPU. The rest is waiting for the emulator to finish each
+≤4 KiB `Write` chunk.
+
+In the first run, `vtGrid.Draw` took `writeResizeMu` on every call. Since
+per-client scrollback (#200), the live-view fast path skips that lock, and
+#209 (#204) made the comments match. The post-rebase run still read about
+3.9 ms, because `SafeEmulator.Write` holds the emulator's own mutex for
+each chunk.
+
+During the burst the server uses about 73% of a core, and the terminal
+client about 6%. About 80% of the server's CPU is the VT emulator's write
+path. Roughly a third of that is `vt.Scrollback.Push`: once scrollback is
+full, it `slices.Delete`s the first element and so moves the whole history
+on every line. Render, patch build and encode together are under 1%. In the
+other scenarios both processes use about 1–2% of a core.
+
+The terminal client costs the same to apply a patch as a full snapshot:
+170–180 µs per update at 80×24 and 580–610 µs at 160×48. It rewrites the
+whole mirror and composes the whole frame either way. At 30 updates/s this
+is under 2% of a core even at 160×48.
+
+After rebasing onto per-client scrollback (#200), a short
+`make traffic TRAFFIC_ARGS="--seconds 3"` run showed the same traffic pattern:
+- patches of about 465–1,030 B;
+- full snapshots the same size as before;
+- `seq` still sent only full snapshots.
+
+Server render at 160×48 rose from about 320 µs to about 840 µs per frame. That
+is one short run, not re-profiled.
+
+The browser was measured with `?stats=1` by hand: [pending — see below].
+
+### What the numbers say
+
+**Full snapshots are the dominant remaining cost.** Patches work when they are
+used: a keystroke costs about 470 B at 80×24 and about 900 B at 160×48. Full
+snapshots, however, make up 28% of the typing bytes, 44% of the 160×48 typing
+bytes, 78% of vim, and all of `seq`. They come from three sources, none of
+which is the wire format:
+
+1. **Sustained output never patches.** When a pane's generation moves while
+   its frame is being rendered or sent, `broadcastPaneUpdates` drops that
+   client's baseline. Under steady output that happens on nearly every tick,
+   so every update goes out as a full snapshot at the 30/s frame cap. The
+   lock wait described above widens the window. The client did apply the
+   frame it was sent, so keeping that frame as the baseline would let the
+   next tick patch.
+2. **Unrelated connections force a full resend.** Every broadcast of the
+   layout ends with a forced full of every pane to every client. That
+   includes a connection that never attached, such as `wideboi status`,
+   `status --traffic` or `kill-session`, closing. So each such command costs
+   every attached client a full snapshot per pane.
+3. **Status flips force a full resend.** A pane changing between working and
+   idle triggers the same forced full. Typing and stopping costs two fulls
+   per pane per client.
+
+**Framing is negligible** at 0.0–0.6%.
+
+**Compression would pay for WebSocket clients.** Even as gorilla sends it,
+without context takeover, it saves 84–98% for about 15 µs per message. Almost
+all of the saving comes from full snapshots, which compress from 13.5 KB to a
+few hundred bytes. It does little for small patches that context takeover
+could not also shrink.
+
+**Client CPU is not the bottleneck** in the terminal client.
+
+### Decision
+
+- **Sparse cell spans: not material, no change.** A one-character patch
+  resends one full row, about 470 B. Spans might bring that to about 100 B,
+  which saves around 5 KB/s at typing speed. The forced and dropped-baseline
+  fulls cost an order of magnitude more, and compression would take most of
+  the rest.
+- **Incremental client painting: not material, no change** for the terminal
+  client (under 2% of a core at 30 updates/s at 160×48). The browser verdict
+  waits on the manual `?stats=1` run.
+- **Transport compression: worth doing for WebSocket only.** Turn on
+  `EnableCompression` in the upgrader. Browsers negotiate permessage-deflate
+  themselves. Unix sockets are local, so it does not help them. Follow-up:
+  #203.
+- **New, and larger than any of the three above:**
+  - Keep the sent frame as the baseline when a pane changes mid-send
+    (follow-up: #206).
+  - Stop forcing a full resend of every pane when an unattached connection
+    closes or only a status changes (follow-up: #202).
+- **Server CPU under bursts:** the O(scrollback) `Scrollback.Push` in
+  `charmbracelet/x/vt` (follow-up: #205). Renders still wait on the
+  emulator's per-chunk write lock. The `vtGrid.Draw` lock/comment mismatch
+  was resolved in #209 (#204).

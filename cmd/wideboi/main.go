@@ -55,6 +55,7 @@ type cliOptions struct {
 	showVer    bool
 	showHelp   bool
 	jsonOut    bool
+	trafficOut bool
 	// ownerFD is the inherited connection a spawning plain wideboi owns
 	// this server through, or -1. Internal: see spawnServer.
 	ownerFD int
@@ -114,6 +115,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.BoolVar(&opts.showHelp, "h", false, "show help and usage information")
 	fs.BoolVar(&opts.showHelp, "help", false, "show help and usage information")
 	fs.BoolVar(&opts.jsonOut, "json", false, "output JSON instead of a table (status only)")
+	fs.BoolVar(&opts.trafficOut, "traffic", false, "show per-client pane traffic (status only)")
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return opts, err
@@ -137,6 +139,8 @@ func printHelp(w io.Writer) {
                              End the session: close every pane and stop the server
   wideboi [flags] status [--json]
                              Show the layout snapshot and pane statuses
+  wideboi [flags] status --traffic [--json]
+                             Show pane updates and bytes sent to each client
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
@@ -167,6 +171,15 @@ Environment Variables:
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
+  WIDEBOI_TRAFFIC_TIMING =1 to time server render, patch build and encode (status --traffic)
+  WIDEBOI_CPUPROFILE     Path prefix for CPU profiles
+                         (<prefix>.server|client.cpu.<pid>.pprof)
+  WIDEBOI_MEMPROFILE     Path prefix for memory (allocs) profiles
+                         (<prefix>.server|client.mem.<pid>.pprof);
+                         both written as the process exits normally
+                         (kill-session, detach), so a server's files land
+                         after kill-session returns; a signal-ended run
+                         leaves an empty CPU file and no memory profile
   SHELL                  Default shell path (when shell is not set in config)
 `)
 }
@@ -203,7 +216,11 @@ func main() {
 	case "kill-session":
 		fatal(runKillSession(cfg))
 	case "status":
-		fatal(runStatus(cfg, opts.jsonOut, os.Stdout))
+		if opts.trafficOut {
+			fatal(runTrafficStatus(cfg, opts.jsonOut, os.Stdout))
+		} else {
+			fatal(runStatus(cfg, opts.jsonOut, os.Stdout))
+		}
 	case "cleanup":
 		fatal(runCleanup(os.Stdout, config.SessionDir()))
 	case "ls":
@@ -242,6 +259,7 @@ func runServer(cfg config.Config, ownerFD int) error {
 	if f != nil {
 		defer f.Close()
 	}
+	defer startProfiles("server")()
 	slog.Info("starting wideboi server", "socketPath", cfg.Socket, "ownerFD", ownerFD)
 
 	cwd, _ := os.Getwd()
@@ -290,6 +308,9 @@ func runServer(cfg config.Config, ownerFD int) error {
 	}
 
 	srv := server.NewServer(ownerConn, cfg.Shell, cwd)
+	if os.Getenv("WIDEBOI_TRAFFIC_TIMING") == "1" {
+		srv.SetTrafficTiming(true)
+	}
 	if ownerConn != nil {
 		srv.SetOwner(ownerConn)
 	}
@@ -538,6 +559,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	if f != nil {
 		defer f.Close()
 	}
+	defer startProfiles("client")()
 	slog.Info("wideboi client starting", "socketPath", cfg.Socket, "owner", owner)
 
 	// Before the terminal is touched, so a refusal prints plainly.

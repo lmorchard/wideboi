@@ -1147,6 +1147,7 @@ type ServerMessage struct {
 	//	*ServerMessage_PaneCreated
 	//	*ServerMessage_PaneClosed
 	//	*ServerMessage_PaneMetadata
+	//	*ServerMessage_TrafficStats
 	Msg           isServerMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1243,6 +1244,15 @@ func (x *ServerMessage) GetPaneMetadata() *MsgPaneMetadata {
 	return nil
 }
 
+func (x *ServerMessage) GetTrafficStats() *MsgTrafficStats {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerMessage_TrafficStats); ok {
+			return x.TrafficStats
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Msg interface {
 	isServerMessage_Msg()
 }
@@ -1271,6 +1281,10 @@ type ServerMessage_PaneMetadata struct {
 	PaneMetadata *MsgPaneMetadata `protobuf:"bytes,6,opt,name=pane_metadata,json=paneMetadata,proto3,oneof"`
 }
 
+type ServerMessage_TrafficStats struct {
+	TrafficStats *MsgTrafficStats `protobuf:"bytes,7,opt,name=traffic_stats,json=trafficStats,proto3,oneof"`
+}
+
 func (*ServerMessage_PaneUpdate) isServerMessage_Msg() {}
 
 func (*ServerMessage_PanePatch) isServerMessage_Msg() {}
@@ -1282,6 +1296,8 @@ func (*ServerMessage_PaneCreated) isServerMessage_Msg() {}
 func (*ServerMessage_PaneClosed) isServerMessage_Msg() {}
 
 func (*ServerMessage_PaneMetadata) isServerMessage_Msg() {}
+
+func (*ServerMessage_TrafficStats) isServerMessage_Msg() {}
 
 type MsgAttach struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1885,6 +1901,7 @@ type ClientMessage struct {
 	//	*ClientMessage_Detach
 	//	*ClientMessage_Shutdown
 	//	*ClientMessage_StatusRequest
+	//	*ClientMessage_TrafficRequest
 	Msg           isClientMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2017,6 +2034,15 @@ func (x *ClientMessage) GetStatusRequest() *MsgStatusRequest {
 	return nil
 }
 
+func (x *ClientMessage) GetTrafficRequest() *MsgTrafficRequest {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientMessage_TrafficRequest); ok {
+			return x.TrafficRequest
+		}
+	}
+	return nil
+}
+
 type isClientMessage_Msg interface {
 	isClientMessage_Msg()
 }
@@ -2061,6 +2087,10 @@ type ClientMessage_StatusRequest struct {
 	StatusRequest *MsgStatusRequest `protobuf:"bytes,10,opt,name=status_request,json=statusRequest,proto3,oneof"`
 }
 
+type ClientMessage_TrafficRequest struct {
+	TrafficRequest *MsgTrafficRequest `protobuf:"bytes,11,opt,name=traffic_request,json=trafficRequest,proto3,oneof"`
+}
+
 func (*ClientMessage_Attach) isClientMessage_Msg() {}
 
 func (*ClientMessage_Verb) isClientMessage_Msg() {}
@@ -2080,6 +2110,338 @@ func (*ClientMessage_Detach) isClientMessage_Msg() {}
 func (*ClientMessage_Shutdown) isClientMessage_Msg() {}
 
 func (*ClientMessage_StatusRequest) isClientMessage_Msg() {}
+
+func (*ClientMessage_TrafficRequest) isClientMessage_Msg() {}
+
+// Traffic counters for `wideboi status --traffic` (#179). Counts and
+// timings only: never cell contents, titles, input or tokens.
+type MsgTrafficRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgTrafficRequest) Reset() {
+	*x = MsgTrafficRequest{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgTrafficRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgTrafficRequest) ProtoMessage() {}
+
+func (x *MsgTrafficRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgTrafficRequest.ProtoReflect.Descriptor instead.
+func (*MsgTrafficRequest) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{25}
+}
+
+type TimingStat struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Count         uint64                 `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
+	TotalNanos    uint64                 `protobuf:"varint,2,opt,name=total_nanos,json=totalNanos,proto3" json:"total_nanos,omitempty"`
+	MaxNanos      uint64                 `protobuf:"varint,3,opt,name=max_nanos,json=maxNanos,proto3" json:"max_nanos,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TimingStat) Reset() {
+	*x = TimingStat{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TimingStat) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TimingStat) ProtoMessage() {}
+
+func (x *TimingStat) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TimingStat.ProtoReflect.Descriptor instead.
+func (*TimingStat) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *TimingStat) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *TimingStat) GetTotalNanos() uint64 {
+	if x != nil {
+		return x.TotalNanos
+	}
+	return 0
+}
+
+func (x *TimingStat) GetMaxNanos() uint64 {
+	if x != nil {
+		return x.MaxNanos
+	}
+	return 0
+}
+
+type ClientTraffic struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ClientId         int32                  `protobuf:"varint,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	Transport        string                 `protobuf:"bytes,2,opt,name=transport,proto3" json:"transport,omitempty"` // "socket", "websocket", "inproc"
+	ConnectedMillis  int64                  `protobuf:"varint,3,opt,name=connected_millis,json=connectedMillis,proto3" json:"connected_millis,omitempty"`
+	FullUpdates      uint64                 `protobuf:"varint,4,opt,name=full_updates,json=fullUpdates,proto3" json:"full_updates,omitempty"`
+	RowPatches       uint64                 `protobuf:"varint,5,opt,name=row_patches,json=rowPatches,proto3" json:"row_patches,omitempty"`
+	ShiftPatches     uint64                 `protobuf:"varint,6,opt,name=shift_patches,json=shiftPatches,proto3" json:"shift_patches,omitempty"`
+	ChangedRows      uint64                 `protobuf:"varint,7,opt,name=changed_rows,json=changedRows,proto3" json:"changed_rows,omitempty"`
+	ResyncRequests   uint64                 `protobuf:"varint,8,opt,name=resync_requests,json=resyncRequests,proto3" json:"resync_requests,omitempty"`
+	SendFailures     uint64                 `protobuf:"varint,9,opt,name=send_failures,json=sendFailures,proto3" json:"send_failures,omitempty"`
+	Messages         uint64                 `protobuf:"varint,10,opt,name=messages,proto3" json:"messages,omitempty"`                                           // every message the transport encoded
+	PayloadBytes     uint64                 `protobuf:"varint,11,opt,name=payload_bytes,json=payloadBytes,proto3" json:"payload_bytes,omitempty"`               // protobuf envelope bytes, all messages
+	PanePayloadBytes uint64                 `protobuf:"varint,12,opt,name=pane_payload_bytes,json=panePayloadBytes,proto3" json:"pane_payload_bytes,omitempty"` // protobuf bytes of pane updates + patches
+	WireBytes        uint64                 `protobuf:"varint,13,opt,name=wire_bytes,json=wireBytes,proto3" json:"wire_bytes,omitempty"`                        // bytes written to the net.Conn
+	Encode           *TimingStat            `protobuf:"bytes,14,opt,name=encode,proto3" json:"encode,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ClientTraffic) Reset() {
+	*x = ClientTraffic{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClientTraffic) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClientTraffic) ProtoMessage() {}
+
+func (x *ClientTraffic) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClientTraffic.ProtoReflect.Descriptor instead.
+func (*ClientTraffic) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ClientTraffic) GetClientId() int32 {
+	if x != nil {
+		return x.ClientId
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetTransport() string {
+	if x != nil {
+		return x.Transport
+	}
+	return ""
+}
+
+func (x *ClientTraffic) GetConnectedMillis() int64 {
+	if x != nil {
+		return x.ConnectedMillis
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetFullUpdates() uint64 {
+	if x != nil {
+		return x.FullUpdates
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetRowPatches() uint64 {
+	if x != nil {
+		return x.RowPatches
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetShiftPatches() uint64 {
+	if x != nil {
+		return x.ShiftPatches
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetChangedRows() uint64 {
+	if x != nil {
+		return x.ChangedRows
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetResyncRequests() uint64 {
+	if x != nil {
+		return x.ResyncRequests
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetSendFailures() uint64 {
+	if x != nil {
+		return x.SendFailures
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetMessages() uint64 {
+	if x != nil {
+		return x.Messages
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetPayloadBytes() uint64 {
+	if x != nil {
+		return x.PayloadBytes
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetPanePayloadBytes() uint64 {
+	if x != nil {
+		return x.PanePayloadBytes
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetWireBytes() uint64 {
+	if x != nil {
+		return x.WireBytes
+	}
+	return 0
+}
+
+func (x *ClientTraffic) GetEncode() *TimingStat {
+	if x != nil {
+		return x.Encode
+	}
+	return nil
+}
+
+type MsgTrafficStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UptimeMillis  int64                  `protobuf:"varint,1,opt,name=uptime_millis,json=uptimeMillis,proto3" json:"uptime_millis,omitempty"`
+	TimingEnabled bool                   `protobuf:"varint,2,opt,name=timing_enabled,json=timingEnabled,proto3" json:"timing_enabled,omitempty"`
+	Clients       []*ClientTraffic       `protobuf:"bytes,3,rep,name=clients,proto3" json:"clients,omitempty"`
+	Departed      *ClientTraffic         `protobuf:"bytes,4,opt,name=departed,proto3" json:"departed,omitempty"` // sum over attached clients that have left
+	Render        *TimingStat            `protobuf:"bytes,5,opt,name=render,proto3" json:"render,omitempty"`
+	BuildPatch    *TimingStat            `protobuf:"bytes,6,opt,name=build_patch,json=buildPatch,proto3" json:"build_patch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgTrafficStats) Reset() {
+	*x = MsgTrafficStats{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgTrafficStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgTrafficStats) ProtoMessage() {}
+
+func (x *MsgTrafficStats) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgTrafficStats.ProtoReflect.Descriptor instead.
+func (*MsgTrafficStats) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *MsgTrafficStats) GetUptimeMillis() int64 {
+	if x != nil {
+		return x.UptimeMillis
+	}
+	return 0
+}
+
+func (x *MsgTrafficStats) GetTimingEnabled() bool {
+	if x != nil {
+		return x.TimingEnabled
+	}
+	return false
+}
+
+func (x *MsgTrafficStats) GetClients() []*ClientTraffic {
+	if x != nil {
+		return x.Clients
+	}
+	return nil
+}
+
+func (x *MsgTrafficStats) GetDeparted() *ClientTraffic {
+	if x != nil {
+		return x.Departed
+	}
+	return nil
+}
+
+func (x *MsgTrafficStats) GetRender() *TimingStat {
+	if x != nil {
+		return x.Render
+	}
+	return nil
+}
+
+func (x *MsgTrafficStats) GetBuildPatch() *TimingStat {
+	if x != nil {
+		return x.BuildPatch
+	}
+	return nil
+}
 
 var File_internal_protocol_wirepb_wideboi_proto protoreflect.FileDescriptor
 
@@ -2170,7 +2532,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\tuser_vars\x18\x03 \x03(\v2/.wideboi.protocol.MsgPaneMetadata.UserVarsEntryR\buserVars\x1a;\n" +
 	"\rUserVarsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc0\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8a\x04\n" +
 	"\rServerMessage\x12B\n" +
 	"\vpane_update\x18\x01 \x01(\v2\x1f.wideboi.protocol.MsgPaneUpdateH\x00R\n" +
 	"paneUpdate\x12?\n" +
@@ -2180,7 +2542,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\fpane_created\x18\x04 \x01(\v2 .wideboi.protocol.MsgPaneCreatedH\x00R\vpaneCreated\x12B\n" +
 	"\vpane_closed\x18\x05 \x01(\v2\x1f.wideboi.protocol.MsgPaneClosedH\x00R\n" +
 	"paneClosed\x12H\n" +
-	"\rpane_metadata\x18\x06 \x01(\v2!.wideboi.protocol.MsgPaneMetadataH\x00R\fpaneMetadataB\x05\n" +
+	"\rpane_metadata\x18\x06 \x01(\v2!.wideboi.protocol.MsgPaneMetadataH\x00R\fpaneMetadata\x12H\n" +
+	"\rtraffic_stats\x18\a \x01(\v2!.wideboi.protocol.MsgTrafficStatsH\x00R\ftrafficStatsB\x05\n" +
 	"\x03msg\"3\n" +
 	"\tMsgAttach\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\x05R\x04cols\x12\x12\n" +
@@ -2216,7 +2579,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\"\v\n" +
 	"\tMsgDetach\"\r\n" +
 	"\vMsgShutdown\"\x12\n" +
-	"\x10MsgStatusRequest\"\xd9\x04\n" +
+	"\x10MsgStatusRequest\"\xa9\x05\n" +
 	"\rClientMessage\x125\n" +
 	"\x06attach\x18\x01 \x01(\v2\x1b.wideboi.protocol.MsgAttachH\x00R\x06attach\x12/\n" +
 	"\x04verb\x18\x02 \x01(\v2\x19.wideboi.protocol.MsgVerbH\x00R\x04verb\x122\n" +
@@ -2229,8 +2592,42 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x06detach\x18\b \x01(\v2\x1b.wideboi.protocol.MsgDetachH\x00R\x06detach\x12;\n" +
 	"\bshutdown\x18\t \x01(\v2\x1d.wideboi.protocol.MsgShutdownH\x00R\bshutdown\x12K\n" +
 	"\x0estatus_request\x18\n" +
-	" \x01(\v2\".wideboi.protocol.MsgStatusRequestH\x00R\rstatusRequestB\x05\n" +
-	"\x03msg*\xe1\x02\n" +
+	" \x01(\v2\".wideboi.protocol.MsgStatusRequestH\x00R\rstatusRequest\x12N\n" +
+	"\x0ftraffic_request\x18\v \x01(\v2#.wideboi.protocol.MsgTrafficRequestH\x00R\x0etrafficRequestB\x05\n" +
+	"\x03msg\"\x13\n" +
+	"\x11MsgTrafficRequest\"`\n" +
+	"\n" +
+	"TimingStat\x12\x14\n" +
+	"\x05count\x18\x01 \x01(\x04R\x05count\x12\x1f\n" +
+	"\vtotal_nanos\x18\x02 \x01(\x04R\n" +
+	"totalNanos\x12\x1b\n" +
+	"\tmax_nanos\x18\x03 \x01(\x04R\bmaxNanos\"\x93\x04\n" +
+	"\rClientTraffic\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\x05R\bclientId\x12\x1c\n" +
+	"\ttransport\x18\x02 \x01(\tR\ttransport\x12)\n" +
+	"\x10connected_millis\x18\x03 \x01(\x03R\x0fconnectedMillis\x12!\n" +
+	"\ffull_updates\x18\x04 \x01(\x04R\vfullUpdates\x12\x1f\n" +
+	"\vrow_patches\x18\x05 \x01(\x04R\n" +
+	"rowPatches\x12#\n" +
+	"\rshift_patches\x18\x06 \x01(\x04R\fshiftPatches\x12!\n" +
+	"\fchanged_rows\x18\a \x01(\x04R\vchangedRows\x12'\n" +
+	"\x0fresync_requests\x18\b \x01(\x04R\x0eresyncRequests\x12#\n" +
+	"\rsend_failures\x18\t \x01(\x04R\fsendFailures\x12\x1a\n" +
+	"\bmessages\x18\n" +
+	" \x01(\x04R\bmessages\x12#\n" +
+	"\rpayload_bytes\x18\v \x01(\x04R\fpayloadBytes\x12,\n" +
+	"\x12pane_payload_bytes\x18\f \x01(\x04R\x10panePayloadBytes\x12\x1d\n" +
+	"\n" +
+	"wire_bytes\x18\r \x01(\x04R\twireBytes\x124\n" +
+	"\x06encode\x18\x0e \x01(\v2\x1c.wideboi.protocol.TimingStatR\x06encode\"\xca\x02\n" +
+	"\x0fMsgTrafficStats\x12#\n" +
+	"\ruptime_millis\x18\x01 \x01(\x03R\fuptimeMillis\x12%\n" +
+	"\x0etiming_enabled\x18\x02 \x01(\bR\rtimingEnabled\x129\n" +
+	"\aclients\x18\x03 \x03(\v2\x1f.wideboi.protocol.ClientTrafficR\aclients\x12;\n" +
+	"\bdeparted\x18\x04 \x01(\v2\x1f.wideboi.protocol.ClientTrafficR\bdeparted\x124\n" +
+	"\x06render\x18\x05 \x01(\v2\x1c.wideboi.protocol.TimingStatR\x06render\x12=\n" +
+	"\vbuild_patch\x18\x06 \x01(\v2\x1c.wideboi.protocol.TimingStatR\n" +
+	"buildPatch*\xe1\x02\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +
@@ -2277,7 +2674,7 @@ func file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_protocol_wirepb_wideboi_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_internal_protocol_wirepb_wideboi_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_internal_protocol_wirepb_wideboi_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_internal_protocol_wirepb_wideboi_proto_goTypes = []any{
 	(VerbType)(0),             // 0: wideboi.protocol.VerbType
 	(PaneStatus)(0),           // 1: wideboi.protocol.PaneStatus
@@ -2308,9 +2705,13 @@ var file_internal_protocol_wirepb_wideboi_proto_goTypes = []any{
 	(*MsgShutdown)(nil),       // 26: wideboi.protocol.MsgShutdown
 	(*MsgStatusRequest)(nil),  // 27: wideboi.protocol.MsgStatusRequest
 	(*ClientMessage)(nil),     // 28: wideboi.protocol.ClientMessage
-	nil,                       // 29: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
-	nil,                       // 30: wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
-	nil,                       // 31: wideboi.protocol.MsgPaneMetadata.UserVarsEntry
+	(*MsgTrafficRequest)(nil), // 29: wideboi.protocol.MsgTrafficRequest
+	(*TimingStat)(nil),        // 30: wideboi.protocol.TimingStat
+	(*ClientTraffic)(nil),     // 31: wideboi.protocol.ClientTraffic
+	(*MsgTrafficStats)(nil),   // 32: wideboi.protocol.MsgTrafficStats
+	nil,                       // 33: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
+	nil,                       // 34: wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
+	nil,                       // 35: wideboi.protocol.MsgPaneMetadata.UserVarsEntry
 }
 var file_internal_protocol_wirepb_wideboi_proto_depIdxs = []int32{
 	2,  // 0: wideboi.protocol.ColorData.kind:type_name -> wideboi.protocol.ColorKind
@@ -2323,34 +2724,41 @@ var file_internal_protocol_wirepb_wideboi_proto_depIdxs = []int32{
 	6,  // 7: wideboi.protocol.PaneRow.cells:type_name -> wideboi.protocol.CellData
 	9,  // 8: wideboi.protocol.MsgPanePatch.changed_rows:type_name -> wideboi.protocol.PaneRow
 	11, // 9: wideboi.protocol.MsgLayoutSnapshot.columns:type_name -> wideboi.protocol.ColumnData
-	29, // 10: wideboi.protocol.MsgLayoutSnapshot.pane_statuses:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
-	30, // 11: wideboi.protocol.MsgLayoutSnapshot.pane_titles:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
-	31, // 12: wideboi.protocol.MsgPaneMetadata.user_vars:type_name -> wideboi.protocol.MsgPaneMetadata.UserVarsEntry
+	33, // 10: wideboi.protocol.MsgLayoutSnapshot.pane_statuses:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
+	34, // 11: wideboi.protocol.MsgLayoutSnapshot.pane_titles:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
+	35, // 12: wideboi.protocol.MsgPaneMetadata.user_vars:type_name -> wideboi.protocol.MsgPaneMetadata.UserVarsEntry
 	8,  // 13: wideboi.protocol.ServerMessage.pane_update:type_name -> wideboi.protocol.MsgPaneUpdate
 	10, // 14: wideboi.protocol.ServerMessage.pane_patch:type_name -> wideboi.protocol.MsgPanePatch
 	12, // 15: wideboi.protocol.ServerMessage.layout_snapshot:type_name -> wideboi.protocol.MsgLayoutSnapshot
 	13, // 16: wideboi.protocol.ServerMessage.pane_created:type_name -> wideboi.protocol.MsgPaneCreated
 	14, // 17: wideboi.protocol.ServerMessage.pane_closed:type_name -> wideboi.protocol.MsgPaneClosed
 	15, // 18: wideboi.protocol.ServerMessage.pane_metadata:type_name -> wideboi.protocol.MsgPaneMetadata
-	0,  // 19: wideboi.protocol.MsgVerb.verb:type_name -> wideboi.protocol.VerbType
-	3,  // 20: wideboi.protocol.MsgMouse.kind:type_name -> wideboi.protocol.MouseKind
-	20, // 21: wideboi.protocol.MsgInput.key:type_name -> wideboi.protocol.KeyData
-	17, // 22: wideboi.protocol.ClientMessage.attach:type_name -> wideboi.protocol.MsgAttach
-	18, // 23: wideboi.protocol.ClientMessage.verb:type_name -> wideboi.protocol.MsgVerb
-	19, // 24: wideboi.protocol.ClientMessage.mouse:type_name -> wideboi.protocol.MsgMouse
-	21, // 25: wideboi.protocol.ClientMessage.input:type_name -> wideboi.protocol.MsgInput
-	22, // 26: wideboi.protocol.ClientMessage.resize:type_name -> wideboi.protocol.MsgResize
-	23, // 27: wideboi.protocol.ClientMessage.scroll:type_name -> wideboi.protocol.MsgScroll
-	24, // 28: wideboi.protocol.ClientMessage.pane_resync:type_name -> wideboi.protocol.MsgPaneResync
-	25, // 29: wideboi.protocol.ClientMessage.detach:type_name -> wideboi.protocol.MsgDetach
-	26, // 30: wideboi.protocol.ClientMessage.shutdown:type_name -> wideboi.protocol.MsgShutdown
-	27, // 31: wideboi.protocol.ClientMessage.status_request:type_name -> wideboi.protocol.MsgStatusRequest
-	1,  // 32: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry.value:type_name -> wideboi.protocol.PaneStatus
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	32, // 19: wideboi.protocol.ServerMessage.traffic_stats:type_name -> wideboi.protocol.MsgTrafficStats
+	0,  // 20: wideboi.protocol.MsgVerb.verb:type_name -> wideboi.protocol.VerbType
+	3,  // 21: wideboi.protocol.MsgMouse.kind:type_name -> wideboi.protocol.MouseKind
+	20, // 22: wideboi.protocol.MsgInput.key:type_name -> wideboi.protocol.KeyData
+	17, // 23: wideboi.protocol.ClientMessage.attach:type_name -> wideboi.protocol.MsgAttach
+	18, // 24: wideboi.protocol.ClientMessage.verb:type_name -> wideboi.protocol.MsgVerb
+	19, // 25: wideboi.protocol.ClientMessage.mouse:type_name -> wideboi.protocol.MsgMouse
+	21, // 26: wideboi.protocol.ClientMessage.input:type_name -> wideboi.protocol.MsgInput
+	22, // 27: wideboi.protocol.ClientMessage.resize:type_name -> wideboi.protocol.MsgResize
+	23, // 28: wideboi.protocol.ClientMessage.scroll:type_name -> wideboi.protocol.MsgScroll
+	24, // 29: wideboi.protocol.ClientMessage.pane_resync:type_name -> wideboi.protocol.MsgPaneResync
+	25, // 30: wideboi.protocol.ClientMessage.detach:type_name -> wideboi.protocol.MsgDetach
+	26, // 31: wideboi.protocol.ClientMessage.shutdown:type_name -> wideboi.protocol.MsgShutdown
+	27, // 32: wideboi.protocol.ClientMessage.status_request:type_name -> wideboi.protocol.MsgStatusRequest
+	29, // 33: wideboi.protocol.ClientMessage.traffic_request:type_name -> wideboi.protocol.MsgTrafficRequest
+	30, // 34: wideboi.protocol.ClientTraffic.encode:type_name -> wideboi.protocol.TimingStat
+	31, // 35: wideboi.protocol.MsgTrafficStats.clients:type_name -> wideboi.protocol.ClientTraffic
+	31, // 36: wideboi.protocol.MsgTrafficStats.departed:type_name -> wideboi.protocol.ClientTraffic
+	30, // 37: wideboi.protocol.MsgTrafficStats.render:type_name -> wideboi.protocol.TimingStat
+	30, // 38: wideboi.protocol.MsgTrafficStats.build_patch:type_name -> wideboi.protocol.TimingStat
+	1,  // 39: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry.value:type_name -> wideboi.protocol.PaneStatus
+	40, // [40:40] is the sub-list for method output_type
+	40, // [40:40] is the sub-list for method input_type
+	40, // [40:40] is the sub-list for extension type_name
+	40, // [40:40] is the sub-list for extension extendee
+	0,  // [0:40] is the sub-list for field type_name
 }
 
 func init() { file_internal_protocol_wirepb_wideboi_proto_init() }
@@ -2365,6 +2773,7 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 		(*ServerMessage_PaneCreated)(nil),
 		(*ServerMessage_PaneClosed)(nil),
 		(*ServerMessage_PaneMetadata)(nil),
+		(*ServerMessage_TrafficStats)(nil),
 	}
 	file_internal_protocol_wirepb_wideboi_proto_msgTypes[24].OneofWrappers = []any{
 		(*ClientMessage_Attach)(nil),
@@ -2377,6 +2786,7 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 		(*ClientMessage_Detach)(nil),
 		(*ClientMessage_Shutdown)(nil),
 		(*ClientMessage_StatusRequest)(nil),
+		(*ClientMessage_TrafficRequest)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2384,7 +2794,7 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_protocol_wirepb_wideboi_proto_rawDesc), len(file_internal_protocol_wirepb_wideboi_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   28,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

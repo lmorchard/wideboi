@@ -39,6 +39,8 @@ func MarshalClient(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ClientMessage_Shutdown{Shutdown: &wirepb.MsgShutdown{}}
 	case MsgStatusRequest:
 		env.Msg = &wirepb.ClientMessage_StatusRequest{StatusRequest: &wirepb.MsgStatusRequest{}}
+	case MsgTrafficRequest:
+		env.Msg = &wirepb.ClientMessage_TrafficRequest{TrafficRequest: &wirepb.MsgTrafficRequest{}}
 	default:
 		return nil, fmt.Errorf("unsupported client message %T", msg)
 	}
@@ -71,6 +73,8 @@ func UnmarshalClient(data []byte) (any, error) {
 		return MsgShutdown{}, nil
 	case *wirepb.ClientMessage_StatusRequest:
 		return MsgStatusRequest{}, nil
+	case *wirepb.ClientMessage_TrafficRequest:
+		return MsgTrafficRequest{}, nil
 	default:
 		return nil, fmt.Errorf("unknown client message %T", env.Msg)
 	}
@@ -151,6 +155,12 @@ func MarshalServer(msg any) ([]byte, error) {
 			}
 		}
 		env.Msg = &wirepb.ServerMessage_PaneMetadata{PaneMetadata: meta}
+	case MsgTrafficStats:
+		stats := &wirepb.MsgTrafficStats{UptimeMillis: m.UptimeMillis, TimingEnabled: m.TimingEnabled, Departed: encodeClientTraffic(m.Departed), Render: encodeTiming(m.Render), BuildPatch: encodeTiming(m.BuildPatch)}
+		for _, c := range m.Clients {
+			stats.Clients = append(stats.Clients, encodeClientTraffic(c))
+		}
+		env.Msg = &wirepb.ServerMessage_TrafficStats{TrafficStats: stats}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -239,6 +249,13 @@ func UnmarshalServer(data []byte) (any, error) {
 			}
 		}
 		return meta, nil
+	case *wirepb.ServerMessage_TrafficStats:
+		src := m.TrafficStats
+		stats := MsgTrafficStats{UptimeMillis: src.UptimeMillis, TimingEnabled: src.TimingEnabled, Departed: decodeClientTraffic(src.Departed), Render: decodeTiming(src.Render), BuildPatch: decodeTiming(src.BuildPatch)}
+		for _, c := range src.Clients {
+			stats.Clients = append(stats.Clients, decodeClientTraffic(c))
+		}
+		return stats, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}
@@ -315,4 +332,37 @@ func decodeKey(k *wirepb.KeyData) KeyData {
 		return KeyData{}
 	}
 	return KeyData{Text: k.Text, Mod: int(k.Mod), Code: rune(k.Code), ShiftedCode: rune(k.ShiftedCode), BaseCode: rune(k.BaseCode), IsRepeat: k.IsRepeat}
+}
+
+func encodeTiming(t TimingStat) *wirepb.TimingStat {
+	if t == (TimingStat{}) {
+		return nil
+	}
+	return &wirepb.TimingStat{Count: t.Count, TotalNanos: t.TotalNanos, MaxNanos: t.MaxNanos}
+}
+
+func decodeTiming(t *wirepb.TimingStat) TimingStat {
+	if t == nil {
+		return TimingStat{}
+	}
+	return TimingStat{Count: t.Count, TotalNanos: t.TotalNanos, MaxNanos: t.MaxNanos}
+}
+
+func encodeClientTraffic(c ClientTraffic) *wirepb.ClientTraffic {
+	return &wirepb.ClientTraffic{ClientId: int32(c.ClientID), Transport: validUTF8(c.Transport), ConnectedMillis: c.ConnectedMillis,
+		FullUpdates: c.FullUpdates, RowPatches: c.RowPatches, ShiftPatches: c.ShiftPatches, ChangedRows: c.ChangedRows,
+		ResyncRequests: c.ResyncRequests, SendFailures: c.SendFailures,
+		Messages: c.Messages, PayloadBytes: c.PayloadBytes, PanePayloadBytes: c.PanePayloadBytes, WireBytes: c.WireBytes,
+		Encode: encodeTiming(c.Encode)}
+}
+
+func decodeClientTraffic(c *wirepb.ClientTraffic) ClientTraffic {
+	if c == nil {
+		return ClientTraffic{}
+	}
+	return ClientTraffic{ClientID: int(c.ClientId), Transport: c.Transport, ConnectedMillis: c.ConnectedMillis,
+		FullUpdates: c.FullUpdates, RowPatches: c.RowPatches, ShiftPatches: c.ShiftPatches, ChangedRows: c.ChangedRows,
+		ResyncRequests: c.ResyncRequests, SendFailures: c.SendFailures,
+		Messages: c.Messages, PayloadBytes: c.PayloadBytes, PanePayloadBytes: c.PanePayloadBytes, WireBytes: c.WireBytes,
+		Encode: decodeTiming(c.Encode)}
 }

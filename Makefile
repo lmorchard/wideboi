@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test web-test web-build proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+.PHONY: check check-targets quick test web-test web-build proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check traffic print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -177,6 +177,12 @@ smoke: build
 # tearing down.
 attach-check: build
 	python3 scripts/attachcheck.py
+
+# traffic is a measurement run (#179), not a gate: minutes, machine-dependent.
+# Tables go to stdout, raw JSON (and --profile pprof files) to tmp/traffic/.
+#   make traffic TRAFFIC_ARGS="--seconds 3 --only typing --profile"
+traffic: build
+	python3 scripts/traffic.py $(TRAFFIC_ARGS)
 
 web/node_modules/.installed: web/package.json web/package-lock.json
 	cd web && npm ci
