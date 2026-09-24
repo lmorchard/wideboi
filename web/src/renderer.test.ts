@@ -79,6 +79,26 @@ describe('GridRenderer frame scheduling', () => {
     r.stop();
   });
 
+  it('keeps the painted canvas on a redundant resize notification', () => {
+    const r = renderer();
+    const canvas = (r as unknown as { canvas: HTMLCanvasElement }).canvas;
+    let width = 0, height = 0, clears = 0;
+    Object.defineProperty(canvas, 'width', {
+      get: () => width, set: (value: number) => { width = value; clears++; },
+    });
+    Object.defineProperty(canvas, 'height', {
+      get: () => height, set: (value: number) => { height = value; clears++; },
+    });
+    r.start();
+    r.resize(80, 40);
+    flush();
+    expect(clears).toBe(2);
+    r.resize(80, 40);
+    expect(clears).toBe(2);
+    expect(frames.size).toBe(0);
+    r.stop();
+  });
+
   it('pauses while hidden or stopped and resumes with the latest state', () => {
     const r = renderer();
     r.start();

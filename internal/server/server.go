@@ -1056,6 +1056,7 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
+		Subprotocols:    []string{"wideboi"},
 		CheckOrigin: func(r *http.Request) bool {
 			// Security: Prevent malicious cross-origin websites from connecting to the local terminal.
 			origin := r.Header.Get("Origin")

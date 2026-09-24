@@ -27,7 +27,9 @@ export class WideboiClient {
     let binary = "";
     for (const byte of bytes) binary += String.fromCharCode(byte);
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
-    const ws = protocol ? new WebSocket(this.url, [protocol]) : new WebSocket(this.url);
+    // The server selects this fixed protocol during the handshake. Browsers
+    // reject a handshake that offers protocols but receives no selection.
+    const ws = protocol ? new WebSocket(this.url, ["wideboi", protocol]) : new WebSocket(this.url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
