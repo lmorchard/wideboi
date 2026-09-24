@@ -83,3 +83,49 @@ func TestListenWebSocketAuth(t *testing.T) {
 		})
 	}
 }
+
+func TestListenWebSocketOrigins(t *testing.T) {
+	cases := []struct {
+		name, host, origin string
+		wantAccepted       bool
+	}{
+		{name: "no origin", wantAccepted: true},
+		{name: "same local host", origin: "http://127.0.0.1:8080", host: "127.0.0.1:8080", wantAccepted: true},
+		{name: "same remote host through TLS proxy", origin: "https://wideboi.example.com", host: "wideboi.example.com", wantAccepted: true},
+		{name: "local Vite development", origin: "http://localhost:5173", host: "127.0.0.1:8080", wantAccepted: true},
+		{name: "foreign site", origin: "https://evil.example.com", host: "wideboi.example.com"},
+		{name: "Vite exception on remote host", origin: "http://localhost:5173", host: "wideboi.example.com"},
+		{name: "old 8080 exception", origin: "http://localhost:8080", host: "wideboi.example.com"},
+		{name: "old 8081 exception", origin: "http://127.0.0.1:8081", host: "wideboi.example.com"},
+		{name: "invalid scheme", origin: "file://wideboi.example.com", host: "wideboi.example.com"},
+		{name: "origin with path", origin: "https://wideboi.example.com/path", host: "wideboi.example.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := server.NewServer(nil, "/bin/sh", "")
+			mux := http.NewServeMux()
+			s.ListenWebSocket(context.Background(), mux, "secret")
+			ts := httptest.NewServer(mux)
+			defer ts.Close()
+			wsURL := "ws" + ts.URL[len("http"):] + "/ws?token=secret"
+			headers := http.Header{}
+			if tc.host != "" {
+				headers.Set("Host", tc.host)
+			}
+			if tc.origin != "" {
+				headers.Set("Origin", tc.origin)
+			}
+			dialer := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
+			conn, resp, err := dialer.Dial(wsURL, headers)
+			if err == nil {
+				conn.Close()
+			}
+			if tc.wantAccepted && err != nil {
+				t.Fatalf("expected accepted origin: %v", err)
+			}
+			if !tc.wantAccepted && (err == nil || resp == nil || resp.StatusCode != http.StatusForbidden) {
+				t.Fatalf("expected forbidden origin; err=%v response=%v", err, resp)
+			}
+		})
+	}
+}

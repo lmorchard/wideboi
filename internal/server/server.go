@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/websocket"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -1057,27 +1058,7 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		Subprotocols:    []string{"wideboi"},
-		CheckOrigin: func(r *http.Request) bool {
-			// Security: Prevent malicious cross-origin websites from connecting to the local terminal.
-			origin := r.Header.Get("Origin")
-			if origin == "" {
-				return true // Direct connections (like wscat or curl) are allowed
-			}
-
-			u, err := url.Parse(origin)
-			if err != nil {
-				return false
-			}
-
-			// Allow if the origin matches the host the request was sent to.
-			if u.Host == r.Host {
-				return true
-			}
-
-			return u.Host == "127.0.0.1:5173" || u.Host == "localhost:5173" ||
-				u.Host == "127.0.0.1:8080" || u.Host == "localhost:8080" ||
-				u.Host == "127.0.0.1:8081" || u.Host == "localhost:8081"
-		},
+		CheckOrigin:     webSocketOriginAllowed,
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
@@ -1110,4 +1091,27 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 
 		go s.handleClientConnLoop(ctx, sConn)
 	})
+}
+
+// webSocketOriginAllowed permits same-host browser connections and the local
+// Vite development server. The development exception must never apply to a
+// remotely addressed WebSocket endpoint.
+func webSocketOriginAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // Non-browser clients still need the token.
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	if u.Host == r.Host {
+		return true
+	}
+	requestHost, _, err := net.SplitHostPort(r.Host)
+	if err != nil || (requestHost != "localhost" && requestHost != "127.0.0.1" && requestHost != "::1") {
+		return false
+	}
+	return u.Scheme == "http" && (u.Host == "localhost:5173" || u.Host == "127.0.0.1:5173" || u.Host == "[::1]:5173")
 }
