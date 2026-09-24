@@ -31,3 +31,6 @@ click-to-focus, pane-local mouse coordinates, crowded focus, mode changes
 without resize messages, and reduced motion. The
 geometry tests were observed failing when the minimum sliver width was
 deliberately changed to an incorrect value, then restored.
+The browser WebSocket mocks select the app connection by its offered protocol;
+matching only `/ws` also caught and then lost Vite's development socket on
+Linux CI.
