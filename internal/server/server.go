@@ -858,7 +858,7 @@ func (s *Server) Close() error {
 }
 
 // ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
-func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux) {
+func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
@@ -875,6 +875,15 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if token != "" {
+			reqToken := r.URL.Query().Get("token")
+			if reqToken != token {
+				slog.Warn("websocket connection rejected: invalid token", "remote", r.RemoteAddr)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			slog.Debug("websocket upgrade failed", "err", err)

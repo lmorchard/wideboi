@@ -131,6 +131,9 @@ export class WideboiApp extends LitElement {
   private wsUrl = `ws://${window.location.hostname}:8080/ws`;
 
   @state()
+  private token = new URLSearchParams(window.location.search).get('token') || '';
+
+  @state()
   private errorMsg = '';
 
   private inPrefixMode = false;
@@ -181,7 +184,23 @@ export class WideboiApp extends LitElement {
     }
     
     this.errorMsg = '';
-    this.client = new WideboiClient(this.wsUrl);
+    
+    let url = this.wsUrl;
+    if (this.token) {
+        try {
+            const urlObj = new URL(url);
+            urlObj.searchParams.set('token', this.token);
+            url = urlObj.toString();
+        } catch (e) {
+            // Ignored, fallback to appending
+            if (url.includes('?')) {
+                url += `&token=${encodeURIComponent(this.token)}`;
+            } else {
+                url += `?token=${encodeURIComponent(this.token)}`;
+            }
+        }
+    }
+    this.client = new WideboiClient(url);
     
     this.client.onConnect = () => {
       console.log('Connected to server');
@@ -384,6 +403,19 @@ export class WideboiApp extends LitElement {
     this.wsUrl = (e.target as HTMLInputElement).value;
   }
 
+  private handleTokenChange(e: Event) {
+    this.token = (e.target as HTMLInputElement).value;
+    
+    // Update URL bar without reloading
+    const newUrl = new URL(window.location.href);
+    if (this.token) {
+        newUrl.searchParams.set('token', this.token);
+    } else {
+        newUrl.searchParams.delete('token');
+    }
+    window.history.replaceState({}, '', newUrl);
+  }
+
   private handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       this.connectClient();
@@ -423,6 +455,13 @@ export class WideboiApp extends LitElement {
               @input=${this.handleUrlChange}
               @keydown=${this.handleKeydown}
               placeholder="ws://localhost:8080/ws"
+            />
+            <input 
+              type="text" 
+              .value=${this.token} 
+              @input=${this.handleTokenChange}
+              @keydown=${this.handleKeydown}
+              placeholder="Token (optional)"
             />
             <button @click=${this.connectClient}>Connect</button>
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}

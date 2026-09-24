@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	crypto_rand "crypto/rand"
 	"errors"
 	"flag"
 	"fmt"
@@ -295,8 +296,16 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 	var httpSrv *http.Server
 	if cfg.Websocket != "" {
+		if cfg.WebsocketToken == "" {
+			b := make([]byte, 16)
+			if _, err := crypto_rand.Read(b); err != nil {
+				return fmt.Errorf("generate websocket token: %w", err)
+			}
+			cfg.WebsocketToken = fmt.Sprintf("%x", b)
+		}
+
 		mux := http.NewServeMux()
-		srv.ListenWebSocket(ctx, mux)
+		srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
 
 		httpSrv = &http.Server{
 			Handler: mux,
@@ -309,8 +318,8 @@ func runServer(cfg config.Config, ownerFD int) error {
 		}
 
 		go func() {
-			fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws\n", cfg.Websocket)
-			slog.Info("websocket server listening", "addr", cfg.Websocket)
+			fmt.Fprintf(os.Stderr, "wideboi: websocket server listening at ws://%s/ws?token=%s\n", cfg.Websocket, cfg.WebsocketToken)
+			slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
 			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("websocket server failed", "err", err)
 			}
