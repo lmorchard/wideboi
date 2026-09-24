@@ -40,6 +40,10 @@ type Pane struct {
 	// an unlocked read-out/reflow/write-back of the cell buffer, so that
 	// race is real, not theoretical.
 	resizeMu sync.Mutex
+	// renderMu keeps grid.Close from overlapping a pane snapshot. Renderers
+	// acquire resizeMu first, so a renderer waiting behind a wedged Resize
+	// cannot prevent Close from reaching grid.Close to break that wedge.
+	renderMu sync.RWMutex
 
 	// input is keys and mouse events for the child, in one queue so
 	// they reach it in the order the user produced them.
@@ -278,9 +282,17 @@ func (p *Pane) Title() string { return p.grid.Title() }
 func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
 
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport.
-func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
+// It returns false if the pane began closing before rendering could start.
+func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
 	p.resizeMu.Lock()
 	defer p.resizeMu.Unlock()
+	p.renderMu.RLock()
+	defer p.renderMu.RUnlock()
+	select {
+	case <-p.closed:
+		return protocol.MsgPaneUpdate{}, false
+	default:
+	}
 	cols, rows := p.cols, p.rows
 
 	buf := uv.NewScreenBuffer(cols, rows)
@@ -322,7 +334,7 @@ func (p *Pane) UpdateMessage() protocol.MsgPaneUpdate {
 		CursorY:       cp.Y,
 		CursorVisible: p.CursorVisible(),
 		MouseTracking: p.grid.MouseTracking(),
-	}
+	}, true
 }
 
 // Generation reports the grid's change counter; see term.Grid.Generation.
@@ -378,7 +390,9 @@ func (p *Pane) Close() error {
 		close(p.closed)
 
 		p.pty.Hangup(p.graceOrDefault())
+		p.renderMu.Lock()
 		gridErr := p.grid.Close()
+		p.renderMu.Unlock()
 
 		p.resizeMu.Lock()
 		defer p.resizeMu.Unlock()

@@ -722,6 +722,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	type outgoing struct {
 		pane   *Pane
 		update protocol.MsgPaneUpdate
+		ready  bool
 		gen    uint64
 		to     []transport.Transport
 	}
@@ -750,7 +751,11 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	// Neither operation may hold the server mutex: focus, input, close,
 	// and other panes must remain responsive during that work.
 	for i := range out {
-		out[i].update = out[i].pane.UpdateMessage()
+		update, ok := out[i].pane.UpdateMessage()
+		if ok {
+			out[i].update = update
+			out[i].ready = true
+		}
 	}
 
 	type result struct {
@@ -762,6 +767,9 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	}
 	var results []result
 	for _, o := range out {
+		if !o.ready {
+			continue
+		}
 		s.mu.Lock()
 		current := s.panes[o.update.PaneID] == o.pane
 		s.mu.Unlock()

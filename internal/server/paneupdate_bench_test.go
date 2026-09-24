@@ -16,7 +16,7 @@ func BenchmarkPaneUpdateRender(b *testing.B) {
 			p := &Pane{id: 1, grid: newStatusGrid(term.StatusIdle), cols: size[0], rows: size[1]}
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = p.UpdateMessage()
+				_, _ = p.UpdateMessage()
 			}
 		})
 	}

@@ -13,6 +13,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server/ptyx"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -26,6 +27,68 @@ type blockingDrawGrid struct {
 type changingDrawGrid struct{ *statusGrid }
 
 func (g *changingDrawGrid) Draw(uv.Screen, image.Rectangle) { g.bump() }
+
+type closeAwareGrid struct {
+	*statusGrid
+	drawing chan struct{}
+	release chan struct{}
+	closed  chan struct{}
+}
+
+func (g *closeAwareGrid) Draw(uv.Screen, image.Rectangle) {
+	close(g.drawing)
+	<-g.release
+}
+
+func (g *closeAwareGrid) Close() error {
+	close(g.closed)
+	return nil
+}
+
+func TestPaneCloseWaitsForActiveRender(t *testing.T) {
+	pty, err := ptyx.Spawn([]string{"/bin/cat"}, 10, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &closeAwareGrid{statusGrid: newStatusGrid(term.StatusIdle), drawing: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
+	p := &Pane{id: 1, pty: pty, grid: g, cols: 10, rows: 10, closed: make(chan struct{}), closeGrace: 10 * time.Millisecond}
+	rendered := make(chan struct{})
+	go func() {
+		_, _ = p.UpdateMessage()
+		close(rendered)
+	}()
+	select {
+	case <-g.drawing:
+	case <-time.After(time.Second):
+		t.Fatal("render did not start")
+	}
+	closed := make(chan struct{})
+	go func() {
+		_ = p.Close()
+		close(closed)
+	}()
+	select {
+	case <-p.closed:
+	case <-time.After(time.Second):
+		t.Fatal("close did not start")
+	}
+	select {
+	case <-g.closed:
+		t.Error("grid closed while render was active")
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(g.release)
+	select {
+	case <-rendered:
+	case <-time.After(time.Second):
+		t.Fatal("render did not finish")
+	}
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("close did not finish")
+	}
+}
 
 func TestGenerationChangingDuringRenderIsRetried(t *testing.T) {
 	s, _, tp := twoIdlePanes(t)
