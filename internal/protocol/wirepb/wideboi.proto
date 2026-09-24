@@ -103,6 +103,7 @@ message MsgPanePatch {
   int32 cursor_y = 8;
   bool cursor_visible = 9;
   bool mouse_tracking = 10;
+  int32 shift_rows = 11;
 }
 
 message ColumnData {

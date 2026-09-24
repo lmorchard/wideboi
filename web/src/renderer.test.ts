@@ -193,4 +193,22 @@ describe('GridRenderer frame scheduling', () => {
     expect(panes.get(1)?.cursorVisible).toBe(false);
     expect(panes.get(1)?.mouseTracking).toBe(false);
   });
+
+  it('applies a whole-pane shift and rejects missing replacement rows', () => {
+    const r = renderer();
+    const cell = (content: string) => create(CellDataSchema, { content, width: 1 });
+    const lines = ['A', 'B', 'C', 'D'].map(content => create(LineDataSchema, { cells: [cell(content)] }));
+    r.handlePaneUpdate(create(MsgPaneUpdateSchema, { paneId: 1, generation: 1n,
+      cols: 1, rows: 4, lines }));
+    const patch = create(MsgPanePatchSchema, { paneId: 1, cols: 1, rows: 4,
+      baseGeneration: 1n, generation: 2n, shiftRows: -1,
+      changedRows: [{ y: 3, cells: [cell('E')] }] });
+    expect(r.handlePanePatch(patch)).toBe(true);
+    const panes = (r as unknown as { panes: Map<number, MsgPaneUpdate> }).panes;
+    expect(panes.get(1)?.lines.map(line => line.cells[0].content)).toEqual(['B', 'C', 'D', 'E']);
+    expect(r.handlePanePatch({ ...patch, generation: 3n })).toBe(false);
+    r.handlePaneUpdate(create(MsgPaneUpdateSchema, { paneId: 1, generation: 1n,
+      cols: 1, rows: 4, lines }));
+    expect(r.handlePanePatch({ ...patch, changedRows: [] })).toBe(false);
+  });
 });

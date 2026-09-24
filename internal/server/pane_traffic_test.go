@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -42,7 +45,17 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 			write: func(g term.Grid, tick int) {
 				_, _ = g.Write([]byte(fmt.Sprintf("%03d %s\r\n", tick+24, strings.Repeat("x", 70))))
 			},
-			wantUpdates: 30,
+			wantUpdates: 30, wantPatches: true,
+		},
+		{
+			name: "scrollback_80x24", cols: 80, rows: 24, clients: 1,
+			prepare: func(g term.Grid) {
+				for row := 0; row < 30; row++ {
+					_, _ = g.Write([]byte(fmt.Sprintf("history %03d\r\n", row)))
+				}
+			},
+			write:       func(g term.Grid, tick int) { g.SetScrollOffset(1 - tick%2) },
+			wantUpdates: 30, wantPatches: true,
 		},
 		{
 			name: "typing_160x48_four_clients", cols: 160, rows: 48, clients: 4,
@@ -59,6 +72,7 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 			pane := &Pane{id: 1, grid: grid, cols: tc.cols, rows: tc.rows}
 			s := &Server{panes: map[int]*Pane{1: pane}}
 			channels := make([]*transport.InProcChannel, tc.clients)
+			mirrors := make([]protocol.MsgPaneUpdate, tc.clients)
 			for i := range channels {
 				channels[i] = transport.NewInProcChannel(2)
 				s.transports = append(s.transports, channels[i])
@@ -66,11 +80,13 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 			ctx := context.Background()
 			s.broadcastPaneUpdates(ctx, false)
 			var initialBytes int
-			for _, ch := range channels {
+			for i, ch := range channels {
 				msg := <-ch.ServerSend
-				if _, ok := msg.(protocol.MsgPaneUpdate); !ok {
+				initial, ok := msg.(protocol.MsgPaneUpdate)
+				if !ok {
 					t.Fatalf("initial message %T is not a snapshot", msg)
 				}
+				mirrors[i] = initial
 				payload, err := protocol.MarshalServer(msg)
 				if err != nil {
 					t.Fatal(err)
@@ -78,7 +94,7 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 				initialBytes += len(payload)
 			}
 
-			var updates, patches, snapshots, sentBytes, fullBytes int
+			var updates, patches, snapshots, sentBytes, fullBytes, gzipBytes, fullGzipBytes int
 			for tick := 0; tick < 30; tick++ {
 				tc.write(grid, tick)
 				s.broadcastPaneUpdates(ctx, false)
@@ -105,7 +121,7 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, msg := range frameMessages {
+				for i, msg := range frameMessages {
 					payload, err := protocol.MarshalServer(msg)
 					if err != nil {
 						t.Fatal(err)
@@ -113,13 +129,24 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 					updates++
 					sentBytes += len(payload)
 					fullBytes += len(fullPayload)
+					gzipBytes += gzipSize(t, payload)
+					fullGzipBytes += gzipSize(t, fullPayload)
 					switch msg.(type) {
 					case protocol.MsgPanePatch:
 						patches++
+						var valid bool
+						mirrors[i], valid = protocol.ApplyPanePatch(mirrors[i], msg.(protocol.MsgPanePatch))
+						if !valid {
+							t.Fatalf("tick %d client %d rejected its patch", tick, i)
+						}
 					case protocol.MsgPaneUpdate:
 						snapshots++
+						mirrors[i] = msg.(protocol.MsgPaneUpdate)
 					default:
 						t.Fatalf("unexpected pane message %T", msg)
+					}
+					if !reflect.DeepEqual(mirrors[i], full) {
+						t.Fatalf("tick %d client %d mirror differs from full render", tick, i)
 					}
 				}
 			}
@@ -132,7 +159,20 @@ func TestPaneTrafficWorkloads(t *testing.T) {
 			if tc.wantPatches && sentBytes >= fullBytes {
 				t.Fatalf("patch traffic %d B did not beat full traffic %d B", sentBytes, fullBytes)
 			}
-			t.Logf("initial=%d B, steady=%d B, full_equivalent=%d B, updates=%d, patches=%d, snapshots=%d, updates_per_client_per_s=%.2f, bytes_per_update=%.1f", initialBytes, sentBytes, fullBytes, updates, patches, snapshots, float64(updates)/float64(tc.clients)/0.99, float64(sentBytes)/float64(updates))
+			t.Logf("initial=%d B, steady=%d B, full_equivalent=%d B, gzip_steady=%d B, gzip_full_equivalent=%d B, updates=%d, patches=%d, snapshots=%d, updates_per_client_per_s=%.2f, bytes_per_update=%.1f", initialBytes, sentBytes, fullBytes, gzipBytes, fullGzipBytes, updates, patches, snapshots, float64(updates)/float64(tc.clients)/0.99, float64(sentBytes)/float64(updates))
 		})
 	}
+}
+
+func gzipSize(t *testing.T, payload []byte) int {
+	t.Helper()
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Len()
 }

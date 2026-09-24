@@ -91,21 +91,28 @@ export class GridRenderer {
     const base = this.panes.get(patch.paneId);
     if (!base || base.generation !== patch.baseGeneration ||
         base.cols !== patch.cols || base.rows !== patch.rows ||
-        base.lines.length !== base.rows || patch.generation <= patch.baseGeneration) {
+        base.lines.length !== base.rows || patch.generation <= patch.baseGeneration ||
+        Math.abs(patch.shiftRows) >= base.rows) {
       this.panes.delete(patch.paneId);
       this.invalidate();
       return false;
     }
-    const lines = base.lines.slice();
+    const lines = Array.from({ length: base.rows }, (_, y) => base.lines[y - patch.shiftRows]);
     const seen = new Set<number>();
     for (const row of patch.changedRows) {
-      if (row.y < 0 || row.y >= base.rows || seen.has(row.y) || row.cells.length !== base.cols) {
+      if (row.y < 0 || row.y >= base.rows || seen.has(row.y) || row.cells.length !== base.cols ||
+          (patch.shiftRows !== 0 && lines[row.y] !== undefined)) {
         this.panes.delete(patch.paneId);
         this.invalidate();
         return false;
       }
       seen.add(row.y);
       lines[row.y] = create(LineDataSchema, { cells: row.cells });
+    }
+    if (lines.some((line) => line === undefined || line.cells.length !== base.cols)) {
+      this.panes.delete(patch.paneId);
+      this.invalidate();
+      return false;
     }
     // Cursor and mouse fields always overwrite: an absent field is false.
     this.panes.set(patch.paneId, {
