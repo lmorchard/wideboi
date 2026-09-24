@@ -193,7 +193,7 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 	cli.Attach(ctx)
 
 	// waitQuiet reports whether a stretch of `quiet` with no
-	// MsgPaneUpdate arrives before `ceiling`. Every message still goes
+	// pane update or patch arrives before `ceiling`. Every message still goes
 	// through the client, so the focus pane is known for SendInput.
 	waitQuiet := func(quiet, ceiling time.Duration) bool {
 		deadline := time.After(ceiling)
@@ -203,7 +203,8 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 			select {
 			case msg := <-cc.ServerSendChan():
 				cli.HandleServerMsg(msg)
-				if _, ok := msg.(protocol.MsgPaneUpdate); ok {
+				switch msg.(type) {
+				case protocol.MsgPaneUpdate, protocol.MsgPanePatch:
 					timer.Reset(quiet)
 				}
 			case <-timer.C:
@@ -216,7 +217,7 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 	// The ceiling covers shell startup and the Working->Idle status
 	// decay at ~3s, whose snapshot forces one more round of updates.
 	if !waitQuiet(time.Second, 8*time.Second) {
-		t.Fatal("an idle session never went a full second without a MsgPaneUpdate")
+		t.Fatal("an idle session never went a full second without a pane update")
 	}
 
 	// Typing into an idle pane flips its status to Working, and that
@@ -234,11 +235,11 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 				switch msg.(type) {
 				case protocol.MsgLayoutSnapshot:
 					afterSnapshot = true
-				case protocol.MsgPaneUpdate:
+				case protocol.MsgPaneUpdate, protocol.MsgPanePatch:
 					return afterSnapshot
 				}
 			case <-deadline:
-				t.Fatalf("typing %q produced no MsgPaneUpdate", key)
+				t.Fatalf("typing %q produced no pane update", key)
 			}
 		}
 	}

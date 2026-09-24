@@ -1,23 +1,30 @@
-# Partial pane update investigation (#158)
+# Partial pane updates (#158)
+
+## Wire contract
+
+`MsgPaneUpdate` is a complete pane snapshot with a generation. A new client, a resize, a layout resend, a missed send, or a resynchronization request receives one. `MsgPanePatch` names the exact `BaseGeneration` it extends, a new generation, complete replacement rows, and cursor and mouse state. Empty `ChangedRows` represents a cursor or mouse-only change. The server compares rendered rows instead of trusting the emulator's `Touched()` flags, which have known resize behavior (`docs/LESSONS.md`). When at least half the rows changed, it sends a full snapshot; this includes typical scrolling.
+
+The server keeps the last accepted full state for each client and pane. `paneSendMu` orders successive sends. A client applies a patch only if its pane ID, dimensions, and generation match its baseline; otherwise it requests `MsgPaneResync`. A send rejected by the transport invalidates the server's baseline, so the next send is full. If a transport accepted but lost a message, the client detects the mismatch on a later patch and requests a full snapshot. Layout-triggered sends are full because a layout snapshot may replace a client's mirror. Both the terminal and browser clients reconstruct the same `MsgPaneUpdate` state from patches.
 
 ## Measurements
 
-Run on an Apple M5 Max (darwin/arm64), Go benchmark with `-benchtime=100x`:
+Synthetic uncompressed JSON, Apple M5 Max (darwin/arm64), `-benchtime=100x`:
 
-| Workload | Full JSON | Changed-row prototype | Row reduction |
+| Workload | Full snapshot | Row patch | Reduction |
 | --- | ---: | ---: | ---: |
-| One changed row, 80×24 | 426,397 B | 17,883 B | 95.8% |
-| Scrolling, 80×24 (all rows) | 426,397 B | 426,791 B | none |
-| One changed row, 160×48 | 1,705,166 B | 35,643 B | 97.9% |
+| One changed row, 80×24 | 426,412 B | 17,927 B | 95.8% |
+| Scrolling, 80×24 (all rows) | 426,412 B | 426,835 B | none; full snapshot selected |
+| One changed row, 160×48 | 1,705,181 B | 35,688 B | 97.9% |
 
-JSON encoding took about 1.06 ms for an 80×24 full update versus 40 µs for its one-row prototype; at 160×48 it took 3.87 ms versus 78 µs. Full-grid construction alone took 65 µs and 327 KB allocated at 80×24, 289 µs and 1.28 MB at 160×48, and 608 µs and 2.85 MB at 240×72. Run `GOCACHE=/private/tmp/wideboi-go-cache go test ./internal/server -run '^$' -bench 'BenchmarkPane(UpdateRender|JSONPayload)$' -benchmem` to repeat.
+JSON encoding took about 0.91 ms for an 80×24 full update versus 37 µs for its one-row patch; at 160×48 it took 3.48 ms versus 73 µs. Complete frame construction took 65 µs and 327 KB allocated at 80×24, 289 µs and 1.28 MB at 160×48, and 608 µs and 2.85 MB at 240×72 in the earlier benchmark. Comparing rows to build a patch added 3.8 µs and 32 B allocated at 80×24, or 14.7 µs and 32 B at 160×48. Applying it to a Go protocol snapshot added about 0.14 µs and 640 B at 80×24, or 0.15 µs and 1.3 KB at 160×48. The terminal client currently repaints its mirror from the reconstructed full snapshot, so its total patch handling cost is higher than the protocol-only apply benchmark.
 
-These are synthetic, uncompressed JSON messages with default-style cells. The row prototype includes a pane ID, base and new generations, row coordinates and complete cell data for each changed row, plus cursor and mouse state. It does not include diffing cost, client reconstruction cost, WebSocket framing, or compression. The current wire format does not carry generation numbers, so this is a payload comparison, not an implementation of partial delivery. With multiple clients, outgoing bytes scale roughly by client count; rendering and diffing can be shared only if their accepted baselines agree.
+The server ticks every 33 ms, giving a sustained changed pane an upper bound of about 30 updates/s. At that rate, one 80×24 pane with a one-row change would send about 12.8 MB/s in full JSON per client versus 0.54 MB/s in row patches; four clients would receive about 51 MB/s versus 2.2 MB/s in aggregate. These are calculated upper bounds, not measured live workload rates. Actual rates depend on PTY output and frame coalescing. These benchmarks omit WebSocket framing and compression. Full frames are still rendered once per changed pane, and the server retains a baseline per client; patch comparison is repeated for each client baseline.
 
-## Suggested protocol
+Repeat the payload and CPU measurements with:
 
-Use a full snapshot for attach, reconnect, resize, layout resends, and recovery. Send a row patch only when a client has accepted the exact `BaseGeneration` and the encoded patch is smaller than a full snapshot. Each patch should carry `PaneID`, `BaseGeneration`, `Generation`, complete replacement rows with row indices, and cursor visibility/position and mouse-tracking state. A cursor-only change then has no rows. Complete rows preserve styled cells and wide-glyph continuation cells without defining span boundaries first. Scrolling can touch every row and should normally send a full snapshot.
+```sh
+go test ./internal/server -run '^$' -bench 'BenchmarkPane(UpdateRender|JSONPayload)$' -benchmem
+go test ./internal/protocol -run '^$' -bench BenchmarkPanePatchBuildAndApply -benchmem
+```
 
-The server must track the last accepted baseline per client and pane. On a failed `SendServer`, it must keep or invalidate that baseline and retry with a full snapshot. The client must reject a patch whose base does not match its current generation and request a full snapshot. The transport must preserve per-pane order; `paneSendMu` currently serializes broadcasts. A newly attached client has no baseline. Layout snapshots can blank mirrors, so their forced pane resends must remain full snapshots.
-
-Do not use emulator `Touched()` as the only source of dirty rows: its resize behavior is documented in `docs/LESSONS.md`. Comparing consecutive rendered snapshots is reliable but costs a full render and a cell comparison. A later grid-level dirty-region API would need its own mutation and resize tests. Both terminal and browser clients need the same patch application rules and fixtures before enabling patches on the wire. Tests should include one-cell typing, cursor-only moves, scrolling, styled and wide cells, resize, attach/reconnect, and a dropped patch followed by recovery.
+Tests cover a one-row edit, styled and wide cells, cursor-only changes, scrolling fallback, resize fallback, new clients, a missed patch followed by a full snapshot, and a client generation mismatch followed by resynchronization. The server concurrency test also runs input, resize, pane close, and frame delivery while one transport does not read.

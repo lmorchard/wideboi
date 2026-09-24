@@ -230,6 +230,10 @@ export class WideboiApp extends LitElement {
         this.paneTitles = env.p.PaneTitles || {};
       } else if (env.t === 'MsgPaneUpdate') {
         this.renderer.handlePaneUpdate(env.p);
+      } else if (env.t === 'MsgPanePatch') {
+        if (!this.renderer.handlePanePatch(env.p)) {
+          client.send('MsgPaneResync', { PaneID: env.p.PaneID });
+        }
       }
     };
 

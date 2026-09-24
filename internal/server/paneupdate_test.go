@@ -8,6 +8,8 @@ import (
 	"image"
 	"slices"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +24,153 @@ type blockingDrawGrid struct {
 	*statusGrid
 	started chan struct{}
 	release chan struct{}
+}
+
+type cellGrid struct {
+	*statusGrid
+	content atomic.Pointer[string]
+}
+
+func (g *cellGrid) set(s string) {
+	g.content.Store(&s)
+	g.bump()
+}
+
+func (g *cellGrid) Draw(dst uv.Screen, _ image.Rectangle) {
+	if text := g.content.Load(); text != nil {
+		dst.SetCell(0, 0, &uv.Cell{Content: *text, Width: 1})
+	}
+}
+
+func takePaneMessage(t *testing.T, tp *transport.InProcChannel) any {
+	t.Helper()
+	select {
+	case msg := <-tp.ServerSend:
+		return msg
+	default:
+		t.Fatal("expected pane message")
+		return nil
+	}
+}
+
+func TestPanePatchPerClientBaselineAndRecovery(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
+	g := &cellGrid{statusGrid: newStatusGrid(term.StatusIdle)}
+	g.set("a")
+	s.panes[1].grid = g
+	s.panes[1].cols, s.panes[1].rows = 4, 4
+	healthy := s.transports[0].(*transport.InProcChannel)
+	slow := transport.NewInProcChannel(2)
+	s.transports = append(s.transports, slow)
+	ctx := context.Background()
+
+	s.broadcastPaneUpdates(ctx, false)
+	first, ok := takePaneMessage(t, healthy).(protocol.MsgPaneUpdate)
+	if !ok {
+		t.Fatal("first healthy delivery was not a full snapshot")
+	}
+	if _, ok := takePaneMessage(t, slow).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("first slow delivery was not a full snapshot")
+	}
+
+	g.set("b")
+	for len(slow.ServerSend) < cap(slow.ServerSend) {
+		slow.ServerSend <- struct{}{}
+	}
+	s.broadcastPaneUpdates(ctx, false)
+	patch, ok := takePaneMessage(t, healthy).(protocol.MsgPanePatch)
+	if !ok || len(patch.ChangedRows) != 1 {
+		t.Fatalf("healthy client did not get one changed row: %+v", patch)
+	}
+	drainPaneUpdates(slow)
+	s.broadcastPaneUpdates(ctx, false)
+	if _, ok := takePaneMessage(t, slow).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("client that missed a patch did not get a full recovery snapshot")
+	}
+	if got := drainPaneUpdates(healthy); len(got) != 0 {
+		t.Fatalf("healthy client got redundant update: %v", got)
+	}
+
+	late := transport.NewInProcChannel(2)
+	s.mu.Lock()
+	s.transports = append(s.transports, late)
+	s.mu.Unlock()
+	s.broadcastPaneUpdates(ctx, false)
+	if _, ok := takePaneMessage(t, late).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("late client did not get a full snapshot")
+	}
+
+	// Model a transport that accepted the first patch but lost it after
+	// SendServer returned true. The next patch names generation 2, while
+	// this client still holds the initial generation 1 snapshot.
+	g.set("c")
+	s.broadcastPaneUpdates(ctx, false)
+	nextPatch, ok := takePaneMessage(t, healthy).(protocol.MsgPanePatch)
+	if !ok || nextPatch.BaseGeneration != patch.Generation {
+		t.Fatalf("next patch did not advance from accepted baseline: %+v", nextPatch)
+	}
+	if _, ok := protocol.ApplyPanePatch(first, nextPatch); ok {
+		t.Fatal("client accepted a patch after losing its predecessor")
+	}
+	s.handleClientMsg(ctx, healthy, protocol.MsgPaneResync{PaneID: 1})
+	if _, ok := takePaneMessage(t, healthy).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("resync request did not produce a full snapshot")
+	}
+}
+
+// The server must keep accepting input and resize work while snapshots
+// are rendered and one client never drains its transport. Pane closure
+// racing those operations must not retain a stale delivery baseline.
+func TestConcurrentInputResizeCloseWithSlowTransport(t *testing.T) {
+	healthy := transport.NewInProcChannel(4096)
+	s := NewServer(healthy, "/bin/sh", "")
+	s.closeGrace = 10 * time.Millisecond
+	slow := transport.NewInProcChannel(1)
+	slow.ServerSend <- struct{}{}
+	s.transports = append(s.transports, slow)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.handleClientMsg(ctx, healthy, protocol.MsgAttach{Cols: 80, Rows: 24})
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	run := func(fn func()) {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; fn() }()
+	}
+	run(func() {
+		for i := 0; i < 30; i++ {
+			s.handleClientMsg(ctx, healthy, protocol.MsgInput{PaneID: 1, Data: []byte("x")})
+		}
+	})
+	run(func() {
+		for i := 0; i < 15; i++ {
+			s.handleClientMsg(ctx, healthy, protocol.MsgResize{Cols: 80 + i%2*20, Rows: 24 + i%2*4})
+		}
+	})
+	run(func() {
+		for i := 0; i < 30; i++ {
+			s.broadcastPaneUpdates(ctx, false)
+		}
+	})
+	run(func() {
+		time.Sleep(time.Millisecond)
+		s.handleClientMsg(ctx, healthy, protocol.MsgVerb{Verb: protocol.VerbKillPane})
+	})
+	close(start)
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("concurrent pane work did not finish")
+	}
+	closeDone := make(chan struct{})
+	go func() { _ = s.Close(); close(closeDone) }()
+	select {
+	case <-closeDone:
+	case <-ctx.Done():
+		t.Fatal("server close stalled after concurrent pane work")
+	}
 }
 
 type changingDrawGrid struct{ *statusGrid }
@@ -149,7 +298,10 @@ func drainPaneUpdates(tp *transport.InProcChannel) []int {
 	for {
 		select {
 		case msg := <-tp.ServerSend:
-			if u, ok := msg.(protocol.MsgPaneUpdate); ok {
+			switch u := msg.(type) {
+			case protocol.MsgPaneUpdate:
+				ids = append(ids, u.PaneID)
+			case protocol.MsgPanePatch:
 				ids = append(ids, u.PaneID)
 			}
 		default:
@@ -262,6 +414,9 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 	if _, ok := s.paneGens[tp][2]; ok {
 		t.Error("record for exited pane 2 survived a broadcast")
 	}
+	if _, ok := s.paneFrames[tp][2]; ok {
+		t.Error("baseline for exited pane 2 survived a broadcast")
+	}
 
 	// With no panes left nothing is delivered, and the last record
 	// must still go.
@@ -272,10 +427,16 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 	if n := len(s.paneGens[tp]); n != 0 {
 		t.Errorf("%d record(s) survived the last pane exiting", n)
 	}
+	if n := len(s.paneFrames[tp]); n != 0 {
+		t.Errorf("%d baseline(s) survived the last pane exiting", n)
+	}
 
 	s.dropClient(context.Background(), tp)
 	if _, ok := s.paneGens[tp]; ok {
 		t.Error("records for a dropped client survived dropClient")
+	}
+	if _, ok := s.paneFrames[tp]; ok {
+		t.Error("baselines for a dropped client survived dropClient")
 	}
 }
 

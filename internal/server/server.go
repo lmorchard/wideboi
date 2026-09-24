@@ -48,6 +48,9 @@ type Server struct {
 	// client gets everything and a dropped update is retried for the
 	// client that missed it. See broadcastPaneUpdates.
 	paneGens map[transport.Transport]map[int]uint64
+	// paneFrames is the last accepted full state per client and pane. A
+	// client's next patch is calculated only from its own baseline.
+	paneFrames map[transport.Transport]map[int]protocol.MsgPaneUpdate
 
 	// clientSizes records the last known window dimensions of each connected
 	// client. The server session size is the minimum among all clients,
@@ -252,6 +255,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	}
 	s.transports = out
 	delete(s.paneGens, tp)
+	delete(s.paneFrames, tp)
 	delete(s.clientSizes, tp)
 	s.recomputeSessionSizeLocked()
 	s.resizePanesLocked()
@@ -290,8 +294,11 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
 	needBroadcast := false
+	resyncPaneID := 0
 
 	switch m := msg.(type) {
+	case protocol.MsgPaneResync:
+		resyncPaneID = m.PaneID
 	case protocol.MsgStatusRequest:
 		needBroadcast = true
 
@@ -411,6 +418,17 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 
 	s.mu.Unlock()
+	if resyncPaneID > 0 {
+		// Take the broadcast lane before invalidating the baseline. An
+		// in-flight patch may finish first, but the full resend follows it.
+		s.paneSendMu.Lock()
+		s.mu.Lock()
+		delete(s.paneGens[tp], resyncPaneID)
+		delete(s.paneFrames[tp], resyncPaneID)
+		s.mu.Unlock()
+		s.paneSendMu.Unlock()
+		s.broadcastPaneUpdates(ctx, false)
+	}
 
 	if needBroadcast {
 		s.broadcastLayout(ctx)
@@ -780,12 +798,17 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	s.paneSendMu.Lock()
 	defer s.paneSendMu.Unlock()
 
+	type target struct {
+		tp       transport.Transport
+		baseline protocol.MsgPaneUpdate
+		hasBase  bool
+	}
 	type outgoing struct {
 		pane   *Pane
 		update protocol.MsgPaneUpdate
 		ready  bool
 		gen    uint64
-		to     []transport.Transport
+		to     []target
 	}
 	s.mu.Lock()
 	tps := append([]transport.Transport{}, s.transports...)
@@ -795,11 +818,12 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		// the recorded generation behind the content, so the next
 		// tick resends: one update too many, never one too few.
 		gen := p.Generation()
-		var to []transport.Transport
+		var to []target
 		for _, tp := range tps {
 			last, ok := s.paneGens[tp][id]
 			if force || !ok || last != gen {
-				to = append(to, tp)
+				baseline, hasBase := s.paneFrames[tp][id]
+				to = append(to, target{tp: tp, baseline: baseline, hasBase: hasBase && ok && !force})
 			}
 		}
 		if len(to) > 0 {
@@ -814,6 +838,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	for i := range out {
 		update, ok := out[i].pane.UpdateMessage()
 		if ok {
+			update.Generation = out[i].gen
 			out[i].update = update
 			out[i].ready = true
 		}
@@ -824,6 +849,7 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		id       int
 		pane     *Pane
 		gen      uint64
+		frame    protocol.MsgPaneUpdate
 		accepted bool
 	}
 	var results []result
@@ -837,8 +863,14 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		if !current {
 			continue
 		}
-		for _, tp := range o.to {
-			results = append(results, result{tp, o.update.PaneID, o.pane, o.gen, tp.SendServer(ctx, o.update)})
+		for _, target := range o.to {
+			var message transport.ServerMessage = o.update
+			if target.hasBase {
+				if patch, ok := protocol.BuildPanePatch(target.baseline, o.update); ok {
+					message = patch
+				}
+			}
+			results = append(results, result{target.tp, o.update.PaneID, o.pane, o.gen, o.update, target.tp.SendServer(ctx, message)})
 		}
 	}
 
@@ -852,6 +884,9 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	}
 	if s.paneGens == nil {
 		s.paneGens = make(map[transport.Transport]map[int]uint64)
+	}
+	if s.paneFrames == nil {
+		s.paneFrames = make(map[transport.Transport]map[int]protocol.MsgPaneUpdate)
 	}
 	for _, r := range results {
 		// A client dropped mid-send must not be re-added, and a pane
@@ -867,12 +902,14 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 			// clients whose record may already equal gen, and leaving
 			// that in place would mean no later tick retries it.
 			delete(s.paneGens[r.tp], r.id)
+			delete(s.paneFrames[r.tp], r.id)
 			continue
 		}
 		// Content can change while the update is being rendered or sent.
 		// Leave this client behind so the next tick sends the new state.
 		if r.pane.Generation() != r.gen {
 			delete(s.paneGens[r.tp], r.id)
+			delete(s.paneFrames[r.tp], r.id)
 			continue
 		}
 		m := s.paneGens[r.tp]
@@ -881,8 +918,21 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 			s.paneGens[r.tp] = m
 		}
 		m[r.id] = r.gen
+		frames := s.paneFrames[r.tp]
+		if frames == nil {
+			frames = make(map[int]protocol.MsgPaneUpdate)
+			s.paneFrames[r.tp] = frames
+		}
+		frames[r.id] = r.frame
 	}
 	for _, m := range s.paneGens {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.paneFrames {
 		for id := range m {
 			if _, ok := s.panes[id]; !ok {
 				delete(m, id)
@@ -973,6 +1023,7 @@ func (s *Server) Close() error {
 		tps := s.transports
 		s.transports = nil
 		s.paneGens = nil
+		s.paneFrames = nil
 		s.owner = nil
 		s.mu.Unlock()
 		for _, tp := range tps {

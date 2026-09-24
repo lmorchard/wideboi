@@ -20,6 +20,8 @@ var wireTypes = []any{
 	MsgDetach{},
 	MsgLayoutSnapshot{},
 	MsgPaneUpdate{},
+	MsgPanePatch{},
+	MsgPaneResync{},
 	MsgPaneClosed{},
 }
 

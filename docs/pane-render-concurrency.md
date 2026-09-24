@@ -1,0 +1,5 @@
+# Pane rendering and resize concurrency (#155)
+
+PR #162 moved full pane rendering outside `Server.mu` while preserving `paneSendMu` ordering. The follow-up stress test runs input, resize, pane close, and frame delivery concurrently with a non-reading transport. The full race-enabled Go suite passes.
+
+`resizePanesLocked` already releases `Server.mu` around each `Pane.Resize`, but the caller's message loop still waits for the resize to finish. Moving that work to a background worker would change ordering: a later resize could overtake an earlier one, a layout broadcast could describe dimensions the pane has not reached, and close would need to cancel queued jobs while still letting `grid.Close` break a wedged in-progress resize. A safe worker design needs a per-pane desired-size generation, serialized execution, coalescing of superseded sizes, and a completion point before the corresponding pane update is sent. The current synchronous path retains those guarantees. This follow-up does not change the resize path.

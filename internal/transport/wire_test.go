@@ -165,6 +165,9 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 				{Content: "世", Width: 2, Style: protocol.EncodeStyle(uv.Style{Fg: ansi.BasicColor(4)})},
 			}},
 		},
+		protocol.MsgPanePatch{PaneID: 1, Cols: 2, Rows: 2, BaseGeneration: 3, Generation: 4,
+			ChangedRows: []protocol.PaneRow{{Y: 0, Cells: protocol.LineData{{Content: "世", Width: 2}}}}},
+		protocol.MsgPaneResync{PaneID: 1},
 		protocol.MsgPaneClosed{PaneID: 4, ExitCode: 130},
 	}
 

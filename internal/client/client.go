@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -59,6 +60,7 @@ type Client struct {
 	paneTitles   map[int]string
 	layoutMode   protocol.LayoutMode
 	mirrors      map[int]*PaneMirror
+	paneUpdates  map[int]protocol.MsgPaneUpdate
 	cursorInfos  map[int]cursorPos
 	prefixLabel  string
 	controlMode  bool
@@ -112,6 +114,7 @@ func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Clie
 		strip:       layout.NewStrip(),
 		prefixLabel: prefixLabel,
 		mirrors:     make(map[int]*PaneMirror),
+		paneUpdates: make(map[int]protocol.MsgPaneUpdate),
 		cursorInfos: make(map[int]cursorPos),
 	}
 }
@@ -202,10 +205,12 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 					Cols:    w,
 					Rows:    h,
 				}
+				delete(c.paneUpdates, p.PaneID)
 			} else if p.Src.Dx() > m.Cols || p.Src.Dy() > m.Rows {
 				m.Cols = max(m.Cols, p.Src.Dx())
 				m.Rows = max(m.Rows, p.Src.Dy())
 				m.Surface = compose.NewSurface(m.Cols, m.Rows)
+				delete(c.paneUpdates, p.PaneID)
 			}
 		}
 
@@ -220,6 +225,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		for id := range c.mirrors {
 			if !live[id] {
 				delete(c.mirrors, id)
+				delete(c.paneUpdates, id)
 			}
 		}
 		for id := range c.mouseTracking {
@@ -229,44 +235,63 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		}
 
 	case protocol.MsgPaneUpdate:
-		// Trace, not Debug: busy panes still send one of these per
-		// server frame.
-		slog.Log(context.Background(), logger.LevelTrace, "received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
-		mirror, ok := c.mirrors[m.PaneID]
-		if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {
-			mirror = &PaneMirror{
-				ID:      m.PaneID,
-				Surface: compose.NewSurface(m.Cols, m.Rows),
-				Cols:    m.Cols,
-				Rows:    m.Rows,
-			}
-			c.mirrors[m.PaneID] = mirror
-		}
-		for y, line := range m.Lines {
-			currX := 0
-			for _, cell := range line {
-				uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
-				uvCell.Style = cell.Style.Decode()
-				mirror.Surface.SetCell(currX, y, uvCell)
-				w := cell.Width
-				if w <= 0 {
-					w = 1
-				}
-				currX += w
+		c.applyPaneUpdateLocked(m)
+
+	case protocol.MsgPanePatch:
+		base, ok := c.paneUpdates[m.PaneID]
+		if ok {
+			if next, valid := protocol.ApplyPanePatch(base, m); valid {
+				c.applyPaneUpdateLocked(next)
+				break
 			}
 		}
-		if c.cursorInfos == nil {
-			c.cursorInfos = make(map[int]cursorPos)
-		}
-		c.cursorInfos[m.PaneID] = cursorPos{
-			pt:      image.Pt(m.CursorX, m.CursorY),
-			visible: m.CursorVisible,
-		}
-		if c.mouseTracking == nil {
-			c.mouseTracking = make(map[int]bool)
-		}
-		c.mouseTracking[m.PaneID] = m.MouseTracking
+		delete(c.paneUpdates, m.PaneID)
+		// A baseline mismatch means at least one patch was lost or a
+		// layout replaced the mirror. Ask the server for a full snapshot.
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		c.transport.SendClient(ctx, protocol.MsgPaneResync{PaneID: m.PaneID})
+		cancel()
 	}
+}
+
+func (c *Client) applyPaneUpdateLocked(m protocol.MsgPaneUpdate) {
+	// Trace, not Debug: busy panes still send one of these per frame.
+	slog.Log(context.Background(), logger.LevelTrace, "received MsgPaneUpdate", "paneID", m.PaneID, "cols", m.Cols, "rows", m.Rows)
+	c.paneUpdates[m.PaneID] = m
+	mirror, ok := c.mirrors[m.PaneID]
+	if !ok || mirror.Cols != m.Cols || mirror.Rows != m.Rows {
+		mirror = &PaneMirror{
+			ID:      m.PaneID,
+			Surface: compose.NewSurface(m.Cols, m.Rows),
+			Cols:    m.Cols,
+			Rows:    m.Rows,
+		}
+		c.mirrors[m.PaneID] = mirror
+	}
+	for y, line := range m.Lines {
+		currX := 0
+		for _, cell := range line {
+			uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
+			uvCell.Style = cell.Style.Decode()
+			mirror.Surface.SetCell(currX, y, uvCell)
+			w := cell.Width
+			if w <= 0 {
+				w = 1
+			}
+			currX += w
+		}
+	}
+	if c.cursorInfos == nil {
+		c.cursorInfos = make(map[int]cursorPos)
+	}
+	c.cursorInfos[m.PaneID] = cursorPos{
+		pt:      image.Pt(m.CursorX, m.CursorY),
+		visible: m.CursorVisible,
+	}
+	if c.mouseTracking == nil {
+		c.mouseTracking = make(map[int]bool)
+	}
+	c.mouseTracking[m.PaneID] = m.MouseTracking
 }
 
 // drawLayer names what Draw paints this frame.

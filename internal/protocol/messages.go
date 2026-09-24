@@ -50,6 +50,7 @@ type LineData []CellData
 // MsgPaneUpdate carries a pane's rendered cell buffer and cursor state.
 type MsgPaneUpdate struct {
 	PaneID        int
+	Generation    uint64
 	Cols          int
 	Rows          int
 	Lines         []LineData
@@ -62,6 +63,30 @@ type MsgPaneUpdate struct {
 	// writing bytes is what sends a pane update.
 	MouseTracking bool
 }
+
+// PaneRow replaces one complete row. Complete rows keep wide glyph
+// continuation cells and all style fields together.
+type PaneRow struct {
+	Y     int
+	Cells LineData
+}
+
+// MsgPanePatch changes a pane relative to an exact client baseline.
+// Rows may be empty for cursor or mouse-mode-only changes.
+type MsgPanePatch struct {
+	PaneID         int
+	Cols, Rows     int
+	BaseGeneration uint64
+	Generation     uint64
+	ChangedRows    []PaneRow
+	CursorX        int
+	CursorY        int
+	CursorVisible  bool
+	MouseTracking  bool
+}
+
+// MsgPaneResync asks for a full snapshot after a missing or stale patch.
+type MsgPaneResync struct{ PaneID int }
 
 // PlacementKind says what a placement represents, which the renderer
 // cannot infer from geometry: a card sliver and a pane clipped by the
