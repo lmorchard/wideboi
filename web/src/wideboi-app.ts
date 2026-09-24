@@ -2,6 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { WideboiClient } from './client';
 import { GridRenderer } from './renderer';
+import { sendKeyboardInput, sendTextInput } from './input';
 import { consumeLinkToken } from './token';
 import type { WSEnvelope } from './protocol';
 
@@ -140,6 +141,8 @@ export class WideboiApp extends LitElement {
   private errorMsg = '';
 
   private inPrefixMode = false;
+  private listeners?: AbortController;
+  private pointer?: { id: number; paneID: number; placement: import('./protocol').PlacementData; button: number; tracking: boolean; startX: number; startY: number };
 
   constructor() {
     super();
@@ -159,6 +162,7 @@ export class WideboiApp extends LitElement {
   }
 
   firstUpdated() {
+    this.listeners = new AbortController();
     this.renderer = new GridRenderer(this.canvas);
     this.resizeObserver.observe(this.canvas);
     
@@ -169,21 +173,40 @@ export class WideboiApp extends LitElement {
     this.setupMouse();
   }
 
+  connectedCallback() {
+    super.connectedCallback();
+    if (this.renderer && !this.listeners) {
+      this.listeners = new AbortController();
+      this.resizeObserver.observe(this.canvas);
+      if (this.connected) this.renderer.start();
+      this.setupKeyboard();
+      this.setupMouse();
+    }
+  }
+
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.listeners?.abort();
+    this.listeners = undefined;
+    this.pointer = undefined;
+    this.inPrefixMode = false;
     this.resizeObserver.disconnect();
     if (this.renderer) {
       this.renderer.stop();
     }
     if (this.client) {
       this.client.disconnect();
+      this.client = null;
     }
+    this.connected = false;
   }
 
   private connectClient() {
     if (this.client) {
       this.client.disconnect();
     }
+    this.connected = false;
+    this.inPrefixMode = false;
     
     this.errorMsg = '';
     
@@ -217,6 +240,7 @@ export class WideboiApp extends LitElement {
     client.onDisconnect = () => {
       if (this.client !== client) return;
       this.connected = false;
+      this.inPrefixMode = false;
       this.renderer?.stop();
       this.errorMsg = 'Disconnected from server.';
     }
@@ -230,6 +254,9 @@ export class WideboiApp extends LitElement {
         this.paneTitles = env.p.PaneTitles || {};
       } else if (env.t === 'MsgPaneUpdate') {
         this.renderer.handlePaneUpdate(env.p);
+      } else if (env.t === 'MsgPaneClosed') {
+        this.renderer.handlePaneClosed(env.p.PaneID);
+        this.activePanes = this.activePanes.filter(id => id !== env.p.PaneID);
       }
     };
 
@@ -240,6 +267,7 @@ export class WideboiApp extends LitElement {
     document.addEventListener('keydown', (e) => {
       if (!this.connected || !this.renderer || !this.client) return;
       if (e.target instanceof HTMLInputElement) return; 
+      if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
       // Intercept the default prefix (ctrl+b) locally to drive verbs.
       // 1 = VerbFocusLeft, 2 = VerbFocusRight, 3 = VerbNewColumn, 5 = VerbKillPane
@@ -298,106 +326,67 @@ export class WideboiApp extends LitElement {
       }
 
       
-      const keyData = {
-        Text: e.key.length === 1 ? e.key : "",
-        Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0),
-        Code: e.key.length === 1 ? e.key.charCodeAt(0) : 0,
-        ShiftedCode: 0,
-        BaseCode: 0,
-        IsRepeat: e.repeat
-      };
+      if (sendKeyboardInput(this.client, this.renderer.getFocusedPaneId(), e)) e.preventDefault();
+    }, { signal: this.listeners?.signal });
 
-      let data = "";
-      if (e.key === "Enter") { keyData.Code = 13; keyData.Text = "\r"; }
-      else if (e.key === "Backspace") { keyData.Code = 127; keyData.Text = "\x7f"; }
-      else if (e.key === "Escape") { keyData.Code = 27; keyData.Text = "\x1b"; }
-      else if (e.key === "Tab") { keyData.Code = 9; keyData.Text = "\t"; }
-      else if (e.key === "ArrowUp") { data = "\x1b[A"; }
-      else if (e.key === "ArrowDown") { data = "\x1b[B"; }
-      else if (e.key === "ArrowRight") { data = "\x1b[C"; }
-      else if (e.key === "ArrowLeft") { data = "\x1b[D"; }
-      else if (e.key === "Home") { data = "\x1b[H"; }
-      else if (e.key === "End") { data = "\x1b[F"; }
-      else if (e.key === "PageUp") { data = "\x1b[5~"; }
-      else if (e.key === "PageDown") { data = "\x1b[6~"; }
-      else if (e.key === "Insert") { data = "\x1b[2~"; }
-      else if (e.key === "Delete") { data = "\x1b[3~"; }
-
-      const inputMsg = {
-        PaneID: this.renderer.getFocusedPaneId(),
-        Key: keyData,
-        Data: data ? btoa(data) : "" // MsgInput Data is []byte so JSON might expect base64? Let's check!
-      };
-      
-      this.client.send('MsgInput', inputMsg);
+    document.addEventListener('paste', (e) => {
+      if (!this.connected || !this.renderer || !this.client || e.target instanceof HTMLInputElement) return;
+      const value = e.clipboardData?.getData('text/plain') || '';
+      if (!sendTextInput(this.client, this.renderer.getFocusedPaneId(), value)) return;
       e.preventDefault();
-    });
+    }, { signal: this.listeners?.signal });
+
+    document.addEventListener('compositionend', (e) => {
+      if (!this.connected || !this.renderer || !this.client || e.target instanceof HTMLInputElement) return;
+      sendTextInput(this.client, this.renderer.getFocusedPaneId(), (e as CompositionEvent).data);
+    }, { signal: this.listeners?.signal });
   }
 
   private setupMouse() {
     if (!this.canvas) return;
-    this.canvas.addEventListener('mousedown', (e) => {
+    this.canvas.addEventListener('pointerdown', (e) => {
       if (!this.connected || !this.renderer || !this.client) return;
-      
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
       const hit = this.renderer.getPaneHit(x, y);
-      
-      if (hit.paneID > 0 && hit.placement) {
-        this.client.send('MsgFocusPane', { PaneID: hit.paneID });
-        
-        const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
-        const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
-        
-        this.client.send('MsgMouse', {
-            PaneID: hit.paneID,
-            Kind: 0, 
-            X: localX,
-            Y: localY,
-            Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
-            Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
-        });
-      }
-    });
+      if (!hit.paneID || !hit.placement) return;
+      this.pointer = {
+        id: e.pointerId, paneID: hit.paneID, placement: hit.placement,
+        button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
+        tracking: this.renderer.mouseTracking(hit.paneID), startX: x, startY: y
+      };
+      this.canvas.setPointerCapture(e.pointerId);
+      this.renderer.clearSelection();
+      if (this.pointer.tracking) this.sendPointerMouse(0, e);
+      this.client.send('MsgFocusPane', { PaneID: hit.paneID });
+      e.preventDefault();
+    }, { signal: this.listeners?.signal });
 
-    this.canvas.addEventListener('mouseup', (e) => {
-      if (!this.connected || !this.renderer || !this.client) return;
-      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      const hit = this.renderer.getPaneHit(x, y);
-      if (hit.paneID > 0 && hit.placement) {
-        const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
-        const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
-        
-        this.client.send('MsgMouse', {
-            PaneID: hit.paneID,
-            Kind: 1, 
-            X: localX,
-            Y: localY,
-            Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
-            Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
-        });
+    this.canvas.addEventListener('pointermove', (e) => {
+      const press = this.pointer;
+      if (!press || press.id !== e.pointerId || !this.renderer) return;
+      if (press.tracking) this.sendPointerMouse(2, e);
+      else if (press.button === 1) {
+        const start = this.pointerCell(press.startX, press.startY, press.placement);
+        const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
+        const end = this.pointerCell(x, y, press.placement);
+        this.renderer.setSelection(press.paneID, start, end);
       }
-    });
+      e.preventDefault();
+    }, { signal: this.listeners?.signal });
 
-    this.canvas.addEventListener('mousemove', (e) => {
-      if (!this.connected || !this.renderer || !this.client) return;
-      if (e.buttons === 0) return; // Only send drags
-      
-      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
-      const hit = this.renderer.getPaneHit(x, y);
-      if (hit.paneID > 0 && hit.placement) {
-        const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
-        const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
-        
-        this.client.send('MsgMouse', {
-            PaneID: hit.paneID,
-            Kind: 2, 
-            X: localX,
-            Y: localY,
-            Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
-            Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
-        });
+    const release = (e: PointerEvent) => {
+      if (!this.pointer || this.pointer.id !== e.pointerId) return;
+      if (this.pointer.tracking) this.sendPointerMouse(1, e);
+      else if (this.renderer) {
+        const text = this.renderer.selectionText();
+        if (text && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
       }
-    });
+      this.pointer = undefined;
+      if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+    this.canvas.addEventListener('pointerup', release, { signal: this.listeners?.signal });
+    this.canvas.addEventListener('pointercancel', release, { signal: this.listeners?.signal });
 
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -414,7 +403,27 @@ export class WideboiApp extends LitElement {
         const delta = e.deltaY > 0 ? -3 : 3;
         this.client.send('MsgScroll', { PaneID: hit.paneID, Delta: delta });
       }
-    }, { passive: false });
+    }, { passive: false, signal: this.listeners?.signal });
+  }
+
+  private sendPointerMouse(kind: number, e: PointerEvent) {
+    const press = this.pointer;
+    if (!press || !this.client || !this.renderer || !this.connected) return;
+    const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
+    const p = press.placement;
+    const { x: localX, y: localY } = this.pointerCell(x, y, p);
+    this.client.send('MsgMouse', {
+      PaneID: press.paneID, Kind: kind, X: localX, Y: localY,
+      Button: press.button,
+      Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
+    });
+  }
+
+  private pointerCell(x: number, y: number, p: import('./protocol').PlacementData) {
+    return {
+      x: Math.max(p.Src.Min.X, Math.min(p.Src.Max.X - 1, p.Src.Min.X + x - p.Dst.Min.X)),
+      y: Math.max(p.Src.Min.Y, Math.min(p.Src.Max.Y - 1, p.Src.Min.Y + y - p.Dst.Min.Y))
+    };
   }
 
   private sendAttach() {

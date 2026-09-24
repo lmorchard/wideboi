@@ -15,30 +15,36 @@ export class WideboiClient {
   }
 
   public connect() {
+    this.disconnect();
     // The browser can include a failed WebSocket URL in its own console
     // message. Carry the credential in a subprotocol instead of that URL.
     const bytes = new TextEncoder().encode(this.token);
     let binary = "";
     for (const byte of bytes) binary += String.fromCharCode(byte);
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
-    this.ws = protocol ? new WebSocket(this.url, [protocol]) : new WebSocket(this.url);
+    const ws = protocol ? new WebSocket(this.url, [protocol]) : new WebSocket(this.url);
+    this.ws = ws;
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (this.ws !== ws) return;
       console.log("[WideboiClient] Connected");
       if (this.onConnect) this.onConnect();
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (this.ws !== ws) return;
       console.log("[WideboiClient] Disconnected");
       this.ws = null;
       if (this.onDisconnect) this.onDisconnect();
     };
 
-    this.ws.onerror = () => {
+    ws.onerror = () => {
+      if (this.ws !== ws) return;
       console.error("[WideboiClient] WebSocket error");
     };
 
-    this.ws.onmessage = (event: MessageEvent) => {
+    ws.onmessage = (event: MessageEvent) => {
+      if (this.ws !== ws) return;
       try {
         const envelope = JSON.parse(event.data) as WSEnvelope;
         if (this.onMessage) {

@@ -7,9 +7,17 @@ import (
 	"log/slog"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/lmorchard/wideboi/internal/protocol"
+)
+
+const (
+	webSocketReadLimit    = 1 << 20
+	webSocketWriteTimeout = 10 * time.Second
+	webSocketPongTimeout  = 90 * time.Second
+	webSocketPingInterval = 30 * time.Second
 )
 
 // WSEnvelope represents the JSON payload format sent over WebSockets.
@@ -50,14 +58,27 @@ func (wsConn *WebSocketServerConn) RunPumps(ctx context.Context) {
 
 func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 	defer wsConn.Close()
+	ping := time.NewTicker(webSocketPingInterval)
+	defer ping.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-wsConn.closed:
+			return
+		case <-ping.C:
+			wsConn.mu.Lock()
+			_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
+			err := wsConn.conn.WriteMessage(websocket.PingMessage, nil)
+			wsConn.mu.Unlock()
+			if err != nil {
+				wsConn.set("pinging websocket", err)
+				return
+			}
 		case msg, ok := <-wsConn.ServerSend:
 			if !ok {
-				continue
+				return
 			}
 
 			payloadBytes, err := json.Marshal(msg)
@@ -77,6 +98,7 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 			}
 
 			wsConn.mu.Lock()
+			_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
 			err = wsConn.conn.WriteJSON(env)
 			wsConn.mu.Unlock()
 
@@ -102,6 +124,12 @@ var clientTypes = map[string]func() any{
 
 func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 	defer close(wsConn.ClientSend)
+	defer wsConn.Close()
+	wsConn.conn.SetReadLimit(webSocketReadLimit)
+	_ = wsConn.conn.SetReadDeadline(time.Now().Add(webSocketPongTimeout))
+	wsConn.conn.SetPongHandler(func(string) error {
+		return wsConn.conn.SetReadDeadline(time.Now().Add(webSocketPongTimeout))
+	})
 
 	for {
 		select {
@@ -133,6 +161,8 @@ func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 
 			select {
 			case wsConn.ClientSend <- msg:
+			case <-wsConn.closed:
+				return
 			case <-ctx.Done():
 				return
 			}
@@ -151,12 +181,17 @@ func (wsConn *WebSocketServerConn) SendServer(ctx context.Context, msg ServerMes
 	default:
 	}
 
+	// A full queue means this peer cannot keep up. Closing only this
+	// connection keeps broadcasts and shutdown responsive for everyone else.
 	select {
 	case wsConn.ServerSend <- msg:
 		return true
 	case <-wsConn.closed:
 		return false
 	case <-ctx.Done():
+		return false
+	default:
+		_ = wsConn.Close()
 		return false
 	}
 }
@@ -170,6 +205,10 @@ func (wsConn *WebSocketServerConn) ServerSendChan() <-chan ServerMessage {
 }
 
 func (wsConn *WebSocketServerConn) Close() error {
-	wsConn.closeOnce.Do(func() { close(wsConn.closed) })
-	return wsConn.conn.Close()
+	var err error
+	wsConn.closeOnce.Do(func() {
+		close(wsConn.closed)
+		err = wsConn.conn.Close()
+	})
+	return err
 }
