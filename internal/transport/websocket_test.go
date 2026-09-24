@@ -287,3 +287,43 @@ func TestWebSocketRejectsOversizedInput(t *testing.T) {
 		t.Fatal("oversized input did not close reader")
 	}
 }
+
+// The WebSocket twin of TestServerWritePumpSkipsAnUnencodableMessage.
+func TestWebSocketWritePumpSkipsAnUnencodableMessage(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var serverWSConn *transport.WebSocketServerConn
+	connErr := make(chan error, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			connErr <- err
+			return
+		}
+		serverWSConn = transport.NewWebSocketServerConn(c, 16)
+		serverWSConn.RunPumps(ctx)
+		connErr <- nil
+	}))
+	defer s.Close()
+
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	clientConn, _, err := websocket.DefaultDialer.Dial(u, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer clientConn.Close()
+	if err := <-connErr; err != nil {
+		t.Fatalf("upgrade failed: %v", err)
+	}
+	defer serverWSConn.Close()
+
+	serverWSConn.SendServer(ctx, struct{}{})
+	serverWSConn.SendServer(ctx, protocol.MsgPaneClosed{PaneID: 9})
+	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	if got := readServer(t, clientConn); got != (protocol.MsgPaneClosed{PaneID: 9}) {
+		t.Fatalf("got %#v, want the MsgPaneClosed sent after the unencodable message", got)
+	}
+}

@@ -293,6 +293,36 @@ def case_styled_output_does_not_kill_the_connection(fail):
         srv.stop()
 
 
+def case_multibyte_title_does_not_kill_the_connection(fail):
+    """#175. U+2733 is E2 9C B3, and 0x9C is also the C1 String
+    Terminator: x/ansi cut the OSC after E2, the title became invalid
+    UTF-8, protobuf refused the snapshot carrying it, the write pump
+    closed the connection, and when that client owned the session the
+    session ended. The title text is split in the typed command so the
+    command's own echo cannot satisfy either check."""
+    srv = Server()
+    try:
+        c = Client()
+        c.type(b"printf '\\033]0;\\342\\234\\263 ti''tle-mk\\007'\r")
+        c.type(b"echo title-survived\r")
+        if not c.wait_for(lambda out: b"title-survived" in out):
+            fail("the connection stopped carrying updates after a multibyte title")
+        # The pane header draws the title, so "title-mk" belongs on
+        # screen -- but only whole, after its U+2733. A bare occurrence is
+        # the sequence's tail printed as text after the false ST.
+        out = c.output()
+        whole = "\u2733 title-mk".encode()
+        if whole not in out:
+            fail("the pane header never showed the title intact")
+        if out.count(b"title-mk") != out.count(whole):
+            fail("the tail of the title leaked onto the screen as text")
+        if wait_for_exit(c.pid, 0.5) is not None:
+            fail("the attached client exited after a multibyte title")
+        c.kill()
+    finally:
+        srv.stop()
+
+
 def case_attached_control_mode_offers_detach(fail):
     """`wideboi attach`'s side of smoke.py's 80-column case: the bar
     must offer detach here too. Asserted on the wire because the
@@ -928,6 +958,7 @@ CASES = [
     ("attached client emits no bytes while idle", case_attached_client_idle_emits_no_bytes),
     ("attached client presents no empty frames", case_attached_client_presents_no_empty_frames),
     ("styled output does not kill the connection", case_styled_output_does_not_kill_the_connection),
+    ("multibyte title does not kill the connection", case_multibyte_title_does_not_kill_the_connection),
     ("attached control mode offers detach", case_attached_control_mode_offers_detach),
     ("detach leaves the session running", case_detach_leaves_the_session_running),
     ("quit from an attached client ends the session", case_quit_from_an_attached_client_ends_the_session),

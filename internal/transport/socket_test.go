@@ -262,3 +262,33 @@ func TestLiveSocketWithoutALockIsLeftAlone(t *testing.T) {
 	}
 	c.Close()
 }
+
+// A message the codec cannot encode is a server bug, not a dead peer. The
+// write pump used to close the connection over one, and when that client
+// owned the session the session went with it (#175). struct{}{} is a
+// message MarshalServer rejects, standing in for any encode failure.
+func TestServerWritePumpSkipsAnUnencodableMessage(t *testing.T) {
+	ours, theirs := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	sc := transport.NewServerSocketConn(ours, 4)
+	sc.RunPumps(ctx)
+	defer sc.Close()
+	cc := transport.NewClientSocketConn(theirs, 4)
+	cc.RunPumps(ctx)
+	defer cc.Close()
+
+	sc.SendServer(ctx, struct{}{})
+	sc.SendServer(ctx, protocol.MsgPaneClosed{PaneID: 9})
+	select {
+	case msg, ok := <-cc.ServerSendChan():
+		if !ok {
+			t.Fatal("the connection closed over an unencodable message")
+		}
+		if msg != (protocol.MsgPaneClosed{PaneID: 9}) {
+			t.Fatalf("got %#v, want the MsgPaneClosed sent after the unencodable message", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the message after an unencodable one never arrived; the write pump died")
+	}
+}
