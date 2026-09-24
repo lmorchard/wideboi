@@ -152,6 +152,28 @@ wideboi server --websocket :8080
 
 Once the server is running, the Web Client allows you to view and interact with your terminal multiplexer natively in any modern browser.
 
+When no token is configured, the server generates one at startup and prints a
+`#token=...` link once to its stderr. It also stores the token in an owner-only
+`<socket without .sock>.web-token` file. For the default session, that is
+`$TMPDIR/wideboi-<uid>/default.web-token`; this file lets you retrieve the
+token when the server was started in the background. It is removed on normal
+shutdown, and `wideboi cleanup` removes files left by dead sessions.
+
+Open the link to hand the token to the browser, or open the base URL and enter
+the token in the connection form. The browser removes the fragment from its
+history entry immediately and keeps the token in page memory for reconnects.
+It sends the token in the WebSocket handshake subprotocol, leaving the
+connection URL clean. Reloading the page clears the in-memory token, so use
+the original link or enter it again. Older `?token=...` links still work and
+are cleaned from the history entry when opened.
+
+To choose a token, set `WIDEBOI_WEBSOCKET_TOKEN`, `websocket_token` in the
+config file, or `--websocket-token`. Enter that value in the browser's
+connection form. To rotate a configured token, change its value and restart
+the server; to rotate a generated token, restart the server. The current token
+is required for new WebSocket connections. Keep the startup link private:
+anyone holding it can control the terminal session.
+
 > Note: The Vite + Lit Web UI is currently hosted in the `web/` directory and requires running `npm run dev` to serve the static assets locally during development (see [Issue #126](https://github.com/lmorchard/wideboi/issues/126)).
 
 ## Configuration

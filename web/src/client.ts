@@ -3,20 +3,28 @@ import type { WSEnvelope } from "./protocol";
 export class WideboiClient {
   private ws: WebSocket | null = null;
   private url: string;
+  private token: string;
   
   public onMessage?: (envelope: WSEnvelope) => void;
   public onConnect?: () => void;
   public onDisconnect?: () => void;
 
-  constructor(url: string) {
+  constructor(url: string, token = "") {
     this.url = url;
+    this.token = token;
   }
 
   public connect() {
-    this.ws = new WebSocket(this.url);
+    // The browser can include a failed WebSocket URL in its own console
+    // message. Carry the credential in a subprotocol instead of that URL.
+    const bytes = new TextEncoder().encode(this.token);
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
+    this.ws = protocol ? new WebSocket(this.url, [protocol]) : new WebSocket(this.url);
 
     this.ws.onopen = () => {
-      console.log("[WideboiClient] Connected to", this.url);
+      console.log("[WideboiClient] Connected");
       if (this.onConnect) this.onConnect();
     };
 
@@ -26,8 +34,8 @@ export class WideboiClient {
       if (this.onDisconnect) this.onDisconnect();
     };
 
-    this.ws.onerror = (err) => {
-      console.error("[WideboiClient] WebSocket error:", err);
+    this.ws.onerror = () => {
+      console.error("[WideboiClient] WebSocket error");
     };
 
     this.ws.onmessage = (event: MessageEvent) => {

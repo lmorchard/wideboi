@@ -21,6 +21,7 @@ func TestRunCleanup(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "dead.server.log"), []byte("dead server"), 0644)
 	os.WriteFile(filepath.Join(dir, "dead.client.log"), []byte("dead client"), 0644)
 	os.WriteFile(filepath.Join(dir, "dead.sock.lock"), []byte("lock bytes"), 0644)
+	os.WriteFile(filepath.Join(dir, "dead.web-token"), []byte("old secret"), 0600)
 
 	// 3. Create active session artifacts
 	activeSockPath := filepath.Join(dir, "active.sock")
@@ -32,6 +33,7 @@ func TestRunCleanup(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "active.server.log"), []byte("active server"), 0644)
 	os.WriteFile(filepath.Join(dir, "active.client.log"), []byte("active client"), 0644)
 	os.WriteFile(filepath.Join(dir, "active.sock.lock"), []byte("lock bytes"), 0644)
+	os.WriteFile(filepath.Join(dir, "active.web-token"), []byte("current secret"), 0600)
 
 	// 4. Create stray/unknown files
 	os.WriteFile(filepath.Join(dir, "unknown.txt"), []byte("unknown"), 0644)
@@ -68,6 +70,9 @@ func TestRunCleanup(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "dead.sock.lock")); err != nil {
 		t.Errorf("dead.sock.lock should be kept: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "dead.web-token")); !os.IsNotExist(err) {
+		t.Errorf("dead.web-token should be removed")
+	}
 
 	// Verify active artifacts are kept
 	if _, err := os.Stat(activeSockPath); err != nil {
@@ -78,6 +83,9 @@ func TestRunCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "active.client.log")); err != nil {
 		t.Errorf("active.client.log should be kept: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "active.web-token")); err != nil {
+		t.Errorf("active.web-token should be kept: %v", err)
 	}
 
 	// Verify unknown files are kept
