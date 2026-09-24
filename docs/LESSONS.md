@@ -622,3 +622,14 @@ direction that no longer existed. Review caught it; `BuildBindings` now clears
 `HelpGroup`, `HelpKey` — check every consumer of the group,** not just the one
 the change is about. `internal/client/help.go` and `keys.BarItemsFor` are the
 two today.
+
+
+## A server that maintains global state limits all connected clients
+
+Until #142, the `Server` maintained a single set of `cols` and `rows` values that applied globally to the session. Whenever a new client connected or resized (like the Web UI connecting with a very tall canvas), it updated the global dimensions for the session. This caused the session to resize based on the last client to connect, breaking the experience for smaller clients (e.g., CLI users viewing the prompt getting clipped).
+
+The fix involves holding independent state for each client (a `clientSizes map[transport.Transport]protocol.MsgResize`) and calculating a "minimum safe dimension" across the active set. 
+
+Two consequences:
+1. **When tracking state per-client, ensure disconnections are handled correctly.** When `dropClient` runs, it must not only remove the disconnected client from the `clientSizes` state, but it must recalculate the bounds *and* actively push those new bounds to the remaining clients (e.g. triggering `resizePanesLocked()` and broadcasting). Without this, if the smallest client drops, the remaining clients will never realize the session is allowed to grow.
+2. **Global state implicitly couples client constraints.** State shared across multiple distinct viewers must be re-evaluated as an aggregation (e.g., minimum) rather than a single overwrite value.
