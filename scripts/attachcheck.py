@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty, wait_for_exit, force_cleanup,
     descendants, server_child, settle_output, still_alive,
-    private_run_dir, run_main,
+    private_run_dir, run_main, harness_args,
 )
 # focus_pane_id reads the status line the way the diffing renderer
 # actually writes it: the "focus: [pane N" literal appears only in the
@@ -99,7 +99,8 @@ def bin_env() -> dict:
     # timed out, and its line editor sometimes discarded text typed
     # while it was starting -- an intermittent "planted job never
     # appeared" that had nothing to do with wideboi.
-    return {**os.environ, "WIDEBOI_SOCK": socket_path(),
+    env = {k: v for k, v in os.environ.items() if not k.startswith("WIDEBOI_")}
+    return {**env, "WIDEBOI_SOCK": socket_path(),
             "SHELL": "/bin/sh", "PS1": "$ "}
 
 
@@ -111,7 +112,7 @@ class Server:
         if os.path.exists(self.sock):
             os.remove(self.sock)
         self.proc = subprocess.Popen(
-            [BIN, *args, "server"],
+            harness_args(BIN, *args, "server"),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env or bin_env(),
@@ -155,7 +156,7 @@ class Client:
     answers and otherwise spawns one and owns the session."""
 
     def __init__(self, startup=PROMPT_WAIT, plain=False, args=(), gate=None):
-        argv = [BIN, *args] if plain else [BIN, "attach", *args]
+        argv = harness_args(BIN, *args) if plain else harness_args(BIN, "attach", *args)
         if gate is not None:
             # Held on opening the fifo until something opens its write
             # end, which releases every gated client at once.
@@ -632,10 +633,10 @@ def case_named_sessions_are_independent(fail):
     try:
         alpha = Server(args=("-L", "alpha"), env=env, sock=os.path.join(sdir, "alpha.sock"))
         beta = Server(args=("-L", "beta"), env=env, sock=os.path.join(sdir, "beta.sock"))
-        ls = subprocess.run([BIN, "ls"], capture_output=True, timeout=10, env=env)
+        ls = subprocess.run(harness_args(BIN, "ls"), capture_output=True, timeout=10, env=env)
         if ls.returncode != 0 or ls.stdout.decode().split() != ["alpha", "beta"]:
             fail(f"ls exited {ls.returncode} printing {ls.stdout!r}, want alpha and beta")
-        r = subprocess.run([BIN, "-L", "alpha", "kill-session"],
+        r = subprocess.run(harness_args(BIN, "-L", "alpha", "kill-session"),
                            capture_output=True, timeout=15, env=env)
         if r.returncode != 0:
             fail(f"kill-session -L alpha exited {r.returncode}: "
@@ -646,7 +647,7 @@ def case_named_sessions_are_independent(fail):
             fail("alpha still running after kill-session -L alpha")
         if not beta.alive():
             fail("ending alpha ended beta")
-        ls = subprocess.run([BIN, "ls"], capture_output=True, timeout=10, env=env)
+        ls = subprocess.run(harness_args(BIN, "ls"), capture_output=True, timeout=10, env=env)
         if ls.stdout.decode().split() != ["beta"]:
             fail(f"after the kill, ls printed {ls.stdout!r}, want beta")
     finally:
@@ -661,7 +662,7 @@ def case_second_server_refuses_to_steal_the_socket(fail):
     srv = Server()
     try:
         second = subprocess.run(
-            [BIN, "server"], capture_output=True, timeout=10, env=bin_env(),
+            harness_args(BIN, "server"), capture_output=True, timeout=10, env=bin_env(),
         )
         if second.returncode != 3:
             fail(f"second server exited {second.returncode}, want 3 (session taken)")
@@ -679,7 +680,7 @@ def case_attach_without_a_server_says_so(fail):
     sock = socket_path()
     if os.path.exists(sock):
         os.remove(sock)
-    r = subprocess.run([BIN, "attach"], capture_output=True, timeout=10,
+    r = subprocess.run(harness_args(BIN, "attach"), capture_output=True, timeout=10,
                        env=bin_env())
     if r.returncode == 0:
         fail("attach succeeded with no server running")
@@ -709,7 +710,7 @@ def case_server_reaps_its_panes_on_signal(fail):
 
 
 def kill_session() -> subprocess.CompletedProcess:
-    return subprocess.run([BIN, "kill-session"], capture_output=True,
+    return subprocess.run(harness_args(BIN, "kill-session"), capture_output=True,
                           timeout=15, env=bin_env())
 
 

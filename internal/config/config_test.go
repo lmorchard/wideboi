@@ -20,8 +20,14 @@ func mockEnv(m map[string]string) func(string) string {
 	}
 }
 
+// defaultFlags exercises built-in defaults without reading files from the
+// test runner's working directory. Discovery has dedicated tests below.
+func defaultFlags() config.ConfigFlags {
+	return config.ConfigFlags{ConfigFile: os.DevNull}
+}
+
 func TestLoadDefaults(t *testing.T) {
-	cfg, bindings, err := config.Load(config.ConfigFlags{}, mockEnv(nil))
+	cfg, bindings, err := config.Load(defaultFlags(), mockEnv(nil))
 	if err != nil {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
@@ -291,7 +297,7 @@ width_presets = [10, 80]
 // pointer so an absent key and an explicit false are distinguishable;
 // a plain bool would read an absent key as "off".
 func TestLoadMouse(t *testing.T) {
-	cfg, _, err := config.Load(config.ConfigFlags{}, mockEnv(nil))
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
 	if err != nil {
 		t.Fatalf("Load() unexpected error: %v", err)
 	}
@@ -323,7 +329,7 @@ func TestLoadLogLevel(t *testing.T) {
 		}
 	}
 
-	cfg, _, err := config.Load(config.ConfigFlags{}, env(nil))
+	cfg, _, err := config.Load(defaultFlags(), env(nil))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -351,7 +357,7 @@ func TestLoadLogLevel(t *testing.T) {
 		t.Errorf("WIDEBOI_LOG_LEVEL=trace gave %v, want TRACE (env overrides toml)", cfg.LogLevel)
 	}
 
-	if _, _, err := config.Load(config.ConfigFlags{}, env(map[string]string{"WIDEBOI_LOG_LEVEL": "verbose"})); err == nil {
+	if _, _, err := config.Load(defaultFlags(), env(map[string]string{"WIDEBOI_LOG_LEVEL": "verbose"})); err == nil {
 		t.Error("an unknown WIDEBOI_LOG_LEVEL was accepted")
 	}
 }
@@ -419,7 +425,7 @@ func emptyConfigHome(t *testing.T, env map[string]string) map[string]string {
 }
 
 func TestSessionNameMapsToASocketInTheSessionDir(t *testing.T) {
-	cfg, _, err := config.Load(config.ConfigFlags{Session: "work"}, mockEnv(emptyConfigHome(t, nil)))
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: os.DevNull, Session: "work"}, mockEnv(emptyConfigHome(t, nil)))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -466,6 +472,8 @@ func TestSessionAndSocketLayering(t *testing.T) {
 				if err := os.WriteFile(flags.ConfigFile, []byte(tc.toml), 0o600); err != nil {
 					t.Fatal(err)
 				}
+			} else {
+				flags.ConfigFile = os.DevNull
 			}
 			cfg, _, err := config.Load(flags, mockEnv(emptyConfigHome(t, tc.env)))
 			if tc.wantErr != "" {

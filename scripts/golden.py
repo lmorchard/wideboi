@@ -19,6 +19,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     Drainer, spawn_in_pty, wait_for_exit, force_cleanup, private_run_dir, run_main,
+    harness_args,
 )
 
 GOLDEN = os.path.join("testdata", "golden", "startup.txt")
@@ -70,7 +71,7 @@ def capture() -> str:
     # because the server also leaves its lock file beside the socket.
     run_dir = private_run_dir("wideboi-golden-")
     sock = os.path.join(run_dir, "s.sock")
-    pid, fd = spawn_in_pty(["./bin/wideboi"], 100, 30, True,
+    pid, fd = spawn_in_pty(harness_args("./bin/wideboi"), 100, 30, True,
                            {"WIDEBOI_SOCK": sock})
     d = Drainer(fd)
     d.start()

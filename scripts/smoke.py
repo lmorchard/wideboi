@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty,
     wait_for_exit, descendants, force_cleanup, ps_rows,
-    settle_output, still_alive, private_run_dir, run_main,
+    settle_output, still_alive, private_run_dir, run_main, harness_args,
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
@@ -128,7 +128,7 @@ class Session:
         with SPAWNED_LOCK:
             sock = os.path.join(RUNTIME_DIR, f"s{next(_SOCK_IDS)}.sock")
         env = {"WIDEBOI_SOCK": sock, **(env or {})}
-        cmd = ["./bin/wideboi"] + (args or [])
+        cmd = harness_args("./bin/wideboi", *(args or []))
         self.pid, self.fd = spawn_in_pty(cmd, cols, rows, True, env)
         self.rows = rows
         with SPAWNED_LOCK:

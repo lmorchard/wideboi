@@ -31,6 +31,14 @@ ALT_SCREEN_ENTER = b"\x1b[?1049h"
 ALT_SCREEN_EXIT = b"\x1b[?1049l"
 
 
+def harness_args(binary: str, *args: str) -> list[str]:
+    """Start with defaults, ignoring the developer's project config.
+
+    An explicit -c later in args wins for cases testing config files.
+    """
+    return [binary, "-c", os.devnull, *args]
+
+
 class Drainer:
     """Continuously reads a pty master on a background thread.
 
@@ -208,13 +216,13 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
             # golden snapshot expect the built-in default (cards) -- the
             # status line's layout tag, and attachcheck's comparisons
             # between clients -- so neither WIDEBOI_LAYOUT nor a
-            # developer's own config file may choose it. Dropping the
-            # variable and pointing XDG_CONFIG_HOME at a directory that
-            # never exists (config.Load ignores a missing default file)
-            # keeps the real default under test, rather than a pinned
-            # copy of it. A case that wants another layout, or a config,
-            # passes --layout or -c explicitly.
-            child_env.pop("WIDEBOI_LAYOUT", None)
+            # developer's own environment may choose it. The callers
+            # pass -c /dev/null to skip discovered config files. Clearing
+            # inherited WIDEBOI_* variables keeps the built-in defaults
+            # under test; env below restores each case's explicit values.
+            for key in list(child_env):
+                if key.startswith("WIDEBOI_"):
+                    del child_env[key]
             child_env["XDG_CONFIG_HOME"] = os.path.join(
                 tempfile.gettempdir(), f"wideboi-harness-no-config-{os.getpid()}")
             if env:
