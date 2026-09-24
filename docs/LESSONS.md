@@ -184,6 +184,12 @@ before assigning them. A `ResizeObserver` callback can arrive without a real
 size change; in an idle, change-only browser session, no new frame may arrive
 to repaint a canvas cleared by that callback.
 
+Keep the observed canvas's CSS dimensions under flex layout control. Writing
+inline width and height from its own `ResizeObserver` callback can feed layout
+changes back into the observer. Send `MsgResize` only when the cell grid changes,
+and have the server broadcast only when the shared minimum dimensions change:
+each layout broadcast forces a full pane resend to every client.
+
 ## Change-only pane updates require complete bookkeeping
 
 Before #85, every 33 ms frame resent every pane and repaired missed updates.

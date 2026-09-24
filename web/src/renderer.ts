@@ -11,6 +11,8 @@ export class GridRenderer {
   private ctx: CanvasRenderingContext2D;
   private cellWidth = 0;
   private cellHeight = 0;
+  private viewportWidth = 0;
+  private viewportHeight = 0;
 
   private panes = new Map<number, MsgPaneUpdate>();
   private layout: MsgLayoutSnapshot | null = null;
@@ -181,16 +183,14 @@ export class GridRenderer {
     const dpr = window.devicePixelRatio || 1;
     const pixelWidth = Math.round(width * dpr);
     const pixelHeight = Math.round(height * dpr);
-    // Setting either canvas dimension clears its bitmap, even when the value
-    // is unchanged. ResizeObserver can fire for unrelated layout changes.
-    const cssWidth = `${width}px`;
-    const cssHeight = `${height}px`;
+    // The canvas' CSS size belongs to the flex layout. Writing it here while
+    // observing the canvas can feed its own size changes back into resize.
     if (this.canvas.width === pixelWidth && this.canvas.height === pixelHeight &&
-        this.canvas.style.width === cssWidth && this.canvas.style.height === cssHeight) return;
+        this.viewportWidth === width && this.viewportHeight === height) return;
+    this.viewportWidth = width;
+    this.viewportHeight = height;
     if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
     if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
-    this.canvas.style.width = cssWidth;
-    this.canvas.style.height = cssHeight;
     
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.measureFont();
@@ -233,15 +233,11 @@ export class GridRenderer {
 		return this.focusedPaneId;
 	}
 
-	public getGridSize(): { cols: number, rows: number } {
+  public getGridSize(): { cols: number, rows: number } {
     if (this.cellWidth === 0 || this.cellHeight === 0) return { cols: 80, rows: 24 };
-    
-    const width = parseInt(this.canvas.style.width || "0", 10);
-    const height = parseInt(this.canvas.style.height || "0", 10);
-    
     return {
-      cols: Math.floor(width / this.cellWidth),
-      rows: Math.floor(height / this.cellHeight)
+      cols: Math.floor(this.viewportWidth / this.cellWidth),
+      rows: Math.floor(this.viewportHeight / this.cellHeight)
     };
   }
 

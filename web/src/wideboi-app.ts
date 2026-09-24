@@ -146,6 +146,7 @@ export class WideboiApp extends LitElement {
   private paneStatuses: Record<number, PaneStatus> = {};
   private listeners?: AbortController;
   private pointer?: { id: number; paneID: number; placement: import('./protocol').PlacementData; button: number; tracking: boolean; focusOnClick: boolean; dragged: boolean; startX: number; startY: number };
+  private lastSentSize?: { cols: number; rows: number };
 
   private focusPane(paneID: number) {
     if (!this.renderer || !this.activePanes.includes(paneID)) return;
@@ -164,8 +165,12 @@ export class WideboiApp extends LitElement {
         this.renderer.resize(width, height);
         
         if (this.client && this.connected) {
-            const size = this.renderer.getGridSize();
-            this.client.send({ case: 'resize', value: { cols: size.cols, rows: size.rows } });
+          const size = this.renderer.getGridSize();
+          if (size.cols > 0 && size.rows > 0 &&
+              (size.cols !== this.lastSentSize?.cols || size.rows !== this.lastSentSize?.rows)) {
+            this.client.send({ case: 'resize', value: size });
+            this.lastSentSize = size;
+          }
         }
       }
     });
@@ -216,6 +221,7 @@ export class WideboiApp extends LitElement {
       this.client.disconnect();
     }
     this.connected = false;
+    this.lastSentSize = undefined;
     this.inPrefixMode = false;
     this.pendingFocusId = 0;
     
@@ -485,6 +491,7 @@ export class WideboiApp extends LitElement {
      if (!this.renderer || !this.client) return;
      const size = this.renderer.getGridSize();
      this.client.send({ case: 'attach', value: { cols: size.cols, rows: size.rows } });
+     this.lastSentSize = size;
   }
 
   private handleUrlChange(e: Event) {
