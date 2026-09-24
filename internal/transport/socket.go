@@ -80,6 +80,7 @@ func init() {
 	gob.Register(protocol.MsgShutdown{})
 	gob.Register(protocol.MsgDetach{})
 	gob.Register(protocol.MsgLayoutSnapshot{})
+	gob.Register(protocol.MsgPaneCreated{})
 	gob.Register(protocol.MsgPaneClosed{})
 }
 

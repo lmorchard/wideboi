@@ -214,13 +214,20 @@ func (m LayoutMode) String() string {
 	return fmt.Sprintf("LayoutMode(%d)", int(m))
 }
 
-// MsgLayoutSnapshot is sent by the server to update the client on columns, focus, and statuses. Placements and layout mode are the client's own (#47, #92).
+// MsgLayoutSnapshot broadcasts shared columns and statuses. Focus, placements,
+// and layout mode belong to each client.
 type MsgLayoutSnapshot struct {
 	Columns      []ColumnData
 	PaneStatuses map[int]PaneStatus
 	// PaneTitles is each pane's terminal title, for chrome that wants
 	// to say what a pane is doing rather than show a sliver of it.
 	PaneTitles map[int]string
+}
+
+// MsgPaneCreated tells only the requesting client which pane its new-column
+// verb created. That client can focus it when the next snapshot arrives.
+type MsgPaneCreated struct {
+	PaneID int
 }
 
 // MsgPaneClosed notifies the client that a pane's process died or was reaped.

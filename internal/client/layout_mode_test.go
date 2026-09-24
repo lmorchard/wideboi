@@ -31,6 +31,8 @@ func TestToggleLayoutSendsNothing(t *testing.T) {
 	tp := transport.NewInProcChannel(16)
 	cli := NewClient(tp, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 
 	cli.ToggleLayout()
 
@@ -54,6 +56,8 @@ func TestToggleLayoutSendsNothing(t *testing.T) {
 func TestToggleLayoutArmsMotion(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 	if placementsEqual(
 		expectedPlacements(protocol.LayoutScroll, threeColumns(), 2, 100, 24),
 		expectedPlacements(protocol.LayoutCards, threeColumns(), 2, 100, 24)) {
@@ -82,7 +86,8 @@ func TestToggleLayoutArmsMotion(t *testing.T) {
 func TestSetLayoutModeBeforeFirstSnapshot(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 
 	want := expectedPlacements(protocol.LayoutCards, threeColumns(), 2, 100, 24)
 	if got := clientPlacements(cli); !placementsEqual(got, want) {
@@ -100,7 +105,7 @@ func TestToggleRevealsOffscreenPaneContent(t *testing.T) {
 	cli.SetLayoutMode(protocol.LayoutScroll)
 
 	snap := protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(),
+		Columns:    threeColumns(),
 		PaneTitles: map[int]string{3: "TITLE"},
 	}
 

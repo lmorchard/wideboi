@@ -52,7 +52,7 @@ func TestStripComputesPlacements(t *testing.T) {
 	s := layout.NewStrip()
 	s.AddColumn(1, 40, 23, 0)
 	s.AddColumn(2, 39, 23, 0) // 40 + 1 divider + 39 = 80 total width
-	s.FocusLeft()          // focus column 1
+	s.FocusLeft()             // focus column 1
 
 	placements := s.ComputePlacements(80, 24)
 	if len(placements) != 2 {
@@ -299,12 +299,12 @@ func TestMoveLeftAndRightSwapWithNeighbourAndKeepFocus(t *testing.T) {
 		move func()
 		want []int
 	}{
-		{func() { s.MoveLeft(1) }, []int{1, 3, 2}},
-		{func() { s.MoveLeft(1) }, []int{3, 1, 2}},
-		{func() { s.MoveLeft(1) }, []int{3, 1, 2}}, // left edge: no-op
-		{func() { s.MoveRight(1) }, []int{1, 3, 2}},
-		{func() { s.MoveRight(1) }, []int{1, 2, 3}},
-		{func() { s.MoveRight(1) }, []int{1, 2, 3}}, // right edge: no-op
+		{func() { s.MoveLeft(3) }, []int{1, 3, 2}},
+		{func() { s.MoveLeft(3) }, []int{3, 1, 2}},
+		{func() { s.MoveLeft(3) }, []int{3, 1, 2}}, // left edge: no-op
+		{func() { s.MoveRight(3) }, []int{1, 3, 2}},
+		{func() { s.MoveRight(3) }, []int{1, 2, 3}},
+		{func() { s.MoveRight(3) }, []int{1, 2, 3}}, // right edge: no-op
 	}
 	for i, st := range steps {
 		st.move()
@@ -388,8 +388,8 @@ func TestFocusLastIgnoresNoOpsAndMoves(t *testing.T) {
 		{"FocusLeft at edge", s.FocusLeft},
 		{"same pane", func() { s.FocusPaneID(1) }},
 		{"unknown pane", func() { s.FocusPaneID(99) }},
-		{"MoveRight", func() { s.MoveRight(1) }},
-		{"MoveLeft", func() { s.MoveLeft(1) }},
+		{"MoveRight", func() { s.MoveRight(3) }},
+		{"MoveLeft", func() { s.MoveLeft(3) }},
 	} {
 		step.noop()
 		if got := s.LastFocusPaneID(); got != 2 {

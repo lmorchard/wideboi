@@ -392,12 +392,18 @@ func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
 
 	select {
 	case msg := <-tp.ServerSend:
+		if created, ok := msg.(protocol.MsgPaneCreated); ok {
+			if created.PaneID != 1 {
+				t.Fatalf("created pane = %d, want 1", created.PaneID)
+			}
+			msg = <-tp.ServerSend
+		}
 		snap, ok := msg.(protocol.MsgLayoutSnapshot)
 		if !ok {
 			t.Fatalf("expected MsgLayoutSnapshot, got %T", msg)
 		}
-		if 1 <= 0 {
-			t.Fatalf("expected a focused pane after VerbNewColumn, got %+v", snap)
+		if len(snap.Columns) != 1 || snap.Columns[0].PaneID != 1 {
+			t.Fatalf("expected the new pane in the snapshot, got %+v", snap)
 		}
 		_, rows, ok := srv.PaneSize(1)
 		if !ok {

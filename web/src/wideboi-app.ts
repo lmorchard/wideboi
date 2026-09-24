@@ -134,6 +134,16 @@ export class WideboiApp extends LitElement {
   private errorMsg = '';
 
   private inPrefixMode = false;
+  private previousFocusId = 0;
+  private pendingFocusId = 0;
+  private paneStatuses: Record<number, number> = {};
+
+  private focusPane(paneID: number) {
+    if (!this.renderer || !this.activePanes.includes(paneID)) return;
+    if (paneID !== this.focusedPaneId) this.previousFocusId = this.focusedPaneId;
+    this.focusedPaneId = paneID;
+    this.renderer.setFocusedPaneId(paneID);
+  }
 
   constructor() {
     super();
@@ -200,8 +210,16 @@ export class WideboiApp extends LitElement {
       if (env.t === 'MsgLayoutSnapshot') {
         this.renderer.handleLayoutSnapshot(env.p);
         this.activePanes = env.p.Columns?.map((c: any) => c.PaneID) || [];
-        this.focusedPaneId = env.p.FocusPaneID || 0;
+        this.focusedPaneId = this.renderer.getFocusedPaneId();
+        if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
+          this.focusPane(this.pendingFocusId);
+          this.pendingFocusId = 0;
+        }
+        if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
+        this.paneStatuses = env.p.PaneStatuses || {};
         this.paneTitles = env.p.PaneTitles || {};
+      } else if (env.t === 'MsgPaneCreated') {
+        this.pendingFocusId = env.p.PaneID;
       } else if (env.t === 'MsgPaneUpdate') {
         this.renderer.handlePaneUpdate(env.p);
       }
@@ -249,7 +267,21 @@ export class WideboiApp extends LitElement {
         }
         
         if (verb > 0) {
-          this.client.send('MsgVerb', { Verb: verb });
+          const index = this.activePanes.indexOf(this.focusedPaneId);
+          if (verb === 1 && index > 0) this.focusPane(this.activePanes[index - 1]);
+          else if (verb === 2 && index >= 0 && index < this.activePanes.length - 1) this.focusPane(this.activePanes[index + 1]);
+          else if (verb === 12) this.focusPane(this.previousFocusId);
+          else if (verb === 6) {
+            const rank = (status: number) => status === 4 ? 3 : status === 3 ? 2 : status === 2 ? 1 : 0;
+            const target = this.activePanes.reduce((best, id) => {
+              const score = rank(this.paneStatuses[id]);
+              return score > rank(this.paneStatuses[best]) ||
+                (score > 0 && score === rank(this.paneStatuses[best]) && id < best) ? id : best;
+            }, 0);
+            if (target) this.focusPane(target);
+          } else if (![1, 2, 6, 12].includes(verb)) {
+            this.client.send('MsgVerb', { Verb: verb, PaneID: this.focusedPaneId });
+          }
           
           // If they held Ctrl while pressing the key (e.g. Ctrl-b, then held Ctrl and pressed 'l'),
           // stay in prefix mode so they can repeat it.
@@ -317,7 +349,10 @@ export class WideboiApp extends LitElement {
       const hit = this.renderer.getPaneHit(x, y);
       
       if (hit.paneID > 0 && hit.placement) {
-        this.client.send('MsgFocusPane', { PaneID: hit.paneID });
+        if (hit.paneID !== this.focusedPaneId) {
+          this.focusPane(hit.paneID);
+          return;
+        }
         
         const localX = hit.placement.Src.Min.X + (x - hit.placement.Dst.Min.X);
         const localY = hit.placement.Src.Min.Y + (y - hit.placement.Dst.Min.Y);
@@ -396,7 +431,7 @@ export class WideboiApp extends LitElement {
     const select = e.target as HTMLSelectElement;
     const paneID = parseInt(select.value, 10);
     if (paneID > 0 && this.client && this.connected) {
-      this.client.send('MsgFocusPane', { PaneID: paneID });
+      this.focusPane(paneID);
     }
     this.canvas.focus();
   }

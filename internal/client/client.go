@@ -48,25 +48,26 @@ type frameState struct {
 
 // Client manages screen rendering, off-screen mirrors, and input forwarding.
 type Client struct {
-	mu           sync.Mutex
-	transport    transport.Transport
-	cols         int
-	rows         int
-	strip        *layout.Strip
-	placements   []protocol.PlacementData
-	focusPaneID  int
-	paneStatuses map[int]protocol.PaneStatus
-	paneTitles   map[int]string
-	layoutMode   protocol.LayoutMode
-	mirrors      map[int]*PaneMirror
-	cursorInfos  map[int]cursorPos
-	prefixLabel  string
-	controlMode  bool
-	helpVisible  bool
-	detachable   bool
-	bindings     []keys.Binding
-	motion       *motion
-	sel          *selection
+	mu                 sync.Mutex
+	transport          transport.Transport
+	cols               int
+	rows               int
+	strip              *layout.Strip
+	placements         []protocol.PlacementData
+	focusPaneID        int
+	pendingFocusPaneID int
+	paneStatuses       map[int]protocol.PaneStatus
+	paneTitles         map[int]string
+	layoutMode         protocol.LayoutMode
+	mirrors            map[int]*PaneMirror
+	cursorInfos        map[int]cursorPos
+	prefixLabel        string
+	controlMode        bool
+	helpVisible        bool
+	detachable         bool
+	bindings           []keys.Binding
+	motion             *motion
+	sel                *selection
 	// mouseTracking is which panes' children have asked for mouse
 	// events, from MsgPaneUpdate. grab is a drag being forwarded to one.
 	mouseTracking map[int]bool
@@ -133,6 +134,8 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	defer c.mu.Unlock()
 
 	switch m := msg.(type) {
+	case protocol.MsgPaneCreated:
+		c.pendingFocusPaneID = m.PaneID
 	case protocol.MsgLayoutSnapshot:
 		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", c.focusPaneID)
 		// Two different "previous" values, and the distinction
@@ -161,10 +164,18 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		//
 		// The layout mode is not read from the snapshot: it is this
 		// client's own (#92), set by SetLayoutMode and ToggleLayout.
+		for _, col := range m.Columns {
+			if col.PaneID == c.pendingFocusPaneID {
+				c.focusPaneID = c.pendingFocusPaneID
+				c.pendingFocusPaneID = 0
+				break
+			}
+		}
 		if c.focusPaneID == 0 && len(m.Columns) > 0 {
 			c.focusPaneID = m.Columns[0].PaneID
 		}
 		c.strip.SyncColumns(m.Columns, c.focusPaneID)
+		c.focusPaneID = c.strip.FocusedPaneID()
 
 		// With no columns ComputePlacements returns nil, which is what
 		// an empty session should draw. The server sent its own
@@ -181,7 +192,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// Starting from what is currently on screen rather than from
 		// the pre-animation layout is what lets a second change
 		// mid-flight continue rather than jump.
-		if c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
+		if len(prevTarget) > 0 && c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
 			c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
 		}
 
@@ -981,7 +992,7 @@ func truncateRunes(s string, n int) string {
 func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	switch v {
 	case protocol.VerbFocusLeft:
 		c.strip.FocusLeft()
@@ -1042,7 +1053,7 @@ func (c *Client) FocusColumn(ctx context.Context, n int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ids := c.strip.PaneIDs()
-	
+
 	i := n - 1
 	if n == keys.LastColumn {
 		i = len(ids) - 1

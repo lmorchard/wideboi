@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
-	
 )
 
 func threeIdlePanes(t *testing.T) (*Server, []int) {

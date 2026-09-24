@@ -14,7 +14,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
-	
+
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 

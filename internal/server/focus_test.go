@@ -6,7 +6,6 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
-	
 )
 
 // A click names the pane it landed on, so the server must be able to

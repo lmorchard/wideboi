@@ -171,7 +171,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				s.dropClient(tp)
 				return
 			}
-			s.handleClientMsg(ctx, msg)
+			s.handleClientMsgFrom(ctx, tp, msg)
 		}
 	}
 }
@@ -243,8 +243,13 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessage) {
+	s.handleClientMsgFrom(ctx, nil, msg)
+}
+
+func (s *Server) handleClientMsgFrom(ctx context.Context, sender transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
 	needBroadcast := false
+	createdPaneID := 0
 
 	switch m := msg.(type) {
 	case protocol.MsgAttach:
@@ -268,7 +273,9 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 	case protocol.MsgVerb:
 		switch m.Verb {
 		case protocol.VerbNewColumn:
-			_, _ = s.spawnPaneLocked(m.PaneID)
+			if p, err := s.spawnPaneLocked(m.PaneID); err == nil {
+				createdPaneID = p.ID()
+			}
 			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
 			s.strip.CycleWidth(m.PaneID)
@@ -323,6 +330,9 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 	}
 
 	s.mu.Unlock()
+	if sender != nil && createdPaneID != 0 {
+		sender.SendServer(ctx, protocol.MsgPaneCreated{PaneID: createdPaneID})
+	}
 
 	if needBroadcast {
 		s.broadcastLayout(ctx)

@@ -1,8 +1,8 @@
 package term_test
 
 import (
-	"testing"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"testing"
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/server/term"

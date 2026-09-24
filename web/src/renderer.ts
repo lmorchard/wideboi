@@ -9,6 +9,7 @@ export class GridRenderer {
 
   private panes = new Map<number, MsgPaneUpdate>();
   private layout: MsgLayoutSnapshot | null = null;
+  private focusedPaneId = 0;
   private placements: PlacementData[] = [];
   
   private animationFrameId = 0;
@@ -36,7 +37,17 @@ export class GridRenderer {
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
     this.layout = snapshot;
+    if (!snapshot.Columns.some(c => c.PaneID === this.focusedPaneId)) {
+      this.focusedPaneId = snapshot.Columns[0]?.PaneID || 0;
+    }
     this.recomputePlacements();
+  }
+
+  public setFocusedPaneId(paneID: number) {
+    if (this.layout?.Columns.some(c => c.PaneID === paneID)) {
+      this.focusedPaneId = paneID;
+      this.recomputePlacements();
+    }
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
@@ -87,7 +98,7 @@ export class GridRenderer {
   }
 
 	public getFocusedPaneId(): number {
-		return this.layout?.FocusPaneID || 0;
+		return this.focusedPaneId;
 	}
 
 	public getGridSize(): { cols: number, rows: number } {
@@ -120,7 +131,7 @@ export class GridRenderer {
       
       let focusIdx = -1;
       for (let i = 0; i < this.layout.Columns.length; i++) {
-          if (this.layout.Columns[i].PaneID === this.layout.FocusPaneID) {
+          if (this.layout.Columns[i].PaneID === this.focusedPaneId) {
               focusIdx = i;
               break;
           }
@@ -257,7 +268,7 @@ export class GridRenderer {
       }
     }
 
-    if (pane.CursorVisible && this.layout?.FocusPaneID === pane.PaneID) {
+    if (pane.CursorVisible && this.focusedPaneId === pane.PaneID) {
       const curX = pane.CursorX + offsetX;
       const curY = pane.CursorY + offsetY;
       
@@ -295,7 +306,7 @@ export class GridRenderer {
     this.ctx.restore();
     
     // Draw border
-    const isFocused = this.layout?.FocusPaneID === pane.PaneID;
+    const isFocused = this.focusedPaneId === pane.PaneID;
     if (p.Dst.Max.X < this.getGridSize().cols) {
         this.ctx.fillStyle = '#1e1e1e';
         this.ctx.fillRect(

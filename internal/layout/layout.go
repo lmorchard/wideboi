@@ -436,8 +436,10 @@ func (s *Strip) Columns() []Column {
 	return cols
 }
 
-// SyncColumns updates the strip's columns and focused pane from protocol ColumnData.
+// SyncColumns updates the columns while retaining the requested local focus.
+// If that pane has closed, focus the preceding column (or the first one).
 func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
+	oldIndex := s.focusIndex
 	s.columns = make([]Column, len(cols))
 	for i, c := range cols {
 		s.columns[i] = Column{
@@ -446,5 +448,26 @@ func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
 			Height: c.Height,
 		}
 	}
-	s.FocusPaneID(focusPaneID)
+	if len(s.columns) == 0 {
+		s.focusIndex = 0
+		s.lastFocusPaneID = 0
+		return
+	}
+	newIndex := -1
+	for i, c := range s.columns {
+		if c.PaneID == focusPaneID {
+			newIndex = i
+			break
+		}
+	}
+	if newIndex < 0 {
+		newIndex = min(max(oldIndex-1, 0), len(s.columns)-1)
+	}
+	s.focusIndex = newIndex
+	for _, c := range s.columns {
+		if c.PaneID == s.lastFocusPaneID {
+			return
+		}
+	}
+	s.lastFocusPaneID = 0
 }

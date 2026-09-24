@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
-	
+
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 

@@ -3,8 +3,8 @@ package client
 import (
 	"testing"
 
-	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/layout"
+	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
 func clientWithStatuses(t *testing.T, statuses map[int]protocol.PaneStatus) *Client {

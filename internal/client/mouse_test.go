@@ -53,15 +53,16 @@ func click(cli *Client, x, y int) {
 func focusRequests(msgs []transport.ClientMessage) []int {
 	var ids []int
 	for _, m := range msgs {
-		if f, ok := m.(protocol.MsgVerb); ok {
-			ids = append(ids, f.PaneID)
+		if got, ok := m.(protocol.MsgVerb); ok {
+			ids = append(ids, got.PaneID)
 		}
 	}
 	return ids
 }
 
 func TestClickFocusesPaneUnderPointer(t *testing.T) {
-	cli, _ := newMouseClient(t)
+	cli, ch := newMouseClient(t)
+	_ = ch
 	p2 := placementFor(cli, 2)
 	if p2.Dst.Empty() {
 		t.Fatal("pane 2 has no placement; fixture is wrong")
@@ -70,25 +71,27 @@ func TestClickFocusesPaneUnderPointer(t *testing.T) {
 	click(cli, p2.Dst.Min.X+2, p2.Dst.Min.Y+2)
 
 	if got := cli.FocusedPaneID(); got != 2 {
-		t.Errorf("focus requests = %d, want [2]", got)
+		t.Errorf("focus = %d, want 2", got)
 	}
 }
 
 // The header row is chrome drawn above the pane, not inside its Dst,
 // and it is the most obvious thing to click.
 func TestClickOnHeaderRowFocuses(t *testing.T) {
-	cli, _ := newMouseClient(t)
+	cli, ch := newMouseClient(t)
+	_ = ch
 	p2 := placementFor(cli, 2)
 
 	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
 
 	if got := cli.FocusedPaneID(); got != 2 {
-		t.Errorf("focus requests = %d, want [2]", got)
+		t.Errorf("focus = %d, want 2", got)
 	}
 }
 
 func TestClickOnFocusedPaneSendsNothing(t *testing.T) {
-	cli, _ := newMouseClient(t)
+	cli, ch := newMouseClient(t)
+	_ = ch
 	p1 := placementFor(cli, 1)
 
 	click(cli, p1.Dst.Min.X+2, p1.Dst.Min.Y+2)
@@ -104,8 +107,8 @@ func TestClickHitsTopmostCard(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-	})
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 	p1, p2 := placementFor(cli, 1), placementFor(cli, 2)
 	overlap := p1.Dst.Intersect(p2.Dst)
 	if overlap.Empty() {
@@ -116,7 +119,7 @@ func TestClickHitsTopmostCard(t *testing.T) {
 	}
 
 	click(cli, overlap.Min.X, overlap.Min.Y+1)
-	if got := cli.FocusedPaneID(); got != 1 {
+	if got := cli.FocusedPaneID(); got != 2 {
 		t.Errorf("click on overlap sent focus %v; pane 2 is on top and already focused", got)
 	}
 
@@ -128,6 +131,7 @@ func TestClickHitsTopmostCard(t *testing.T) {
 
 func TestMouseIgnoredWhileHelpVisible(t *testing.T) {
 	cli, ch := newMouseClient(t)
+	_ = ch
 	cli.SetHelpVisible(true)
 	p2 := placementFor(cli, 2)
 
@@ -141,6 +145,7 @@ func TestMouseIgnoredWhileHelpVisible(t *testing.T) {
 // Nothing is under the status bar or past the last pane.
 func TestClickOnEmptySpaceSendsNothing(t *testing.T) {
 	cli, ch := newMouseClient(t)
+	_ = ch
 
 	cli.HandleMouse(context.Background(), press(99, 10))
 	cli.HandleMouse(context.Background(), press(10, 23))
@@ -169,6 +174,7 @@ func scrolls(msgs []transport.ClientMessage) []protocol.MsgScroll {
 // focus from the one being typed into.
 func TestWheelScrollsPaneUnderPointer(t *testing.T) {
 	cli, ch := newMouseClient(t)
+	_ = ch
 	p2 := placementFor(cli, 2)
 
 	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, p2.Dst.Min.Y+2, uv.MouseWheelUp))
@@ -185,6 +191,7 @@ func TestWheelScrollsPaneUnderPointer(t *testing.T) {
 
 func TestWheelDownScrollsForward(t *testing.T) {
 	cli, ch := newMouseClient(t)
+	_ = ch
 	p1 := placementFor(cli, 1)
 
 	cli.HandleMouse(context.Background(), wheel(p1.Dst.Min.X+2, p1.Dst.Min.Y+2, uv.MouseWheelDown))
@@ -203,6 +210,7 @@ func TestWheelDownScrollsForward(t *testing.T) {
 // renderer still honours it, so the mouse should too.
 func TestWheelOverSliverOrHeaderDoesNothing(t *testing.T) {
 	cli, ch := newMouseClient(t)
+	_ = ch
 	p2 := placementFor(cli, 2)
 
 	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, 0, uv.MouseWheelUp))
@@ -267,6 +275,7 @@ func drag(cli *Client, from, to image.Point) string {
 func newSelectClient(t *testing.T) (*Client, *transport.InProcChannel, *fakeHostScreen) {
 	t.Helper()
 	cli, ch := newMouseClient(t)
+	_ = ch
 	cli.HandleServerMsg(paneLines(1, 40, 22, "HELLO WORLD", "SECOND LINE", "THIRD"))
 	cli.HandleServerMsg(paneLines(2, 40, 22, "NEIGHBOUR TEXT", "MORE NEIGHBOUR"))
 	scr := newFakeHostScreen(100, 24)
@@ -277,7 +286,8 @@ func newSelectClient(t *testing.T) (*Client, *transport.InProcChannel, *fakeHost
 // Stream selection, like every terminal: the tail of the first row,
 // the head of the last. Backwards drags read the same as forwards.
 func TestDragSelectsAndReturnsText(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d := placementFor(cli, 1).Dst
 
 	got := drag(cli, image.Pt(d.Min.X+6, d.Min.Y), image.Pt(d.Min.X+2, d.Min.Y+1))
@@ -294,7 +304,8 @@ func TestDragSelectsAndReturnsText(t *testing.T) {
 // Rows between the ends are taken whole, and trailing blanks -- the
 // empty rest of a 40-wide row -- are not copied.
 func TestDragAcrossRowsTrimsTrailingBlanks(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d := placementFor(cli, 1).Dst
 
 	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+2, d.Min.Y+2))
@@ -305,7 +316,8 @@ func TestDragAcrossRowsTrimsTrailingBlanks(t *testing.T) {
 }
 
 func TestReleaseWithoutDragCopiesNothing(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d := placementFor(cli, 1).Dst
 
 	if got := drag(cli, image.Pt(d.Min.X+3, d.Min.Y), image.Pt(d.Min.X+3, d.Min.Y)); got != "" {
@@ -322,7 +334,8 @@ func TestReleaseWithoutDragCopiesNothing(t *testing.T) {
 // A drag that wanders into the next pane stays in the one it started
 // in: its neighbour's text is someone else's output.
 func TestDragIsClampedToStartingPane(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d1, d2 := placementFor(cli, 1).Dst, placementFor(cli, 2).Dst
 
 	got := drag(cli, image.Pt(d1.Min.X, d1.Min.Y), image.Pt(d2.Min.X+5, d1.Min.Y+1))
@@ -362,6 +375,7 @@ func TestSelectionIsHighlighted(t *testing.T) {
 func TestSelectionHandlesWideGlyphs(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	_ = ch
+	_ = ch
 	cli.HandleServerMsg(paneLines(1, 40, 22, "A世\x00B"))
 	scr := newFakeHostScreen(100, 24)
 	cli.Draw(scr)
@@ -379,7 +393,8 @@ func TestSelectionHandlesWideGlyphs(t *testing.T) {
 }
 
 func TestClearSelectionOnKey(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d := placementFor(cli, 1).Dst
 	drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+4, d.Min.Y))
 
@@ -395,7 +410,8 @@ func TestClearSelectionOnKey(t *testing.T) {
 // Once the pane moves, the highlighted cells no longer hold the text
 // that was selected.
 func TestSelectionClearsWhenPaneMoves(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d := placementFor(cli, 1).Dst
 	drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+4, d.Min.Y))
 
@@ -435,6 +451,8 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 func newTrackingClient(t *testing.T, focus int) (*Client, *transport.InProcChannel) {
 	t.Helper()
 	cli, ch := newMouseClient(t)
+	_ = ch
+	cli.FocusColumn(context.Background(), focus)
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
@@ -488,7 +506,7 @@ func TestPressOnUnfocusedTrackingPaneOnlyFocuses(t *testing.T) {
 
 	msgs := sent(ch)
 	if got := cli.FocusedPaneID(); got != 2 {
-		t.Errorf("focus requests = %d, want [2]", got)
+		t.Errorf("focus = %d, want 2", got)
 	}
 	if m := mice(msgs); len(m) != 0 {
 		t.Errorf("forwarded %+v to a pane that was not focused", m)
@@ -521,7 +539,7 @@ func TestForwardedDragFollowsGrabOutsidePane(t *testing.T) {
 	if got[2].Kind != protocol.MouseRelease || got[2].X != 0 {
 		t.Errorf("release = %+v, want MouseRelease clamped to X=0", got[2])
 	}
-	if got := cli.FocusedPaneID(); got != 1 {
+	if got := cli.FocusedPaneID(); got != 2 {
 		t.Errorf("drag into pane 1 sent focus %v", got)
 	}
 	if copied != "" {
@@ -579,8 +597,8 @@ func TestCardSelectionStopsAtTheCardAbove(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-	})
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER-CARD-TEXT-THAT-RUNS-UNDER-THE-NEXT", "LOWER-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(2, 60, 10, "TOP-CARD", "TOP-ROW-TWO"))
 	cli.HandleServerMsg(paneLines(3, 60, 10, "RIGHT"))
@@ -607,8 +625,8 @@ func TestCardSelectionCopiesNoBorder(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-	})
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 	cli.HandleServerMsg(paneLines(3, 60, 10, "RIGHT-CARD"))
 	cli.Draw(newFakeHostScreen(100, 24))
 	d3 := placementFor(cli, 3).Dst
@@ -625,8 +643,8 @@ func TestClickOnCardBorderFocusesThatCard(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-	})
+	cli.focusPaneID = 1
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 	cli.Draw(newFakeHostScreen(100, 24))
 	sent(ch)
 	d2 := placementFor(cli, 2).Dst
@@ -660,11 +678,11 @@ func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 	ch := transport.NewInProcChannel(64)
 	cli := NewClient(ch, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-	
+
 	snap := protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{{PaneID: 1, Width: 60, Height: 10}},
 	}
-	
+
 	cli.HandleServerMsg(snap)
 	cli.HandleServerMsg(paneLines(1, 60, 10, "LOWER"))
 	cli.Draw(newFakeHostScreen(100, 24))
@@ -687,7 +705,8 @@ func TestCardSelectionSurvivesUnchangedSnapshot(t *testing.T) {
 // clicks therefore focus on release, and only if the pointer did not
 // move.
 func TestDragOnUnfocusedPaneSelectsWithoutFocusing(t *testing.T) {
-	cli, _, _ := newSelectClient(t)
+	cli, ch, _ := newSelectClient(t)
+	_ = ch
 	d := placementFor(cli, 2).Dst
 
 	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+8, d.Min.Y))
@@ -703,7 +722,8 @@ func TestDragOnUnfocusedPaneSelectsWithoutFocusing(t *testing.T) {
 // The header is not content and cannot start a selection, so there is
 // no reason to wait for the release there.
 func TestHeaderPressFocusesImmediately(t *testing.T) {
-	cli, _ := newMouseClient(t)
+	cli, ch := newMouseClient(t)
+	_ = ch
 	p2 := placementFor(cli, 2)
 
 	cli.HandleMouse(context.Background(), press(p2.Dst.Min.X+2, 0))
@@ -714,7 +734,8 @@ func TestHeaderPressFocusesImmediately(t *testing.T) {
 }
 
 func TestDragAcrossSoftWrappedRowJoinsLines(t *testing.T) {
-	cli, _ := newMouseClient(t)
+	cli, ch := newMouseClient(t)
+	_ = ch
 	// Fill row 0 completely (length 40) so the last cell is non-blank.
 	cli.HandleServerMsg(paneLines(1, 40, 22,
 		"1234567890123456789012345678901234567890",

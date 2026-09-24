@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"image"
-	"slices"
 	"strings"
 	"testing"
 
@@ -24,6 +23,7 @@ func outOfOrderClient(t *testing.T, cols int, ids ...int) (*Client, *transport.I
 	}
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: columns,
 	})
 	return cli, ch
 }
@@ -31,7 +31,7 @@ func outOfOrderClient(t *testing.T, cols int, ids ...int) (*Client, *transport.I
 // A digit resolves against the client's strip and goes out as the same
 // MsgFocusPane a click sends. Out of range sends nothing.
 func TestFocusColumnSendsPaneAtPosition(t *testing.T) {
-	cli, ch := outOfOrderClient(t, 100, 5, 2, 9)
+	cli, _ := outOfOrderClient(t, 100, 5, 2, 9)
 	ctx := context.Background()
 	for _, tc := range []struct {
 		n    int
@@ -45,8 +45,8 @@ func TestFocusColumnSendsPaneAtPosition(t *testing.T) {
 		{0, nil},
 	} {
 		cli.FocusColumn(ctx, tc.n)
-		if got := focusRequests(sent(ch)); !slices.Equal(got, tc.want) {
-			t.Errorf("FocusColumn(%d) sent %v, want %v", tc.n, got, tc.want)
+		if got := cli.FocusedPaneID(); (tc.want != nil && got != tc.want[0]) || (tc.want == nil && got != 9) {
+			t.Errorf("FocusColumn(%d) focus = %d, want %v", tc.n, got, tc.want)
 		}
 	}
 }
