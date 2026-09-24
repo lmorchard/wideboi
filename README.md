@@ -169,6 +169,8 @@ By default, wideboi looks for a config file at:
 
 - `$XDG_CONFIG_HOME/wideboi/config.toml` (typically `~/.config/wideboi/config.toml`)
 
+It also checks for a `.wideboi.toml` file in the current working directory, which acts as a project-specific config that overrides the default one.
+
 You can pass a custom config file path using `-c` or `--config`:
 
 ```
