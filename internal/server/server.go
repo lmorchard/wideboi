@@ -44,6 +44,11 @@ type Server struct {
 	// client that missed it. See broadcastPaneUpdates.
 	paneGens map[transport.Transport]map[int]uint64
 
+	// clientSizes records the last known window dimensions of each connected
+	// client. The server session size is the minimum among all clients,
+	// preventing a large client from cropping a smaller one.
+	clientSizes map[transport.Transport]protocol.MsgResize
+
 	// paneSendMu serializes broadcastPaneUpdates. The Run loop, every
 	// client's message loop (via broadcastLayout) and onPaneExit all
 	// broadcast, and two overlapping rounds could deliver an older
@@ -99,12 +104,13 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		cwd, _ = os.Getwd()
 	}
 	srv := &Server{
-		strip:      layout.NewStrip(),
-		panes:      make(map[int]*Pane),
-		shell:      shell,
-		cwd:        cwd,
-		transports: make([]transport.Transport, 0),
-		stopCh:     make(chan struct{}),
+		strip:       layout.NewStrip(),
+		panes:       make(map[int]*Pane),
+		shell:       shell,
+		cwd:         cwd,
+		transports:  make([]transport.Transport, 0),
+		clientSizes: make(map[transport.Transport]protocol.MsgResize),
+		stopCh:      make(chan struct{}),
 	}
 	if tp != nil {
 		srv.transports = append(srv.transports, tp)
@@ -172,7 +178,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				s.dropClient(tp)
 				return
 			}
-			s.handleClientMsg(ctx, msg)
+			s.handleClientMsg(ctx, tp, msg)
 		}
 	}
 }
@@ -211,6 +217,8 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	}
 	s.transports = out
 	delete(s.paneGens, tp)
+	delete(s.clientSizes, tp)
+	s.recomputeSessionSizeLocked()
 }
 
 // Run executes the main server event loop, processing client messages and polling descendants.
@@ -243,7 +251,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessage) {
+func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
 	needBroadcast := false
 
@@ -253,7 +261,8 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 
 	case protocol.MsgAttach:
 		if m.Cols > 0 && m.Rows > 0 {
-			s.cols, s.rows = m.Cols, m.Rows
+			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
+			s.recomputeSessionSizeLocked()
 		}
 		if len(s.panes) == 0 {
 			_, _ = s.spawnPaneLocked()
@@ -265,7 +274,8 @@ func (s *Server) handleClientMsg(ctx context.Context, msg transport.ClientMessag
 
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
-			s.cols, s.rows = m.Cols, m.Rows
+			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
+			s.recomputeSessionSizeLocked()
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
@@ -425,6 +435,30 @@ func (s *Server) removePaneLocked(id int) {
 	s.strip.KillPane(id)
 	delete(s.panes, id)
 	go p.Close()
+}
+
+// recomputeSessionSizeLocked updates s.cols and s.rows to the minimum dimensions
+// among all connected clients.
+func (s *Server) recomputeSessionSizeLocked() {
+	if len(s.clientSizes) == 0 {
+		return
+	}
+	minCols, minRows := 0, 0
+	first := true
+	for _, sz := range s.clientSizes {
+		if first {
+			minCols, minRows = sz.Cols, sz.Rows
+			first = false
+		} else {
+			if sz.Cols < minCols {
+				minCols = sz.Cols
+			}
+			if sz.Rows < minRows {
+				minRows = sz.Rows
+			}
+		}
+	}
+	s.cols, s.rows = minCols, minRows
 }
 
 // resizePanesLocked pushes each pane's current column width and available

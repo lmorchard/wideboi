@@ -190,7 +190,7 @@ func TestReservedToggleVerbChangesNothing(t *testing.T) {
 	}
 	focus := s.strip.FocusedPaneID()
 
-	s.handleClientMsg(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
+	s.handleClientMsg(ctx, nil, protocol.MsgVerb{Verb: protocol.VerbToggleCards})
 
 	// Nor may it broadcast: a snapshot is followed by a forced resend
 	// of every pane to every client, so an old client's C-b c would
