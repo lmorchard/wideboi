@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+.PHONY: proto web-test check check-targets quick test race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -42,7 +42,7 @@ CHECK_JOBS ?= 8
 check:
 	@$(MAKE) --no-print-directory -j$(CHECK_JOBS) check-targets
 
-check-targets: fmt-check lint seam-check test race verify-exit smoke attach-check
+check-targets: fmt-check lint seam-check test race verify-exit smoke attach-check web-test
 
 # quick is the inner-loop tier: everything that does not spawn the real
 # binary in a real pty, and no race detector. Run this on save; run check
@@ -58,6 +58,9 @@ quick: fmt-check lint seam-check test
 
 test: web/dist
 	go test ./...
+
+web-test: web/dist
+	cd web && npm test
 
 # The race detector belongs in the gate: a data race that only appears
 # under load is exactly what a green suite hides. -count=1 defeats `go
@@ -174,3 +177,7 @@ attach-check: build
 web/dist: web/package.json $(shell find web/src -type f) web/index.html web/tsconfig.json
 	cd web && npm install && npm run build
 
+
+# Regenerate protobuf bindings after editing internal/protocol/wirepb/wideboi.proto.
+proto:
+	buf generate

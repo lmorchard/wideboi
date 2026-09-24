@@ -78,7 +78,36 @@ export interface MsgResize {
   Rows: number;
 }
 
-export interface WSEnvelope {
-  t: string;
-  p: any;
+
+
+// Renderer data is kept separate from the generated transport schema.
+import type { MsgLayoutSnapshot as WireLayout, MsgPaneUpdate as WirePane, ColorData as WireColor } from './gen/internal/protocol/wirepb/wideboi_pb';
+
+function fromWireColor(color?: WireColor): ColorData {
+  return { Kind: color?.kind ?? 0, Index: color?.index ?? 0, R: color?.r ?? 0, G: color?.g ?? 0, B: color?.b ?? 0, A: color?.a ?? 0 };
+}
+
+export function fromWireLayout(wire: WireLayout): MsgLayoutSnapshot {
+  return {
+    Columns: wire.columns.map((column) => ({ PaneID: column.paneId, Width: column.width, Height: column.height })),
+    FocusPaneID: wire.focusPaneId,
+    PaneStatuses: wire.paneStatuses,
+    PaneTitles: wire.paneTitles,
+  };
+}
+
+export function fromWirePane(wire: WirePane): MsgPaneUpdate {
+  return {
+    PaneID: wire.paneId, Cols: wire.cols, Rows: wire.rows,
+    Lines: wire.lines.map((line) => line.cells.map((cell) => ({
+      Content: cell.content, Width: cell.width,
+      Style: {
+        Fg: fromWireColor(cell.style?.fg), Bg: fromWireColor(cell.style?.bg),
+        UnderlineColor: fromWireColor(cell.style?.underlineColor),
+        Underline: cell.style?.underline ?? 0, Attrs: cell.style?.attrs ?? 0,
+      },
+    }))),
+    CursorX: wire.cursorX, CursorY: wire.cursorY,
+    CursorVisible: wire.cursorVisible, MouseTracking: wire.mouseTracking,
+  };
 }

@@ -246,3 +246,14 @@ Flags:
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Wire protocol
+
+The Unix socket and WebSocket transports exchange binary Protocol Buffers. The
+schema in `internal/protocol/wirepb/wideboi.proto` defines both client and server
+oneof envelopes. Unix socket messages use a four-byte big-endian length prefix;
+WebSocket binary messages use WebSocket's own framing. The Go application models
+are converted to generated wire messages in `internal/protocol/codec.go`.
+
+To regenerate the Go and TypeScript types after editing the schema, install
+`buf` and `protoc-gen-go`, run `npm ci --prefix web`, then run `buf generate`.

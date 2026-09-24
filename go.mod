@@ -9,6 +9,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/pelletier/go-toml/v2 v2.4.3
+	google.golang.org/protobuf v1.36.12
 	pgregory.net/rapid v1.3.0
 )
 

@@ -1,0 +1,166 @@
+syntax = "proto3";
+
+package wideboi.protocol;
+option go_package = "github.com/lmorchard/wideboi/internal/protocol/wirepb";
+
+enum VerbType {
+  VERB_TYPE_UNSPECIFIED = 0;
+  VERB_TYPE_FOCUS_LEFT = 1;
+  VERB_TYPE_FOCUS_RIGHT = 2;
+  VERB_TYPE_NEW_COLUMN = 3;
+  VERB_TYPE_CYCLE_WIDTH = 4;
+  VERB_TYPE_KILL_PANE = 5;
+  VERB_TYPE_SMART_JUMP = 6;
+  VERB_TYPE_TOGGLE_CARDS = 7;
+  VERB_TYPE_GROW_WIDTH = 8;
+  VERB_TYPE_SHRINK_WIDTH = 9;
+  VERB_TYPE_MOVE_LEFT = 10;
+  VERB_TYPE_MOVE_RIGHT = 11;
+  VERB_TYPE_FOCUS_LAST = 12;
+}
+
+enum ColorKind {
+  COLOR_KIND_NONE = 0;
+  COLOR_KIND_BASIC = 1;
+  COLOR_KIND_INDEXED = 2;
+  COLOR_KIND_RGBA = 3;
+}
+
+message ColorData {
+  ColorKind kind = 1;
+  uint32 index = 2;
+  uint32 r = 3;
+  uint32 g = 4;
+  uint32 b = 5;
+  uint32 a = 6;
+}
+
+message StyleData {
+  ColorData fg = 1;
+  ColorData bg = 2;
+  ColorData underline_color = 3;
+  uint32 underline = 4;
+  uint32 attrs = 5;
+}
+
+message CellData {
+  string content = 1;
+  int32 width = 2;
+  StyleData style = 3;
+}
+
+message LineData {
+  repeated CellData cells = 1;
+}
+
+message MsgPaneUpdate {
+  int32 pane_id = 1;
+  int32 cols = 2;
+  int32 rows = 3;
+  repeated LineData lines = 4;
+  int32 cursor_x = 5;
+  int32 cursor_y = 6;
+  bool cursor_visible = 7;
+  bool mouse_tracking = 8;
+}
+
+message ColumnData {
+  int32 pane_id = 1;
+  int32 width = 2;
+  int32 height = 3;
+}
+
+message MsgLayoutSnapshot {
+  repeated ColumnData columns = 1;
+  int32 focus_pane_id = 2;
+  map<int32, string> pane_statuses = 3;
+  map<int32, string> pane_titles = 4;
+}
+
+message MsgPaneClosed {
+  int32 pane_id = 1;
+  int32 exit_code = 2;
+}
+
+message ServerMessage {
+  oneof msg {
+    MsgPaneUpdate pane_update = 1;
+    MsgLayoutSnapshot layout_snapshot = 2;
+    MsgPaneClosed pane_closed = 3;
+  }
+}
+
+message MsgAttach {
+  int32 cols = 1;
+  int32 rows = 2;
+}
+
+message MsgVerb {
+  VerbType verb = 1;
+}
+
+message MsgFocusPane {
+  int32 pane_id = 1;
+}
+
+enum MouseKind {
+  MOUSE_KIND_PRESS = 0;
+  MOUSE_KIND_RELEASE = 1;
+  MOUSE_KIND_MOTION = 2;
+  MOUSE_KIND_WHEEL = 3;
+}
+
+message MsgMouse {
+  int32 pane_id = 1;
+  MouseKind kind = 2;
+  int32 x = 3;
+  int32 y = 4;
+  int32 button = 5;
+  int32 mod = 6;
+}
+
+message KeyData {
+  string text = 1;
+  int32 mod = 2;
+  int32 code = 3;
+  int32 shifted_code = 4;
+  int32 base_code = 5;
+  bool is_repeat = 6;
+}
+
+message MsgInput {
+  int32 pane_id = 1;
+  KeyData key = 2;
+  bytes data = 3;
+}
+
+message MsgResize {
+  int32 cols = 1;
+  int32 rows = 2;
+}
+
+message MsgScroll {
+  int32 pane_id = 1;
+  int32 delta = 2;
+}
+
+message MsgDetach {}
+
+message MsgShutdown {}
+
+message MsgStatusRequest {}
+
+message ClientMessage {
+  oneof msg {
+    MsgAttach attach = 1;
+    MsgVerb verb = 2;
+    MsgFocusPane focus_pane = 3;
+    MsgMouse mouse = 4;
+    MsgInput input = 5;
+    MsgResize resize = 6;
+    MsgScroll scroll = 7;
+    MsgDetach detach = 8;
+    MsgShutdown shutdown = 9;
+    MsgStatusRequest status_request = 10;
+  }
+}

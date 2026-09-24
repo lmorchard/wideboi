@@ -8,29 +8,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// This file holds the concrete, gob-safe mirrors of the two upstream
-// types a cell update needs: uv.Style and uv.Key.
-//
-// Neither could travel as-is. uv.Style's Fg, Bg and UnderlineColor are
-// color.Color *interfaces*, and uv.KeyEvent is an interface too. gob
-// refuses to encode an interface value whose concrete type has not been
-// registered, and the refusal is an error on a write pump, not a panic:
-// before this existed, the first coloured cell a child emitted killed
-// the socket and the attached client exited silently.
-//
-// Registering the implementations instead of mirroring them was the
-// obvious alternative and the wrong one. The set is open-ended --
-// ansi.ReadStyleColor alone yields ansi.IndexedColor, color.RGBA,
-// color.CMYK and color.Transparent, uv.ReadStyle adds ansi.BasicColor,
-// and any future upstream branch adds more -- and a missing entry fails
-// exactly the way this one did: silently, at runtime, on someone's
-// prompt. protocol_test.go's TestWireTypesCarryNoInterfaces enforces the
-// mirroring instead, because "contains no interface" is a property of
-// the declared type that a test can actually check.
-//
-// The package still imports uv, but only here and only for the
-// converters. The wire structs themselves are scalars.
-
+// These values are the application's cell and key models. codec.go converts
+// them to generated protobuf messages at the transport boundary.
 // ColorKind tags which arm of ColorData carries the value.
 type ColorKind uint8
 

@@ -44,40 +44,41 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		t.Fatalf("upgrade failed: %v", err)
 	}
 
-	// 1. Test Client -> Server (JSON Envelope)
-	env := transport.WSEnvelope{
-		Type:    "MsgAttach",
-		Payload: []byte(`{"Cols":80,"Rows":24}`),
+	// Browser and server exchange binary protobuf envelopes.
+	attach, err := protocol.MarshalClient(protocol.MsgAttach{Cols: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := clientConn.WriteJSON(env); err != nil {
-		t.Fatalf("client write JSON failed: %v", err)
+	if err := clientConn.WriteMessage(websocket.BinaryMessage, attach); err != nil {
+		t.Fatal(err)
 	}
-
 	select {
 	case msg := <-serverWSConn.ClientSendChan():
 		got, ok := msg.(protocol.MsgAttach)
 		if !ok || got.Cols != 80 || got.Rows != 24 {
-			t.Fatalf("got server msg %+v, want MsgAttach {80, 24}", msg)
+			t.Fatalf("got client msg %+v", msg)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for client message on server")
+		t.Fatal("timeout waiting for client message")
 	}
 
-	// 2. Test Server -> Client (Go struct -> JSON Envelope)
-	snapMsg := protocol.MsgLayoutSnapshot{FocusPaneID: 42}
-	if !serverWSConn.SendServer(ctx, snapMsg) {
-		t.Fatal("server SendServer failed")
+	if !serverWSConn.SendServer(ctx, protocol.MsgLayoutSnapshot{FocusPaneID: 42}) {
+		t.Fatal("SendServer failed")
 	}
-
-	var res transport.WSEnvelope
-	if err := clientConn.ReadJSON(&res); err != nil {
-		t.Fatalf("client read JSON failed: %v", err)
+	kind, payload, err := clientConn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if res.Type != "MsgLayoutSnapshot" {
-		t.Errorf("got type %q, want MsgLayoutSnapshot", res.Type)
+	if kind != websocket.BinaryMessage {
+		t.Fatalf("frame kind %d, want binary", kind)
 	}
-	if !strings.Contains(string(res.Payload), `"FocusPaneID":42`) {
-		t.Errorf("got payload %q, want it to contain FocusPaneID:42", string(res.Payload))
+	decoded, err := protocol.UnmarshalServer(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, ok := decoded.(protocol.MsgLayoutSnapshot)
+	if !ok || snap.FocusPaneID != 42 {
+		t.Fatalf("got server msg %+v", decoded)
 	}
 
 	serverWSConn.Close()

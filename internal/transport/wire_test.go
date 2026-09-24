@@ -1,8 +1,7 @@
 package transport
 
 import (
-	"bytes"
-	"encoding/gob"
+	"encoding/json"
 	"image/color"
 	"reflect"
 	"testing"
@@ -12,24 +11,25 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
-// roundtrip encodes v through the same interface-valued gob path the
-// socket pumps use -- Encode(&msg) where msg is a ServerMessage /
-// ClientMessage -- and decodes it back. Encoding the concrete type
-// directly would not exercise gob's interface machinery, which is
-// exactly where the attach-killing defect lived.
+// roundtrip exercises the generated oneof envelope and binary protobuf codec.
 func roundtrip(t *testing.T, v any) any {
 	t.Helper()
-	var buf bytes.Buffer
-	var out any
-
-	var in ServerMessage = v
-	if err := gob.NewEncoder(&buf).Encode(&in); err != nil {
+	if data, err := protocol.MarshalClient(v); err == nil {
+		got, err := protocol.UnmarshalClient(data)
+		if err != nil {
+			t.Fatalf("decode %T: %v", v, err)
+		}
+		return got
+	}
+	data, err := protocol.MarshalServer(v)
+	if err != nil {
 		t.Fatalf("encode %T: %v", v, err)
 	}
-	if err := gob.NewDecoder(&buf).Decode(&out); err != nil {
+	got, err := protocol.UnmarshalServer(data)
+	if err != nil {
 		t.Fatalf("decode %T: %v", v, err)
 	}
-	return out
+	return got
 }
 
 // TestPaneUpdateSurvivesEveryColorKind is the regression test for the
@@ -154,6 +154,7 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgScroll{PaneID: 2, Delta: -3},
 		protocol.MsgShutdown{},
 		protocol.MsgDetach{},
+		protocol.MsgStatusRequest{},
 		protocol.MsgLayoutSnapshot{
 			Columns:      []protocol.ColumnData{{PaneID: 1, Width: 40, Height: 22}},
 			FocusPaneID:  1,
@@ -175,5 +176,28 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 				t.Errorf("roundtrip changed %s:\n got %+v\nwant %+v", name, got, msg)
 			}
 		})
+	}
+}
+
+// A plain terminal grid is the large, frequent payload that motivated #127.
+func TestPaneUpdateProtobufIsSmallerThanJSON(t *testing.T) {
+	lines := make([]protocol.LineData, 24)
+	for y := range lines {
+		lines[y] = make(protocol.LineData, 80)
+		for x := range lines[y] {
+			lines[y][x] = protocol.CellData{Content: " ", Width: 1}
+		}
+	}
+	msg := protocol.MsgPaneUpdate{PaneID: 1, Cols: 80, Rows: 24, Lines: lines}
+	binary, err := protocol.MarshalServer(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jsonBytes, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binary)*3 >= len(jsonBytes) {
+		t.Fatalf("protobuf grid %d bytes, JSON grid %d bytes: want at least 3x reduction", len(binary), len(jsonBytes))
 	}
 }

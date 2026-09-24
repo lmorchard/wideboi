@@ -2,7 +2,8 @@ import { LitElement, html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { WideboiClient } from './client';
 import { GridRenderer } from './renderer';
-import type { WSEnvelope } from './protocol';
+import { fromWireLayout, fromWirePane } from './protocol';
+import { VerbType, MouseKind } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
@@ -213,16 +214,25 @@ export class WideboiApp extends LitElement {
       this.connected = false;
       this.errorMsg = 'Disconnected from server.';
     }
-    this.client.onMessage = (env: WSEnvelope) => {
+    this.client.onMessage = (message) => {
       if (!this.renderer) return;
-
-      if (env.t === 'MsgLayoutSnapshot') {
-        this.renderer.handleLayoutSnapshot(env.p);
-        this.activePanes = env.p.Columns?.map((c: any) => c.PaneID) || [];
-        this.focusedPaneId = env.p.FocusPaneID || 0;
-        this.paneTitles = env.p.PaneTitles || {};
-      } else if (env.t === 'MsgPaneUpdate') {
-        this.renderer.handlePaneUpdate(env.p);
+      switch (message.msg.case) {
+        case 'layoutSnapshot': {
+          const snapshot = fromWireLayout(message.msg.value);
+          this.renderer.handleLayoutSnapshot(snapshot);
+          this.activePanes = snapshot.Columns.map((c) => c.PaneID);
+          this.focusedPaneId = snapshot.FocusPaneID;
+          this.paneTitles = snapshot.PaneTitles;
+          break;
+        }
+        case 'paneUpdate':
+          this.renderer.handlePaneUpdate(fromWirePane(message.msg.value));
+          break;
+        case 'paneClosed': {
+          const closedId = message.msg.value.paneId;
+          this.activePanes = this.activePanes.filter((id) => id !== closedId);
+          break;
+        }
       }
     };
 
@@ -242,7 +252,7 @@ export class WideboiApp extends LitElement {
         return;
       }
       if (this.inPrefixMode) {
-        let verb = 0;
+        let verb = VerbType.UNSPECIFIED;
         // Handle normal key presses and also handle if Ctrl is held down while pressing the key
         const key = e.key.toLowerCase();
         
@@ -254,17 +264,17 @@ export class WideboiApp extends LitElement {
         }
 
         switch (key) {
-          case 'h': case 'arrowleft': verb = 1; break;  // FocusLeft
-          case 'l': case 'arrowright': verb = 2; break; // FocusRight
-          case 'n': verb = 3; break;  // NewColumn
-          case 'w': verb = 4; break;  // CycleWidth
-          case 'x': verb = 5; break;  // KillPane
-          case 'a': verb = 6; break;  // SmartJump
-          case 'p': verb = 8; break;  // GrowWidth
-          case 'o': verb = 9; break;  // ShrinkWidth
-          case 'y': verb = 10; break; // MoveLeft
-          case 'u': verb = 11; break; // MoveRight
-          case 'tab': verb = 12; break; // FocusLast
+          case 'h': case 'arrowleft': verb = VerbType.FOCUS_LEFT; break;  // FocusLeft
+          case 'l': case 'arrowright': verb = VerbType.FOCUS_RIGHT; break; // FocusRight
+          case 'n': verb = VerbType.NEW_COLUMN; break;  // NewColumn
+          case 'w': verb = VerbType.CYCLE_WIDTH; break;  // CycleWidth
+          case 'x': verb = VerbType.KILL_PANE; break;  // KillPane
+          case 'a': verb = VerbType.SMART_JUMP; break;  // SmartJump
+          case 'p': verb = VerbType.GROW_WIDTH; break;  // GrowWidth
+          case 'o': verb = VerbType.SHRINK_WIDTH; break;  // ShrinkWidth
+          case 'y': verb = VerbType.MOVE_LEFT; break; // MoveLeft
+          case 'u': verb = VerbType.MOVE_RIGHT; break; // MoveRight
+          case 'tab': verb = VerbType.FOCUS_LAST; break; // FocusLast
         }
         
         if (verb > 0) {
@@ -319,7 +329,7 @@ export class WideboiApp extends LitElement {
       const inputMsg = {
         PaneID: this.renderer.getFocusedPaneId(),
         Key: keyData,
-        Data: data ? btoa(data) : "" // MsgInput Data is []byte so JSON might expect base64? Let's check!
+        Data: new TextEncoder().encode(data)
       };
       
       this.client.send('MsgInput', inputMsg);
@@ -343,7 +353,7 @@ export class WideboiApp extends LitElement {
         
         this.client.send('MsgMouse', {
             PaneID: hit.paneID,
-            Kind: 0, 
+            Kind: MouseKind.PRESS, 
             X: localX,
             Y: localY,
             Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
@@ -362,7 +372,7 @@ export class WideboiApp extends LitElement {
         
         this.client.send('MsgMouse', {
             PaneID: hit.paneID,
-            Kind: 1, 
+            Kind: MouseKind.RELEASE, 
             X: localX,
             Y: localY,
             Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
@@ -383,7 +393,7 @@ export class WideboiApp extends LitElement {
         
         this.client.send('MsgMouse', {
             PaneID: hit.paneID,
-            Kind: 2, 
+            Kind: MouseKind.MOTION, 
             X: localX,
             Y: localY,
             Button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,

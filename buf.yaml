@@ -1,0 +1,11 @@
+version: v1
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+    - PACKAGE_VERSION_SUFFIX
+    - ENUM_ZERO_VALUE_SUFFIX
