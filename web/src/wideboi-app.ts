@@ -391,6 +391,23 @@ export class WideboiApp extends LitElement {
         });
       }
     });
+
+    this.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (!this.connected || !this.renderer || !this.client) return;
+      
+      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
+      const hit = this.renderer.getPaneHit(x, y);
+      
+      if (hit.paneID > 0) {
+        // e.deltaY > 0 means scrolling down (towards bottom/newer).
+        // e.deltaY < 0 means scrolling up (towards top/older).
+        // In MsgScroll, Delta > 0 is up (older), Delta < 0 is down (newer).
+        // A standard wheel step is often 3 lines.
+        const delta = e.deltaY > 0 ? -3 : 3;
+        this.client.send('MsgScroll', { PaneID: hit.paneID, Delta: delta });
+      }
+    }, { passive: false });
   }
 
   private sendAttach() {
