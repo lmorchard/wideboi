@@ -42,7 +42,7 @@ CHECK_JOBS ?= 8
 check:
 	@$(MAKE) --no-print-directory -j$(CHECK_JOBS) check-targets
 
-check-targets: fmt-check lint seam-check test web-test race verify-exit smoke attach-check
+check-targets: fmt-check lint seam-check test web-test web-accept race verify-exit smoke attach-check
 
 # quick is the inner-loop tier: everything that does not spawn the real
 # binary in a real pty, and no race detector. Run this on save; run check
@@ -54,13 +54,17 @@ check-targets: fmt-check lint seam-check test web-test race verify-exit smoke at
 # stable, where a hand-maintained list of fast packages would drift. A new
 # package joins quick automatically; if someone adds a slow test, quick
 # gets slower, which is noticeable and self-correcting rather than silent.
-quick: fmt-check lint seam-check test
+quick: fmt-check lint seam-check test web-test
 
 test: web/dist
 	go test ./...
 
 web-test: web/dist
 	cd web && npm test
+
+# Exercise the actual web app in Chromium with a controlled WebSocket peer.
+web-accept: web/dist
+	cd web && npm run test:browser
 
 # The race detector belongs in the gate: a data race that only appears
 # under load is exactly what a green suite hides. -count=1 defeats `go

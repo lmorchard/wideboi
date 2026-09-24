@@ -4,6 +4,8 @@ bin/
 __pycache__/
 *.pyc
 .worktrees/
+web/test-results/
+web/playwright-report/
 *.swp
 *.swo
 .*.toml
