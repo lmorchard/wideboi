@@ -1562,10 +1562,11 @@ func (s *Server) Close() error {
 func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
 	versionProtocol := fmt.Sprintf("wideboi.v%d", protocol.Version)
 	upgrader := &websocket.Upgrader{
-		ReadBufferSize:  4096,
-		WriteBufferSize: 4096,
-		Subprotocols:    []string{versionProtocol},
-		CheckOrigin:     webSocketOriginAllowed,
+		ReadBufferSize:    4096,
+		WriteBufferSize:   4096,
+		Subprotocols:      []string{versionProtocol},
+		CheckOrigin:       webSocketOriginAllowed,
+		EnableCompression: true,
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {

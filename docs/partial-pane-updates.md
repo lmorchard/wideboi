@@ -207,8 +207,15 @@ could not also shrink.
   waits on the manual `?stats=1` run.
 - **Transport compression: worth doing for WebSocket only.** Turn on
   `EnableCompression` in the upgrader. Browsers negotiate permessage-deflate
-  themselves. Unix sockets are local, so it does not help them. Follow-up:
-  #203.
+  themselves. Unix sockets are local, so it does not help them. Implemented in
+  #203: `EnableCompression: true` on the WebSocket upgrader dropped live wire
+  bytes across all scenarios by 84.0–97.9% for WebSocket clients (typing: 15.5 KB
+  vs 97.5 KB socket wire; `seq`: 16.9 KB vs 812 KB; scroll: 15.6 KB vs 190 KB;
+  vim: 39.5 KB vs 618 KB; 160×48 typing: 18.1 KB vs 244 KB per client). Server
+  protobuf marshal timing (`ENC us`) remained low (~13–21 µs/msg for typical workloads,
+  ~108 µs/msg for burst fulls), while compression CPU cost is ~13–19 µs/msg as measured
+  by the deflate sink. MsgTrafficStats replies are sent uncompressed so measurement
+  harness accounting remains exact.
 - **New, and larger than any of the three above:**
   - Keep the sent frame as the baseline when a pane changes mid-send
     (follow-up: #206).
