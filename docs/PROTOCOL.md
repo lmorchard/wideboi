@@ -66,10 +66,23 @@ A Unix socket is a byte stream. Thus, each message has a frame:
 The maximum frame size is 64 MiB. The code is in
 `internal/transport/frame.go`.
 
+The first frame in each direction is a hello, not an envelope. Its payload
+is 16 bytes:
+
+1. The magic `WIDEBOI\0` (8 bytes).
+2. The protocol version, a 4-byte big-endian integer: `protocol.Version`.
+3. The sender's pid, a 4-byte big-endian integer.
+
+A later version may add bytes after these 16. It must not change them. Each
+side sends its hello and reads the other's before it sends anything else. If
+the versions are different, the connection closes. The code is in
+`internal/transport/handshake.go`.
+
 ### 4.2 WebSocket
 
 Each WebSocket message holds one envelope as a binary frame. The WebSocket
-does the framing, so there is no length prefix.
+does the framing, so there is no length prefix. There is no hello: the same
+binary serves the web client and the server, so their versions match.
 
 If a web client sends a message that is larger than 1 MiB, the server closes
 the connection. The server sends a ping each 30 seconds.
@@ -123,6 +136,11 @@ If you add a field that must mean "no change" when it is missing, use
 
 On the Unix socket:
 
+- If the peer's hello has a different version, or the first frame is not a
+  hello, the connection closes before the peer is a client. The server logs
+  it and the session continues. The client shows the version of each side,
+  the socket and the server's pid. A peer from before the hello existed
+  shows as version 0.
 - If the peer closes the connection, this is a clean close. This is also
   true in the middle of a frame.
 - If a complete frame does not decode, this is an error. The connection
@@ -154,7 +172,9 @@ To add a field or a message:
 4. Change `internal/protocol/codec.go`.
 5. For a new message, add it to `wireTypes` in
    `internal/protocol/wire_test.go`.
-6. Do `make check`.
+6. If a peer of the old version would misread or reject the change, increase
+   `Version` in `internal/protocol/version.go`.
+7. Do `make check`.
 
 The tests find these errors:
 
@@ -165,5 +185,5 @@ The tests find these errors:
   the schema.
 
 `make proto` needs `buf` and Node 22 or later. Do `npm ci --prefix web` first.
-The server and the clients must use the same wideboi version. The protocol
-has no version negotiation.
+The server and the clients must use the same protocol version. The hello
+detects a difference; there is no negotiation.

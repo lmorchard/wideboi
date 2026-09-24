@@ -2,6 +2,7 @@ package transport
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -10,11 +11,13 @@ import (
 // four-byte big-endian length prefix. WebSocket messages are framed already.
 const maxFrameSize = 64 << 20
 
+var errFrameTooLarge = errors.New("protobuf frame too large")
+
 // writeFrame sends the prefix and payload in one buffer: pane updates are
 // the hot path, and one write per message beats two.
 func writeFrame(w io.Writer, data []byte) error {
 	if len(data) > maxFrameSize {
-		return fmt.Errorf("protobuf frame too large: %d", len(data))
+		return fmt.Errorf("%w: %d", errFrameTooLarge, len(data))
 	}
 	buf := make([]byte, 4+len(data))
 	binary.BigEndian.PutUint32(buf, uint32(len(data)))
@@ -42,7 +45,7 @@ func readFrame(r io.Reader) ([]byte, error) {
 	}
 	size := binary.BigEndian.Uint32(header[:])
 	if size > maxFrameSize {
-		return nil, fmt.Errorf("protobuf frame too large: %d", size)
+		return nil, fmt.Errorf("%w: %d", errFrameTooLarge, size)
 	}
 	payload := make([]byte, size)
 	_, err := io.ReadFull(r, payload)

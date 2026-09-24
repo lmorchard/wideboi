@@ -39,6 +39,9 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first net.Dial failed: %v", err)
 	}
+	if _, err := transport.Handshake(conn1); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
 	cConn1 := transport.NewClientSocketConn(conn1, 256)
 	cConn1.RunPumps(ctx)
 
@@ -64,6 +67,9 @@ func TestServerAndAttachViaUnixSocket(t *testing.T) {
 	conn2, err := net.Dial("unix", sockPath)
 	if err != nil {
 		t.Fatalf("second net.Dial failed: %v", err)
+	}
+	if _, err := transport.Handshake(conn2); err != nil {
+		t.Fatalf("handshake: %v", err)
 	}
 	cConn2 := transport.NewClientSocketConn(conn2, 256)
 	cConn2.RunPumps(ctx)
@@ -126,6 +132,9 @@ func TestKillSessionShutsDownAServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
+	if _, err := transport.Handshake(conn); err != nil {
+		t.Fatalf("handshake: %v", err)
+	}
 	cc := transport.NewClientSocketConn(conn, 256)
 	cc.RunPumps(ctx)
 	client.NewClient(cc, 80, 24, "C-b").Attach(ctx)
@@ -185,6 +194,9 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
 		t.Fatalf("net.Dial failed: %v", err)
+	}
+	if _, err := transport.Handshake(conn); err != nil {
+		t.Fatalf("handshake: %v", err)
 	}
 	cc := transport.NewClientSocketConn(conn, 256)
 	cc.RunPumps(ctx)

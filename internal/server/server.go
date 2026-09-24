@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"io"
@@ -173,24 +174,45 @@ func (s *Server) ListenSocket(ctx context.Context, sl *transport.SocketListener)
 			if err != nil {
 				return
 			}
-			sConn := transport.NewServerSocketConn(conn, 256)
-			sConn.RunPumps(ctx)
-
-			s.mu.Lock()
-			if s.stoppingLocked() {
-				// Accepted just as Close shut the listener. Close
-				// has taken, or is about to take, its snapshot of
-				// the transports, so this one would never be hung up.
-				s.mu.Unlock()
-				_ = sConn.Close()
-				continue
-			}
-			s.transports = append(s.transports, sConn)
-			s.mu.Unlock()
-
-			go s.handleClientConnLoop(ctx, sConn)
+			go s.admitSocketConn(ctx, conn)
 		}
 	}()
+}
+
+// admitSocketConn registers conn as a client once it has shown it
+// speaks this build's protocol. A peer that fails the handshake is
+// hung up on before it is a client at all, so it cannot resize panes,
+// receive broadcasts, or end the session on the way out (#174). It runs
+// off the accept loop: a peer that never says hello costs its own
+// goroutine the handshake ceiling, not everyone else's attach.
+func (s *Server) admitSocketConn(ctx context.Context, conn net.Conn) {
+	if peer, err := transport.Handshake(conn); err != nil {
+		_ = conn.Close()
+		// `wideboi ls`, `cleanup` and the listener's liveness probe all
+		// dial and hang up at once; that is not worth a warning.
+		if errors.Is(err, io.EOF) {
+			slog.Debug("socket peer hung up before its hello")
+		} else {
+			slog.Warn("refusing socket client", "peerPID", peer.PID, "err", err)
+		}
+		return
+	}
+	sConn := transport.NewServerSocketConn(conn, 256)
+	sConn.RunPumps(ctx)
+
+	s.mu.Lock()
+	if s.stoppingLocked() {
+		// Accepted just as Close shut the listener. Close
+		// has taken, or is about to take, its snapshot of
+		// the transports, so this one would never be hung up.
+		s.mu.Unlock()
+		_ = sConn.Close()
+		return
+	}
+	s.transports = append(s.transports, sConn)
+	s.mu.Unlock()
+
+	go s.handleClientConnLoop(ctx, sConn)
 }
 
 func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transport) {

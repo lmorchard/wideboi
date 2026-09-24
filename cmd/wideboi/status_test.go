@@ -28,6 +28,10 @@ func mockServer(t *testing.T, dir string, snap protocol.MsgLayoutSnapshot) strin
 		if err != nil {
 			return
 		}
+		if _, err := transport.Handshake(conn); err != nil {
+			conn.Close()
+			return
+		}
 		sc := transport.NewServerSocketConn(conn, 1)
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
