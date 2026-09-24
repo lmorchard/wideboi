@@ -2,6 +2,8 @@ package protocol
 
 import (
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/lmorchard/wideboi/internal/protocol/wirepb"
 	"google.golang.org/protobuf/proto"
@@ -91,7 +93,7 @@ func MarshalServer(msg any) ([]byte, error) {
 		if m.PaneTitles != nil {
 			snap.PaneTitles = make(map[int32]string, len(m.PaneTitles))
 			for id, title := range m.PaneTitles {
-				snap.PaneTitles[int32(id)] = title
+				snap.PaneTitles[int32(id)] = validUTF8(title)
 			}
 		}
 		env.Msg = &wirepb.ServerMessage_LayoutSnapshot{LayoutSnapshot: snap}
@@ -165,12 +167,23 @@ func UnmarshalServer(data []byte) (any, error) {
 	}
 }
 
+// validUTF8 returns s unchanged when it is valid UTF-8, the common case,
+// and otherwise replaces each invalid byte sequence with U+FFFD. Protobuf
+// string fields refuse invalid UTF-8, and one bad pane title used to make
+// a whole snapshot unencodable (#175).
+func validUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
+}
+
 // encodeLine and decodeLine convert one row; full updates and patches
 // share them so a cell field is mapped in exactly one place.
 func encodeLine(line LineData) []*wirepb.CellData {
 	cells := make([]*wirepb.CellData, 0, len(line))
 	for _, cell := range line {
-		cells = append(cells, &wirepb.CellData{Content: cell.Content, Width: int32(cell.Width), Style: encodeStyle(cell.Style)})
+		cells = append(cells, &wirepb.CellData{Content: validUTF8(cell.Content), Width: int32(cell.Width), Style: encodeStyle(cell.Style)})
 	}
 	return cells
 }
@@ -217,7 +230,7 @@ func encodeKey(k KeyData) *wirepb.KeyData {
 	if k == (KeyData{}) {
 		return nil
 	}
-	return &wirepb.KeyData{Text: k.Text, Mod: int32(k.Mod), Code: int32(k.Code), ShiftedCode: int32(k.ShiftedCode), BaseCode: int32(k.BaseCode), IsRepeat: k.IsRepeat}
+	return &wirepb.KeyData{Text: validUTF8(k.Text), Mod: int32(k.Mod), Code: int32(k.Code), ShiftedCode: int32(k.ShiftedCode), BaseCode: int32(k.BaseCode), IsRepeat: k.IsRepeat}
 }
 
 func decodeKey(k *wirepb.KeyData) KeyData {

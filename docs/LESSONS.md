@@ -30,6 +30,10 @@ pinned versions. These behaviors have already surprised us:
 - `TerminalScreen.ExitAltScreen` copies cursor visibility to the parent
   screen. Call `ShowCursor` before `ExitAltScreen` on every client teardown
   path, and check the final PTY bytes.
+- `x/ansi` v0.11.8 ends an OSC at byte `0x9C` (C1 ST) even when it continues
+  a UTF-8 character. `✳` (`E2 9C B3`) and many CJK characters (`本` =
+  `E6 9C AC`) contain it, so Claude Code's title arrived as `"\xe2"` and its
+  tail printed as text. `term.oscScanner` repairs this before the parser (#175).
 
 Keep `term.Grid` narrow so upstream fixes stay behind one interface.
 
@@ -308,3 +312,9 @@ while in-process tests pass. `TestCodecRoundTripsEveryField` populates every
 exported field, and `TestWireSchemaCoversEveryWireType` checks schema oneofs.
 Vitest does not typecheck: after web type changes, run `make check` so `tsc`
 checks the tests too.
+
+Protobuf `string` fields reject invalid UTF-8; gob never checked. One bad pane
+title made a snapshot unencodable, the pump closed the owner's connection, and
+the session ended (#175). The codec passes outbound strings through
+`validUTF8`, and a server pump drops a message it cannot encode rather than
+the peer.

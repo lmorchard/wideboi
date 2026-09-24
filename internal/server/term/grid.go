@@ -150,7 +150,11 @@ type vtGrid struct {
 	// reason cursorVisible is.
 	title                  atomic.Pointer[string]
 	sawAuthoritativeStatus atomic.Bool
-	scrollOffset           atomic.Int32
+
+	// osc repairs OSC strings x/ansi would cut at a 0x9C byte (#175).
+	// Only Write touches it, under writeResizeMu.
+	osc          oscScanner
+	scrollOffset atomic.Int32
 
 	// generation backs Generation; see the Grid interface.
 	generation atomic.Uint64
@@ -331,9 +335,17 @@ func (g *vtGrid) Write(p []byte) (int, error) {
 	if !g.sawAuthoritativeStatus.Load() {
 		g.status.Store(int32(protocol.StatusWorking))
 	}
-	n, err := g.em.Write(p)
+	var err error
+	g.osc.write(p, func(b []byte) {
+		if err == nil {
+			_, err = g.em.Write(b)
+		}
+	}, func(title string) { g.title.Store(&title) })
 	g.generation.Add(1)
-	return n, err
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // Title reports the pane's terminal title. See the Grid interface.

@@ -222,11 +222,15 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 				return
 			}
 			payload, err := protocol.MarshalServer(msg)
-			if err == nil {
-				err = writeFrame(sc.conn, payload)
-			}
 			if err != nil {
-				sc.set(fmt.Sprintf("encoding %T to client", msg), err)
+				// A message we cannot encode is a server bug, not a dead
+				// peer: dropping it costs one frame, where dropping the
+				// connection cost the session when this was its owner (#175).
+				slog.Error("dropping unencodable message", "type", fmt.Sprintf("%T", msg), "err", err)
+				continue
+			}
+			if err := writeFrame(sc.conn, payload); err != nil {
+				sc.set(fmt.Sprintf("writing %T to client", msg), err)
 				return
 			}
 		}

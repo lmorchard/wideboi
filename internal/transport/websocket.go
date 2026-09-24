@@ -77,8 +77,9 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 			// does the framing the Unix socket needs a length prefix for.
 			payload, err := protocol.MarshalServer(msg)
 			if err != nil {
-				wsConn.set("encoding WebSocket payload", err)
-				return
+				// See ServerSocketConn.writeLoop: skip it, keep the peer (#175).
+				slog.Error("dropping unencodable message", "type", fmt.Sprintf("%T", msg), "err", err)
+				continue
 			}
 
 			wsConn.mu.Lock()

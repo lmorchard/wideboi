@@ -253,3 +253,40 @@ func TestBrowserFixturesMatchGo(t *testing.T) {
 		t.Errorf("pane update = %s, protobuf.test.ts expects %s", got, want)
 	}
 }
+
+// Protobuf string fields refuse invalid UTF-8, and one bad pane title --
+// x/ansi cut Claude Code's "✳ ..." after its first byte -- made a whole
+// snapshot unencodable, which closed the owner's connection and ended the
+// session (#175). Invalid bytes must become U+FFFD instead.
+func TestMarshalReplacesInvalidUTF8(t *testing.T) {
+	snap := MsgLayoutSnapshot{PaneTitles: map[int]string{1: "\xe2", 2: "ok ✳"}}
+	data, err := MarshalServer(snap)
+	if err != nil {
+		t.Fatalf("snapshot with an invalid title: %v", err)
+	}
+	got, err := UnmarshalServer(data)
+	if err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if titles := got.(MsgLayoutSnapshot).PaneTitles; titles[1] != "\uFFFD" || titles[2] != "ok ✳" {
+		t.Errorf("titles = %v, want the invalid one replaced and the valid one untouched", titles)
+	}
+
+	// Patches share encodeLine with updates, so this covers both.
+	upd := MsgPaneUpdate{PaneID: 1, Cols: 1, Rows: 1, Lines: []LineData{{{Content: "\xff", Width: 1}}}}
+	data, err = MarshalServer(upd)
+	if err != nil {
+		t.Fatalf("update with an invalid cell: %v", err)
+	}
+	got, err = UnmarshalServer(data)
+	if err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if c := got.(MsgPaneUpdate).Lines[0][0].Content; c != "\uFFFD" {
+		t.Errorf("cell content = %q, want U+FFFD", c)
+	}
+
+	if _, err := MarshalClient(MsgInput{PaneID: 1, Key: KeyData{Text: "\xc3"}}); err != nil {
+		t.Fatalf("input with invalid key text: %v", err)
+	}
+}
