@@ -13,6 +13,14 @@ task changes or running a build that writes artifacts. Commit, test, and open
 the PR from that worktree. Leave other worktrees and their uncommitted changes
 alone.
 
+## Retry GitHub CLI outside the sandbox before using the browser
+
+The managed sandbox can make a valid `gh` keyring login appear invalid and
+block access to `api.github.com`. If `gh auth status` or an API call fails
+there, retry the command with sandbox escalation. A keyring login may work
+normally outside the sandbox; use `gh` for issues and PRs before turning to
+computer use.
+
 ## Probe the pinned terminal dependencies
 
 `charmbracelet/x/vt` has no tagged release, and `charmbracelet/ultraviolet` is
