@@ -58,21 +58,25 @@ prefix = "ctrl+a"
 socket = "/tmp/toml.sock"
 shell = "/bin/tomlsh"
 websocket = ":8080"
+websocket_token = "secret1"
 `
 	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	env := map[string]string{
-		"WIDEBOI_LAYOUT":    "cards",
-		"WIDEBOI_PREFIX":    "ctrl+p",
-		"WIDEBOI_WEBSOCKET": ":8081",
+		"WIDEBOI_LAYOUT":          "cards",
+		"WIDEBOI_PREFIX":          "ctrl+x",
+		"WIDEBOI_WEBSOCKET":       ":8081",
+		"WIDEBOI_WEBSOCKET_TOKEN": "secret2",
+		"SHELL":                   "/bin/envsh",
 	}
 
 	flags := config.ConfigFlags{
-		ConfigFile: tomlPath,
-		Prefix:     "ctrl+k",
-		Websocket:  ":8082",
+		ConfigFile:     tomlPath,
+		Prefix:         "ctrl+k",
+		Websocket:      ":8082",
+		WebsocketToken: "secret3",
 	}
 
 	cfg, _, err := config.Load(flags, mockEnv(env))
@@ -114,6 +118,10 @@ websocket = ":8080"
 	// Websocket: flag overrides env and TOML
 	if cfg.Websocket != ":8082" {
 		t.Errorf("Websocket = %q, want ':8082' from flag", cfg.Websocket)
+	}
+	// WebsocketToken: flag overrides env and TOML
+	if cfg.WebsocketToken != "secret3" {
+		t.Errorf("WebsocketToken = %q, want 'secret3' from flag", cfg.WebsocketToken)
 	}
 }
 

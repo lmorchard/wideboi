@@ -19,8 +19,9 @@ import (
 
 // Config represents the resolved, fully-validated configuration for wideboi.
 type Config struct {
-	Socket    string `toml:"socket"`
-	Websocket string `toml:"websocket"`
+	Socket         string `toml:"socket"`
+	Websocket      string `toml:"websocket"`
+	WebsocketToken string `toml:"websocket_token"`
 	// Session is the resolved session name, or empty when a socket path
 	// was chosen instead. Socket is what is used.
 	Session      string              `toml:"session"`
@@ -43,13 +44,14 @@ type Config struct {
 
 // ConfigFlags contains command-line flag overrides passed into Load.
 type ConfigFlags struct {
-	ConfigFile string
-	Layout     string
-	Prefix     string
-	Socket     string
-	Session    string
-	Websocket  string
-	Shell      string
+	ConfigFile     string
+	Layout         string
+	Prefix         string
+	Socket         string
+	Session        string
+	Websocket      string
+	WebsocketToken string
+	Shell          string
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -142,12 +144,13 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	// serves as the baseline default when not configured in TOML. WIDEBOI_SHELL
 	// is the wideboi-specific environment override that takes precedence over TOML.
 	cfg := Config{
-		Layout:    "cards",
-		Prefix:    "ctrl+b",
-		Socket:    DefaultSocketPath(),
-		Session:   "default",
-		Shell:     getenv("SHELL"),
-		Websocket: "",
+		Layout:         "cards",
+		Prefix:         "ctrl+b",
+		Socket:         DefaultSocketPath(),
+		Session:        "default",
+		Shell:          getenv("SHELL"),
+		Websocket:      "",
+		WebsocketToken: "",
 	}
 	if cfg.Shell == "" {
 		cfg.Shell = "/bin/sh"
@@ -190,6 +193,18 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 				cfg.Keys[k] = v
 			}
 		}
+		if fileCfg.Layout != "" {
+			cfg.Layout = fileCfg.Layout
+		}
+		if fileCfg.Prefix != "" {
+			cfg.Prefix = fileCfg.Prefix
+		}
+		if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
+			return err
+		}
+		if fileCfg.Shell != "" {
+			cfg.Shell = fileCfg.Shell
+		}
 		if fileCfg.Mouse != nil {
 			cfg.Mouse = fileCfg.Mouse
 		}
@@ -198,6 +213,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		}
 		if fileCfg.Websocket != "" {
 			cfg.Websocket = fileCfg.Websocket
+		}
+		if fileCfg.WebsocketToken != "" {
+			cfg.WebsocketToken = fileCfg.WebsocketToken
 		}
 		if fileCfg.LogLevelName != "" {
 			cfg.LogLevelName = fileCfg.LogLevelName
@@ -231,6 +249,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if envWS := getenv("WIDEBOI_WEBSOCKET"); envWS != "" {
 		cfg.Websocket = envWS
 	}
+	if envToken := getenv("WIDEBOI_WEBSOCKET_TOKEN"); envToken != "" {
+		cfg.WebsocketToken = envToken
+	}
 	if envPrefix := getenv("WIDEBOI_PREFIX"); envPrefix != "" {
 		cfg.Prefix = envPrefix
 	}
@@ -250,6 +271,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if flags.Websocket != "" {
 		cfg.Websocket = flags.Websocket
+	}
+	if flags.WebsocketToken != "" {
+		cfg.WebsocketToken = flags.WebsocketToken
 	}
 	if flags.Prefix != "" {
 		cfg.Prefix = flags.Prefix
