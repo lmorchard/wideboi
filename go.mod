@@ -29,3 +29,5 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
+
+replace github.com/charmbracelet/x/vt => github.com/lmorchard/x/vt v0.0.0-20260924233645-cacc71cdcc0f
