@@ -170,7 +170,9 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		// Headers, slivers and tracking children cannot start a
 		// selection, so there is nothing to wait for.
 		if unfocused {
-			out = append(out, protocol.MsgFocusPane{PaneID: p.PaneID})
+			c.strip.FocusPaneID(p.PaneID)
+			c.focusPaneID = c.strip.FocusedPaneID()
+			c.updatePlacementsLocked()
 		}
 
 	case uv.MouseMotionEvent:
@@ -189,7 +191,9 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 			// A click, not a drag. Copying one character on every
 			// click-to-focus would clobber the clipboard constantly.
 			if c.sel.focusOnClick {
-				out = append(out, protocol.MsgFocusPane{PaneID: c.sel.paneID})
+				c.strip.FocusPaneID(c.sel.paneID)
+				c.focusPaneID = c.strip.FocusedPaneID()
+				c.updatePlacementsLocked()
 			}
 			c.sel = nil
 		case c.lastRenderedScreen != nil:

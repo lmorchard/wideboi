@@ -88,8 +88,7 @@ func paneUpdate(paneID, cols, rows int, text string) protocol.MsgPaneUpdate {
 func TestPaneUpdateKeepsColumnPositionsAfterWideGlyph(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 10, 4, "C-b")
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     []protocol.ColumnData{{PaneID: 1, Width: 4, Height: 2}},
-		FocusPaneID: 1,
+		Columns: []protocol.ColumnData{{PaneID: 1, Width: 4, Height: 2}},
 	})
 	cli.HandleServerMsg(protocol.MsgPaneUpdate{
 		PaneID: 1, Cols: 4, Rows: 2,
@@ -119,8 +118,7 @@ func newTestClientWithTwoPanes(t *testing.T, cols, rows int) *Client {
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     twoColumns(),
-		FocusPaneID: 1,
+		Columns: twoColumns(),
 	})
 	cli.HandleServerMsg(paneUpdate(1, 25, 10, "PANE-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 25, 10, "PANE-TWO"))

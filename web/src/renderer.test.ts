@@ -55,7 +55,7 @@ describe('GridRenderer frame scheduling', () => {
   };
 
   const layout: MsgLayoutSnapshot = {
-    Columns: [], FocusPaneID: 0, PaneStatuses: {}, PaneTitles: {},
+    Columns: [], PaneStatuses: {}, PaneTitles: {},
   };
   const pane: MsgPaneUpdate = {
     PaneID: 1, Generation: 1, Cols: 1, Rows: 1, Lines: [], CursorX: 0, CursorY: 0,
@@ -103,7 +103,7 @@ describe('GridRenderer frame scheduling', () => {
     r.resize(80, 80);
     r.handleLayoutSnapshot({
       Columns: [{ PaneID: 1, Width: 10, Height: 3 }],
-      FocusPaneID: 1, PaneStatuses: {}, PaneTitles: {}
+      PaneStatuses: {}, PaneTitles: {}
     });
     const blank = { Content: ' ', Width: 1, Style: undefined as never };
     r.handlePaneUpdate({
@@ -134,8 +134,9 @@ describe('GridRenderer frame scheduling', () => {
     r.resize(80, 80);
     r.handleLayoutSnapshot({
       Columns: [{ PaneID: 1, Width: 8, Height: 3 }, { PaneID: 2, Width: 8, Height: 3 }],
-      FocusPaneID: 2, PaneStatuses: {}, PaneTitles: {}
+      PaneStatuses: {}, PaneTitles: {}
     });
+    r.setFocusedPaneId(2);
     expect(r.getPaneHit(0, 1).paneID).toBe(1);
     expect(r.getPaneHit(2, 1).paneID).toBe(2);
     expect(r.getPaneHit(1, 1).paneID).toBe(0);

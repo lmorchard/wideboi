@@ -16,7 +16,6 @@ import (
 
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
-	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -39,8 +38,14 @@ type Server struct {
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
 	// tell when either has changed.
-	lastStatuses map[int]string
+	lastStatuses map[int]protocol.PaneStatus
 	lastTitles   map[int]string
+	// Creation notices are retried until accepted, followed by a snapshot.
+	pendingPaneCreated      map[transport.Transport][]int
+	pendingCreationSnapshot map[transport.Transport]bool
+	// layoutSendMu orders each client's creation notices before the snapshot
+	// that includes them, even when broadcasts run concurrently.
+	layoutSendMu sync.Mutex
 
 	// paneGens records, per client, the grid generation each pane was
 	// at in the last update that client accepted. The frame tick sends a
@@ -140,13 +145,15 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		cwd, _ = os.Getwd()
 	}
 	srv := &Server{
-		strip:       layout.NewStrip(),
-		panes:       make(map[int]*Pane),
-		shell:       shell,
-		cwd:         cwd,
-		transports:  make([]transport.Transport, 0),
-		clientSizes: make(map[transport.Transport]protocol.MsgResize),
-		stopCh:      make(chan struct{}),
+		strip:                   layout.NewStrip(),
+		panes:                   make(map[int]*Pane),
+		shell:                   shell,
+		cwd:                     cwd,
+		transports:              make([]transport.Transport, 0),
+		clientSizes:             make(map[transport.Transport]protocol.MsgResize),
+		pendingPaneCreated:      make(map[transport.Transport][]int),
+		pendingCreationSnapshot: make(map[transport.Transport]bool),
+		stopCh:                  make(chan struct{}),
 	}
 	if tp != nil {
 		srv.transports = append(srv.transports, tp)
@@ -257,6 +264,8 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.paneGens, tp)
 	delete(s.paneFrames, tp)
 	delete(s.clientSizes, tp)
+	delete(s.pendingPaneCreated, tp)
+	delete(s.pendingCreationSnapshot, tp)
 	s.recomputeSessionSizeLocked()
 	s.resizePanesLocked()
 }
@@ -295,6 +304,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	s.mu.Lock()
 	needBroadcast := false
 	resyncPaneID := 0
+	createdPaneID := 0
 
 	switch m := msg.(type) {
 	case protocol.MsgPaneResync:
@@ -309,14 +319,14 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		}
 		if len(s.panes) == 0 {
 			if len(s.startup) == 0 {
-				_, _ = s.spawnPaneLocked()
-				_, _ = s.spawnPaneLocked()
+				_, _ = s.spawnPaneLocked(0)
+				_, _ = s.spawnPaneLocked(0)
 				s.strip.FocusLeft()
 			} else if !s.startupLaunched {
 				s.startupLaunched = true
 				firstID := 0
 				for _, spec := range s.startup {
-					p, err := s.spawnPaneWithSpecLocked(spec)
+					p, err := s.spawnPaneWithSpecLocked(spec, 0)
 					if err != nil {
 						slog.Error("starting configured pane", "command", spec.Command, "err", err)
 						continue
@@ -343,40 +353,31 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	case protocol.MsgVerb:
 		switch m.Verb {
-		case protocol.VerbFocusLeft:
-			s.strip.FocusLeft()
-		case protocol.VerbFocusRight:
-			s.strip.FocusRight()
 		case protocol.VerbNewColumn:
-			_, _ = s.spawnPaneLocked()
+			if p, err := s.spawnPaneLocked(m.PaneID); err == nil {
+				createdPaneID = p.ID()
+			}
 			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
-			s.strip.CycleWidth()
+			s.strip.CycleWidth(m.PaneID)
 			s.resizePanesLocked()
 		case protocol.VerbGrowWidth:
-			s.strip.GrowWidth(10)
+			s.strip.GrowWidth(m.PaneID, 10)
 			s.resizePanesLocked()
 		case protocol.VerbShrinkWidth:
-			s.strip.ShrinkWidth(10)
+			s.strip.ShrinkWidth(m.PaneID, 10)
 			s.resizePanesLocked()
 		case protocol.VerbMoveLeft:
-			s.strip.MoveLeft()
+			s.strip.MoveLeft(m.PaneID)
 		case protocol.VerbMoveRight:
 			// Neither move calls resizePanesLocked, for the same
 			// reason a layout toggle never did: order is presentation,
 			// and a column's width goes wherever the column goes.
-			s.strip.MoveRight()
-		case protocol.VerbFocusLast:
-			s.strip.FocusLast()
+			s.strip.MoveRight(m.PaneID)
 		case protocol.VerbKillPane:
-			focusedID := s.strip.FocusedPaneID()
-			if focusedID > 0 {
-				s.removePaneLocked(focusedID)
+			if m.PaneID > 0 {
+				s.removePaneLocked(m.PaneID)
 				s.resizePanesLocked()
-			}
-		case protocol.VerbSmartJump:
-			if id := s.smartJumpTargetLocked(); id > 0 {
-				s.strip.FocusPaneID(id)
 			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client
@@ -386,14 +387,6 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		// nothing, and a snapshot costs a forced resend of every pane to
 		// every client, so it must not broadcast.
 		if m.Verb != protocol.VerbToggleCards {
-			needBroadcast = true
-		}
-
-	case protocol.MsgFocusPane:
-		// Guarded: the pane may have closed between the client's draw
-		// and the click.
-		if _, ok := s.panes[m.PaneID]; ok {
-			s.strip.FocusPaneID(m.PaneID)
 			needBroadcast = true
 		}
 
@@ -415,6 +408,10 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		if p, ok := s.panes[m.PaneID]; ok {
 			p.SetScrollOffset(p.ScrollOffset() + m.Delta)
 		}
+	}
+	if tp != nil && createdPaneID != 0 {
+		s.pendingPaneCreated[tp] = append(s.pendingPaneCreated[tp], createdPaneID)
+		s.pendingCreationSnapshot[tp] = true
 	}
 
 	s.mu.Unlock()
@@ -439,7 +436,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 func (s *Server) SpawnPane() (int, error) {
 	s.mu.Lock()
 
-	p, err := s.spawnPaneLocked()
+	p, err := s.spawnPaneLocked(0)
 	if err != nil {
 		s.mu.Unlock()
 		return 0, err
@@ -450,11 +447,11 @@ func (s *Server) SpawnPane() (int, error) {
 	return p.ID(), nil
 }
 
-func (s *Server) spawnPaneLocked() (*Pane, error) {
-	return s.spawnPaneWithSpecLocked(StartupPane{})
+func (s *Server) spawnPaneLocked(afterPaneID int) (*Pane, error) {
+	return s.spawnPaneWithSpecLocked(StartupPane{}, afterPaneID)
 }
 
-func (s *Server) spawnPaneWithSpecLocked(spec StartupPane) (*Pane, error) {
+func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pane, error) {
 	// Close reaps the panes it snapshotted; one spawned after that --
 	// an attach or a new column during the reap -- would be nobody's
 	// to reap.
@@ -483,7 +480,7 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane) (*Pane, error) {
 	p.closeGrace = s.closeGrace
 
 	s.panes[id] = p
-	s.strip.AddColumn(id, paneCols, paneRows)
+	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
 
 	p.Start(func() {
 		// Called when PTY reader hits EOF
@@ -652,40 +649,13 @@ func (s *Server) resizePanesLocked() {
 // a prompt. Working and Idle are never targets: a busy pane does not
 // want you and an empty one has nothing to say. Ties break on the
 // lowest pane ID so repeated presses are deterministic.
-func (s *Server) smartJumpTargetLocked() int {
-	rank := func(st term.PaneStatus) int {
-		switch st {
-		case term.StatusFailed:
-			return 3
-		case term.StatusDone:
-			return 2
-		case term.StatusNeedsInput:
-			return 1
-		default:
-			return 0
-		}
-	}
-
-	bestID, bestRank := 0, 0
-	for id, p := range s.panes {
-		r := rank(p.Status())
-		switch {
-		case r == 0:
-		case r > bestRank:
-			bestID, bestRank = id, r
-		case r == bestRank && id < bestID:
-			bestID = id
-		}
-	}
-	return bestID
-}
 
 // statusGlyphsLocked renders the current per-pane status glyphs.
 // s.mu must be held.
-func (s *Server) statusGlyphsLocked() map[int]string {
-	out := make(map[int]string, len(s.panes))
+func (s *Server) statusGlyphsLocked() map[int]protocol.PaneStatus {
+	out := make(map[int]protocol.PaneStatus, len(s.panes))
 	for id, p := range s.panes {
-		out[id] = p.Status().Glyph()
+		out[id] = p.Status()
 	}
 	return out
 }
@@ -698,6 +668,18 @@ func (s *Server) paneTitlesLocked() map[int]string {
 		out[id] = p.Title()
 	}
 	return out
+}
+
+func sameStatusMap(a, b map[int]protocol.PaneStatus) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // sameStringMap reports whether two pane-keyed string maps agree.
@@ -726,8 +708,9 @@ func sameStringMap(a, b map[int]string) bool {
 // unless the glyph set actually moved.
 func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	s.mu.Lock()
-	changed := !sameStringMap(s.statusGlyphsLocked(), s.lastStatuses) ||
-		!sameStringMap(s.paneTitlesLocked(), s.lastTitles)
+	changed := !sameStatusMap(s.statusGlyphsLocked(), s.lastStatuses) ||
+		!sameStringMap(s.paneTitlesLocked(), s.lastTitles) ||
+		len(s.pendingCreationSnapshot) > 0
 	s.mu.Unlock()
 
 	if !changed {
@@ -747,16 +730,22 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 }
 
 func (s *Server) broadcastLayout(ctx context.Context) {
+	s.layoutSendMu.Lock()
+	defer s.layoutSendMu.Unlock()
+
 	s.mu.Lock()
 	statuses := s.statusGlyphsLocked()
 	titles := s.paneTitlesLocked()
 	snapshot := protocol.MsgLayoutSnapshot{
 		Columns:      layout.ToColumnData(s.strip.Columns()),
-		FocusPaneID:  s.strip.FocusedPaneID(),
 		PaneStatuses: statuses,
 		PaneTitles:   titles,
 	}
 	tps := append([]transport.Transport{}, s.transports...)
+	pending := make(map[transport.Transport][]int, len(s.pendingPaneCreated))
+	for tp, ids := range s.pendingPaneCreated {
+		pending[tp] = append([]int(nil), ids...)
+	}
 	s.mu.Unlock()
 
 	// Delivered means *every* attached client accepted it, not any
@@ -770,9 +759,32 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	// rather than retrying forever.
 	delivered := true
 	for _, tp := range tps {
-		if !tp.SendServer(ctx, snapshot) {
-			delivered = false
+		sent := 0
+		for _, id := range pending[tp] {
+			if !tp.SendServer(ctx, protocol.MsgPaneCreated{PaneID: id}) {
+				break
+			}
+			sent++
 		}
+		if sent > 0 {
+			s.mu.Lock()
+			if len(s.pendingPaneCreated[tp]) >= sent {
+				s.pendingPaneCreated[tp] = s.pendingPaneCreated[tp][sent:]
+				if len(s.pendingPaneCreated[tp]) == 0 {
+					delete(s.pendingPaneCreated, tp)
+				}
+			}
+			s.mu.Unlock()
+		}
+		if sent != len(pending[tp]) || !tp.SendServer(ctx, snapshot) {
+			delivered = false
+			continue
+		}
+		s.mu.Lock()
+		if len(s.pendingPaneCreated[tp]) == 0 {
+			delete(s.pendingCreationSnapshot, tp)
+		}
+		s.mu.Unlock()
 	}
 
 	// Mark the glyph set clean only once it actually went somewhere.

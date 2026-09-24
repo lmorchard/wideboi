@@ -34,10 +34,16 @@ func newMotionClient(t *testing.T, cols, rows int) *Client {
 // card mode first; setting the mode it is already in changes nothing.
 func focusTo(cli *Client, paneID int) {
 	cli.SetLayoutMode(protocol.LayoutCards)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     threeColumns(),
-		FocusPaneID: paneID,
-	})
+	if cli.FocusedPaneID() == 0 {
+		cli.focusPaneID = paneID
+		cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
+		return
+	}
+	cli.mu.Lock()
+	cli.strip.FocusPaneID(paneID)
+	cli.focusPaneID = cli.strip.FocusedPaneID()
+	cli.updatePlacementsLocked()
+	cli.mu.Unlock()
 }
 
 func rectOf(ps []protocol.PlacementData, paneID int) image.Rectangle {
@@ -144,8 +150,8 @@ func TestNoMotionWhenPlacementsAreUnchanged(t *testing.T) {
 	cli := newMotionClient(t, cols, rows)
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 1,
-		PaneStatuses: map[int]string{1: "»"},
+		Columns:      threeColumns(),
+		PaneStatuses: map[int]protocol.PaneStatus{1: protocol.StatusWorking},
 	})
 
 	cli.mu.Lock()
@@ -213,9 +219,11 @@ func TestNoMotionWhenFocusMovesButGeometryDoesNot(t *testing.T) {
 	cli := newTestClientWithTwoPanes(t, cols, rows) // both visible
 
 	cli.SetLayoutMode(protocol.LayoutScroll)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: twoColumns(), FocusPaneID: 2,
-	})
+	cli.strip.FocusPaneID(2)
+	cli.focusPaneID = 2
+	cli.mu.Lock()
+	cli.updatePlacementsLocked()
+	cli.mu.Unlock()
 
 	cli.mu.Lock()
 	running := cli.motion != nil
@@ -251,8 +259,8 @@ func TestStatusSnapshotDoesNotRestartMotion(t *testing.T) {
 	// broadcastLayoutIfStatusChanged sends while a pane is working.
 	for i := 0; i < 3; i++ {
 		cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-			Columns: threeColumns(), FocusPaneID: 2,
-			PaneStatuses: map[int]string{2: "»"},
+			Columns:      threeColumns(),
+			PaneStatuses: map[int]protocol.PaneStatus{2: protocol.StatusWorking},
 		})
 	}
 

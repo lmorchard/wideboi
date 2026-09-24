@@ -38,9 +38,9 @@ func TestScrollStrategyNeverEmitsSlivers(t *testing.T) {
 // In a fan with genuine overlapping, ALL cards show their content, so they are all Full.
 func TestCardStrategyMarksAllAsFull(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 22)
-	s.AddColumn(2, 40, 22)
-	s.AddColumn(3, 40, 22)
+	s.AddColumn(1, 40, 22, 0)
+	s.AddColumn(2, 40, 22, 0)
+	s.AddColumn(3, 40, 22, 0)
 	s.SetStrategy(layout.CardStrategy{SliverWidth: 4})
 	s.FocusPaneID(2)
 
@@ -60,7 +60,7 @@ func TestCardStrategyMarksAllAsFull(t *testing.T) {
 // it is not a sliver.
 func TestCardStrategySingleColumnIsFull(t *testing.T) {
 	s := layout.NewStrip()
-	s.AddColumn(1, 40, 22)
+	s.AddColumn(1, 40, 22, 0)
 	s.SetStrategy(layout.CardStrategy{SliverWidth: 4})
 
 	placements := s.ComputePlacements(120, 24)

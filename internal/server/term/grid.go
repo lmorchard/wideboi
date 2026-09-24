@@ -17,6 +17,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
+	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
 // Grid is one pane's terminal state.
@@ -86,7 +87,7 @@ type Grid interface {
 
 	// Status reports the current agent/command status derived from OSC 133
 	// sequences or output heuristics.
-	Status() PaneStatus
+	Status() protocol.PaneStatus
 
 	ScrollbackLen() int
 	ScrollOffset() int
@@ -131,31 +132,6 @@ type Grid interface {
 // ModScrollLock are the full set of KeyMod constants that exist. Nothing
 // here is guessed.
 const encodingMods = uv.ModCtrl | uv.ModAlt | uv.ModMeta | uv.ModSuper | uv.ModHyper
-
-type PaneStatus int
-
-const (
-	StatusIdle PaneStatus = iota
-	StatusWorking
-	StatusNeedsInput
-	StatusDone
-	StatusFailed
-)
-
-func (s PaneStatus) Glyph() string {
-	switch s {
-	case StatusWorking:
-		return "»"
-	case StatusNeedsInput:
-		return "!"
-	case StatusDone:
-		return "✓"
-	case StatusFailed:
-		return "✗"
-	default:
-		return " "
-	}
-}
 
 // vtGrid adapts x/vt's SafeEmulator to Grid. SafeEmulator rather than
 // Emulator because a pane's PTY reader goroutine writes to it while the
@@ -235,7 +211,7 @@ func NewVT(cols, rows int) Grid {
 func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 	g := &vtGrid{em: vt.NewSafeEmulator(cols, rows), idleTimeout: idle}
 	g.cursorVisible.Store(true)
-	g.status.Store(int32(StatusIdle))
+	g.status.Store(int32(protocol.StatusIdle))
 
 	g.em.SetCallbacks(vt.Callbacks{
 		CursorVisibility: func(visible bool) { g.cursorVisible.Store(visible) },
@@ -267,24 +243,24 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 			return false
 		}
 
-		var st PaneStatus
+		var st protocol.PaneStatus
 		switch parts[1] {
 		case "A", "B":
 			// A is prompt-start, B is prompt-end, and a shell emits
 			// both back to back on every prompt. Mapping B to Working
 			// would clobber A microseconds later and leave an idle
 			// shell reading as busy, so both mean "waiting on you".
-			st = StatusNeedsInput
+			st = protocol.StatusNeedsInput
 		case "C":
-			st = StatusWorking
+			st = protocol.StatusWorking
 		case "D":
 			// Bare "D" and "D;0" are success; any other exit-code
 			// field is a failure. Split rather than match a ";0"
 			// suffix: the payload may carry trailing key=value
 			// fields, so "133;D;0;aid=1" is still a success.
-			st = StatusDone
+			st = protocol.StatusDone
 			if len(parts) > 2 && parts[2] != "" && parts[2] != "0" {
-				st = StatusFailed
+				st = protocol.StatusFailed
 			}
 		default:
 			// Unrecognised. Let vt log it as unhandled, and leave
@@ -323,16 +299,16 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 			}
 		}
 
-		var st PaneStatus
+		var st protocol.PaneStatus
 		switch parts[2] {
 		case "0":
-			st = StatusDone
+			st = protocol.StatusDone
 		case "1", "3":
-			st = StatusWorking
+			st = protocol.StatusWorking
 		case "2":
-			st = StatusFailed
+			st = protocol.StatusFailed
 		case "4":
-			st = StatusNeedsInput
+			st = protocol.StatusNeedsInput
 		default:
 			return false
 		}
@@ -353,7 +329,7 @@ func (g *vtGrid) Write(p []byte) (int, error) {
 	now := time.Now()
 	g.lastWriteTime.Store(&now)
 	if !g.sawAuthoritativeStatus.Load() {
-		g.status.Store(int32(StatusWorking))
+		g.status.Store(int32(protocol.StatusWorking))
 	}
 	n, err := g.em.Write(p)
 	g.generation.Add(1)
@@ -368,15 +344,15 @@ func (g *vtGrid) Title() string {
 	return ""
 }
 
-func (g *vtGrid) Status() PaneStatus {
-	st := PaneStatus(g.status.Load())
-	if !g.sawAuthoritativeStatus.Load() && st == StatusWorking {
+func (g *vtGrid) Status() protocol.PaneStatus {
+	st := protocol.PaneStatus(g.status.Load())
+	if !g.sawAuthoritativeStatus.Load() && st == protocol.StatusWorking {
 		idle := g.idleTimeout
 		if idle <= 0 {
 			idle = DefaultIdleTimeout
 		}
 		if t := g.lastWriteTime.Load(); t != nil && time.Since(*t) > idle {
-			return StatusIdle
+			return protocol.StatusIdle
 		}
 	}
 	return st

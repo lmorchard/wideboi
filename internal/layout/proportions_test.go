@@ -14,7 +14,7 @@ import (
 func stripOf(n, width, focusPane int) *layout.Strip {
 	s := layout.NewStrip()
 	for i := 1; i <= n; i++ {
-		s.AddColumn(i, width, 22)
+		s.AddColumn(i, width, 22, 0)
 	}
 	s.SetStrategy(layout.CardStrategy{})
 	s.FocusPaneID(focusPane)

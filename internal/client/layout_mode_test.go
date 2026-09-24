@@ -31,7 +31,8 @@ func TestToggleLayoutSendsNothing(t *testing.T) {
 	tp := transport.NewInProcChannel(16)
 	cli := NewClient(tp, 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2})
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 
 	cli.ToggleLayout()
 
@@ -55,7 +56,8 @@ func TestToggleLayoutSendsNothing(t *testing.T) {
 func TestToggleLayoutArmsMotion(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2})
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 	if placementsEqual(
 		expectedPlacements(protocol.LayoutScroll, threeColumns(), 2, 100, 24),
 		expectedPlacements(protocol.LayoutCards, threeColumns(), 2, 100, 24)) {
@@ -84,8 +86,8 @@ func TestToggleLayoutArmsMotion(t *testing.T) {
 func TestSetLayoutModeBeforeFirstSnapshot(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
-
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 2})
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: threeColumns()})
 
 	want := expectedPlacements(protocol.LayoutCards, threeColumns(), 2, 100, 24)
 	if got := clientPlacements(cli); !placementsEqual(got, want) {
@@ -102,7 +104,11 @@ func TestToggleRevealsOffscreenPaneContent(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
 
-	snap := protocol.MsgLayoutSnapshot{Columns: threeColumns(), FocusPaneID: 1}
+	snap := protocol.MsgLayoutSnapshot{
+		Columns:    threeColumns(),
+		PaneTitles: map[int]string{3: "TITLE"},
+	}
+
 	cli.HandleServerMsg(snap)
 	if p := placementFor(cli, 3); p.PaneID != 0 {
 		t.Fatalf("test setup bug: pane 3 is placed in scroll mode at %v", p.Dst)
@@ -110,7 +116,7 @@ func TestToggleRevealsOffscreenPaneContent(t *testing.T) {
 	cli.HandleServerMsg(paneUpdate(1, 60, 10, "CONTENT-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 60, 10, "CONTENT-TWO"))
 	cli.HandleServerMsg(paneUpdate(3, 60, 10, "CONTENT-THREE"))
-	snap.PaneStatuses = map[int]string{3: "»"} // a status-only change
+	snap.PaneStatuses = map[int]protocol.PaneStatus{3: protocol.StatusWorking} // a status-only change
 	cli.HandleServerMsg(snap)
 
 	cli.ToggleLayout()

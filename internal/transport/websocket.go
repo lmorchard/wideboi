@@ -114,7 +114,6 @@ var clientTypes = map[string]func() any{
 	"MsgPaneResync": func() any { return &protocol.MsgPaneResync{} },
 	"MsgAttach":     func() any { return &protocol.MsgAttach{} },
 	"MsgVerb":       func() any { return &protocol.MsgVerb{} },
-	"MsgFocusPane":  func() any { return &protocol.MsgFocusPane{} },
 	"MsgMouse":      func() any { return &protocol.MsgMouse{} },
 	"MsgInput":      func() any { return &protocol.MsgInput{} },
 	"MsgResize":     func() any { return &protocol.MsgResize{} },

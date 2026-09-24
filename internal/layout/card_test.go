@@ -12,9 +12,9 @@ func TestCardStrategyUnit(t *testing.T) {
 	s := layout.NewStrip()
 	s.SetStrategy(layout.CardStrategy{SliverWidth: 4})
 
-	s.AddColumn(1, 40, 20)
-	s.AddColumn(2, 40, 20)
-	s.AddColumn(3, 40, 20)
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 40, 20, 0)
+	s.AddColumn(3, 40, 20, 0)
 
 	s.FocusLeft() // Focus on pane 2
 
@@ -50,7 +50,7 @@ func TestCardStrategyUnit(t *testing.T) {
 func TestFocusedCardBorderDoesNotCrowdOutASliver(t *testing.T) {
 	s := layout.NewStrip()
 	for i := 1; i <= 3; i++ {
-		s.AddColumn(i, 60, 20)
+		s.AddColumn(i, 60, 20, 0)
 	}
 	s.SetStrategy(layout.CardStrategy{})
 	s.FocusPaneID(2)
@@ -152,7 +152,7 @@ func twentyCards() *layout.Strip {
 	s := layout.NewStrip()
 	s.SetStrategy(layout.CardStrategy{SliverWidth: 4})
 	for i := 1; i <= 20; i++ {
-		s.AddColumn(i, 30, 20)
+		s.AddColumn(i, 30, 20, 0)
 	}
 	s.FocusPaneID(1)
 	return s
@@ -216,7 +216,7 @@ func TestCardWindowPropertyInvariants(t *testing.T) {
 		s := layout.NewStrip()
 		s.SetStrategy(layout.CardStrategy{})
 		for i := 1; i <= n; i++ {
-			s.AddColumn(i, rapid.IntRange(20, 100).Draw(t, "colWidth"), 20)
+			s.AddColumn(i, rapid.IntRange(20, 100).Draw(t, "colWidth"), 20, 0)
 		}
 		s.FocusPaneID(rapid.IntRange(1, n).Draw(t, "startFocus"))
 		vw := rapid.IntRange(30, 200).Draw(t, "viewportWidth")

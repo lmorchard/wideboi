@@ -26,6 +26,21 @@ type blockingDrawGrid struct {
 	release chan struct{}
 }
 
+type gatedDrawGrid struct {
+	term.Grid
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedDrawGrid) Draw(dst uv.Screen, area image.Rectangle) {
+	g.once.Do(func() {
+		close(g.started)
+		<-g.release
+	})
+	g.Grid.Draw(dst, area)
+}
+
 type cellGrid struct {
 	*statusGrid
 	content atomic.Pointer[string]
@@ -54,8 +69,8 @@ func takePaneMessage(t *testing.T, tp *transport.InProcChannel) any {
 }
 
 func TestPanePatchPerClientBaselineAndRecovery(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle})
-	g := &cellGrid{statusGrid: newStatusGrid(term.StatusIdle)}
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
+	g := &cellGrid{statusGrid: newStatusGrid(protocol.StatusIdle)}
 	g.set("a")
 	s.panes[1].grid = g
 	s.panes[1].cols, s.panes[1].rows = 4, 4
@@ -130,7 +145,33 @@ func TestConcurrentInputResizeCloseWithSlowTransport(t *testing.T) {
 	s.transports = append(s.transports, slow)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	p, err := NewPane(1, []string{"/bin/sh"}, 40, 22, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.closeGrace = s.closeGrace
+	s.mu.Lock()
+	s.panes[1] = p
+	s.nextPaneID = 1
+	s.strip.AddColumn(1, 40, 22, 0)
+	s.mu.Unlock()
 	s.handleClientMsg(ctx, healthy, protocol.MsgAttach{Cols: 80, Rows: 24})
+	g := &gatedDrawGrid{Grid: p.grid, started: make(chan struct{}), release: make(chan struct{})}
+	p.grid = g // Install before Start reads the grid from its worker goroutines.
+	p.Start(func() { s.onPaneExit(1) })
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(g.release) }) }
+	defer release()
+	renderDone := make(chan struct{})
+	go func() {
+		s.broadcastPaneUpdates(ctx, true)
+		close(renderDone)
+	}()
+	select {
+	case <-g.started:
+	case <-ctx.Done():
+		t.Fatal("pane render did not start")
+	}
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	run := func(fn func()) {
@@ -152,17 +193,36 @@ func TestConcurrentInputResizeCloseWithSlowTransport(t *testing.T) {
 			s.broadcastPaneUpdates(ctx, false)
 		}
 	})
-	run(func() {
-		time.Sleep(time.Millisecond)
-		s.handleClientMsg(ctx, healthy, protocol.MsgVerb{Verb: protocol.VerbKillPane})
-	})
 	close(start)
+	// The pane must begin closing while its render is still held. This
+	// directly observes the overlap instead of relying on scheduling time.
+	killDone := make(chan struct{})
+	go func() {
+		s.handleClientMsg(ctx, healthy, protocol.MsgVerb{Verb: protocol.VerbKillPane, PaneID: 1})
+		close(killDone)
+	}()
+	select {
+	case <-p.closed:
+	case <-ctx.Done():
+		t.Fatal("pane close did not begin during render")
+	}
+	release()
+	select {
+	case <-killDone:
+	case <-ctx.Done():
+		t.Fatal("pane kill did not finish")
+	}
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-ctx.Done():
 		t.Fatal("concurrent pane work did not finish")
+	}
+	select {
+	case <-renderDone:
+	case <-ctx.Done():
+		t.Fatal("held render did not finish")
 	}
 	closeDone := make(chan struct{})
 	go func() { _ = s.Close(); close(closeDone) }()
@@ -199,7 +259,7 @@ func TestPaneCloseWaitsForActiveRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := &closeAwareGrid{statusGrid: newStatusGrid(term.StatusIdle), drawing: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
+	g := &closeAwareGrid{statusGrid: newStatusGrid(protocol.StatusIdle), drawing: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
 	p := &Pane{id: 1, pty: pty, grid: g, cols: 10, rows: 10, closed: make(chan struct{}), closeGrace: 10 * time.Millisecond}
 	rendered := make(chan struct{})
 	go func() {
@@ -241,7 +301,7 @@ func TestPaneCloseWaitsForActiveRender(t *testing.T) {
 
 func TestGenerationChangingDuringRenderIsRetried(t *testing.T) {
 	s, _, tp := twoIdlePanes(t)
-	g := &changingDrawGrid{newStatusGrid(term.StatusIdle)}
+	g := &changingDrawGrid{newStatusGrid(protocol.StatusIdle)}
 	s.panes[1].grid = g
 	s.broadcastPaneUpdates(context.Background(), false)
 	drainPaneUpdates(tp)
@@ -260,7 +320,7 @@ func (g *blockingDrawGrid) Draw(uv.Screen, image.Rectangle) {
 // protects input, focus, pane lifecycle, and shutdown bookkeeping.
 func TestPaneRenderDoesNotHoldServerMutex(t *testing.T) {
 	s, _, _ := twoIdlePanes(t)
-	g := &blockingDrawGrid{statusGrid: newStatusGrid(term.StatusIdle), started: make(chan struct{}), release: make(chan struct{})}
+	g := &blockingDrawGrid{statusGrid: newStatusGrid(protocol.StatusIdle), started: make(chan struct{}), release: make(chan struct{})}
 	s.panes[1].grid = g
 	done := make(chan struct{})
 	go func() {
@@ -313,7 +373,7 @@ func drainPaneUpdates(tp *transport.InProcChannel) []int {
 
 func twoIdlePanes(t *testing.T) (*Server, map[int]*statusGrid, *transport.InProcChannel) {
 	t.Helper()
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle})
 	return s, grids, s.transports[0].(*transport.InProcChannel)
 }
 
@@ -445,7 +505,7 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 // so without invalidating it no later tick would retry -- and the
 // snapshot in front of it may just have pruned or blanked that mirror.
 func TestDroppedForcedResendIsRetried(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle})
 	ctx := context.Background()
 	tp := transport.NewInProcChannel(4)
 	s.transports = []transport.Transport{tp}

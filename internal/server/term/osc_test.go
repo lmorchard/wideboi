@@ -1,6 +1,7 @@
 package term_test
 
 import (
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"testing"
 	"time"
 
@@ -20,14 +21,14 @@ func TestOSC133DrivesPaneStatus(t *testing.T) {
 	cases := []struct {
 		name    string
 		payload string
-		want    term.PaneStatus
+		want    protocol.PaneStatus
 	}{
 		// A is prompt-start and B is prompt-end. A shell emits both
 		// back to back on every prompt, so mapping B to Working would
 		// clobber A microseconds later and leave an idle shell reading
 		// as busy. Both mean "waiting on you".
-		{"prompt start", "\x1b]133;A\x07", term.StatusNeedsInput},
-		{"prompt end", "\x1b]133;B\x07", term.StatusNeedsInput},
+		{"prompt start", "\x1b]133;A\x07", protocol.StatusNeedsInput},
+		{"prompt end", "\x1b]133;B\x07", protocol.StatusNeedsInput},
 
 		// C is the start of command output: now it is actually busy.
 		//
@@ -35,18 +36,18 @@ func TestOSC133DrivesPaneStatus(t *testing.T) {
 		// from a dead one -- Write's activity fallback sets Working
 		// regardless. It is here for completeness of the mapping, not
 		// as evidence. The A/B and D rows are what prove the switch.
-		{"output start", "\x1b]133;C\x07", term.StatusWorking},
+		{"output start", "\x1b]133;C\x07", protocol.StatusWorking},
 
 		// D is command-finished. Bare D and D;0 are success.
-		{"finished, no code", "\x1b]133;D\x07", term.StatusDone},
-		{"finished, zero", "\x1b]133;D;0\x07", term.StatusDone},
-		{"finished, nonzero", "\x1b]133;D;1\x07", term.StatusFailed},
-		{"finished, signal code", "\x1b]133;D;130\x07", term.StatusFailed},
+		{"finished, no code", "\x1b]133;D\x07", protocol.StatusDone},
+		{"finished, zero", "\x1b]133;D;0\x07", protocol.StatusDone},
+		{"finished, nonzero", "\x1b]133;D;1\x07", protocol.StatusFailed},
+		{"finished, signal code", "\x1b]133;D;130\x07", protocol.StatusFailed},
 
 		// Payloads may carry trailing key=value fields. The old
 		// HasSuffix(s, ";0") test read this one as a failure.
-		{"zero with extra params", "\x1b]133;D;0;aid=1\x07", term.StatusDone},
-		{"prompt with extra params", "\x1b]133;A;cl=m\x07", term.StatusNeedsInput},
+		{"zero with extra params", "\x1b]133;D;0;aid=1\x07", protocol.StatusDone},
+		{"prompt with extra params", "\x1b]133;A;cl=m\x07", protocol.StatusNeedsInput},
 	}
 
 	for _, tc := range cases {
@@ -70,26 +71,26 @@ func TestOSC9ProgressDrivesPaneStatus(t *testing.T) {
 	cases := []struct {
 		name    string
 		payload string
-		want    term.PaneStatus
+		want    protocol.PaneStatus
 	}{
 		// 0 is clear / turn completed.
-		{"turn end (clear with trailing semicolon)", "\x1b]9;4;0;\x07", term.StatusDone},
-		{"turn end (clear bare)", "\x1b]9;4;0\x07", term.StatusDone},
+		{"turn end (clear with trailing semicolon)", "\x1b]9;4;0;\x07", protocol.StatusDone},
+		{"turn end (clear bare)", "\x1b]9;4;0\x07", protocol.StatusDone},
 
 		// 1 is normal progress with percentage.
-		{"progress percentage", "\x1b]9;4;1;45\x07", term.StatusWorking},
+		{"progress percentage", "\x1b]9;4;1;45\x07", protocol.StatusWorking},
 
 		// 2 is error / failed.
-		{"turn error with code", "\x1b]9;4;2;1\x07", term.StatusFailed},
-		{"turn error bare", "\x1b]9;4;2\x07", term.StatusFailed},
+		{"turn error with code", "\x1b]9;4;2;1\x07", protocol.StatusFailed},
+		{"turn error bare", "\x1b]9;4;2\x07", protocol.StatusFailed},
 
 		// 3 is indeterminate / busy (turn start in Claude Code).
-		{"turn start (busy/indeterminate with trailing semicolon)", "\x1b]9;4;3;\x07", term.StatusWorking},
-		{"turn start (busy/indeterminate bare)", "\x1b]9;4;3\x07", term.StatusWorking},
+		{"turn start (busy/indeterminate with trailing semicolon)", "\x1b]9;4;3;\x07", protocol.StatusWorking},
+		{"turn start (busy/indeterminate bare)", "\x1b]9;4;3\x07", protocol.StatusWorking},
 
 		// 4 is warning / paused.
-		{"warning / paused with progress", "\x1b]9;4;4;50\x07", term.StatusNeedsInput},
-		{"warning / paused bare", "\x1b]9;4;4\x07", term.StatusNeedsInput},
+		{"warning / paused with progress", "\x1b]9;4;4;50\x07", protocol.StatusNeedsInput},
+		{"warning / paused bare", "\x1b]9;4;4\x07", protocol.StatusNeedsInput},
 	}
 
 	for _, tc := range cases {
@@ -132,15 +133,15 @@ func TestMalformedOSC9LeavesTheIdleFallbackArmed(t *testing.T) {
 			if _, err := g.Write([]byte(tc.payload)); err != nil {
 				t.Fatalf("Write: %v", err)
 			}
-			if got := g.Status(); got != term.StatusWorking {
-				t.Fatalf("Status() = %v immediately after a write, want %v", got, term.StatusWorking)
+			if got := g.Status(); got != protocol.StatusWorking {
+				t.Fatalf("Status() = %v immediately after a write, want %v", got, protocol.StatusWorking)
 			}
 
 			time.Sleep(idle + 50*time.Millisecond)
 
-			if got := g.Status(); got != term.StatusIdle {
+			if got := g.Status(); got != protocol.StatusIdle {
 				t.Errorf("Status() = %v after idle window, want %v -- payload %q latched authoritative status",
-					got, term.StatusIdle, tc.payload)
+					got, protocol.StatusIdle, tc.payload)
 			}
 		})
 	}
@@ -157,16 +158,16 @@ func TestValidOSC9ArmsTheAuthoritativeLatch(t *testing.T) {
 	if _, err := g.Write([]byte("\x1b]9;4;3;\x07")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if got := g.Status(); got != term.StatusWorking {
-		t.Fatalf("Status() immediately after 9;4;3 = %v, want %v", got, term.StatusWorking)
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() immediately after 9;4;3 = %v, want %v", got, protocol.StatusWorking)
 	}
 
 	// Wait past the idle timeout; authoritative mode must prevent decay to Idle.
 	time.Sleep(idle + 50*time.Millisecond)
 
-	if got := g.Status(); got != term.StatusWorking {
+	if got := g.Status(); got != protocol.StatusWorking {
 		t.Errorf("Status() after idle window = %v, want %v (latch was not armed by valid 9;4)",
-			got, term.StatusWorking)
+			got, protocol.StatusWorking)
 	}
 }
 
@@ -178,32 +179,32 @@ func TestOSC9And133Interleaving(t *testing.T) {
 	if _, err := g.Write([]byte("\x1b]133;A\x07")); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.Status(); got != term.StatusNeedsInput {
-		t.Fatalf("Status() after 133;A = %v, want %v", got, term.StatusNeedsInput)
+	if got := g.Status(); got != protocol.StatusNeedsInput {
+		t.Fatalf("Status() after 133;A = %v, want %v", got, protocol.StatusNeedsInput)
 	}
 
 	// 2. Agent turn starts (OSC 9;4;3) -> Working
 	if _, err := g.Write([]byte("\x1b]9;4;3;\x07")); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.Status(); got != term.StatusWorking {
-		t.Fatalf("Status() after 9;4;3; = %v, want %v", got, term.StatusWorking)
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() after 9;4;3; = %v, want %v", got, protocol.StatusWorking)
 	}
 
 	// 3. Agent turn ends (OSC 9;4;0) -> Done
 	if _, err := g.Write([]byte("\x1b]9;4;0;\x07")); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.Status(); got != term.StatusDone {
-		t.Fatalf("Status() after 9;4;0; = %v, want %v", got, term.StatusDone)
+	if got := g.Status(); got != protocol.StatusDone {
+		t.Fatalf("Status() after 9;4;0; = %v, want %v", got, protocol.StatusDone)
 	}
 
 	// 4. Shell next prompt (OSC 133;A) -> NeedsInput (last writer wins)
 	if _, err := g.Write([]byte("\x1b]133;A\x07")); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.Status(); got != term.StatusNeedsInput {
-		t.Fatalf("Status() after second 133;A = %v, want %v", got, term.StatusNeedsInput)
+	if got := g.Status(); got != protocol.StatusNeedsInput {
+		t.Fatalf("Status() after second 133;A = %v, want %v", got, protocol.StatusNeedsInput)
 	}
 }
 
@@ -229,8 +230,8 @@ func TestMalformedOSC133StillAllowsALaterValidSequence(t *testing.T) {
 	if _, err := g.Write([]byte("\x1b]133;D;1\x07")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if got := g.Status(); got != term.StatusFailed {
-		t.Errorf("Status() = %v after a malformed 133 then a valid D;1, want %v", got, term.StatusFailed)
+	if got := g.Status(); got != protocol.StatusFailed {
+		t.Errorf("Status() = %v after a malformed 133 then a valid D;1, want %v", got, protocol.StatusFailed)
 	}
 }
 
@@ -251,14 +252,14 @@ func TestMalformedOSC133LeavesTheIdleFallbackArmed(t *testing.T) {
 	if _, err := g.Write([]byte("\x1b]133;Z\x07")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if got := g.Status(); got != term.StatusWorking {
-		t.Fatalf("Status() = %v immediately after a write, want %v", got, term.StatusWorking)
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() = %v immediately after a write, want %v", got, protocol.StatusWorking)
 	}
 
 	time.Sleep(idle + 50*time.Millisecond)
 
-	if got := g.Status(); got != term.StatusIdle {
-		t.Errorf("Status() = %v after the idle window, want %v -- an unrecognised 133 payload latched sawOSC133 and disabled the idle fallback", got, term.StatusIdle)
+	if got := g.Status(); got != protocol.StatusIdle {
+		t.Errorf("Status() = %v after the idle window, want %v -- an unrecognised 133 payload latched sawOSC133 and disabled the idle fallback", got, protocol.StatusIdle)
 	}
 }
 
