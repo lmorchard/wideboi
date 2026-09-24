@@ -79,6 +79,27 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		t.Errorf("got type %q, want MsgLayoutSnapshot", res.Type)
 	}
 
+	if err := clientConn.WriteJSON(transport.WSEnvelope{Type: "MsgPaneResync", Payload: []byte(`{"PaneID":7}`)}); err != nil {
+		t.Fatalf("client resync write failed: %v", err)
+	}
+	select {
+	case msg := <-serverWSConn.ClientSendChan():
+		if msg != (protocol.MsgPaneResync{PaneID: 7}) {
+			t.Fatalf("resync decoded as %#v", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for resync request")
+	}
+	if !serverWSConn.SendServer(ctx, protocol.MsgPanePatch{PaneID: 7, Cols: 2, Rows: 4, BaseGeneration: 1, Generation: 2}) {
+		t.Fatal("server patch send failed")
+	}
+	if err := clientConn.ReadJSON(&res); err != nil {
+		t.Fatalf("client patch read failed: %v", err)
+	}
+	if res.Type != "MsgPanePatch" || !strings.Contains(string(res.Payload), `"BaseGeneration":1`) {
+		t.Fatalf("patch envelope = %#v", res)
+	}
+
 	serverWSConn.Close()
 }
 

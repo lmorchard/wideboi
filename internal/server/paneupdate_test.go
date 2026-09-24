@@ -8,12 +8,15 @@ import (
 	"image"
 	"slices"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
+	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -21,6 +24,213 @@ type blockingDrawGrid struct {
 	*statusGrid
 	started chan struct{}
 	release chan struct{}
+}
+
+type gatedDrawGrid struct {
+	term.Grid
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *gatedDrawGrid) Draw(dst uv.Screen, area image.Rectangle) {
+	g.once.Do(func() {
+		close(g.started)
+		<-g.release
+	})
+	g.Grid.Draw(dst, area)
+}
+
+type cellGrid struct {
+	*statusGrid
+	content atomic.Pointer[string]
+}
+
+func (g *cellGrid) set(s string) {
+	g.content.Store(&s)
+	g.bump()
+}
+
+func (g *cellGrid) Draw(dst uv.Screen, _ image.Rectangle) {
+	if text := g.content.Load(); text != nil {
+		dst.SetCell(0, 0, &uv.Cell{Content: *text, Width: 1})
+	}
+}
+
+func takePaneMessage(t *testing.T, tp *transport.InProcChannel) any {
+	t.Helper()
+	select {
+	case msg := <-tp.ServerSend:
+		return msg
+	default:
+		t.Fatal("expected pane message")
+		return nil
+	}
+}
+
+func TestPanePatchPerClientBaselineAndRecovery(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
+	g := &cellGrid{statusGrid: newStatusGrid(protocol.StatusIdle)}
+	g.set("a")
+	s.panes[1].grid = g
+	s.panes[1].cols, s.panes[1].rows = 4, 4
+	healthy := s.transports[0].(*transport.InProcChannel)
+	slow := transport.NewInProcChannel(2)
+	s.transports = append(s.transports, slow)
+	ctx := context.Background()
+
+	s.broadcastPaneUpdates(ctx, false)
+	first, ok := takePaneMessage(t, healthy).(protocol.MsgPaneUpdate)
+	if !ok {
+		t.Fatal("first healthy delivery was not a full snapshot")
+	}
+	if _, ok := takePaneMessage(t, slow).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("first slow delivery was not a full snapshot")
+	}
+
+	g.set("b")
+	for len(slow.ServerSend) < cap(slow.ServerSend) {
+		slow.ServerSend <- struct{}{}
+	}
+	s.broadcastPaneUpdates(ctx, false)
+	patch, ok := takePaneMessage(t, healthy).(protocol.MsgPanePatch)
+	if !ok || len(patch.ChangedRows) != 1 {
+		t.Fatalf("healthy client did not get one changed row: %+v", patch)
+	}
+	drainPaneUpdates(slow)
+	s.broadcastPaneUpdates(ctx, false)
+	if _, ok := takePaneMessage(t, slow).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("client that missed a patch did not get a full recovery snapshot")
+	}
+	if got := drainPaneUpdates(healthy); len(got) != 0 {
+		t.Fatalf("healthy client got redundant update: %v", got)
+	}
+
+	late := transport.NewInProcChannel(2)
+	s.mu.Lock()
+	s.transports = append(s.transports, late)
+	s.mu.Unlock()
+	s.broadcastPaneUpdates(ctx, false)
+	if _, ok := takePaneMessage(t, late).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("late client did not get a full snapshot")
+	}
+
+	// Model a transport that accepted the first patch but lost it after
+	// SendServer returned true. The next patch names generation 2, while
+	// this client still holds the initial generation 1 snapshot.
+	g.set("c")
+	s.broadcastPaneUpdates(ctx, false)
+	nextPatch, ok := takePaneMessage(t, healthy).(protocol.MsgPanePatch)
+	if !ok || nextPatch.BaseGeneration != patch.Generation {
+		t.Fatalf("next patch did not advance from accepted baseline: %+v", nextPatch)
+	}
+	if _, ok := protocol.ApplyPanePatch(first, nextPatch); ok {
+		t.Fatal("client accepted a patch after losing its predecessor")
+	}
+	s.handleClientMsg(ctx, healthy, protocol.MsgPaneResync{PaneID: 1})
+	if _, ok := takePaneMessage(t, healthy).(protocol.MsgPaneUpdate); !ok {
+		t.Fatal("resync request did not produce a full snapshot")
+	}
+}
+
+// The server must keep accepting input and resize work while snapshots
+// are rendered and one client never drains its transport. Pane closure
+// racing those operations must not retain a stale delivery baseline.
+func TestConcurrentInputResizeCloseWithSlowTransport(t *testing.T) {
+	healthy := transport.NewInProcChannel(4096)
+	s := NewServer(healthy, "/bin/sh", "")
+	s.closeGrace = 10 * time.Millisecond
+	slow := transport.NewInProcChannel(1)
+	slow.ServerSend <- struct{}{}
+	s.transports = append(s.transports, slow)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p, err := NewPane(1, []string{"/bin/sh"}, 40, 22, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.closeGrace = s.closeGrace
+	s.mu.Lock()
+	s.panes[1] = p
+	s.nextPaneID = 1
+	s.strip.AddColumn(1, 40, 22, 0)
+	s.mu.Unlock()
+	s.handleClientMsg(ctx, healthy, protocol.MsgAttach{Cols: 80, Rows: 24})
+	g := &gatedDrawGrid{Grid: p.grid, started: make(chan struct{}), release: make(chan struct{})}
+	p.grid = g // Install before Start reads the grid from its worker goroutines.
+	p.Start(func() { s.onPaneExit(1) })
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(g.release) }) }
+	defer release()
+	renderDone := make(chan struct{})
+	go func() {
+		s.broadcastPaneUpdates(ctx, true)
+		close(renderDone)
+	}()
+	select {
+	case <-g.started:
+	case <-ctx.Done():
+		t.Fatal("pane render did not start")
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	run := func(fn func()) {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; fn() }()
+	}
+	run(func() {
+		for i := 0; i < 30; i++ {
+			s.handleClientMsg(ctx, healthy, protocol.MsgInput{PaneID: 1, Data: []byte("x")})
+		}
+	})
+	run(func() {
+		for i := 0; i < 15; i++ {
+			s.handleClientMsg(ctx, healthy, protocol.MsgResize{Cols: 80 + i%2*20, Rows: 24 + i%2*4})
+		}
+	})
+	run(func() {
+		for i := 0; i < 30; i++ {
+			s.broadcastPaneUpdates(ctx, false)
+		}
+	})
+	close(start)
+	// The pane must begin closing while its render is still held. This
+	// directly observes the overlap instead of relying on scheduling time.
+	killDone := make(chan struct{})
+	go func() {
+		s.handleClientMsg(ctx, healthy, protocol.MsgVerb{Verb: protocol.VerbKillPane, PaneID: 1})
+		close(killDone)
+	}()
+	select {
+	case <-p.closed:
+	case <-ctx.Done():
+		t.Fatal("pane close did not begin during render")
+	}
+	release()
+	select {
+	case <-killDone:
+	case <-ctx.Done():
+		t.Fatal("pane kill did not finish")
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("concurrent pane work did not finish")
+	}
+	select {
+	case <-renderDone:
+	case <-ctx.Done():
+		t.Fatal("held render did not finish")
+	}
+	closeDone := make(chan struct{})
+	go func() { _ = s.Close(); close(closeDone) }()
+	select {
+	case <-closeDone:
+	case <-ctx.Done():
+		t.Fatal("server close stalled after concurrent pane work")
+	}
 }
 
 type changingDrawGrid struct{ *statusGrid }
@@ -148,7 +358,10 @@ func drainPaneUpdates(tp *transport.InProcChannel) []int {
 	for {
 		select {
 		case msg := <-tp.ServerSend:
-			if u, ok := msg.(protocol.MsgPaneUpdate); ok {
+			switch u := msg.(type) {
+			case protocol.MsgPaneUpdate:
+				ids = append(ids, u.PaneID)
+			case protocol.MsgPanePatch:
 				ids = append(ids, u.PaneID)
 			}
 		default:
@@ -261,6 +474,9 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 	if _, ok := s.paneGens[tp][2]; ok {
 		t.Error("record for exited pane 2 survived a broadcast")
 	}
+	if _, ok := s.paneFrames[tp][2]; ok {
+		t.Error("baseline for exited pane 2 survived a broadcast")
+	}
 
 	// With no panes left nothing is delivered, and the last record
 	// must still go.
@@ -271,10 +487,16 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 	if n := len(s.paneGens[tp]); n != 0 {
 		t.Errorf("%d record(s) survived the last pane exiting", n)
 	}
+	if n := len(s.paneFrames[tp]); n != 0 {
+		t.Errorf("%d baseline(s) survived the last pane exiting", n)
+	}
 
 	s.dropClient(context.Background(), tp)
 	if _, ok := s.paneGens[tp]; ok {
 		t.Error("records for a dropped client survived dropClient")
+	}
+	if _, ok := s.paneFrames[tp]; ok {
+		t.Error("baselines for a dropped client survived dropClient")
 	}
 }
 

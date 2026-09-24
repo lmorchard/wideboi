@@ -1,4 +1,4 @@
-import type { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData } from './protocol';
+import type { MsgLayoutSnapshot, MsgPanePatch, MsgPaneUpdate, PlacementData } from './protocol';
 import { decodeColor } from './colors';
 import { reconcileFocus } from './focus';
 
@@ -79,6 +79,35 @@ export class GridRenderer {
   public handlePaneUpdate(update: MsgPaneUpdate) {
     this.panes.set(update.PaneID, update);
     this.invalidate();
+  }
+
+  public handlePanePatch(patch: MsgPanePatch): boolean {
+    const base = this.panes.get(patch.PaneID);
+    if (!base || base.Generation !== patch.BaseGeneration ||
+        base.Cols !== patch.Cols || base.Rows !== patch.Rows ||
+        base.Lines.length !== base.Rows || patch.Generation <= patch.BaseGeneration) {
+      this.panes.delete(patch.PaneID);
+      this.invalidate();
+      return false;
+    }
+    const lines = base.Lines.slice();
+    const seen = new Set<number>();
+    for (const row of patch.ChangedRows ?? []) {
+      if (row.Y < 0 || row.Y >= base.Rows || seen.has(row.Y) || row.Cells.length !== base.Cols) {
+        this.panes.delete(patch.PaneID);
+        this.invalidate();
+        return false;
+      }
+      seen.add(row.Y);
+      lines[row.Y] = row.Cells;
+    }
+    this.panes.set(patch.PaneID, {
+      PaneID: patch.PaneID, Cols: patch.Cols, Rows: patch.Rows, Lines: lines,
+      Generation: patch.Generation, CursorX: patch.CursorX, CursorY: patch.CursorY,
+      CursorVisible: patch.CursorVisible, MouseTracking: patch.MouseTracking,
+    });
+    this.invalidate();
+    return true;
   }
 
   public handlePaneClosed(paneID: number) {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GridRenderer } from './renderer';
-import type { MsgLayoutSnapshot, MsgPaneUpdate } from './protocol';
+import type { MsgLayoutSnapshot, MsgPanePatch, MsgPaneUpdate } from './protocol';
 
 describe('GridRenderer frame scheduling', () => {
   const frames = new Map<number, FrameRequestCallback>();
@@ -58,7 +58,7 @@ describe('GridRenderer frame scheduling', () => {
     Columns: [], PaneStatuses: {}, PaneTitles: {},
   };
   const pane: MsgPaneUpdate = {
-    PaneID: 1, Cols: 1, Rows: 1, Lines: [], CursorX: 0, CursorY: 0,
+    PaneID: 1, Generation: 1, Cols: 1, Rows: 1, Lines: [], CursorX: 0, CursorY: 0,
     CursorVisible: false, MouseTracking: false,
   };
 
@@ -107,7 +107,7 @@ describe('GridRenderer frame scheduling', () => {
     });
     const blank = { Content: ' ', Width: 1, Style: undefined as never };
     r.handlePaneUpdate({
-      PaneID: 1, Cols: 10, Rows: 3,
+      PaneID: 1, Generation: 1, Cols: 10, Rows: 3,
       Lines: [[
         { Content: '界', Width: 2, Style: undefined as never },
         blank,
@@ -140,5 +140,31 @@ describe('GridRenderer frame scheduling', () => {
     expect(r.getPaneHit(0, 1).paneID).toBe(1);
     expect(r.getPaneHit(2, 1).paneID).toBe(2);
     expect(r.getPaneHit(1, 1).paneID).toBe(0);
+  });
+
+  it('applies complete changed rows and rejects a stale patch', () => {
+    const r = renderer();
+    const cell = (Content: string) => ({ Content, Width: 1, Style: {
+      Fg: { Kind: 0, Index: 0, R: 0, G: 0, B: 0, A: 0 },
+      Bg: { Kind: 0, Index: 0, R: 0, G: 0, B: 0, A: 0 },
+      UnderlineColor: { Kind: 0, Index: 0, R: 0, G: 0, B: 0, A: 0 },
+      Underline: 0, Attrs: 0,
+    } });
+    const full: MsgPaneUpdate = { ...pane, Cols: 2, Rows: 4,
+      Lines: Array.from({ length: 4 }, () => [cell(' '), cell(' ')]) };
+    r.handlePaneUpdate(full);
+    const patch: MsgPanePatch = { PaneID: 1, Cols: 2, Rows: 4,
+      BaseGeneration: 1, Generation: 2, ChangedRows: [{ Y: 1, Cells: [cell('X'), cell(' ')] }],
+      CursorX: 1, CursorY: 1, CursorVisible: true, MouseTracking: true };
+    expect(r.handlePanePatch(patch)).toBe(true);
+    const panes = (r as unknown as { panes: Map<number, MsgPaneUpdate> }).panes;
+    expect(panes.get(1)?.Lines[1][0].Content).toBe('X');
+    expect(panes.get(1)?.Lines[0]).toEqual(full.Lines[0]);
+    expect(panes.get(1)?.CursorVisible).toBe(true);
+    expect(panes.get(1)?.MouseTracking).toBe(true);
+    expect(r.handlePanePatch({ ...patch, Generation: 3 })).toBe(false);
+    expect(panes.has(1)).toBe(false);
+    r.handlePaneUpdate({ ...full, Generation: 3 });
+    expect(panes.get(1)?.Generation).toBe(3);
   });
 });

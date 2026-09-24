@@ -55,9 +55,23 @@ export interface MsgLayoutSnapshot {
 
 export interface MsgPaneUpdate {
   PaneID: number;
+  Generation: number;
   Cols: number;
   Rows: number;
   Lines: LineData[];
+  CursorX: number;
+  CursorY: number;
+  CursorVisible: boolean;
+  MouseTracking: boolean;
+}
+
+export interface MsgPanePatch {
+  PaneID: number;
+  Cols: number;
+  Rows: number;
+  BaseGeneration: number;
+  Generation: number;
+  ChangedRows: { Y: number; Cells: LineData }[] | null;
   CursorX: number;
   CursorY: number;
   CursorVisible: boolean;

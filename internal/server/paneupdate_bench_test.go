@@ -21,21 +21,9 @@ func BenchmarkPaneUpdateRender(b *testing.B) {
 	}
 }
 
-// This is a payload experiment for #158, not a new wire format. A row
-// patch still needs a client baseline, ordering, and resynchronization.
+// Compares the actual JSON payload types. Scroll-like changes fall back
+// to full snapshots; the all-row patch measures why that fallback helps.
 func BenchmarkPaneJSONPayload(b *testing.B) {
-	type changedRow struct {
-		Y     int
-		Cells protocol.LineData
-	}
-	type rowPatch struct {
-		PaneID                       int
-		Base                         uint64
-		Gen                          uint64
-		Rows                         []changedRow
-		CursorX, CursorY             int
-		CursorVisible, MouseTracking bool
-	}
 	for _, tc := range []struct {
 		name                string
 		cols, rows, changed int
@@ -51,10 +39,11 @@ func BenchmarkPaneJSONPayload(b *testing.B) {
 				lines[y][x] = protocol.CellData{Content: "x", Width: 1}
 			}
 		}
-		full := protocol.MsgPaneUpdate{PaneID: 1, Cols: tc.cols, Rows: tc.rows, Lines: lines, CursorVisible: true}
-		patch := rowPatch{PaneID: 1, Base: 1, Gen: 2, CursorVisible: true}
+		full := protocol.MsgPaneUpdate{PaneID: 1, Generation: 2, Cols: tc.cols, Rows: tc.rows, Lines: lines, CursorVisible: true}
+		patch := protocol.MsgPanePatch{PaneID: 1, Cols: tc.cols, Rows: tc.rows,
+			BaseGeneration: 1, Generation: 2, CursorVisible: true}
 		for y := 0; y < tc.changed; y++ {
-			patch.Rows = append(patch.Rows, changedRow{Y: y, Cells: lines[y]})
+			patch.ChangedRows = append(patch.ChangedRows, protocol.PaneRow{Y: y, Cells: lines[y]})
 		}
 		for _, variant := range []struct {
 			name  string

@@ -273,6 +273,10 @@ export class WideboiApp extends LitElement {
         this.pendingFocusId = env.p.PaneID;
       } else if (env.t === 'MsgPaneUpdate') {
         this.renderer.handlePaneUpdate(env.p);
+      } else if (env.t === 'MsgPanePatch') {
+        if (!this.renderer.handlePanePatch(env.p)) {
+          client.send('MsgPaneResync', { PaneID: env.p.PaneID });
+        }
       } else if (env.t === 'MsgPaneClosed') {
         this.renderer.handlePaneClosed(env.p.PaneID);
         this.activePanes = this.activePanes.filter(id => id !== env.p.PaneID);

@@ -71,6 +71,8 @@ func init() {
 	gob.Register(protocol.CellData{})
 	gob.Register(protocol.LineData{})
 	gob.Register(protocol.MsgPaneUpdate{})
+	gob.Register(protocol.MsgPanePatch{})
+	gob.Register(protocol.MsgPaneResync{})
 	gob.Register(protocol.MsgAttach{})
 	gob.Register(protocol.MsgVerb{})
 	gob.Register(protocol.MsgMouse{})
