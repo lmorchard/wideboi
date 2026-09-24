@@ -119,6 +119,14 @@ while it starts. The result was an intermittent "planted job never appeared",
 and `attach-check` was spending about half its runtime waiting on zsh. Anything
 the harness starts off a pty needs the same pin (`attachcheck.bin_env`).
 
+## A redundant canvas resize clears the last painted frame
+
+Assigning `canvas.width` or `canvas.height` resets the bitmap even when the
+new number equals the old one. A `ResizeObserver` callback can arrive without
+a useful size change, so `GridRenderer.resize` checks both backing dimensions
+before assigning them. This matters especially for the change-only browser
+renderer: an idle session may have no new frame to repaint a cleared canvas.
+
 ## Change-only sends trade self-healing for bookkeeping
 
 Until #85 the server resent every pane to every client on each 33ms frame.

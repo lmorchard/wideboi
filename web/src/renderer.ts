@@ -165,10 +165,18 @@ export class GridRenderer {
 
   public resize(width: number, height: number) {
     const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = width * dpr;
-    this.canvas.height = height * dpr;
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
+    const pixelWidth = Math.round(width * dpr);
+    const pixelHeight = Math.round(height * dpr);
+    // Setting either canvas dimension clears its bitmap, even when the value
+    // is unchanged. ResizeObserver can fire for unrelated layout changes.
+    const cssWidth = `${width}px`;
+    const cssHeight = `${height}px`;
+    if (this.canvas.width === pixelWidth && this.canvas.height === pixelHeight &&
+        this.canvas.style.width === cssWidth && this.canvas.style.height === cssHeight) return;
+    if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
+    if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
+    this.canvas.style.width = cssWidth;
+    this.canvas.style.height = cssHeight;
     
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.measureFont();
