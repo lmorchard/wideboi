@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,6 +91,21 @@ func (s *Server) SetStartupPanes(panes []StartupPane) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.startup = append([]StartupPane(nil), panes...)
+}
+
+// websocketProtocolToken reads the browser's token-bearing subprotocol offer.
+// The server deliberately does not select it as the negotiated subprotocol.
+func websocketProtocolToken(r *http.Request) string {
+	const prefix = "wideboi-token."
+	for _, protocol := range websocket.Subprotocols(r) {
+		if strings.HasPrefix(protocol, prefix) {
+			decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(protocol, prefix))
+			if err == nil {
+				return string(decoded)
+			}
+		}
+	}
+	return ""
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning
@@ -973,7 +990,7 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		if token != "" {
 			reqToken := r.URL.Query().Get("token")
-			if reqToken != token {
+			if reqToken != token && websocketProtocolToken(r) != token {
 				slog.Warn("websocket connection rejected: invalid token", "remote", r.RemoteAddr)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
