@@ -569,12 +569,23 @@ func TestStartupPanesConfig(t *testing.T) {
 		t.Fatalf("startup panes = %+v", cfg.Startup)
 	}
 
-	for _, bad := range []string{"[[startup]]\nwidth = 19\n", "[[startup]]\ncommand = \"   \"\n"} {
+	for _, bad := range []string{
+		"[[startup]]\nwidth = 19\n",
+		"[[startup]]\nwidth = 4097\n",
+		"[[startup]]\nwidth = 1000000000\n",
+		"[[startup]]\ncommand = \"   \"\n",
+	} {
 		if err := os.WriteFile(path, []byte(bad), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil)); err == nil {
 			t.Errorf("expected invalid startup pane to fail: %q", bad)
 		}
+	}
+	if err := os.WriteFile(path, []byte("[[startup]]\nwidth = 4096\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil)); err != nil {
+		t.Errorf("maximum startup width should be valid: %v", err)
 	}
 }

@@ -182,7 +182,7 @@ See [`config.example.toml`](config.example.toml) for an annotated example config
 To open a project loadout when a new session starts, add `[[startup]]` entries
 to `.wideboi.toml` (or your main config). Each entry creates one column in
 order. A `command` runs through the configured shell; omit it for an
-interactive shell. Optional `width` is the column width in cells (at least 20).
+interactive shell. Optional `width` is the column width in cells (20–4096).
 
 ```toml
 [[startup]]

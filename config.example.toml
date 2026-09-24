@@ -40,7 +40,8 @@ prefix = "ctrl+b"
 
 # Initial columns for a newly created session. Each [[startup]] entry opens
 # one column, in order. Omit command for an interactive shell; commands run
-# through the configured shell with `-c`. Omit width for the normal width.
+# through the configured shell with `-c`. Width must be 20–4096 cells;
+# omit it for the normal width.
 # A project .wideboi.toml can replace the whole list for that project.
 # [[startup]]
 # command = "nvim"
