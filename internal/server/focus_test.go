@@ -15,7 +15,7 @@ func TestFocusPaneMovesFocusToNamedPane(t *testing.T) {
 	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle, 3: term.StatusIdle})
 	s.strip.FocusPaneID(1)
 
-	s.handleClientMsg(context.Background(), protocol.MsgFocusPane{PaneID: 3})
+	s.handleClientMsg(context.Background(), nil, protocol.MsgFocusPane{PaneID: 3})
 
 	if got := s.strip.FocusedPaneID(); got != 3 {
 		t.Errorf("focused pane = %d, want 3", got)
@@ -28,7 +28,7 @@ func TestFocusPaneIgnoresUnknownPane(t *testing.T) {
 	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
 	s.strip.FocusPaneID(2)
 
-	s.handleClientMsg(context.Background(), protocol.MsgFocusPane{PaneID: 99})
+	s.handleClientMsg(context.Background(), nil, protocol.MsgFocusPane{PaneID: 99})
 
 	if got := s.strip.FocusedPaneID(); got != 2 {
 		t.Errorf("focused pane = %d, want 2 (unchanged)", got)
@@ -44,7 +44,7 @@ func TestMouseMessageQueuesForNamedPane(t *testing.T) {
 	p := s.panes[2]
 	p.input = make(chan uv.Event, 1)
 
-	s.handleClientMsg(context.Background(), protocol.MsgMouse{
+	s.handleClientMsg(context.Background(), nil, protocol.MsgMouse{
 		PaneID: 2, Kind: protocol.MouseRelease, X: 4, Y: 5, Button: int(uv.MouseLeft),
 	})
 

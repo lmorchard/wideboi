@@ -164,8 +164,8 @@ func TestClosedServerSpawnsNoPanes(t *testing.T) {
 	s := NewServer(nil, "/bin/sh", "")
 	_ = s.Close()
 
-	s.handleClientMsg(context.Background(), protocol.MsgAttach{Cols: 80, Rows: 24})
-	s.handleClientMsg(context.Background(), protocol.MsgVerb{Verb: protocol.VerbNewColumn})
+	s.handleClientMsg(context.Background(), nil, protocol.MsgAttach{Cols: 80, Rows: 24})
+	s.handleClientMsg(context.Background(), nil, protocol.MsgVerb{Verb: protocol.VerbNewColumn})
 
 	s.mu.Lock()
 	leaked := make([]*Pane, 0, len(s.panes))
@@ -213,7 +213,7 @@ func TestCloseStopsListeningBeforeReaping(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.ListenSocket(ctx, sl)
-	s.handleClientMsg(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	s.handleClientMsg(ctx, nil, protocol.MsgAttach{Cols: 80, Rows: 24})
 
 	s.mu.Lock()
 	var roots []*os.Process
