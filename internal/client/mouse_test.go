@@ -237,6 +237,7 @@ func paneLines(paneID, cols, rows int, rowsText ...string) protocol.MsgPaneUpdat
 		for i := 0; i < len(rs); i++ {
 			if i+1 < len(rs) && rs[i+1] == 0 {
 				line = append(line, protocol.CellData{Content: string(rs[i]), Width: 2})
+				line = append(line, protocol.CellData{Content: " ", Width: 1})
 				i++
 				continue
 			}
