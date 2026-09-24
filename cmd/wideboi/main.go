@@ -105,7 +105,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Socket, "socket", "", "unix domain socket path")
 	fs.StringVar(&opts.flags.Session, "L", "", "session name")
 	fs.StringVar(&opts.flags.Session, "session", "", "session name")
-	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \":8080\")")
+	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \"127.0.0.1:8080\")")
 	fs.StringVar(&opts.flags.WebsocketToken, "websocket-token", "", "token required for websocket connections")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
@@ -152,7 +152,7 @@ Flags:
   -L, --session <name>   Session to start or attach to (default: "default");
                          its socket is $TMPDIR/wideboi-<uid>/<name>.sock
   -s, --socket <path>    Unix domain socket path, instead of a session name
-      --websocket <addr> Address for WebSocket server (e.g. ":8080")
+      --websocket <addr> Address for WebSocket server (e.g. "127.0.0.1:8080")
       --websocket-token <token> Token required for WebSocket connections
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
@@ -163,7 +163,7 @@ Environment Variables:
   WIDEBOI_LAYOUT         Starting layout for this client ("cards" or "scroll")
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SESSION        Session name override
-  WIDEBOI_WEBSOCKET      Address for WebSocket server (e.g. ":8080")
+  WIDEBOI_WEBSOCKET      Address for WebSocket server (e.g. "127.0.0.1:8080")
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
@@ -342,6 +342,7 @@ func runServer(cfg config.Config, ownerFD int) error {
 			slog.Error("cannot listen on websocket address", "err", err)
 			return err
 		}
+		warnIfWebClientExposed(os.Stderr, slog.Default(), wsListener.Addr())
 		if generatedToken {
 			if err := writeWebToken(cfg.Socket, cfg.WebsocketToken); err != nil {
 				_ = wsListener.Close()
@@ -414,6 +415,15 @@ func announceWebClient(w io.Writer, log *slog.Logger, host, addr, token string, 
 		fmt.Fprintf(w, "wideboi: web client listening at http://%s/ (token configured)\n", host)
 	}
 	log.Info("websocket server listening", "addr", addr, "token", "***REDACTED***")
+}
+
+func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr) {
+	tcpAddr, ok := addr.(*net.TCPAddr)
+	if !ok || tcpAddr.IP.IsLoopback() {
+		return
+	}
+	fmt.Fprintln(w, "wideboi: WARNING: web client is exposed beyond loopback over unencrypted HTTP/WS; bind to loopback behind an HTTPS reverse proxy for remote access")
+	log.Warn("web client exposed beyond loopback over unencrypted HTTP/WS", "addr", addr)
 }
 
 // runKillSession ends the session at cfg.Socket and waits until it has:

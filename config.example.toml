@@ -27,8 +27,10 @@ prefix = "ctrl+b"
 # socket = "/path/to/socket.sock"
 
 # Address to bind the WebSocket server for the Web Client.
-# E.g. ":8080" or "127.0.0.1:8080". Defaults to empty (disabled).
-# websocket = ":8080"
+# Bind to loopback for local use or an HTTPS reverse proxy on this host.
+# A wildcard address such as ":8080" exposes unencrypted HTTP/WS to the network.
+# Defaults to empty (disabled).
+# websocket = "127.0.0.1:8080"
 
 # Optional fixed token for WebSocket clients. Without it, a token is generated
 # at server startup and shown once in a link on stderr.

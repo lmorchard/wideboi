@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,5 +50,31 @@ func TestWriteWebToken(t *testing.T) {
 		if info.Mode().Perm() != 0600 {
 			t.Fatalf("token file permissions = %o, want 600", info.Mode().Perm())
 		}
+	}
+}
+
+func TestWarnIfWebClientExposed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ip   net.IP
+		warn bool
+	}{
+		{"IPv4 loopback", net.ParseIP("127.0.0.1"), false},
+		{"IPv6 loopback", net.ParseIP("::1"), false},
+		{"IPv4 wildcard", net.IPv4zero, true},
+		{"IPv6 wildcard", net.IPv6zero, true},
+		{"network address", net.ParseIP("192.0.2.1"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stderr, logOutput bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logOutput, nil))
+			warnIfWebClientExposed(&stderr, log, &net.TCPAddr{IP: tc.ip, Port: 8080})
+			if got := stderr.Len() > 0; got != tc.warn {
+				t.Errorf("stderr warning = %t, want %t", got, tc.warn)
+			}
+			if got := logOutput.Len() > 0; got != tc.warn {
+				t.Errorf("log warning = %t, want %t", got, tc.warn)
+			}
+		})
 	}
 }

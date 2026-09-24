@@ -158,9 +158,10 @@ The listener is disabled unless you set `--websocket`,
 `WIDEBOI_WEBSOCKET`, or `websocket` in the config file. All three accept an
 address such as `127.0.0.1:8080`. Binding to `:8080` listens on network
 interfaces beyond loopback. The built-in server uses plain HTTP and WebSocket;
-for access from another machine, use an HTTPS/WSS reverse proxy and keep the
-token private. Remote exposure guidance and additional safeguards are tracked
-in [#147](https://github.com/lmorchard/wideboi/issues/147).
+`:8080`, `0.0.0.0:8080`, and other non-loopback addresses expose that
+unencrypted service to the network. wideboi prints a warning for those binds.
+For access from another machine, use an HTTPS/WSS reverse proxy and keep the
+token private.
 
 When no token is configured, the server generates one at startup and prints a
 `#token=...` link once to its stderr. It also stores the token in an owner-only
@@ -182,7 +183,8 @@ history entry immediately and keeps the token in page memory for reconnects.
 It sends the token in the WebSocket handshake subprotocol, leaving the
 connection URL clean. Reloading the page clears the in-memory token, so use
 the original link or enter it again. Older `?token=...` links still work and
-are cleaned from the history entry when opened.
+are cleaned from the history entry when opened. Avoid query-token links: the
+query is sent in the HTTP request and may be recorded by proxies or logs.
 
 To choose a token, set `--websocket-token <token>`,
 `WIDEBOI_WEBSOCKET_TOKEN`, or `websocket_token` in the config file. Enter that
@@ -194,6 +196,37 @@ startup link private: anyone holding it can control the terminal session.
 For frontend development only, run `cd web && npm run dev` to use Vite's
 development server alongside a wideboi server. Normal builds use the embedded
 client.
+
+### Remote browser access
+
+Keep wideboi bound to loopback and put an HTTPS reverse proxy on the same host.
+For example, with nginx and a certificate for `wideboi.example.com`:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name wideboi.example.com;
+    ssl_certificate /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+Start wideboi with `--websocket 127.0.0.1:8080`, then open
+`https://wideboi.example.com/`. The browser uses WSS automatically. Keep the
+proxy's `Host` header intact so the WebSocket origin check accepts the same
+host. Terminate TLS at the proxy, restrict who can reach it, and avoid logging
+WebSocket handshake headers containing the token. The generated startup link
+points to loopback; for remote access, read the token from the owner-only
+`.web-token` file described above and enter it in the HTTPS page's connection
+form. Treat the token and any token-bearing link as terminal access credentials.
 
 ## Configuration
 
