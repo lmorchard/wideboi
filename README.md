@@ -53,6 +53,11 @@ Starting two `wideboi` at once for one session (two terminals opened
 together, or a restored set of tabs) gives you one session with both
 attached, not an error.
 
+A session survives a rebuild. If the new build changed the wire protocol,
+it refuses the old server and says so, with the server's pid. Attach to
+that session with a build that matches it, or start a new one alongside with
+`-L <name>`.
+
 ## Keys
 
 wideboi uses a prefix key, like tmux. Press `ctrl+b` to enter control

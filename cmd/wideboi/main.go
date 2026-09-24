@@ -274,6 +274,16 @@ func runServer(cfg config.Config, ownerFD int) error {
 			slog.Error("owner connection", "fd", ownerFD, "err", err)
 			return fmt.Errorf("owner connection on fd %d: %w", ownerFD, err)
 		}
+		// The owner is whoever exec'd us, normally this very binary,
+		// but a rebuild between its start and our exec can put two
+		// builds on the pair. No pane exists yet, so there is no work
+		// to protect: leaving instead of serving no-one keeps an
+		// unreachable session from lingering (#174).
+		if peer, err := transport.Handshake(conn); err != nil {
+			conn.Close()
+			slog.Error("owner failed the protocol handshake; exiting", "ownerPID", peer.PID, "err", err)
+			return fmt.Errorf("owner connection: %w", err)
+		}
 		sc := transport.NewServerSocketConn(conn, 256)
 		sc.RunPumps(ctx)
 		ownerConn = sc
@@ -433,6 +443,10 @@ func runKillSession(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("no wideboi server running at %s: %w", cfg.Socket, err)
 	}
+	if _, err := transport.Handshake(conn); err != nil {
+		conn.Close()
+		return describeHandshakeErr(cfg.Socket, err, killHint(cfg.Socket, err))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cc := transport.NewClientSocketConn(conn, 256)
@@ -525,6 +539,25 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		defer f.Close()
 	}
 	slog.Info("wideboi client starting", "socketPath", cfg.Socket, "owner", owner)
+
+	// Before the terminal is touched, so a refusal prints plainly.
+	if _, err := transport.Handshake(conn); err != nil {
+		conn.Close()
+		// A server we spawned that quit during startup hung up without
+		// a hello; that is its startup failure, not a mismatch. One that
+		// did say hello in another version exits too, and its exit
+		// code must not hide why.
+		if owner && errors.Is(err, io.EOF) {
+			switch serverExitCode(serverExit, reapCeiling) {
+			case exitSessionTaken:
+				return errSessionTaken
+			case -1:
+			default:
+				return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path(cfg.Socket, "server"))
+			}
+		}
+		return describeHandshakeErr(cfg.Socket, err, "")
+	}
 
 	t := uv.DefaultTerminal()
 	scr := t.Screen()
@@ -671,6 +704,11 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					return nil // Just exit cleanly if the server is truly gone
 				}
 
+				// A server restarted from another build is not one to
+				// rejoin.
+				if err := handshakeServer(reconnectConn, cfg.Socket); err != nil {
+					return err
+				}
 				slog.Info("reconnected successfully")
 
 				// Close the old transport pumps and swap in the new one.

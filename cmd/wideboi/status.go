@@ -20,6 +20,9 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("no wideboi server running at %s: %w", cfg.Socket, err)
 	}
+	if err := handshakeServer(conn, cfg.Socket); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

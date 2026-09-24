@@ -318,3 +318,12 @@ title made a snapshot unencodable, the pump closed the owner's connection, and
 the session ended (#175). The codec passes outbound strings through
 `validUTF8`, and a server pump drops a message it cannot encode rather than
 the peer.
+
+## Bump `protocol.Version` when the wire changes
+
+Sessions outlive rebuilds, so a new client meeting an old server is normal.
+Without a version check, #166's switch from gob to protobuf showed up as
+`protobuf frame too large: 4288679936`: the first gob bytes, `0xFFA01000`,
+read as a length prefix. The Unix socket now opens with a hello that carries
+`protocol.Version` (#174). The check only works if someone bumps the version.
+Increase it for any change an older peer would misread or reject.
