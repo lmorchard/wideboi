@@ -128,7 +128,7 @@ export class WideboiApp extends LitElement {
   private focusedPaneId = 0;
 
   @state()
-  private wsUrl = `ws://${window.location.hostname}:8080/ws`;
+  private wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
   @state()
   private token = new URLSearchParams(window.location.search).get('token') || '';
@@ -471,7 +471,7 @@ export class WideboiApp extends LitElement {
               .value=${this.wsUrl} 
               @input=${this.handleUrlChange}
               @keydown=${this.handleKeydown}
-              placeholder="ws://localhost:8080/ws"
+              placeholder=${`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
             />
             <input 
               type="text" 

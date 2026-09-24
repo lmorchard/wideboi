@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -154,15 +155,15 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 		select {
 		case <-ctx.Done():
 			return
-		case msg, ok := <-tp.ClientSendChan():
-			if !ok {
-				if s.dropClient(tp) {
-					slog.Info("owning client left without detaching; ending the session")
-					_ = s.Close()
+			case msg, ok := <-tp.ClientSendChan():
+				if !ok {
+					if s.dropClient(ctx, tp) {
+						slog.Info("owning client left without detaching; ending the session")
+						_ = s.Close()
+					}
+					return
 				}
-				return
-			}
-			if _, ok := msg.(protocol.MsgShutdown); ok {
+				if _, ok := msg.(protocol.MsgShutdown); ok {
 				// Close hangs up on every transport, this one
 				// included, and only after reaping. Called here,
 				// not under s.mu, for the same reason dropClient
@@ -170,14 +171,14 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				_ = s.Close()
 				return
 			}
-			if _, ok := msg.(protocol.MsgDetach); ok {
-				// An owner detaching gives up ownership, not the
-				// session. Returning here means the EOF that follows
-				// is never read as an owner leaving: this goroutine is
-				// the only reader of this connection, and it stops.
-				s.dropClient(tp)
-				return
-			}
+				if _, ok := msg.(protocol.MsgDetach); ok {
+					// An owner detaching gives up ownership, not the
+					// session. Returning here means the EOF that follows
+					// is never read as an owner leaving: this goroutine is
+					// the only reader of this connection, and it stops.
+					s.dropClient(ctx, tp)
+					return
+				}
 			s.handleClientMsg(ctx, tp, msg)
 		}
 	}
@@ -185,7 +186,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 
 // dropClient removes tp from the broadcast set and closes it. It reports
 // whether tp was the owner, and clears ownership under the same lock.
-func (s *Server) dropClient(tp transport.Transport) (wasOwner bool) {
+func (s *Server) dropClient(ctx context.Context, tp transport.Transport) (wasOwner bool) {
 	s.mu.Lock()
 	s.removeTransportLocked(tp)
 	if tp == s.owner {
@@ -193,6 +194,8 @@ func (s *Server) dropClient(tp transport.Transport) (wasOwner bool) {
 		wasOwner = true
 	}
 	s.mu.Unlock()
+	// Broadcast layout outside the lock to push the resized panes to remaining clients
+	s.broadcastLayout(ctx)
 	// Close outside s.mu. Close can block, and
 	// Issue #43 records holding s.mu across a
 	// blocking call as the shape behind the server that
@@ -219,6 +222,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.paneGens, tp)
 	delete(s.clientSizes, tp)
 	s.recomputeSessionSizeLocked()
+	s.resizePanesLocked()
 }
 
 // Run executes the main server event loop, processing client messages and polling descendants.
@@ -905,9 +909,20 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 			if origin == "" {
 				return true // Direct connections (like wscat or curl) are allowed
 			}
-			return origin == "http://127.0.0.1:5173" || origin == "http://localhost:5173" ||
-				origin == "http://127.0.0.1:8080" || origin == "http://localhost:8080" ||
-				origin == "http://127.0.0.1:8081" || origin == "http://localhost:8081"
+
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+
+			// Allow if the origin matches the host the request was sent to.
+			if u.Host == r.Host {
+				return true
+			}
+
+			return u.Host == "127.0.0.1:5173" || u.Host == "localhost:5173" ||
+				u.Host == "127.0.0.1:8080" || u.Host == "localhost:8080" ||
+				u.Host == "127.0.0.1:8081" || u.Host == "localhost:8081"
 		},
 	}
 
