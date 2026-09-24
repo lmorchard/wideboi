@@ -255,16 +255,16 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			c.mirrors[m.PaneID] = mirror
 		}
 		for y, line := range m.Lines {
-			currX := 0
-			for _, cell := range line {
+			for x, cell := range line {
+				// LineData has one entry per terminal column. SetCell
+				// writes a wide glyph's continuation itself; the wire
+				// placeholder must not overwrite it.
+				if x > 0 && line[x-1].Width > 1 {
+					continue
+				}
 				uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
 				uvCell.Style = cell.Style.Decode()
-				mirror.Surface.SetCell(currX, y, uvCell)
-				w := cell.Width
-				if w <= 0 {
-					w = 1
-				}
-				currX += w
+				mirror.Surface.SetCell(x, y, uvCell)
 			}
 		}
 		if c.cursorInfos == nil {

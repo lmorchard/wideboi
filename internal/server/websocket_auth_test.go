@@ -14,14 +14,18 @@ import (
 
 func TestListenWebSocketAuth(t *testing.T) {
 	cases := []struct {
-		name          string
-		expectedToken string
-		requestQuery  string
-		wantSuccess   bool
+		name            string
+		expectedToken   string
+		requestQuery    string
+		requestProtocol string
+		wantSuccess     bool
 	}{
 		{name: "no token expected, no token provided", expectedToken: "", requestQuery: "", wantSuccess: true},
 		{name: "no token expected, random token provided", expectedToken: "", requestQuery: "token=xyz", wantSuccess: true},
 		{name: "token expected, matching token provided", expectedToken: "secret123", requestQuery: "token=secret123", wantSuccess: true},
+		{name: "generated token via browser protocol", expectedToken: "secret123", requestProtocol: "wideboi-token.c2VjcmV0MTIz", wantSuccess: true},
+		{name: "configured token via browser protocol", expectedToken: "configured!", requestProtocol: "wideboi-token.Y29uZmlndXJlZCE", wantSuccess: true},
+		{name: "wrong browser protocol token", expectedToken: "secret123", requestProtocol: "wideboi-token.d3Jvbmc", wantSuccess: false},
 		{name: "token expected, no token provided", expectedToken: "secret123", requestQuery: "", wantSuccess: false},
 		{name: "token expected, mismatching token provided", expectedToken: "secret123", requestQuery: "token=wrong", wantSuccess: false},
 	}
@@ -45,6 +49,9 @@ func TestListenWebSocketAuth(t *testing.T) {
 
 			dialer := websocket.Dialer{
 				HandshakeTimeout: 2 * time.Second,
+			}
+			if tc.requestProtocol != "" {
+				dialer.Subprotocols = []string{tc.requestProtocol}
 			}
 			conn, resp, err := dialer.Dial(wsURL.String(), nil)
 

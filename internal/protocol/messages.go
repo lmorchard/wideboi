@@ -71,7 +71,9 @@ type CellData struct {
 	Style   StyleData
 }
 
-// LineData represents a horizontal row of cells.
+// LineData represents a horizontal row indexed by terminal column. A wide
+// glyph occupies its starting cell and a continuation cell at the next
+// index; renderers must advance by one index, not by CellData.Width.
 type LineData []CellData
 
 // MsgPaneUpdate carries a pane's rendered cell buffer and cursor state.

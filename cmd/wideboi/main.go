@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -284,6 +286,13 @@ func runServer(cfg config.Config, ownerFD int) error {
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
 	}
+	if len(cfg.Startup) > 0 {
+		panes := make([]server.StartupPane, len(cfg.Startup))
+		for i, pane := range cfg.Startup {
+			panes[i] = server.StartupPane{Command: pane.Command, Width: pane.Width}
+		}
+		srv.SetStartupPanes(panes)
+	}
 
 	// The server is responsible for its panes, and there is no
 	// terminal to restore: teardown is the whole job. Without this,
@@ -333,20 +342,23 @@ func runServer(cfg config.Config, ownerFD int) error {
 			slog.Error("cannot listen on websocket address", "err", err)
 			return err
 		}
+		if generatedToken {
+			if err := writeWebToken(cfg.Socket, cfg.WebsocketToken); err != nil {
+				_ = wsListener.Close()
+				return fmt.Errorf("save generated web token: %w", err)
+			}
+			defer os.Remove(webTokenPath(cfg.Socket))
+		} else {
+			// A prior server may have died without removing its generated token.
+			_ = os.Remove(webTokenPath(cfg.Socket))
+		}
 
 		go func() {
 			host := cfg.Websocket
 			if host != "" && host[0] == ':' {
 				host = "localhost" + host
 			}
-
-			if generatedToken {
-				fmt.Fprintf(os.Stderr, "wideboi: web client listening at http://%s/?token=%s\n", host, cfg.WebsocketToken)
-				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", cfg.WebsocketToken)
-			} else {
-				fmt.Fprintf(os.Stderr, "wideboi: web client listening at http://%s/ (token configured)\n", host)
-				slog.Info("websocket server listening", "addr", cfg.Websocket, "token", "***REDACTED***")
-			}
+			announceWebClient(os.Stderr, slog.Default(), host, cfg.Websocket, cfg.WebsocketToken, generatedToken)
 			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("websocket server failed", "err", err)
 			}
@@ -367,6 +379,41 @@ func runServer(cfg config.Config, ownerFD int) error {
 		time.Sleep(signalExitMargin)
 	}
 	return err
+}
+
+func webTokenPath(socket string) string {
+	return strings.TrimSuffix(socket, ".sock") + ".web-token"
+}
+
+// writeWebToken replaces a stale token atomically, with owner-only access.
+func writeWebToken(socket, token string) error {
+	path := webTokenPath(socket)
+	f, err := os.CreateTemp(filepath.Dir(path), ".web-token-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.WriteString(token + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// announceWebClient shows a generated credential once on the server's stderr,
+// while the persistent structured log records only that authentication is on.
+func announceWebClient(w io.Writer, log *slog.Logger, host, addr, token string, generated bool) {
+	if generated {
+		// A fragment is not sent with the HTTP request. The browser consumes it
+		// and removes it from its history entry before opening the WebSocket.
+		fmt.Fprintf(w, "wideboi: web client listening at http://%s/#token=%s\n", host, token)
+	} else {
+		fmt.Fprintf(w, "wideboi: web client listening at http://%s/ (token configured)\n", host)
+	}
+	log.Info("websocket server listening", "addr", addr, "token", "***REDACTED***")
 }
 
 // runKillSession ends the session at cfg.Socket and waits until it has:

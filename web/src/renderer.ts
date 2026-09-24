@@ -1,4 +1,4 @@
-import type { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData, Rectangle } from './protocol';
+import type { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData } from './protocol';
 import { decodeColor } from './colors';
 import { reconcileFocus } from './focus';
 
@@ -12,8 +12,18 @@ export class GridRenderer {
   private layout: MsgLayoutSnapshot | null = null;
   private focusedPaneId = 0;
   private placements: PlacementData[] = [];
+  private scrollX = 0;
+  private selection?: { paneID: number; start: { x: number; y: number }; end: { x: number; y: number } };
   
-  private animationFrameId = 0;
+  private animationFrameId: number | null = null;
+  private running = false;
+  private readonly onVisibilityChange = () => {
+    if (document.hidden) {
+      this.cancelFrame();
+    } else {
+      this.invalidate();
+    }
+  };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -25,32 +35,96 @@ export class GridRenderer {
   }
 
   public start() {
-    const loop = () => {
-      this.draw();
-      this.animationFrameId = requestAnimationFrame(loop);
-    };
-    loop();
+    if (this.running) return;
+    this.running = true;
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+    this.invalidate();
   }
 
   public stop() {
+    this.running = false;
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.cancelFrame();
+  }
+
+  private cancelFrame() {
+    if (this.animationFrameId === null) return;
     cancelAnimationFrame(this.animationFrameId);
+    this.animationFrameId = null;
+  }
+
+  private invalidate() {
+    if (!this.running || document.hidden || this.animationFrameId !== null) return;
+    this.animationFrameId = requestAnimationFrame(() => {
+      this.animationFrameId = null;
+      if (this.running && !document.hidden) this.draw();
+    });
   }
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
     this.focusedPaneId = reconcileFocus(this.layout?.Columns || [], snapshot.Columns, this.focusedPaneId);
     this.layout = snapshot;
     this.recomputePlacements();
+    this.invalidate();
   }
 
   public setFocusedPaneId(paneID: number) {
     if (this.layout?.Columns.some(c => c.PaneID === paneID)) {
       this.focusedPaneId = paneID;
       this.recomputePlacements();
+      this.invalidate();
     }
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
     this.panes.set(update.PaneID, update);
+    this.invalidate();
+  }
+
+  public handlePaneClosed(paneID: number) {
+    this.panes.delete(paneID);
+    if (this.selection?.paneID === paneID) this.selection = undefined;
+    this.invalidate();
+  }
+
+  public mouseTracking(paneID: number): boolean {
+    return this.panes.get(paneID)?.MouseTracking ?? false;
+  }
+
+  public setSelection(paneID: number, start: { x: number; y: number }, end: { x: number; y: number }) {
+    this.selection = { paneID, start, end };
+    this.invalidate();
+  }
+
+  public clearSelection() {
+    this.selection = undefined;
+    this.invalidate();
+  }
+
+  public selectionText(): string {
+    const sel = this.selection;
+    const pane = sel && this.panes.get(sel.paneID);
+    if (!sel || !pane) return '';
+    let a = sel.start, b = sel.end;
+    if (a.y > b.y || (a.y === b.y && a.x > b.x)) [a, b] = [b, a];
+    const rows: string[] = [];
+    for (let y = a.y; y <= b.y; y++) {
+      const line = pane.Lines[y] || [];
+      const start = y === a.y ? a.x : 0;
+      const end = y === b.y ? b.x : line.length - 1;
+      let text = '';
+      for (let x = start; x <= end; x++) {
+        const cell = line[x];
+        if (!cell) continue;
+        let continuation = false;
+        for (let back = 1; back <= 3 && x - back >= 0; back++) {
+          if (line[x - back]?.Width > back) { continuation = true; break; }
+        }
+        if (!continuation) text += cell.Content || ' ';
+      }
+      rows.push(text.trimEnd());
+    }
+    return rows.join('\n');
   }
 
   public resize(width: number, height: number) {
@@ -60,9 +134,10 @@ export class GridRenderer {
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
     
-    this.ctx.scale(dpr, dpr);
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.measureFont();
     this.recomputePlacements();
+    this.invalidate();
   }
 
   
@@ -120,72 +195,41 @@ export class GridRenderer {
     this.cellHeight = 14 * 1.2; // approx line height
   }
   
-  // Re-implements ScrollStrategy from Go
+  // Match layout.ScrollStrategy's focus visibility and source crop rules.
   private recomputePlacements() {
-      if (!this.layout) return;
-      
-      const grid = this.getGridSize();
-      const availHeight = Math.max(grid.rows - 2, 1);
-      const w = grid.cols;
-      
-      let focusIdx = -1;
-      for (let i = 0; i < this.layout.Columns.length; i++) {
-          if (this.layout.Columns[i].PaneID === this.focusedPaneId) {
-              focusIdx = i;
-              break;
-          }
-      }
-      
-      let startIdx = Math.max(focusIdx, 0);
-      if (startIdx >= this.layout.Columns.length) {
-          this.placements = [];
-          return;
-      }
-      
-      let availWidth = w;
-      availWidth -= this.layout.Columns[startIdx].Width;
-      
-      for (; startIdx > 0 && availWidth > 0; ) {
-          const prevW = this.layout.Columns[startIdx - 1].Width;
-          if (availWidth - (prevW + 1) >= 0) {
-              availWidth -= (prevW + 1);
-              startIdx--;
-          } else {
-              break;
-          }
-      }
-      
-      const places: PlacementData[] = [];
-      let currentX = 0;
-      
-      for (let i = startIdx; i < this.layout.Columns.length; i++) {
-          const c = this.layout.Columns[i];
-          const paneW = c.Width;
-          
-          if (currentX >= w) break;
-          
-          let drawW = paneW;
-          if (currentX + drawW > w) {
-              drawW = w - currentX;
-          }
-          
-          const dst: Rectangle = { Min: {X: currentX, Y: 1}, Max: {X: currentX+drawW, Y: 1+availHeight} };
-          
-          // Src
-          const srcY = dst.Min.Y - 1;
-          const src: Rectangle = { Min: {X: 0, Y: srcY}, Max: {X: drawW, Y: srcY + (dst.Max.Y - dst.Min.Y)} };
-          
-          places.push({
-              PaneID: c.PaneID,
-              Src: src,
-              Dst: dst,
-              Z: 0,
-              Kind: 0
-          });
-          currentX += paneW + 1;
-      }
-      
-      this.placements = places;
+    if (!this.layout) return;
+    const { cols: width, rows } = this.getGridSize();
+    const columns = this.layout.Columns || [];
+    if (!columns.length || width <= 0 || rows <= 0) {
+      this.placements = [];
+      return;
+    }
+    const height = Math.max(rows - 2, 1);
+    const positions: number[] = [];
+    let x = 0;
+    for (const column of columns) {
+      positions.push(x);
+      x += column.Width + 1;
+    }
+    const focus = Math.max(columns.findIndex(c => c.PaneID === this.focusedPaneId), 0);
+    const focusX = positions[focus];
+    const focusWidth = columns[focus].Width;
+    if (focusX < this.scrollX) this.scrollX = focusX;
+    else if (focusX + focusWidth > this.scrollX + width) {
+      this.scrollX = focusX + focusWidth - width;
+    }
+    this.placements = columns.flatMap((column, index): PlacementData[] => {
+      const paneX = positions[index] - this.scrollX;
+      const left = Math.max(paneX, 0);
+      const right = Math.min(paneX + column.Width, width);
+      if (left >= right) return [];
+      return [{
+        PaneID: column.PaneID,
+        Src: { Min: { X: left - paneX, Y: 0 }, Max: { X: right - paneX, Y: height } },
+        Dst: { Min: { X: left, Y: 1 }, Max: { X: right, Y: 1 + height } },
+        Z: 0, Kind: 0
+      }];
+    });
   }
 
   private draw() {
@@ -197,6 +241,15 @@ export class GridRenderer {
     for (const p of this.placements) {
       this.drawPlacement(p);
     }
+    const grid = this.getGridSize();
+    const focused = this.focusedPaneId;
+    const title = this.layout.PaneTitles?.[focused] || `Pane ${focused}`;
+    this.ctx.fillStyle = '#cccccc';
+    this.ctx.font = '14px monospace';
+    this.ctx.fillText(title.slice(0, grid.cols), 0, 0);
+    const status = this.layout.Columns.map(c =>
+      `[${c.PaneID}] ${this.layout?.PaneStatuses?.[c.PaneID] || ''}`).join(' ');
+    this.ctx.fillText(status.slice(0, grid.cols), 0, (grid.rows - 1) * this.cellHeight);
   }
 
   private drawPlacement(p: PlacementData) {
@@ -234,13 +287,20 @@ export class GridRenderer {
       const line = pane.Lines[y];
       if (!line) continue;
       
-      let x = 0;
-      for (const cell of line) {
+      // LineData has one entry per terminal column. A wide glyph's
+      // continuation occupies the next entry; Width is paint width only.
+      for (let x = 0; x < line.length; x++) {
+        const cell = line[x];
+        if (x > 0 && line[x - 1]?.Width > 1) continue;
         const screenX = x + offsetX;
         
         if (screenX >= dstMinX && screenX < dstMinX + dx) {
-          const bg = decodeColor(cell.Style?.Bg, true);
-          const fg = decodeColor(cell.Style?.Fg, false);
+          const attrs = cell.Style?.Attrs ?? 0;
+          const reverse = (attrs & 32) !== 0;
+          const normalBg = decodeColor(cell.Style?.Bg, true);
+          const normalFg = decodeColor(cell.Style?.Fg, false);
+          const bg = reverse ? normalFg : normalBg;
+          const fg = reverse ? normalBg : normalFg;
           
           if (bg !== '#1e1e1e') {
             this.ctx.fillStyle = bg;
@@ -252,18 +312,40 @@ export class GridRenderer {
             );
           }
 
-          if (cell.Content && cell.Content !== ' ') {
+          if (cell.Content && cell.Content !== ' ' && !(attrs & 64)) {
             this.ctx.fillStyle = fg;
-            const isBold = (cell.Style?.Attrs ?? 0) & 1;
-            this.ctx.font = `${isBold ? 'bold ' : ''}14px monospace`;
+            this.ctx.globalAlpha = attrs & 2 ? 0.5 : 1;
+            this.ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}14px monospace`;
             this.ctx.fillText(
               cell.Content, 
               screenX * this.cellWidth, 
               screenY * this.cellHeight
             );
+            this.ctx.globalAlpha = 1;
+          }
+          const lineColor = decodeColor(cell.Style?.UnderlineColor, false);
+          if (cell.Style?.Underline) {
+            this.ctx.fillStyle = cell.Style.UnderlineColor?.Kind ? lineColor : fg;
+            this.ctx.fillRect(screenX * this.cellWidth, (screenY + 1) * this.cellHeight - 2,
+              this.cellWidth, 1);
+          }
+          if (attrs & 128) {
+            this.ctx.fillStyle = fg;
+            this.ctx.fillRect(screenX * this.cellWidth, screenY * this.cellHeight + this.cellHeight / 2,
+              this.cellWidth, 1);
+          }
+          const sel = this.selection;
+          if (sel?.paneID === pane.PaneID) {
+            let a = sel.start, b = sel.end;
+            if (a.y > b.y || (a.y === b.y && a.x > b.x)) [a, b] = [b, a];
+            if ((y > a.y || (y === a.y && x >= a.x)) &&
+                (y < b.y || (y === b.y && x <= b.x))) {
+              this.ctx.fillStyle = 'rgba(100, 160, 220, 0.45)';
+              this.ctx.fillRect(screenX * this.cellWidth, screenY * this.cellHeight,
+                this.cellWidth * Math.max(cell.Width || 1, 1), this.cellHeight);
+            }
           }
         }
-        x += (cell.Width || 1);
       }
     }
 
@@ -281,13 +363,8 @@ export class GridRenderer {
         );
         
         if (curY < pane.Lines.length) {
-            let cx = 0;
-            let targetCell = null;
-            if (pane.Lines[curY]) {
-                for(const cell of pane.Lines[curY]) {
-                    if (cx === pane.CursorX) { targetCell = cell; break; }
-                    cx += (cell.Width || 1);
-                }
+            const targetCell = pane.Lines[pane.CursorY]?.[pane.CursorX];
+            if (targetCell) {
                 if (targetCell && targetCell.Content && targetCell.Content !== ' ') {
                     this.ctx.fillStyle = '#1e1e1e';
                     this.ctx.fillText(

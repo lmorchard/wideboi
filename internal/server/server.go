@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"github.com/gorilla/websocket"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,17 +21,19 @@ import (
 
 // Server manages multiplexer layout, PTY sessions, and client protocol messages.
 type Server struct {
-	mu         sync.Mutex
-	strip      *layout.Strip
-	panes      map[int]*Pane
-	nextPaneID int
-	cols       int
-	rows       int
-	shell      string
-	cwd        string
-	transports []transport.Transport
-	stopCh     chan struct{}
-	closeOnce  sync.Once
+	mu              sync.Mutex
+	strip           *layout.Strip
+	panes           map[int]*Pane
+	nextPaneID      int
+	cols            int
+	rows            int
+	shell           string
+	cwd             string
+	startup         []StartupPane
+	startupLaunched bool
+	transports      []transport.Transport
+	stopCh          chan struct{}
+	closeOnce       sync.Once
 
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
@@ -79,6 +83,34 @@ type Server struct {
 	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
 	// it, via SetCloseGrace in export_test.go.
 	closeGrace time.Duration
+}
+
+// StartupPane is a pane created on the first attach to a new session.
+type StartupPane struct {
+	Command string
+	Width   int
+}
+
+// SetStartupPanes configures the initial columns in their display order.
+func (s *Server) SetStartupPanes(panes []StartupPane) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startup = append([]StartupPane(nil), panes...)
+}
+
+// websocketProtocolToken reads the browser's token-bearing subprotocol offer.
+// The server deliberately does not select it as the negotiated subprotocol.
+func websocketProtocolToken(r *http.Request) string {
+	const prefix = "wideboi-token."
+	for _, protocol := range websocket.Subprotocols(r) {
+		if strings.HasPrefix(protocol, prefix) {
+			decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(protocol, prefix))
+			if err == nil {
+				return string(decoded)
+			}
+		}
+	}
+	return ""
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning
@@ -279,8 +311,27 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			s.recomputeSessionSizeLocked()
 		}
 		if len(s.panes) == 0 {
-			_, _ = s.spawnPaneLocked(0)
-			_, _ = s.spawnPaneLocked(0)
+			if len(s.startup) == 0 {
+				_, _ = s.spawnPaneLocked(0)
+				_, _ = s.spawnPaneLocked(0)
+				s.strip.FocusLeft()
+			} else if !s.startupLaunched {
+				s.startupLaunched = true
+				firstID := 0
+				for _, spec := range s.startup {
+					p, err := s.spawnPaneWithSpecLocked(spec, 0)
+					if err != nil {
+						slog.Error("starting configured pane", "command", spec.Command, "err", err)
+						continue
+					}
+					if firstID == 0 {
+						firstID = p.ID()
+					}
+				}
+				if firstID != 0 {
+					s.strip.FocusPaneID(firstID)
+				}
+			}
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
@@ -379,6 +430,10 @@ func (s *Server) SpawnPane() (int, error) {
 }
 
 func (s *Server) spawnPaneLocked(afterPaneID int) (*Pane, error) {
+	return s.spawnPaneWithSpecLocked(StartupPane{}, afterPaneID)
+}
+
+func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pane, error) {
 	// Close reaps the panes it snapshotted; one spawned after that --
 	// an attach or a new column during the reap -- would be nobody's
 	// to reap.
@@ -391,9 +446,16 @@ func (s *Server) spawnPaneLocked(afterPaneID int) (*Pane, error) {
 	if paneCols > s.cols && s.cols > 0 {
 		paneCols = s.cols
 	}
+	if spec.Width > 0 {
+		paneCols = spec.Width
+	}
 	paneRows := max(s.rows-2, 20)
 
-	p, err := NewPane(id, []string{s.shell}, paneCols, paneRows, s.cwd)
+	argv := []string{s.shell}
+	if spec.Command != "" {
+		argv = []string{s.shell, "-c", spec.Command}
+	}
+	p, err := NewPane(id, argv, paneCols, paneRows, s.cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -731,7 +793,9 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	defer s.paneSendMu.Unlock()
 
 	type outgoing struct {
+		pane   *Pane
 		update protocol.MsgPaneUpdate
+		ready  bool
 		gen    uint64
 		to     []transport.Transport
 	}
@@ -751,21 +815,42 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 			}
 		}
 		if len(to) > 0 {
-			out = append(out, outgoing{update: p.UpdateMessage(), gen: gen, to: to})
+			out = append(out, outgoing{pane: p, gen: gen, to: to})
 		}
 	}
 	s.mu.Unlock()
 
+	// Rendering copies the entire grid and can wait for a pane resize.
+	// Neither operation may hold the server mutex: focus, input, close,
+	// and other panes must remain responsive during that work.
+	for i := range out {
+		update, ok := out[i].pane.UpdateMessage()
+		if ok {
+			out[i].update = update
+			out[i].ready = true
+		}
+	}
+
 	type result struct {
 		tp       transport.Transport
 		id       int
+		pane     *Pane
 		gen      uint64
 		accepted bool
 	}
 	var results []result
 	for _, o := range out {
+		if !o.ready {
+			continue
+		}
+		s.mu.Lock()
+		current := s.panes[o.update.PaneID] == o.pane
+		s.mu.Unlock()
+		if !current {
+			continue
+		}
 		for _, tp := range o.to {
-			results = append(results, result{tp, o.update.PaneID, o.gen, tp.SendServer(ctx, o.update)})
+			results = append(results, result{tp, o.update.PaneID, o.pane, o.gen, tp.SendServer(ctx, o.update)})
 		}
 	}
 
@@ -786,13 +871,19 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		if !present[r.tp] {
 			continue
 		}
-		if _, ok := s.panes[r.id]; !ok {
+		if s.panes[r.id] != r.pane {
 			continue
 		}
 		if !r.accepted {
 			// Forget rather than leave alone: a forced resend goes to
 			// clients whose record may already equal gen, and leaving
 			// that in place would mean no later tick retries it.
+			delete(s.paneGens[r.tp], r.id)
+			continue
+		}
+		// Content can change while the update is being rendered or sent.
+		// Leave this client behind so the next tick sends the new state.
+		if r.pane.Generation() != r.gen {
 			delete(s.paneGens[r.tp], r.id)
 			continue
 		}
@@ -940,7 +1031,7 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		if token != "" {
 			reqToken := r.URL.Query().Get("token")
-			if reqToken != token {
+			if reqToken != token && websocketProtocolToken(r) != token {
 				slog.Warn("websocket connection rejected: invalid token", "remote", r.RemoteAddr)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
