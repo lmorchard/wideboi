@@ -15,6 +15,8 @@ func BuildPanePatch(base, next MsgPaneUpdate) (MsgPanePatch, bool) {
 		BaseGeneration: base.Generation, Generation: next.Generation,
 		CursorX: next.CursorX, CursorY: next.CursorY,
 		CursorVisible: next.CursorVisible, MouseTracking: next.MouseTracking,
+		ScrollOffset: next.ScrollOffset, ScrollbackLen: next.ScrollbackLen,
+		UnreadOutput: next.UnreadOutput,
 	}
 	for y := range next.Lines {
 		if len(base.Lines[y]) != base.Cols || len(next.Lines[y]) != next.Cols {
@@ -126,5 +128,8 @@ func ApplyPanePatch(base MsgPaneUpdate, patch MsgPanePatch) (MsgPaneUpdate, bool
 	next.Generation = patch.Generation
 	next.CursorX, next.CursorY = patch.CursorX, patch.CursorY
 	next.CursorVisible, next.MouseTracking = patch.CursorVisible, patch.MouseTracking
+	next.ScrollOffset = patch.ScrollOffset
+	next.ScrollbackLen = patch.ScrollbackLen
+	next.UnreadOutput = patch.UnreadOutput
 	return next, true
 }

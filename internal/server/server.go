@@ -59,6 +59,25 @@ type Server struct {
 	// client's next patch is calculated only from its own baseline.
 	paneFrames map[transport.Transport]map[int]protocol.MsgPaneUpdate
 
+	// paneUnderlyingGens records the underlying term.Grid generation
+	// observed during the last update sent to that client for that pane.
+	paneUnderlyingGens map[transport.Transport]map[int]uint64
+	// paneOutputGens records the term.Grid.OutputGen observed during the last
+	// update, distinguishing new child output from resizes.
+	paneOutputGens map[transport.Transport]map[int]uint64
+	// clientScrollOffsets tracks view scroll offset per client, per pane.
+	clientScrollOffsets map[transport.Transport]map[int]int
+	// paneOffsets is the last scroll offset successfully delivered to that client.
+	paneOffsets map[transport.Transport]map[int]int
+	// clientUnreadOutput is true when new terminal output arrived while scrolled up.
+	clientUnreadOutput map[transport.Transport]map[int]bool
+	// paneUnreads is the last unread output flag delivered to that client.
+	paneUnreads map[transport.Transport]map[int]bool
+	// clientScrollGens tracks wire generation increments caused by client scroll actions.
+	clientScrollGens map[transport.Transport]map[int]uint64
+	// paneSbLens tracks the scrollback length when last updated to keep content pinned.
+	paneSbLens map[transport.Transport]map[int]int
+
 	// clientSizes records the last known window dimensions of each connected
 	// client. The server session size is the minimum among all clients,
 	// preventing a large client from cropping a smaller one.
@@ -286,6 +305,14 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	s.transports = out
 	delete(s.paneGens, tp)
 	delete(s.paneFrames, tp)
+	delete(s.paneUnderlyingGens, tp)
+	delete(s.paneOutputGens, tp)
+	delete(s.clientScrollOffsets, tp)
+	delete(s.paneOffsets, tp)
+	delete(s.clientUnreadOutput, tp)
+	delete(s.paneUnreads, tp)
+	delete(s.clientScrollGens, tp)
+	delete(s.paneSbLens, tp)
 	delete(s.clientSizes, tp)
 	delete(s.pendingPaneCreated, tp)
 	delete(s.pendingCreationSnapshot, tp)
@@ -326,6 +353,7 @@ func (s *Server) Run(ctx context.Context) error {
 func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
 	needBroadcast := false
+	needPaneBroadcast := false
 	resyncPaneID := 0
 	createdPaneID := 0
 
@@ -337,6 +365,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	case protocol.MsgAttach:
 		if m.Cols > 0 && m.Rows > 0 {
+			if s.clientSizes == nil {
+				s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
+			}
 			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
 			s.recomputeSessionSizeLocked()
 		}
@@ -368,6 +399,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
+			if s.clientSizes == nil {
+				s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
+			}
 			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
 			oldCols, oldRows := s.cols, s.rows
 			s.recomputeSessionSizeLocked()
@@ -418,6 +452,20 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	case protocol.MsgInput:
 		if p, ok := s.panes[m.PaneID]; ok {
+			if tp != nil && s.clientScrollOffsets != nil && s.clientScrollOffsets[tp] != nil && s.clientScrollOffsets[tp][m.PaneID] > 0 {
+				s.clientScrollOffsets[tp][m.PaneID] = 0
+				if s.clientUnreadOutput != nil && s.clientUnreadOutput[tp] != nil {
+					delete(s.clientUnreadOutput[tp], m.PaneID)
+				}
+				if s.clientScrollGens == nil {
+					s.clientScrollGens = make(map[transport.Transport]map[int]uint64)
+				}
+				if s.clientScrollGens[tp] == nil {
+					s.clientScrollGens[tp] = make(map[int]uint64)
+				}
+				s.clientScrollGens[tp][m.PaneID]++
+				needPaneBroadcast = true
+			}
 			if len(m.Data) > 0 {
 				_, _ = p.Write(m.Data)
 			} else if !m.Key.IsZero() {
@@ -431,8 +479,38 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		}
 
 	case protocol.MsgScroll:
-		if p, ok := s.panes[m.PaneID]; ok {
-			p.SetScrollOffset(p.ScrollOffset() + m.Delta)
+		if p, ok := s.panes[m.PaneID]; ok && tp != nil {
+			if s.clientScrollOffsets == nil {
+				s.clientScrollOffsets = make(map[transport.Transport]map[int]int)
+			}
+			offsets := s.clientScrollOffsets[tp]
+			if offsets == nil {
+				offsets = make(map[int]int)
+				s.clientScrollOffsets[tp] = offsets
+			}
+			cur := offsets[m.PaneID]
+			newOffset := cur + m.Delta
+			maxOffset := p.ScrollbackLen()
+			if newOffset < 0 {
+				newOffset = 0
+			}
+			if newOffset > maxOffset {
+				newOffset = maxOffset
+			}
+			if newOffset != cur {
+				offsets[m.PaneID] = newOffset
+				if newOffset == 0 && s.clientUnreadOutput != nil && s.clientUnreadOutput[tp] != nil {
+					delete(s.clientUnreadOutput[tp], m.PaneID)
+				}
+				if s.clientScrollGens == nil {
+					s.clientScrollGens = make(map[transport.Transport]map[int]uint64)
+				}
+				if s.clientScrollGens[tp] == nil {
+					s.clientScrollGens[tp] = make(map[int]uint64)
+				}
+				s.clientScrollGens[tp][m.PaneID]++
+				needPaneBroadcast = true
+			}
 		}
 	}
 	if tp != nil && createdPaneID != 0 {
@@ -448,6 +526,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		s.mu.Lock()
 		delete(s.paneGens[tp], resyncPaneID)
 		delete(s.paneFrames[tp], resyncPaneID)
+		delete(s.paneUnderlyingGens[tp], resyncPaneID)
 		s.mu.Unlock()
 		s.paneSendMu.Unlock()
 		s.broadcastPaneUpdates(ctx, false)
@@ -455,6 +534,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	if needBroadcast {
 		s.broadcastLayout(ctx)
+	}
+	if needPaneBroadcast {
+		go s.broadcastPaneUpdates(ctx, false)
 	}
 }
 
@@ -828,7 +910,7 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 }
 
 // broadcastPaneUpdates sends each pane to every client that has not
-// accepted its current generation. force sends every pane to every
+// accepted its current view state. force sends every pane to every
 // client: broadcastLayout needs that, because a snapshot can prune a
 // client's mirror or replace it with a blank one (client.go, the
 // MsgLayoutSnapshot case), so an unchanged pane must still be resent
@@ -837,133 +919,288 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 	s.paneSendMu.Lock()
 	defer s.paneSendMu.Unlock()
 
-	type target struct {
-		tp       transport.Transport
-		baseline protocol.MsgPaneUpdate
-		hasBase  bool
+	type clientTarget struct {
+		tp            transport.Transport
+		paneID        int
+		pane          *Pane
+		offset        int
+		unread        bool
+		underlyingGen uint64
+		outputGen     uint64
+		sbLen         int
+		wireGen       uint64
+		baseline      protocol.MsgPaneUpdate
+		hasBase       bool
 	}
-	type outgoing struct {
-		pane   *Pane
-		update protocol.MsgPaneUpdate
-		ready  bool
-		gen    uint64
-		to     []target
+
+	type renderKey struct {
+		paneID int
+		offset int
+		unread bool
 	}
+
 	s.mu.Lock()
 	tps := append([]transport.Transport{}, s.transports...)
-	var out []outgoing
-	for id, p := range s.panes {
-		// Read before rendering. A write landing in between leaves
-		// the recorded generation behind the content, so the next
-		// tick resends: one update too many, never one too few.
-		gen := p.Generation()
-		var to []target
-		for _, tp := range tps {
-			last, ok := s.paneGens[tp][id]
-			if force || !ok || last != gen {
-				baseline, hasBase := s.paneFrames[tp][id]
-				to = append(to, target{tp: tp, baseline: baseline, hasBase: hasBase && ok && !force})
-			}
-		}
-		if len(to) > 0 {
-			out = append(out, outgoing{pane: p, gen: gen, to: to})
-		}
-	}
-	s.mu.Unlock()
-
-	// Rendering copies the entire grid and can wait for a pane resize.
-	// Neither operation may hold the server mutex: focus, input, close,
-	// and other panes must remain responsive during that work.
-	for i := range out {
-		update, ok := out[i].pane.UpdateMessage()
-		if ok {
-			update.Generation = out[i].gen
-			out[i].update = update
-			out[i].ready = true
-		}
-	}
-
-	type result struct {
-		tp       transport.Transport
-		id       int
-		pane     *Pane
-		gen      uint64
-		frame    protocol.MsgPaneUpdate
-		accepted bool
-	}
-	var results []result
-	for _, o := range out {
-		if !o.ready {
-			continue
-		}
-		s.mu.Lock()
-		current := s.panes[o.update.PaneID] == o.pane
-		s.mu.Unlock()
-		if !current {
-			continue
-		}
-		for _, target := range o.to {
-			var message transport.ServerMessage = o.update
-			if target.hasBase {
-				if patch, ok := protocol.BuildPanePatch(target.baseline, o.update); ok {
-					message = patch
-				}
-			}
-			results = append(results, result{target.tp, o.update.PaneID, o.pane, o.gen, o.update, target.tp.SendServer(ctx, message)})
-		}
-	}
-
-	// Runs even when nothing was sent, so records for exited panes go
-	// when the last pane does.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	present := make(map[transport.Transport]bool, len(s.transports))
-	for _, tp := range s.transports {
-		present[tp] = true
-	}
 	if s.paneGens == nil {
 		s.paneGens = make(map[transport.Transport]map[int]uint64)
 	}
 	if s.paneFrames == nil {
 		s.paneFrames = make(map[transport.Transport]map[int]protocol.MsgPaneUpdate)
 	}
-	for _, r := range results {
-		// A client dropped mid-send must not be re-added, and a pane
-		// that exited mid-send has nothing left to track.
-		if !present[r.tp] {
+	if s.paneUnderlyingGens == nil {
+		s.paneUnderlyingGens = make(map[transport.Transport]map[int]uint64)
+	}
+	if s.paneOutputGens == nil {
+		s.paneOutputGens = make(map[transport.Transport]map[int]uint64)
+	}
+	if s.clientScrollOffsets == nil {
+		s.clientScrollOffsets = make(map[transport.Transport]map[int]int)
+	}
+	if s.paneOffsets == nil {
+		s.paneOffsets = make(map[transport.Transport]map[int]int)
+	}
+	if s.clientUnreadOutput == nil {
+		s.clientUnreadOutput = make(map[transport.Transport]map[int]bool)
+	}
+	if s.paneUnreads == nil {
+		s.paneUnreads = make(map[transport.Transport]map[int]bool)
+	}
+	if s.clientScrollGens == nil {
+		s.clientScrollGens = make(map[transport.Transport]map[int]uint64)
+	}
+	if s.paneSbLens == nil {
+		s.paneSbLens = make(map[transport.Transport]map[int]int)
+	}
+
+	var targets []clientTarget
+	panesByID := make(map[int]*Pane, len(s.panes))
+	neededRenders := make(map[renderKey]bool)
+
+	for id, p := range s.panes {
+		panesByID[id] = p
+		underlyingGen := p.Generation()
+		outputGen := p.OutputGen()
+		sbLen := p.ScrollbackLen()
+
+		for _, tp := range tps {
+			lastWireGen, hasWireGen := s.paneGens[tp][id]
+			lastOutputGen, hasOutputGen := s.paneOutputGens[tp][id]
+			curOffset := p.ScrollOffset()
+			if m, ok := s.clientScrollOffsets[tp]; ok {
+				if off, ok := m[id]; ok {
+					curOffset = off
+				}
+			}
+			lastOffset, hasOffset := s.paneOffsets[tp][id]
+			curUnread := s.clientUnreadOutput[tp][id]
+			lastUnread, hasUnread := s.paneUnreads[tp][id]
+			lastSbLen := s.paneSbLens[tp][id]
+
+			// Check if new output arrived while already scrolled up
+			outputChanged := !hasOutputGen || outputGen != lastOutputGen
+			if outputChanged && hasOffset && lastOffset > 0 && curOffset > 0 {
+				curUnread = true
+				if s.clientUnreadOutput[tp] == nil {
+					s.clientUnreadOutput[tp] = make(map[int]bool)
+				}
+				s.clientUnreadOutput[tp][id] = true
+
+				// Content pinning: if scrollback lengthened, increase offset to keep view anchored
+				if sbLen > lastSbLen {
+					diff := sbLen - lastSbLen
+					curOffset += diff
+					if curOffset > sbLen {
+						curOffset = sbLen
+					}
+					if s.clientScrollOffsets[tp] == nil {
+						s.clientScrollOffsets[tp] = make(map[int]int)
+					}
+					s.clientScrollOffsets[tp][id] = curOffset
+				}
+			}
+
+			offsetChanged := !hasOffset || curOffset != lastOffset
+			unreadChanged := !hasUnread || curUnread != lastUnread
+
+			scrollGen := uint64(0)
+			if m, ok := s.clientScrollGens[tp]; ok {
+				scrollGen = m[id]
+			}
+			wireGen := underlyingGen + scrollGen
+
+			dirty := force || !hasWireGen || (wireGen != lastWireGen) || offsetChanged || unreadChanged
+			if !dirty {
+				continue
+			}
+
+			baseline, hasBase := s.paneFrames[tp][id]
+			hasBase = hasBase && hasWireGen && !force
+
+			key := renderKey{paneID: id, offset: curOffset, unread: curUnread}
+			neededRenders[key] = true
+
+			targets = append(targets, clientTarget{
+				tp:            tp,
+				paneID:        id,
+				pane:          p,
+				offset:        curOffset,
+				unread:        curUnread,
+				underlyingGen: underlyingGen,
+				outputGen:     outputGen,
+				sbLen:         sbLen,
+				wireGen:       wireGen,
+				baseline:      baseline,
+				hasBase:       hasBase,
+			})
+		}
+	}
+	s.mu.Unlock()
+
+	if len(targets) == 0 {
+		s.mu.Lock()
+		s.cleanExitedPanesLocked()
+		s.mu.Unlock()
+		return
+	}
+
+	// Render distinct frames outside s.mu
+	renderedFrames := make(map[renderKey]protocol.MsgPaneUpdate, len(neededRenders))
+	for key := range neededRenders {
+		p := panesByID[key.paneID]
+		if p == nil {
 			continue
 		}
-		if s.panes[r.id] != r.pane {
+		frame, ok := p.UpdateMessageForOffset(key.offset, key.unread)
+		if ok {
+			renderedFrames[key] = frame
+		}
+	}
+
+	type result struct {
+		tp            transport.Transport
+		paneID        int
+		pane          *Pane
+		underlyingGen uint64
+		outputGen     uint64
+		sbLen         int
+		wireGen       uint64
+		offset        int
+		unread        bool
+		frame         protocol.MsgPaneUpdate
+		accepted      bool
+	}
+
+	var results []result
+	for _, target := range targets {
+		key := renderKey{paneID: target.paneID, offset: target.offset, unread: target.unread}
+		frame, ok := renderedFrames[key]
+		if !ok {
+			continue
+		}
+
+		s.mu.Lock()
+		current := s.panes[target.paneID] == target.pane
+		s.mu.Unlock()
+		if !current {
+			continue
+		}
+
+		update := frame
+		update.Generation = target.wireGen
+
+		var message transport.ServerMessage = update
+		if target.hasBase {
+			if patch, ok := protocol.BuildPanePatch(target.baseline, update); ok {
+				message = patch
+			}
+		}
+		accepted := target.tp.SendServer(ctx, message)
+		results = append(results, result{
+			tp:            target.tp,
+			paneID:        target.paneID,
+			pane:          target.pane,
+			underlyingGen: target.underlyingGen,
+			outputGen:     target.outputGen,
+			sbLen:         target.sbLen,
+			wireGen:       target.wireGen,
+			offset:        target.offset,
+			unread:        target.unread,
+			frame:         update,
+			accepted:      accepted,
+		})
+	}
+
+	// Update records under s.mu
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	present := make(map[transport.Transport]bool, len(s.transports))
+	for _, tp := range s.transports {
+		present[tp] = true
+	}
+
+	for _, r := range results {
+		if !present[r.tp] || s.panes[r.paneID] != r.pane {
 			continue
 		}
 		if !r.accepted {
-			// Forget rather than leave alone: a forced resend goes to
-			// clients whose record may already equal gen, and leaving
-			// that in place would mean no later tick retries it.
-			delete(s.paneGens[r.tp], r.id)
-			delete(s.paneFrames[r.tp], r.id)
+			delete(s.paneGens[r.tp], r.paneID)
+			delete(s.paneFrames[r.tp], r.paneID)
+			delete(s.paneUnderlyingGens[r.tp], r.paneID)
+			delete(s.paneOutputGens[r.tp], r.paneID)
+			delete(s.paneSbLens[r.tp], r.paneID)
 			continue
 		}
-		// Content can change while the update is being rendered or sent.
-		// Leave this client behind so the next tick sends the new state.
-		if r.pane.Generation() != r.gen {
-			delete(s.paneGens[r.tp], r.id)
-			delete(s.paneFrames[r.tp], r.id)
+		// Content can change while update was being rendered or sent.
+		if r.pane.Generation() != r.underlyingGen {
+			delete(s.paneGens[r.tp], r.paneID)
+			delete(s.paneFrames[r.tp], r.paneID)
+			delete(s.paneUnderlyingGens[r.tp], r.paneID)
+			delete(s.paneOutputGens[r.tp], r.paneID)
+			delete(s.paneSbLens[r.tp], r.paneID)
 			continue
 		}
-		m := s.paneGens[r.tp]
-		if m == nil {
-			m = make(map[int]uint64)
-			s.paneGens[r.tp] = m
+
+		if s.paneGens[r.tp] == nil {
+			s.paneGens[r.tp] = make(map[int]uint64)
 		}
-		m[r.id] = r.gen
-		frames := s.paneFrames[r.tp]
-		if frames == nil {
-			frames = make(map[int]protocol.MsgPaneUpdate)
-			s.paneFrames[r.tp] = frames
+		s.paneGens[r.tp][r.paneID] = r.wireGen
+
+		if s.paneFrames[r.tp] == nil {
+			s.paneFrames[r.tp] = make(map[int]protocol.MsgPaneUpdate)
 		}
-		frames[r.id] = r.frame
+		s.paneFrames[r.tp][r.paneID] = r.frame
+
+		if s.paneUnderlyingGens[r.tp] == nil {
+			s.paneUnderlyingGens[r.tp] = make(map[int]uint64)
+		}
+		s.paneUnderlyingGens[r.tp][r.paneID] = r.underlyingGen
+
+		if s.paneOutputGens[r.tp] == nil {
+			s.paneOutputGens[r.tp] = make(map[int]uint64)
+		}
+		s.paneOutputGens[r.tp][r.paneID] = r.outputGen
+
+		if s.paneSbLens[r.tp] == nil {
+			s.paneSbLens[r.tp] = make(map[int]int)
+		}
+		s.paneSbLens[r.tp][r.paneID] = r.sbLen
+
+		if s.paneOffsets[r.tp] == nil {
+			s.paneOffsets[r.tp] = make(map[int]int)
+		}
+		s.paneOffsets[r.tp][r.paneID] = r.offset
+
+		if s.paneUnreads[r.tp] == nil {
+			s.paneUnreads[r.tp] = make(map[int]bool)
+		}
+		s.paneUnreads[r.tp][r.paneID] = r.unread
 	}
+
+	s.cleanExitedPanesLocked()
+}
+
+func (s *Server) cleanExitedPanesLocked() {
 	for _, m := range s.paneGens {
 		for id := range m {
 			if _, ok := s.panes[id]; !ok {
@@ -972,6 +1209,62 @@ func (s *Server) broadcastPaneUpdates(ctx context.Context, force bool) {
 		}
 	}
 	for _, m := range s.paneFrames {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.paneUnderlyingGens {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.paneOutputGens {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.clientScrollOffsets {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.paneOffsets {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.clientUnreadOutput {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.paneUnreads {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.clientScrollGens {
+		for id := range m {
+			if _, ok := s.panes[id]; !ok {
+				delete(m, id)
+			}
+		}
+	}
+	for _, m := range s.paneSbLens {
 		for id := range m {
 			if _, ok := s.panes[id]; !ok {
 				delete(m, id)

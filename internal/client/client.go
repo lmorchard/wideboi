@@ -595,6 +595,29 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			if mirror, ok := c.mirrors[p.PaneID]; ok {
 				compose.Blit(dst, mirror.Surface, p.Dst)
 			}
+			if pu, ok := c.paneUpdates[p.PaneID]; ok && pu.ScrollOffset > 0 && p.Dst.Dy() > 1 {
+				footerY := p.Dst.Max.Y - 1
+				footerW := p.Dst.Dx()
+				footerText := fmt.Sprintf(" [▲ scroll +%d/%d]", pu.ScrollOffset, pu.ScrollbackLen)
+				if pu.UnreadOutput {
+					full := fmt.Sprintf(" [▲ scroll +%d/%d  ▼ new output]", pu.ScrollOffset, pu.ScrollbackLen)
+					compact := fmt.Sprintf(" [▲ scroll +%d/%d  ⤓ new]", pu.ScrollOffset, pu.ScrollbackLen)
+					minimal := fmt.Sprintf(" [▲ +%d/%d ⤓]", pu.ScrollOffset, pu.ScrollbackLen)
+					switch {
+					case compose.StringWidth(dst, full) <= footerW:
+						footerText = full
+					case compose.StringWidth(dst, compact) <= footerW:
+						footerText = compact
+					default:
+						footerText = minimal
+					}
+				}
+				footerText = compose.TruncateWidth(dst, footerText, footerW)
+				if used := compose.StringWidth(dst, footerText); used < footerW {
+					footerText += strings.Repeat(" ", footerW-used)
+				}
+				compose.WriteStyled(dst, p.Dst.Min.X, footerY, footerText, uv.Style{Attrs: uv.AttrReverse})
+			}
 		}
 
 		// Draw column divider on right edge if applicable.
@@ -874,6 +897,13 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 // held.
 func (c *Client) normalStatusLocked(budget int) string {
 	status := fmt.Sprintf("focus: [pane %d ★]", c.focusPaneID)
+	if pu, ok := c.paneUpdates[c.focusPaneID]; ok && pu.ScrollOffset > 0 {
+		scrollTag := fmt.Sprintf(" [scroll +%d]", pu.ScrollOffset)
+		if pu.UnreadOutput {
+			scrollTag = fmt.Sprintf(" [scroll +%d ⤓]", pu.ScrollOffset)
+		}
+		status += scrollTag
+	}
 	for _, p := range c.placements {
 		if glyphStr, ok := c.paneStatuses[p.PaneID]; ok && glyphStr.Glyph() != " " {
 			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyphStr.Glyph())

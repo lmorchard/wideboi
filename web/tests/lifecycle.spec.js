@@ -14,7 +14,7 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v2';
+        this.protocol = 'wideboi.v3';
         this.readyState = 0;
         this.sent = [];
         if (url.endsWith('/ws')) window.testSockets.push(this);
@@ -84,7 +84,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url) {
-        this.protocol = 'wideboi.v2';
+        this.protocol = 'wideboi.v3';
         this.readyState = 0;
         this.sent = [];
         if (url.endsWith('/ws')) window.testSockets.push(this);

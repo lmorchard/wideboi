@@ -640,9 +640,14 @@ export class WideboiApp extends LitElement {
             ></wideboi-pane>
           `)}
         </div>
-        <div class="status">${this.columns.map(column =>
-          `[${column.paneId}] ${PaneStatus[this.paneStatuses[column.paneId] ?? PaneStatus.IDLE] || ''}`
-        ).join('  ')}</div>
+        <div class="status">${(() => {
+          const fp = this.panes.get(this.focusedPaneId);
+          const focusScroll = (fp && fp.scrollOffset > 0) ? `focus: [${this.focusedPaneId} ★] [scroll +${fp.scrollOffset}${fp.unreadOutput ? ' ⤓' : ''}]  ` : '';
+          const items = this.columns.map(column =>
+            `[${column.paneId}] ${PaneStatus[this.paneStatuses[column.paneId] ?? PaneStatus.IDLE] || ''}`
+          ).join('  ');
+          return `${focusScroll}${items}`;
+        })()}</div>
       </div>
       ${!this.connected ? html`
         <div class="overlay">

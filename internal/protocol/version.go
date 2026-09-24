@@ -15,4 +15,6 @@ package protocol
 // gob, then protobuf without a hello -- shows up as version 0.
 // 2 adds whole-pane shift semantics to MsgPanePatch. A version 1 client
 // would ignore shift_rows and silently display stale retained rows.
-const Version uint32 = 2
+// 3 adds scroll_offset, scrollback_len, and unread_output to MsgPaneUpdate
+// and MsgPanePatch for independent per-client scrollback.
+const Version uint32 = 3

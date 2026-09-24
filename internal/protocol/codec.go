@@ -100,13 +100,39 @@ func MarshalServer(msg any) ([]byte, error) {
 	case MsgPaneCreated:
 		env.Msg = &wirepb.ServerMessage_PaneCreated{PaneCreated: &wirepb.MsgPaneCreated{PaneId: int32(m.PaneID)}}
 	case MsgPaneUpdate:
-		update := &wirepb.MsgPaneUpdate{PaneId: int32(m.PaneID), Generation: m.Generation, Cols: int32(m.Cols), Rows: int32(m.Rows), CursorX: int32(m.CursorX), CursorY: int32(m.CursorY), CursorVisible: m.CursorVisible, MouseTracking: m.MouseTracking}
+		update := &wirepb.MsgPaneUpdate{
+			PaneId:        int32(m.PaneID),
+			Generation:    m.Generation,
+			Cols:          int32(m.Cols),
+			Rows:          int32(m.Rows),
+			CursorX:       int32(m.CursorX),
+			CursorY:       int32(m.CursorY),
+			CursorVisible: m.CursorVisible,
+			MouseTracking: m.MouseTracking,
+			ScrollOffset:  int32(m.ScrollOffset),
+			ScrollbackLen: int32(m.ScrollbackLen),
+			UnreadOutput:  m.UnreadOutput,
+		}
 		for _, line := range m.Lines {
 			update.Lines = append(update.Lines, &wirepb.LineData{Cells: encodeLine(line)})
 		}
 		env.Msg = &wirepb.ServerMessage_PaneUpdate{PaneUpdate: update}
 	case MsgPanePatch:
-		patch := &wirepb.MsgPanePatch{PaneId: int32(m.PaneID), Cols: int32(m.Cols), Rows: int32(m.Rows), BaseGeneration: m.BaseGeneration, Generation: m.Generation, ShiftRows: int32(m.ShiftRows), CursorX: int32(m.CursorX), CursorY: int32(m.CursorY), CursorVisible: m.CursorVisible, MouseTracking: m.MouseTracking}
+		patch := &wirepb.MsgPanePatch{
+			PaneId:         int32(m.PaneID),
+			Cols:           int32(m.Cols),
+			Rows:           int32(m.Rows),
+			BaseGeneration: m.BaseGeneration,
+			Generation:     m.Generation,
+			ShiftRows:      int32(m.ShiftRows),
+			CursorX:        int32(m.CursorX),
+			CursorY:        int32(m.CursorY),
+			CursorVisible:  m.CursorVisible,
+			MouseTracking:  m.MouseTracking,
+			ScrollOffset:   int32(m.ScrollOffset),
+			ScrollbackLen:  int32(m.ScrollbackLen),
+			UnreadOutput:   m.UnreadOutput,
+		}
 		for _, row := range m.ChangedRows {
 			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{Y: int32(row.Y), Cells: encodeLine(row.Cells)})
 		}
@@ -148,14 +174,40 @@ func UnmarshalServer(data []byte) (any, error) {
 		return MsgPaneCreated{PaneID: int(m.PaneCreated.PaneId)}, nil
 	case *wirepb.ServerMessage_PaneUpdate:
 		src := m.PaneUpdate
-		update := MsgPaneUpdate{PaneID: int(src.PaneId), Generation: src.Generation, Cols: int(src.Cols), Rows: int(src.Rows), CursorX: int(src.CursorX), CursorY: int(src.CursorY), CursorVisible: src.CursorVisible, MouseTracking: src.MouseTracking}
+		update := MsgPaneUpdate{
+			PaneID:        int(src.PaneId),
+			Generation:    src.Generation,
+			Cols:          int(src.Cols),
+			Rows:          int(src.Rows),
+			CursorX:       int(src.CursorX),
+			CursorY:       int(src.CursorY),
+			CursorVisible: src.CursorVisible,
+			MouseTracking: src.MouseTracking,
+			ScrollOffset:  int(src.ScrollOffset),
+			ScrollbackLen: int(src.ScrollbackLen),
+			UnreadOutput:  src.UnreadOutput,
+		}
 		for _, row := range src.Lines {
 			update.Lines = append(update.Lines, decodeLine(row.Cells))
 		}
 		return update, nil
 	case *wirepb.ServerMessage_PanePatch:
 		src := m.PanePatch
-		patch := MsgPanePatch{PaneID: int(src.PaneId), Cols: int(src.Cols), Rows: int(src.Rows), BaseGeneration: src.BaseGeneration, Generation: src.Generation, ShiftRows: int(src.ShiftRows), CursorX: int(src.CursorX), CursorY: int(src.CursorY), CursorVisible: src.CursorVisible, MouseTracking: src.MouseTracking}
+		patch := MsgPanePatch{
+			PaneID:         int(src.PaneId),
+			Cols:           int(src.Cols),
+			Rows:           int(src.Rows),
+			BaseGeneration: src.BaseGeneration,
+			Generation:     src.Generation,
+			ShiftRows:      int(src.ShiftRows),
+			CursorX:        int(src.CursorX),
+			CursorY:        int(src.CursorY),
+			CursorVisible:  src.CursorVisible,
+			MouseTracking:  src.MouseTracking,
+			ScrollOffset:   int(src.ScrollOffset),
+			ScrollbackLen:  int(src.ScrollbackLen),
+			UnreadOutput:   src.UnreadOutput,
+		}
 		for _, row := range src.ChangedRows {
 			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: int(row.Y), Cells: decodeLine(row.Cells)})
 		}

@@ -121,6 +121,9 @@ func TestPanePatchReconstructsStyledWideAndCursorChanges(t *testing.T) {
 	next.Lines[1][1] = CellData{Content: " ", Width: 1}
 	next.CursorX, next.CursorY = 2, 1
 	next.MouseTracking = true
+	next.ScrollOffset = 5
+	next.ScrollbackLen = 42
+	next.UnreadOutput = true
 	patch, ok := BuildPanePatch(base, next)
 	if !ok || len(patch.ChangedRows) != 1 || patch.ChangedRows[0].Y != 1 {
 		t.Fatalf("build patch = %+v, %v", patch, ok)

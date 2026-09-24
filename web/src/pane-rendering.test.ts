@@ -65,6 +65,24 @@ describe('pane mirrors', () => {
       lines: [{ cells: [{ content: '界', width: 2 }, cell(' '), cell('B'), cell(' ')] }] });
     expect(selectionText(pane, { x: 0, y: 0 }, { x: 2, y: 0 })).toBe('界B');
   });
+
+  it('updates scroll offset, scrollback length, and unread output from patch', () => {
+    const store = new PaneStore();
+    store.update(create(MsgPaneUpdateSchema, {
+      paneId: 1, generation: 1n, cols: 1, rows: 1,
+      lines: [row('A')],
+    }));
+    const patch = create(MsgPanePatchSchema, {
+      paneId: 1, cols: 1, rows: 1,
+      baseGeneration: 1n, generation: 2n,
+      scrollOffset: 5, scrollbackLen: 42, unreadOutput: true,
+    });
+    expect(store.patch(patch)).toBe(true);
+    const pane = store.get(1);
+    expect(pane?.scrollOffset).toBe(5);
+    expect(pane?.scrollbackLen).toBe(42);
+    expect(pane?.unreadOutput).toBe(true);
+  });
 });
 
 describe('per-pane painting', () => {
@@ -150,6 +168,21 @@ describe('per-pane painting', () => {
     expect(frames.size).toBe(0);
     expect(canvas.style.width).toBe('');
     expect(canvas.style.height).toBe('');
+    p.stop();
+  });
+
+  it('draws scroll footer when scrolled up', () => {
+    const { painter: p } = painter();
+    p.start();
+    p.resize(240, 100);
+    p.setPane(create(MsgPaneUpdateSchema, {
+      paneId: 1, cols: 10, rows: 5,
+      scrollOffset: 7, scrollbackLen: 50, unreadOutput: true,
+      lines: [row('A'), row('B'), row('C'), row('D'), row('E')],
+    }));
+    flush();
+    const calls = fillText.mock.calls.map(c => c[0]);
+    expect(calls.some(text => typeof text === 'string' && text.includes('▲ scroll +7/50') && text.includes('new output'))).toBe(true);
     p.stop();
   });
 });
