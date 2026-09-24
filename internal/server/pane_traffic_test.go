@@ -5,10 +5,12 @@ import (
 	"compress/gzip"
 	"context"
 	"fmt"
+	"image"
 	"reflect"
 	"strings"
 	"testing"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -175,4 +177,100 @@ func gzipSize(t *testing.T, payload []byte) int {
 		t.Fatal(err)
 	}
 	return buf.Len()
+}
+
+type midWriteGrid struct {
+	term.Grid
+	onDraw func()
+}
+
+func (g *midWriteGrid) Draw(dst uv.Screen, area image.Rectangle) {
+	if g.onDraw != nil {
+		g.onDraw()
+	}
+	g.Grid.Draw(dst, area)
+}
+
+func (g *midWriteGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
+	if g.onDraw != nil {
+		g.onDraw()
+	}
+	g.Grid.DrawAt(dst, area, offset)
+}
+
+func TestPaneUpdatePatchBaselineRetainedOnMidSendWrite(t *testing.T) {
+	vt := term.NewVT(80, 24)
+	t.Cleanup(func() { _ = vt.Close() })
+	_, _ = vt.Write([]byte("initial line\r\n"))
+
+	var writeDuringDraw bool
+	grid := &midWriteGrid{
+		Grid: vt,
+		onDraw: func() {
+			if writeDuringDraw {
+				writeDuringDraw = false
+				_, _ = vt.Write([]byte("second line written mid-draw\r\n"))
+			}
+		},
+	}
+	pane := &Pane{id: 1, grid: grid, cols: 80, rows: 24}
+	s := &Server{panes: map[int]*Pane{1: pane}}
+	ch := transport.NewInProcChannel(4)
+	s.transports = []transport.Transport{ch}
+
+	ctx := context.Background()
+
+	// 1. Initial broadcast: delivers full snapshot (no baseline yet).
+	s.broadcastPaneUpdates(ctx, false)
+	msg1 := <-ch.ServerSend
+	snap1, ok := msg1.(protocol.MsgPaneUpdate)
+	if !ok {
+		t.Fatalf("expected initial MsgPaneUpdate, got %T", msg1)
+	}
+	clientMirror := snap1
+
+	// 2. Second broadcast: write occurs before and during DrawAt, advancing Generation mid-send.
+	_, _ = vt.Write([]byte("line 2\r\n"))
+	writeDuringDraw = true
+	s.broadcastPaneUpdates(ctx, false)
+	msg2 := <-ch.ServerSend
+	switch m := msg2.(type) {
+	case protocol.MsgPaneUpdate:
+		clientMirror = m
+	case protocol.MsgPanePatch:
+		var valid bool
+		clientMirror, valid = protocol.ApplyPanePatch(clientMirror, m)
+		if !valid {
+			t.Fatalf("patch rejected on second broadcast: %+v", m)
+		}
+	default:
+		t.Fatalf("unexpected message type %T", msg2)
+	}
+
+	// 3. Third broadcast: pane generation was advanced by the mid-send write.
+	// Because the frame from broadcast 2 was delivered, broadcast 3 should send
+	// a patch against broadcast 2's frame, NOT a full snapshot.
+	s.broadcastPaneUpdates(ctx, false)
+	select {
+	case msg3 := <-ch.ServerSend:
+		patch, ok := msg3.(protocol.MsgPanePatch)
+		if !ok {
+			t.Fatalf("expected MsgPanePatch after mid-send write, got %T", msg3)
+		}
+		var valid bool
+		clientMirror, valid = protocol.ApplyPanePatch(clientMirror, patch)
+		if !valid {
+			t.Fatalf("client failed to apply patch: %+v", patch)
+		}
+		full, ok := pane.UpdateMessage()
+		if !ok {
+			t.Fatal("pane.UpdateMessage failed")
+		}
+		full.Generation = pane.Generation()
+		if !reflect.DeepEqual(clientMirror, full) {
+			t.Fatalf("reconstructed mirror differs from full render:\nmirror: %+v\nfull: %+v", clientMirror, full)
+		}
+	default:
+		t.Fatal("no update sent on third broadcast")
+	}
 }
