@@ -187,10 +187,10 @@ orphans.
 ## Skip canvas resets when its size has not changed
 
 Assigning `canvas.width` or `canvas.height` clears the bitmap even when the
-value stays the same. `GridRenderer.resize` checks both backing dimensions
-before assigning them. A `ResizeObserver` callback can arrive without a real
-size change; in an idle, change-only browser session, no new frame may arrive
-to repaint a canvas cleared by that callback.
+value stays the same. Each pane's `PanePainter.resize` checks both backing
+dimensions before assigning them. A `ResizeObserver` callback can arrive
+without a real size change; in an idle, change-only browser session, no new
+frame may arrive to repaint a canvas cleared by that callback.
 
 Keep the observed canvas's CSS dimensions under flex layout control. Writing
 inline width and height from its own `ResizeObserver` callback can feed layout
@@ -325,7 +325,7 @@ server's lifetime (#86). Keep these ordering rules:
 
 Proto3 omits zero values. A patch that hides the cursor sends no
 `cursor_visible` field, and the receiver decodes it as `false`. Today
-`protocol.ApplyPanePatch` and `GridRenderer.handlePanePatch` always replace
+`protocol.ApplyPanePatch` and `PaneStore.patch` always replace
 cursor and mouse fields, so this works. If patches ever update individual
 fields, use schema `optional` presence; otherwise absence could be mistaken
 for “unchanged.” Go and browser tests pin the current hidden-cursor behavior.

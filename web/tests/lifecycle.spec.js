@@ -77,3 +77,71 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
   });
   await expect(page.getByRole('option', { name: '[1] Shell' })).toHaveCount(0);
 });
+
+test('pane elements keep their widths and browser scrolling reveals focus', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.testSockets = [];
+    window.WebSocket = class {
+      static OPEN = 1;
+      constructor(url) {
+        this.protocol = 'wideboi.v2';
+        this.readyState = 0;
+        this.sent = [];
+        if (url.endsWith('/ws')) window.testSockets.push(this);
+      }
+      send(data) { this.sent.push(new Uint8Array(data)); }
+      close() { this.readyState = 3; this.onclose?.(); }
+      open() { this.readyState = 1; this.onopen?.(); }
+      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
+    };
+  });
+  await page.setViewportSize({ width: 500, height: 420 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [1, 2, 3, 4].map(paneId => ({ paneId, width: 40, height: 20 })),
+    } }));
+    window.testSockets[0].message(serverBytes({ case: 'paneUpdate', value: {
+      paneId: 4, generation: 1n, cols: 40, rows: 20,
+      lines: Array.from({ length: 20 }, () => ({ cells: Array.from({ length: 40 }, () => ({ content: ' ', width: 1 })) })),
+      mouseTracking: true,
+    } }));
+  });
+  const panes = page.locator('wideboi-pane');
+  await expect(panes).toHaveCount(4);
+  const before = await panes.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
+  expect(before.every(width => width === before[0])).toBe(true);
+  expect(before[0]).toBeGreaterThan(250);
+  await page.getByRole('combobox').selectOption('4');
+  await expect.poll(() => page.locator('.pane-strip').evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
+  const after = await panes.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
+  expect(after).toEqual(before);
+  await expect(page.locator('wideboi-pane canvas')).toHaveCount(4);
+
+  const messages = () => page.evaluate(async () => {
+    const { clientMessages } = await import('/tests/browser-fixture.ts');
+    return clientMessages(window.testSockets[0].sent).map(msg => msg);
+  });
+  const resizeCount = (await messages()).filter(msg => msg.case === 'resize').length;
+  await page.locator('wideboi-pane canvas').nth(3).click({ position: { x: 20, y: 26 } });
+  await expect.poll(async () => (await messages()).find(msg => msg.case === 'mouse')?.value)
+    .toMatchObject({ paneId: 4, x: 2, y: 1 });
+  expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(resizeCount);
+  await page.locator('wideboi-pane canvas').first().click({ position: { x: 20, y: 26 } });
+  await expect(page.getByRole('combobox')).toHaveValue('1');
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.paneCanvas = document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane').shadowRoot.querySelector('canvas');
+    window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [4, 3, 2, 1].map(paneId => ({ paneId, width: 40, height: 20 })),
+    } }));
+  });
+  await expect.poll(() => panes.evaluateAll(elements => elements.map(element => element.paneId)))
+    .toEqual([4, 3, 2, 1]);
+  expect(await page.evaluate(() => window.paneCanvas === document.querySelector('wideboi-app').shadowRoot
+    .querySelectorAll('wideboi-pane')[3].shadowRoot.querySelector('canvas'))).toBe(true);
+});
