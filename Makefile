@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test web-test proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
+.PHONY: check check-targets quick test web-test web-build proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -178,13 +178,19 @@ smoke: build
 attach-check: build
 	python3 scripts/attachcheck.py
 
-web/dist: web/package.json $(shell find web/src -type f) web/index.html web/tsconfig.json
-	cd web && npm install && npm run build
+web/node_modules/.installed: web/package.json web/package-lock.json
+	cd web && npm ci
+	@touch $@
+
+web/dist: web/node_modules/.installed web/package.json web/package-lock.json $(shell find web/src -type f) web/index.html web/tsconfig.json
+	cd web && npm run build
+
+web-build: web/dist
 
 # Regenerate the Go and TypeScript wire bindings after editing
 # internal/protocol/wirepb/wideboi.proto. Needs buf and web/node_modules;
 # protoc-gen-go runs from go.mod.
-proto:
+proto: web/node_modules/.installed
 	buf generate
 
 # Verify that committed bindings were regenerated after schema changes.
