@@ -111,15 +111,14 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 }
 
 var clientTypes = map[string]func() any{
-	"MsgAttach":    func() any { return &protocol.MsgAttach{} },
-	"MsgVerb":      func() any { return &protocol.MsgVerb{} },
-	"MsgFocusPane": func() any { return &protocol.MsgFocusPane{} },
-	"MsgMouse":     func() any { return &protocol.MsgMouse{} },
-	"MsgInput":     func() any { return &protocol.MsgInput{} },
-	"MsgResize":    func() any { return &protocol.MsgResize{} },
-	"MsgScroll":    func() any { return &protocol.MsgScroll{} },
-	"MsgDetach":    func() any { return &protocol.MsgDetach{} },
-	"MsgShutdown":  func() any { return &protocol.MsgShutdown{} },
+	"MsgAttach":   func() any { return &protocol.MsgAttach{} },
+	"MsgVerb":     func() any { return &protocol.MsgVerb{} },
+	"MsgMouse":    func() any { return &protocol.MsgMouse{} },
+	"MsgInput":    func() any { return &protocol.MsgInput{} },
+	"MsgResize":   func() any { return &protocol.MsgResize{} },
+	"MsgScroll":   func() any { return &protocol.MsgScroll{} },
+	"MsgDetach":   func() any { return &protocol.MsgDetach{} },
+	"MsgShutdown": func() any { return &protocol.MsgShutdown{} },
 }
 
 func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {

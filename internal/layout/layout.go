@@ -119,18 +119,26 @@ func (s *Strip) FocusedPaneID() int {
 	return s.columns[s.focusIndex].PaneID
 }
 
-// AddColumn inserts a new column after the current focus and shifts focus to it.
-func (s *Strip) AddColumn(paneID int, width, height int) {
+// AddColumn inserts a new column after the specified pane and shifts focus to it.
+func (s *Strip) AddColumn(paneID int, width, height int, afterPaneID int) {
 	prev := s.FocusedPaneID()
 	defer s.noteFocusFrom(prev)
 	col := Column{PaneID: paneID, Width: width, Height: height}
+
+	insertIdx := len(s.columns)
+	for i, c := range s.columns {
+		if c.PaneID == afterPaneID {
+			insertIdx = i + 1
+			break
+		}
+	}
+
 	if len(s.columns) == 0 {
 		s.columns = append(s.columns, col)
 		s.focusIndex = 0
 	} else {
-		idx := s.focusIndex + 1
-		s.columns = append(s.columns[:idx], append([]Column{col}, s.columns[idx:]...)...)
-		s.focusIndex = idx
+		s.columns = append(s.columns[:insertIdx], append([]Column{col}, s.columns[insertIdx:]...)...)
+		s.focusIndex = insertIdx
 	}
 }
 
@@ -152,67 +160,90 @@ func (s *Strip) FocusRight() {
 	}
 }
 
-// CycleWidth cycles the focused column's width preset.
+// CycleWidth cycles the specified pane's column's width preset.
 // Custom spawn widths transition to the next higher preset
 // or wrap back to the first preset when at or above the maximum preset.
-func (s *Strip) CycleWidth() {
-	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) {
-		return
-	}
-	presets := s.WidthPresets()
-	cur := s.columns[s.focusIndex].Width
-	for _, p := range presets {
-		if p > cur {
-			s.columns[s.focusIndex].Width = p
+func (s *Strip) CycleWidth(paneID int) {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			presets := s.WidthPresets()
+			cur := s.columns[i].Width
+			for _, p := range presets {
+				if p > cur {
+					s.columns[i].Width = p
+					return
+				}
+			}
+			s.columns[i].Width = presets[0]
 			return
 		}
 	}
-	s.columns[s.focusIndex].Width = presets[0]
 }
 
-// GrowWidth increases the focused column's width by delta cells.
-func (s *Strip) GrowWidth(delta int) {
-	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) || delta <= 0 {
+// GrowWidth increases the specified pane's column's width by delta cells.
+func (s *Strip) GrowWidth(paneID int, delta int) {
+	if delta <= 0 {
 		return
 	}
-	s.columns[s.focusIndex].Width += delta
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			s.columns[i].Width += delta
+			return
+		}
+	}
 }
 
-// ShrinkWidth decreases the focused column's width by delta cells,
+// ShrinkWidth decreases the specified pane's column's width by delta cells,
 // bounded from below by MinColumnWidth.
-func (s *Strip) ShrinkWidth(delta int) {
-	if len(s.columns) == 0 || s.focusIndex >= len(s.columns) || delta <= 0 {
+func (s *Strip) ShrinkWidth(paneID int, delta int) {
+	if delta <= 0 {
 		return
 	}
-	cur := s.columns[s.focusIndex].Width
-	if cur-delta < MinColumnWidth {
-		s.columns[s.focusIndex].Width = MinColumnWidth
-	} else {
-		s.columns[s.focusIndex].Width = cur - delta
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			cur := s.columns[i].Width
+			if cur-delta < MinColumnWidth {
+				s.columns[i].Width = MinColumnWidth
+			} else {
+				s.columns[i].Width = cur - delta
+			}
+			return
+		}
 	}
 }
 
-// MoveLeft swaps the focused column with its left neighbour. Focus
-// follows the column, and its width travels with it: nothing is resized,
-// because a pane's logical width is its column's width (the no-shrink
-// premise), and a move changes neither.
-func (s *Strip) MoveLeft() {
-	i := s.focusIndex
-	if i <= 0 || i >= len(s.columns) {
-		return
+// MoveLeft swaps the specified pane's column with its left neighbour.
+func (s *Strip) MoveLeft(paneID int) {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			if i > 0 {
+				s.columns[i-1], s.columns[i] = s.columns[i], s.columns[i-1]
+				if s.focusIndex == i {
+					s.focusIndex = i - 1
+				} else if s.focusIndex == i-1 {
+					s.focusIndex = i
+				}
+			}
+			return
+		}
 	}
-	s.columns[i-1], s.columns[i] = s.columns[i], s.columns[i-1]
-	s.focusIndex = i - 1
 }
 
 // MoveRight is MoveLeft's mirror.
-func (s *Strip) MoveRight() {
-	i := s.focusIndex
-	if i < 0 || i >= len(s.columns)-1 {
-		return
+func (s *Strip) MoveRight(paneID int) {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			if i < len(s.columns)-1 {
+				s.columns[i+1], s.columns[i] = s.columns[i], s.columns[i+1]
+				if s.focusIndex == i {
+					s.focusIndex = i + 1
+				} else if s.focusIndex == i+1 {
+					s.focusIndex = i
+				}
+			}
+			return
+		}
 	}
-	s.columns[i+1], s.columns[i] = s.columns[i], s.columns[i+1]
-	s.focusIndex = i + 1
 }
 
 // noteFocusFrom records prev as the last-focused pane if focus has
@@ -405,8 +436,10 @@ func (s *Strip) Columns() []Column {
 	return cols
 }
 
-// SyncColumns updates the strip's columns and focused pane from protocol ColumnData.
+// SyncColumns updates the columns while retaining the requested local focus.
+// If that pane has closed, focus the preceding column (or the first one).
 func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
+	oldIndex := s.focusIndex
 	s.columns = make([]Column, len(cols))
 	for i, c := range cols {
 		s.columns[i] = Column{
@@ -415,5 +448,26 @@ func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
 			Height: c.Height,
 		}
 	}
-	s.FocusPaneID(focusPaneID)
+	if len(s.columns) == 0 {
+		s.focusIndex = 0
+		s.lastFocusPaneID = 0
+		return
+	}
+	newIndex := -1
+	for i, c := range s.columns {
+		if c.PaneID == focusPaneID {
+			newIndex = i
+			break
+		}
+	}
+	if newIndex < 0 {
+		newIndex = min(max(oldIndex-1, 0), len(s.columns)-1)
+	}
+	s.focusIndex = newIndex
+	for _, c := range s.columns {
+		if c.PaneID == s.lastFocusPaneID {
+			return
+		}
+	}
+	s.lastFocusPaneID = 0
 }

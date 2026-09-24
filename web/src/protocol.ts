@@ -49,8 +49,7 @@ export type LineData = CellData[];
 
 export interface MsgLayoutSnapshot {
   Columns: ColumnData[];
-  FocusPaneID: number;
-  PaneStatuses: Record<number, string>;
+  PaneStatuses: Record<number, number>;
   PaneTitles: Record<number, string>;
 }
 

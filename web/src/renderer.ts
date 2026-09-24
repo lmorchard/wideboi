@@ -1,5 +1,6 @@
 import type { MsgLayoutSnapshot, MsgPaneUpdate, PlacementData } from './protocol';
 import { decodeColor } from './colors';
+import { reconcileFocus } from './focus';
 
 export class GridRenderer {
   private canvas: HTMLCanvasElement;
@@ -9,6 +10,7 @@ export class GridRenderer {
 
   private panes = new Map<number, MsgPaneUpdate>();
   private layout: MsgLayoutSnapshot | null = null;
+  private focusedPaneId = 0;
   private placements: PlacementData[] = [];
   private scrollX = 0;
   private selection?: { paneID: number; start: { x: number; y: number }; end: { x: number; y: number } };
@@ -60,9 +62,18 @@ export class GridRenderer {
   }
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
+    this.focusedPaneId = reconcileFocus(this.layout?.Columns || [], snapshot.Columns, this.focusedPaneId);
     this.layout = snapshot;
     this.recomputePlacements();
     this.invalidate();
+  }
+
+  public setFocusedPaneId(paneID: number) {
+    if (this.layout?.Columns.some(c => c.PaneID === paneID)) {
+      this.focusedPaneId = paneID;
+      this.recomputePlacements();
+      this.invalidate();
+    }
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
@@ -161,7 +172,7 @@ export class GridRenderer {
   }
 
 	public getFocusedPaneId(): number {
-		return this.layout?.FocusPaneID || 0;
+		return this.focusedPaneId;
 	}
 
 	public getGridSize(): { cols: number, rows: number } {
@@ -200,7 +211,7 @@ export class GridRenderer {
       positions.push(x);
       x += column.Width + 1;
     }
-    const focus = Math.max(columns.findIndex(c => c.PaneID === this.layout!.FocusPaneID), 0);
+    const focus = Math.max(columns.findIndex(c => c.PaneID === this.focusedPaneId), 0);
     const focusX = positions[focus];
     const focusWidth = columns[focus].Width;
     if (focusX < this.scrollX) this.scrollX = focusX;
@@ -231,7 +242,7 @@ export class GridRenderer {
       this.drawPlacement(p);
     }
     const grid = this.getGridSize();
-    const focused = this.layout.FocusPaneID;
+    const focused = this.focusedPaneId;
     const title = this.layout.PaneTitles?.[focused] || `Pane ${focused}`;
     this.ctx.fillStyle = '#cccccc';
     this.ctx.font = '14px monospace';
@@ -338,7 +349,7 @@ export class GridRenderer {
       }
     }
 
-    if (pane.CursorVisible && this.layout?.FocusPaneID === pane.PaneID) {
+    if (pane.CursorVisible && this.focusedPaneId === pane.PaneID) {
       const curX = pane.CursorX + offsetX;
       const curY = pane.CursorY + offsetY;
       
@@ -371,7 +382,7 @@ export class GridRenderer {
     this.ctx.restore();
     
     // Draw border
-    const isFocused = this.layout?.FocusPaneID === pane.PaneID;
+    const isFocused = this.focusedPaneId === pane.PaneID;
     if (p.Dst.Max.X < this.getGridSize().cols) {
         this.ctx.fillStyle = '#1e1e1e';
         this.ctx.fillRect(

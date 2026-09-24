@@ -73,7 +73,6 @@ func init() {
 	gob.Register(protocol.MsgPaneUpdate{})
 	gob.Register(protocol.MsgAttach{})
 	gob.Register(protocol.MsgVerb{})
-	gob.Register(protocol.MsgFocusPane{})
 	gob.Register(protocol.MsgMouse{})
 	gob.Register(protocol.MsgInput{})
 	gob.Register(protocol.MsgResize{})
@@ -82,6 +81,7 @@ func init() {
 	gob.Register(protocol.MsgDetach{})
 	gob.Register(protocol.MsgStatusRequest{})
 	gob.Register(protocol.MsgLayoutSnapshot{})
+	gob.Register(protocol.MsgPaneCreated{})
 	gob.Register(protocol.MsgPaneClosed{})
 }
 

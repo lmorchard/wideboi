@@ -47,19 +47,30 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 		}
 
 		tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-		fmt.Fprintln(tw, "PANE ID\tWIDTH\tHEIGHT\tFOCUS\tSTATUS\tTITLE")
+		fmt.Fprintln(tw, "PANE ID\tWIDTH\tHEIGHT\tSTATUS\tTITLE")
 		for _, col := range snap.Columns {
-			focus := ""
-			if col.PaneID == snap.FocusPaneID {
-				focus = "*"
-			}
 			status := snap.PaneStatuses[col.PaneID]
 			title := snap.PaneTitles[col.PaneID]
-			fmt.Fprintf(tw, "%d\t%d\t%d\t%s\t%s\t%s\n", col.PaneID, col.Width, col.Height, focus, status, title)
+			fmt.Fprintf(tw, "%d\t%d\t%d\t%s\t%s\n", col.PaneID, col.Width, col.Height, statusName(status), title)
 		}
 		return tw.Flush()
 
 	case <-time.After(2 * time.Second):
 		return fmt.Errorf("timeout waiting for server state")
+	}
+}
+
+func statusName(status protocol.PaneStatus) string {
+	switch status {
+	case protocol.StatusWorking:
+		return "working"
+	case protocol.StatusNeedsInput:
+		return "needs input"
+	case protocol.StatusDone:
+		return "done"
+	case protocol.StatusFailed:
+		return "failed"
+	default:
+		return "idle"
 	}
 }

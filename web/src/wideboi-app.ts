@@ -141,8 +141,18 @@ export class WideboiApp extends LitElement {
   private errorMsg = '';
 
   private inPrefixMode = false;
+  private previousFocusId = 0;
+  private pendingFocusId = 0;
+  private paneStatuses: Record<number, number> = {};
   private listeners?: AbortController;
-  private pointer?: { id: number; paneID: number; placement: import('./protocol').PlacementData; button: number; tracking: boolean; startX: number; startY: number };
+  private pointer?: { id: number; paneID: number; placement: import('./protocol').PlacementData; button: number; tracking: boolean; focusOnClick: boolean; dragged: boolean; startX: number; startY: number };
+
+  private focusPane(paneID: number) {
+    if (!this.renderer || !this.activePanes.includes(paneID)) return;
+    if (paneID !== this.focusedPaneId) this.previousFocusId = this.focusedPaneId;
+    this.focusedPaneId = paneID;
+    this.renderer.setFocusedPaneId(paneID);
+  }
 
   constructor() {
     super();
@@ -207,6 +217,7 @@ export class WideboiApp extends LitElement {
     }
     this.connected = false;
     this.inPrefixMode = false;
+    this.pendingFocusId = 0;
     
     this.errorMsg = '';
     
@@ -250,8 +261,16 @@ export class WideboiApp extends LitElement {
       if (env.t === 'MsgLayoutSnapshot') {
         this.renderer.handleLayoutSnapshot(env.p);
         this.activePanes = env.p.Columns?.map((c: any) => c.PaneID) || [];
-        this.focusedPaneId = env.p.FocusPaneID || 0;
+        this.focusedPaneId = this.renderer.getFocusedPaneId();
+        if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
+          this.focusPane(this.pendingFocusId);
+          this.pendingFocusId = 0;
+        }
+        if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
+        this.paneStatuses = env.p.PaneStatuses || {};
         this.paneTitles = env.p.PaneTitles || {};
+      } else if (env.t === 'MsgPaneCreated') {
+        this.pendingFocusId = env.p.PaneID;
       } else if (env.t === 'MsgPaneUpdate') {
         this.renderer.handlePaneUpdate(env.p);
       } else if (env.t === 'MsgPaneClosed') {
@@ -303,7 +322,21 @@ export class WideboiApp extends LitElement {
         }
         
         if (verb > 0) {
-          this.client.send('MsgVerb', { Verb: verb });
+          const index = this.activePanes.indexOf(this.focusedPaneId);
+          if (verb === 1 && index > 0) this.focusPane(this.activePanes[index - 1]);
+          else if (verb === 2 && index >= 0 && index < this.activePanes.length - 1) this.focusPane(this.activePanes[index + 1]);
+          else if (verb === 12) this.focusPane(this.previousFocusId);
+          else if (verb === 6) {
+            const rank = (status: number) => status === 4 ? 3 : status === 3 ? 2 : status === 2 ? 1 : 0;
+            const target = this.activePanes.reduce((best, id) => {
+              const score = rank(this.paneStatuses[id]);
+              return score > rank(this.paneStatuses[best]) ||
+                (score > 0 && score === rank(this.paneStatuses[best]) && id < best) ? id : best;
+            }, 0);
+            if (target) this.focusPane(target);
+          } else if (![1, 2, 6, 12].includes(verb)) {
+            this.client.send('MsgVerb', { Verb: verb, PaneID: this.focusedPaneId });
+          }
           
           // If they held Ctrl while pressing the key (e.g. Ctrl-b, then held Ctrl and pressed 'l'),
           // stay in prefix mode so they can repeat it.
@@ -352,22 +385,24 @@ export class WideboiApp extends LitElement {
       this.pointer = {
         id: e.pointerId, paneID: hit.paneID, placement: hit.placement,
         button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
-        tracking: this.renderer.mouseTracking(hit.paneID), startX: x, startY: y
+        tracking: hit.paneID === this.focusedPaneId && this.renderer.mouseTracking(hit.paneID),
+        focusOnClick: hit.paneID !== this.focusedPaneId, dragged: false,
+        startX: x, startY: y
       };
       this.canvas.setPointerCapture(e.pointerId);
       this.renderer.clearSelection();
       if (this.pointer.tracking) this.sendPointerMouse(0, e);
-      this.client.send('MsgFocusPane', { PaneID: hit.paneID });
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
     this.canvas.addEventListener('pointermove', (e) => {
       const press = this.pointer;
       if (!press || press.id !== e.pointerId || !this.renderer) return;
+      const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
+      if (x !== press.startX || y !== press.startY) press.dragged = true;
       if (press.tracking) this.sendPointerMouse(2, e);
       else if (press.button === 1) {
         const start = this.pointerCell(press.startX, press.startY, press.placement);
-        const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
         const end = this.pointerCell(x, y, press.placement);
         this.renderer.setSelection(press.paneID, start, end);
       }
@@ -378,8 +413,13 @@ export class WideboiApp extends LitElement {
       if (!this.pointer || this.pointer.id !== e.pointerId) return;
       if (this.pointer.tracking) this.sendPointerMouse(1, e);
       else if (this.renderer) {
-        const text = this.renderer.selectionText();
-        if (text && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+        if (e.type === 'pointerup' && this.pointer.focusOnClick && !this.pointer.dragged) {
+          this.renderer.clearSelection();
+          this.focusPane(this.pointer.paneID);
+        } else {
+          const text = this.renderer.selectionText();
+          if (text && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+        }
       }
       this.pointer = undefined;
       if (this.canvas.hasPointerCapture(e.pointerId)) this.canvas.releasePointerCapture(e.pointerId);
@@ -452,7 +492,7 @@ export class WideboiApp extends LitElement {
     const select = e.target as HTMLSelectElement;
     const paneID = parseInt(select.value, 10);
     if (paneID > 0 && this.client && this.connected) {
-      this.client.send('MsgFocusPane', { PaneID: paneID });
+      this.focusPane(paneID);
     }
     this.canvas.focus();
   }

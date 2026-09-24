@@ -45,8 +45,7 @@ func TestSetLayoutModeCardsProducesCardPlacements(t *testing.T) {
 
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     threeColumns(),
-		FocusPaneID: 2,
+		Columns: threeColumns(),
 	})
 
 	cli.mu.Lock()
@@ -70,7 +69,7 @@ func TestToggleBackToScrollLeavesNoSlivers(t *testing.T) {
 
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2,
+		Columns: threeColumns(),
 	})
 	cli.ToggleLayout()
 
@@ -89,7 +88,7 @@ func TestClientDefaultsToScrollLayout(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: threeColumns(), FocusPaneID: 2,
+		Columns: nil,
 	})
 
 	cli.mu.Lock()
@@ -123,11 +122,11 @@ func newCardClient(t *testing.T, cols, rows int, titles map[int]string) *Client 
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
+	cli.focusPaneID = 2
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns:      threeColumns(),
-		FocusPaneID:  2,
 		PaneTitles:   titles,
-		PaneStatuses: map[int]string{1: "✓", 2: " ", 3: "»"},
+		PaneStatuses: map[int]protocol.PaneStatus{1: protocol.StatusDone, 2: protocol.StatusIdle, 3: protocol.StatusWorking},
 	})
 	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
@@ -155,7 +154,7 @@ func TestSliverRendersGlyphAndTitle(t *testing.T) {
 	if !strings.Contains(headerText, "deploy") {
 		t.Errorf("card header does not show the title:\n%s", headerText)
 	}
-	if !strings.Contains(headerText, "✓") {
+	if !strings.Contains(headerText, protocol.StatusDone.Glyph()) {
 		t.Errorf("card header does not show the status glyph:\n%s", headerText)
 	}
 
@@ -181,7 +180,7 @@ func TestSliverWithoutATitleStillRenders(t *testing.T) {
 	if strings.TrimSpace(got) == "" {
 		t.Error("a titleless card rendered nothing in its header")
 	}
-	if !strings.Contains(got, "✓") {
+	if !strings.Contains(got, protocol.StatusDone.Glyph()) {
 		t.Errorf("a titleless card dropped its status glyph too:\n%s", got)
 	}
 }
@@ -283,9 +282,11 @@ func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     threeColumns(),
-		FocusPaneID: 1,
-		PaneTitles:  map[int]string{2: "should not appear"},
+		Columns: manyColumns(3),
+	})
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns:    threeColumns(),
+		PaneTitles: map[int]string{2: "should not appear"},
 	})
 	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
 	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
@@ -325,7 +326,7 @@ func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	st := frameState{
 		placements:   []protocol.PlacementData{*p},
 		focusPaneID:  1,
-		paneStatuses: map[int]string{7: "»"},
+		paneStatuses: map[int]protocol.PaneStatus{7: protocol.StatusWorking},
 		// 12 double-width runes: 12 runes but 24 cells, against 15.
 		paneTitles: map[int]string{7: "日本語日本語日本語日本語"},
 	}
@@ -369,7 +370,7 @@ func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	st := frameState{
 		placements:   []protocol.PlacementData{p},
 		focusPaneID:  7,
-		paneStatuses: map[int]string{7: "»"},
+		paneStatuses: map[int]protocol.PaneStatus{7: protocol.StatusWorking},
 		// 12 double-width runes: 12 runes but 24 cells, against 15.
 		paneTitles: map[int]string{7: "日本語日本語日本語日本語"},
 	}
@@ -406,9 +407,9 @@ func cardClientWithColumns(t *testing.T, cols, rows, n, focus int) *Client {
 	t.Helper()
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutCards)
+	cli.focusPaneID = focus
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     manyColumns(n),
-		FocusPaneID: focus,
+		Columns: manyColumns(n),
 	})
 	return cli
 }
@@ -477,8 +478,10 @@ func TestScrollModeMarksOffScreenPanes(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     manyColumns(14),
-		FocusPaneID: 1,
+		Columns: manyColumns(3),
+	})
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: manyColumns(14),
 	})
 
 	cli.mu.Lock()
@@ -508,8 +511,7 @@ func TestScrollModeNoMarkerWhenEverythingFits(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns:     manyColumns(3),
-		FocusPaneID: 1,
+		Columns: manyColumns(3),
 	})
 
 	scr := newFakeHostScreen(cols, rows)
@@ -536,7 +538,7 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 	}
 
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: nil, FocusPaneID: 0,
+		Columns: nil,
 	})
 
 	scr2 := newFakeHostScreen(cols, rows)
@@ -551,8 +553,12 @@ func TestEmptySnapshotClearsHiddenCardMarker(t *testing.T) {
 // sent when the last pane closes -- must leave it alone.
 func TestEmptySnapshotKeepsClientLayoutMode(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), 60, 16, "C-b")
+	cli.strip.AddColumn(1, 40, 20, 0)
+	cli.strip.AddColumn(2, 40, 20, 0)
+	cli.strip.AddColumn(3, 40, 20, 0)
 	cli.SetLayoutMode(protocol.LayoutCards)
-	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: nil})
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: nil})
 
 	cli.mu.Lock()
 	got := cli.layoutMode
@@ -570,6 +576,9 @@ func TestEmptySnapshotKeepsClientLayoutMode(t *testing.T) {
 func TestCardsDrawDividers(t *testing.T) {
 	const cols, rows = 90, 16
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.strip.AddColumn(1, 40, 20, 0)
+	cli.strip.AddColumn(2, 40, 20, 0)
+	cli.strip.AddColumn(3, 40, 20, 0)
 	cli.SetLayoutMode(protocol.LayoutCards)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
@@ -577,7 +586,6 @@ func TestCardsDrawDividers(t *testing.T) {
 			{PaneID: 2, Width: 60, Height: 10},
 			{PaneID: 3, Width: 60, Height: 10},
 		},
-		FocusPaneID: 2,
 	})
 
 	scr := newFakeHostScreen(cols, rows)
@@ -596,11 +604,7 @@ func TestScrollModeStillDrawsDividers(t *testing.T) {
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
-		Columns: []protocol.ColumnData{
-			{PaneID: 1, Width: 30, Height: 10},
-			{PaneID: 2, Width: 30, Height: 10},
-		},
-		FocusPaneID: 1,
+		Columns: manyColumns(3),
 	})
 
 	scr := newFakeHostScreen(cols, rows)

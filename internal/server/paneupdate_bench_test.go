@@ -6,14 +6,13 @@ import (
 	"testing"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
-	"github.com/lmorchard/wideboi/internal/server/term"
 )
 
 // Isolates the full-grid copy cost that formerly ran under Server.mu.
 func BenchmarkPaneUpdateRender(b *testing.B) {
 	for _, size := range [][2]int{{80, 24}, {160, 48}, {240, 72}} {
 		b.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(b *testing.B) {
-			p := &Pane{id: 1, grid: newStatusGrid(term.StatusIdle), cols: size[0], rows: size[1]}
+			p := &Pane{id: 1, grid: newStatusGrid(protocol.StatusIdle), cols: size[0], rows: size[1]}
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				_, _ = p.UpdateMessage()

@@ -14,7 +14,6 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
-	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -50,7 +49,7 @@ func TestPaneCloseWaitsForActiveRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := &closeAwareGrid{statusGrid: newStatusGrid(term.StatusIdle), drawing: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
+	g := &closeAwareGrid{statusGrid: newStatusGrid(protocol.StatusIdle), drawing: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{})}
 	p := &Pane{id: 1, pty: pty, grid: g, cols: 10, rows: 10, closed: make(chan struct{}), closeGrace: 10 * time.Millisecond}
 	rendered := make(chan struct{})
 	go func() {
@@ -92,7 +91,7 @@ func TestPaneCloseWaitsForActiveRender(t *testing.T) {
 
 func TestGenerationChangingDuringRenderIsRetried(t *testing.T) {
 	s, _, tp := twoIdlePanes(t)
-	g := &changingDrawGrid{newStatusGrid(term.StatusIdle)}
+	g := &changingDrawGrid{newStatusGrid(protocol.StatusIdle)}
 	s.panes[1].grid = g
 	s.broadcastPaneUpdates(context.Background(), false)
 	drainPaneUpdates(tp)
@@ -111,7 +110,7 @@ func (g *blockingDrawGrid) Draw(uv.Screen, image.Rectangle) {
 // protects input, focus, pane lifecycle, and shutdown bookkeeping.
 func TestPaneRenderDoesNotHoldServerMutex(t *testing.T) {
 	s, _, _ := twoIdlePanes(t)
-	g := &blockingDrawGrid{statusGrid: newStatusGrid(term.StatusIdle), started: make(chan struct{}), release: make(chan struct{})}
+	g := &blockingDrawGrid{statusGrid: newStatusGrid(protocol.StatusIdle), started: make(chan struct{}), release: make(chan struct{})}
 	s.panes[1].grid = g
 	done := make(chan struct{})
 	go func() {
@@ -161,7 +160,7 @@ func drainPaneUpdates(tp *transport.InProcChannel) []int {
 
 func twoIdlePanes(t *testing.T) (*Server, map[int]*statusGrid, *transport.InProcChannel) {
 	t.Helper()
-	s, grids := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	s, grids := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle})
 	return s, grids, s.transports[0].(*transport.InProcChannel)
 }
 
@@ -284,7 +283,7 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 // so without invalidating it no later tick would retry -- and the
 // snapshot in front of it may just have pruned or blanked that mirror.
 func TestDroppedForcedResendIsRetried(t *testing.T) {
-	s, _ := serverWithStatuses(t, map[int]term.PaneStatus{1: term.StatusIdle, 2: term.StatusIdle})
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle, 2: protocol.StatusIdle})
 	ctx := context.Background()
 	tp := transport.NewInProcChannel(4)
 	s.transports = []transport.Transport{tp}

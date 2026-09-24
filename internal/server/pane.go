@@ -279,7 +279,7 @@ func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 func (p *Pane) Title() string { return p.grid.Title() }
 
 // Status reports the current agent status of the pane.
-func (p *Pane) Status() term.PaneStatus { return p.grid.Status() }
+func (p *Pane) Status() protocol.PaneStatus { return p.grid.Status() }
 
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport.
 // It returns false if the pane began closing before rendering could start.

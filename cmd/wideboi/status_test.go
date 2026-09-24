@@ -58,10 +58,9 @@ func TestRunStatus(t *testing.T) {
 			{PaneID: 1, Width: 80, Height: 24},
 			{PaneID: 2, Width: 40, Height: 24},
 		},
-		FocusPaneID: 2,
-		PaneStatuses: map[int]string{
-			1: "done",
-			2: "working",
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusDone,
+			2: protocol.StatusWorking,
 		},
 		PaneTitles: map[int]string{
 			1: "vim",
@@ -86,8 +85,8 @@ func TestRunStatus(t *testing.T) {
 	if !strings.Contains(out, "1") || !strings.Contains(out, "vim") || !strings.Contains(out, "done") {
 		t.Errorf("expected pane 1 info in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "2") || !strings.Contains(out, "npm start") || !strings.Contains(out, "working") || !strings.Contains(out, "*") {
-		t.Errorf("expected pane 2 info in output (with focus *), got:\n%s", out)
+	if !strings.Contains(out, "2") || !strings.Contains(out, "npm start") || !strings.Contains(out, "working") {
+		t.Errorf("expected pane 2 info in output, got:\n%s", out)
 	}
 }
 
@@ -102,8 +101,7 @@ func TestRunStatusJSON(t *testing.T) {
 		Columns: []protocol.ColumnData{
 			{PaneID: 3, Width: 100, Height: 50},
 		},
-		FocusPaneID:  3,
-		PaneStatuses: map[int]string{3: "idle"},
+		PaneStatuses: map[int]protocol.PaneStatus{3: protocol.StatusIdle},
 		PaneTitles:   map[int]string{3: "bash"},
 	}
 
@@ -121,7 +119,7 @@ func TestRunStatusJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &parsed); err != nil {
 		t.Fatalf("failed to parse JSON output: %v\nOutput was:\n%s", err, buf.String())
 	}
-	if parsed.FocusPaneID != 3 || len(parsed.Columns) != 1 {
+	if len(parsed.Columns) != 1 || parsed.PaneStatuses[3] != protocol.StatusIdle {
 		t.Errorf("parsed JSON did not match expected structure: %+v", parsed)
 	}
 }

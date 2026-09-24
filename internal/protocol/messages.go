@@ -27,6 +27,33 @@ const (
 	VerbFocusLast
 )
 
+// PaneStatus represents the current state of a pane's process.
+type PaneStatus int
+
+const (
+	StatusIdle PaneStatus = iota
+	StatusWorking
+	StatusNeedsInput
+	StatusDone
+	StatusFailed
+)
+
+// Glyph returns a single-character representation of the status for display.
+func (s PaneStatus) Glyph() string {
+	switch s {
+	case StatusWorking:
+		return "»"
+	case StatusNeedsInput:
+		return "!"
+	case StatusDone:
+		return "✓"
+	case StatusFailed:
+		return "✗"
+	default:
+		return " "
+	}
+}
+
 // ColumnData describes a column's logical width and height.
 type ColumnData struct {
 	PaneID int
@@ -102,17 +129,11 @@ type MsgAttach struct {
 
 // MsgVerb is sent by the client to request a layout navigation or action.
 type MsgVerb struct {
-	Verb VerbType
-}
-
-// MsgFocusPane asks the server to focus a specific pane. A mouse click
-// names its target, unlike the relative focus verbs, so it cannot ride
-// on MsgVerb without giving every other verb a field it ignores.
-type MsgFocusPane struct {
+	Verb   VerbType
 	PaneID int
 }
 
-// MouseKind says which of uv's mouse event types a MsgMouse carries.
+// MouseKind identifies the kind of mouse event forwarded to a pane.
 type MouseKind int
 
 const (
@@ -198,14 +219,20 @@ func (m LayoutMode) String() string {
 // MsgStatusRequest is sent by a client to request a MsgLayoutSnapshot without altering layout or panes.
 type MsgStatusRequest struct{}
 
-// MsgLayoutSnapshot is sent by the server to update the client on columns, focus, and statuses. Placements and layout mode are the client's own (#47, #92).
+// MsgLayoutSnapshot broadcasts shared columns and statuses. Focus, placements,
+// and layout mode belong to each client.
 type MsgLayoutSnapshot struct {
 	Columns      []ColumnData
-	FocusPaneID  int
-	PaneStatuses map[int]string
+	PaneStatuses map[int]PaneStatus
 	// PaneTitles is each pane's terminal title, for chrome that wants
 	// to say what a pane is doing rather than show a sliver of it.
 	PaneTitles map[int]string
+}
+
+// MsgPaneCreated tells only the requesting client which pane its new-column
+// verb created. That client can focus it when the next snapshot arrives.
+type MsgPaneCreated struct {
+	PaneID int
 }
 
 // MsgPaneClosed notifies the client that a pane's process died or was reaped.

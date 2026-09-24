@@ -10,8 +10,8 @@ import (
 // added to messages.go belongs here.
 var wireTypes = []any{
 	MsgAttach{},
+	MsgStatusRequest{},
 	MsgVerb{},
-	MsgFocusPane{},
 	MsgMouse{},
 	MsgInput{},
 	MsgResize{},
@@ -19,6 +19,7 @@ var wireTypes = []any{
 	MsgShutdown{},
 	MsgDetach{},
 	MsgLayoutSnapshot{},
+	MsgPaneCreated{},
 	MsgPaneUpdate{},
 	MsgPaneClosed{},
 }
