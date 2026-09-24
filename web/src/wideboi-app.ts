@@ -5,6 +5,7 @@ import { WideboiClient } from './client';
 import { CELL_HEIGHT, measureCellWidth, PaneStore, selectionText, type CellPoint } from './pane-state';
 import { reconcileFocus } from './focus';
 import { WideboiPane } from './wideboi-pane';
+import { cardLayout } from './card-layout';
 import { sendKeyboardInput, sendTextInput } from './input';
 import { consumeLinkToken } from './token';
 import { MouseKind, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
@@ -49,9 +50,25 @@ export class WideboiApp extends LitElement {
       overflow-x: auto;
       overflow-y: hidden;
       scrollbar-width: thin;
+      scrollbar-gutter: stable;
       overscroll-behavior-x: contain;
       background: #1e1e1e;
     }
+    .pane-strip.cards {
+      position: relative;
+      overflow: hidden;
+    }
+    .pane-strip.cards wideboi-pane { position: absolute; top: 0; }
+    .card-count {
+      position: absolute;
+      bottom: 0;
+      z-index: 1000;
+      padding: 2px 5px;
+      background: #252526;
+      color: #ccc;
+      pointer-events: none;
+    }
+    .card-count.right { right: 0; }
 
     .toolbar {
       background: #252526;
@@ -179,12 +196,18 @@ export class WideboiApp extends LitElement {
   private selectedPane?: WideboiPane;
   private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
+  @state() private layoutMode: 'scroll' | 'cards' = 'scroll';
+  private cardFirst = 0;
+  private cardViewportWidth = 0;
+  private stripScrollLeft = 0;
 
   private focusPane(paneID: number) {
     if (!this.activePanes.includes(paneID)) return;
+    const previous = this.panePositions();
     if (paneID !== this.focusedPaneId) this.previousFocusId = this.focusedPaneId;
     this.focusedPaneId = paneID;
     void this.updateComplete.then(() => {
+      if (this.layoutMode === 'cards') this.animateReorder(previous);
       this.focusedPane()?.focusInput();
       this.revealFocus();
     });
@@ -196,6 +219,7 @@ export class WideboiApp extends LitElement {
   }
 
   private revealFocus() {
+    if (this.layoutMode === 'cards') return;
     const pane = this.focusedPane();
     if (!pane) return;
     pane.scrollIntoView({ block: 'nearest', inline: 'nearest',
@@ -244,7 +268,13 @@ export class WideboiApp extends LitElement {
   constructor() {
     super();
 
-    this.resizeObserver = new ResizeObserver(() => this.sendResizeIfChanged());
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.cardViewportWidth !== this.paneStrip.clientWidth) {
+        this.cardViewportWidth = this.paneStrip.clientWidth;
+        if (this.layoutMode === 'cards') this.requestUpdate();
+      }
+      this.sendResizeIfChanged();
+    });
   }
 
   firstUpdated() {
@@ -403,7 +433,8 @@ export class WideboiApp extends LitElement {
   private setupKeyboard() {
     document.addEventListener('keydown', (e) => {
       if (!this.connected || !this.client) return;
-      if (e.target instanceof HTMLInputElement) return; 
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement ||
+          e.target instanceof HTMLButtonElement) return;
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
       // Intercept the default prefix (ctrl+b) locally to drive verbs.
@@ -495,6 +526,10 @@ export class WideboiApp extends LitElement {
   }
 
   private setupMouse() {
+    this.paneStrip.addEventListener('scroll', () => {
+      if (this.layoutMode === 'cards' && this.paneStrip.scrollLeft) this.paneStrip.scrollLeft = 0;
+    }, { signal: this.listeners?.signal });
+
     this.paneStrip.addEventListener('pointerdown', (e) => {
       if (!this.connected || !this.client) return;
       const pane = this.eventPane(e);
@@ -611,15 +646,45 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  private handleLayoutSelect(e: Event) {
+    const mode = (e.target as HTMLSelectElement).value;
+    if (mode !== 'cards' && mode !== 'scroll') return;
+    const previous = this.panePositions();
+    if (mode === 'cards') {
+      this.stripScrollLeft = this.paneStrip.scrollLeft;
+      // Cancel a smooth focus reveal still in progress in the strip.
+      this.paneStrip.scrollTo({ left: 0, behavior: 'instant' });
+    }
+    this.layoutMode = mode;
+    void this.updateComplete.then(() => {
+      this.paneStrip.scrollTo({ left: mode === 'cards' ? 0 : this.stripScrollLeft, behavior: 'instant' });
+      this.animateReorder(previous);
+      const animations = Array.from(this.movement.values());
+      void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+        if (this.layoutMode === mode) this.revealFocus();
+      });
+    });
+  }
+
   render() {
+    const cards = this.layoutMode === 'cards';
+    const layout = cards ? cardLayout(this.columns, this.focusedPaneId,
+      Math.floor(this.cardViewportWidth / this.cellWidth), this.cardFirst) : undefined;
+    if (layout) this.cardFirst = layout.first;
+    const placements = new Map(layout?.placements.map(p => [p.paneId, p]));
     return html`
       ${this.connected ? html`
         <div class="toolbar">
-          <label>Focus Pane:</label>
-          <select @change=${this.handlePaneSelect}>
+          <label for="focus-pane">Focus Pane:</label>
+          <select id="focus-pane" @change=${this.handlePaneSelect}>
             ${repeat(this.activePanes, id => id, id => html`
               <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
             `)}
+          </select>
+          <label for="layout-mode">Layout:</label>
+          <select id="layout-mode" aria-label="Layout" @change=${this.handleLayoutSelect}>
+            <option value="scroll" .selected=${!cards}>Scroll</option>
+            <option value="cards" .selected=${cards}>Cards</option>
           </select>
           <span style="color: #666; margin-left: auto;">(Tip: Ctrl+B then left/right arrow to switch)</span>
         </div>
@@ -627,18 +692,24 @@ export class WideboiApp extends LitElement {
       <div class="terminal-shell">
         <div class="title">${this.paneTitles[this.focusedPaneId] ||
           (this.focusedPaneId ? `Pane ${this.focusedPaneId}` : '')}</div>
-        <div class="pane-strip">
-          ${repeat(this.columns, column => column.paneId, column => html`
+        <div class=${cards ? 'pane-strip cards' : 'pane-strip'}>
+          ${repeat(this.columns, column => column.paneId, column => {
+            const placement = placements.get(column.paneId);
+            return html`
             <wideboi-pane
-              style=${`width: ${column.width * this.cellWidth}px; --divider-width: ${this.cellWidth}px`}
+              style=${`width: ${column.width * this.cellWidth}px; --divider-width: ${cards ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
               .paneId=${column.paneId}
               .pane=${this.panes.get(column.paneId)}
               .focused=${column.paneId === this.focusedPaneId}
+              .cardMode=${cards}
+              .cardLabel=${`[${column.paneId}] ${this.paneTitles[column.paneId] || 'Terminal'}`}
               .running=${this.connected}
               .cellWidth=${this.cellWidth}
               aria-label=${`Pane ${column.paneId}`}
             ></wideboi-pane>
-          `)}
+          `; })}
+          ${cards && layout?.hiddenLeft ? html`<span class="card-count left">+${layout.hiddenLeft}</span>` : ''}
+          ${cards && layout?.hiddenRight ? html`<span class="card-count right">+${layout.hiddenRight}</span>` : ''}
         </div>
         <div class="status">${(() => {
           const fp = this.panes.get(this.focusedPaneId);

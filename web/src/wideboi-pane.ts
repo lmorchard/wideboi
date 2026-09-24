@@ -21,6 +21,25 @@ export class WideboiPane extends LitElement {
       border-right-color: #007fd4;
       box-shadow: inset 0 2px #007fd4;
     }
+    .card-label { display: none; }
+    :host([card-mode]:not([focused])) .card-label {
+      display: block;
+      position: absolute;
+      z-index: 1;
+      top: 0;
+      left: 0;
+      max-height: 100%;
+      padding: 4px 2px;
+      box-sizing: border-box;
+      writing-mode: vertical-rl;
+      overflow: hidden;
+      white-space: nowrap;
+      color: #ddd;
+      background: #303030;
+      border-right: 1px solid #666;
+      font: 12px sans-serif;
+      pointer-events: none;
+    }
     canvas {
       display: block;
       width: 100%;
@@ -35,6 +54,8 @@ export class WideboiPane extends LitElement {
   @property({ type: Number }) paneId = 0;
   @property({ attribute: false }) pane?: MsgPaneUpdate;
   @property({ type: Boolean, reflect: true }) focused = false;
+  @property({ type: Boolean, reflect: true, attribute: 'card-mode' }) cardMode = false;
+  @property() cardLabel = '';
   @property({ type: Boolean }) running = false;
   @property({ type: Number }) cellWidth = 1;
 
@@ -94,7 +115,7 @@ export class WideboiPane extends LitElement {
   clearSelection() { this.painter?.clearSelection(); }
   focusInput() { this.canvas.focus({ preventScroll: true }); }
 
-  render() { return html`<canvas tabindex=${this.focused ? 0 : -1}></canvas>`; }
+  render() { return html`<canvas tabindex=${this.focused ? 0 : -1}></canvas><span class="card-label">${this.cardLabel}</span>`; }
 }
 
 declare global {

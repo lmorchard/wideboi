@@ -208,6 +208,13 @@ for the next snapshot. For the pane selector, bind each option's `selected`
 property: setting the select's value before Lit removes an option can leave
 the browser displaying a different selection than client focus state.
 
+When a pane moves between absolute card positions and the flex strip, a FLIP
+animation temporarily transforms its bounding rectangle back to the old
+position. Calling `scrollIntoView` during that animation can decide the pane
+is already visible and leave it offscreen when the animation ends. Reveal the
+focused pane after the move animations settle, including when reduced motion
+skips them.
+
 ## Change-only pane updates require complete bookkeeping
 
 Before #85, every 33 ms frame resent every pane and repaired missed updates.
