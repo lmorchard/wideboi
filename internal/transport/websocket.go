@@ -2,10 +2,8 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"sync"
 	"time"
 
@@ -19,12 +17,6 @@ const (
 	webSocketPongTimeout  = 90 * time.Second
 	webSocketPingInterval = 30 * time.Second
 )
-
-// WSEnvelope represents the JSON payload format sent over WebSockets.
-type WSEnvelope struct {
-	Type    string          `json:"t"`
-	Payload json.RawMessage `json:"p"`
-}
 
 // WebSocketServerConn implements Transport for WebSocket client connections.
 type WebSocketServerConn struct {
@@ -81,25 +73,17 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 				return
 			}
 
-			payloadBytes, err := json.Marshal(msg)
+			// One binary frame per protobuf ServerMessage; WebSocket
+			// does the framing the Unix socket needs a length prefix for.
+			payload, err := protocol.MarshalServer(msg)
 			if err != nil {
 				wsConn.set("encoding WebSocket payload", err)
 				return
 			}
 
-			typeName := reflect.TypeOf(msg).Name()
-			if typeName == "" && reflect.TypeOf(msg).Kind() == reflect.Ptr {
-				typeName = reflect.TypeOf(msg).Elem().Name()
-			}
-
-			env := WSEnvelope{
-				Type:    typeName,
-				Payload: payloadBytes,
-			}
-
 			wsConn.mu.Lock()
 			_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
-			err = wsConn.conn.WriteJSON(env)
+			err = wsConn.conn.WriteMessage(websocket.BinaryMessage, payload)
 			wsConn.mu.Unlock()
 
 			if err != nil {
@@ -108,18 +92,6 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 			}
 		}
 	}
-}
-
-var clientTypes = map[string]func() any{
-	"MsgPaneResync": func() any { return &protocol.MsgPaneResync{} },
-	"MsgAttach":     func() any { return &protocol.MsgAttach{} },
-	"MsgVerb":       func() any { return &protocol.MsgVerb{} },
-	"MsgMouse":      func() any { return &protocol.MsgMouse{} },
-	"MsgInput":      func() any { return &protocol.MsgInput{} },
-	"MsgResize":     func() any { return &protocol.MsgResize{} },
-	"MsgScroll":     func() any { return &protocol.MsgScroll{} },
-	"MsgDetach":     func() any { return &protocol.MsgDetach{} },
-	"MsgShutdown":   func() any { return &protocol.MsgShutdown{} },
 }
 
 func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
@@ -136,8 +108,7 @@ func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			var env WSEnvelope
-			err := wsConn.conn.ReadJSON(&env)
+			kind, payload, err := wsConn.conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					wsConn.set("reading websocket", err)
@@ -145,19 +116,17 @@ func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 				return
 			}
 
-			factory, ok := clientTypes[env.Type]
-			if !ok {
-				slog.Warn("WebSocket received unknown message type", "type", env.Type)
+			// A frame we cannot decode is skipped, not fatal: one bad
+			// message should not drop a browser session.
+			if kind != websocket.BinaryMessage {
+				slog.Warn("WebSocket received non-binary frame", "type", kind)
 				continue
 			}
-
-			ptr := factory()
-			if err := json.Unmarshal(env.Payload, ptr); err != nil {
-				slog.Warn("WebSocket failed to unmarshal message payload", "type", env.Type, "err", err)
+			msg, err := protocol.UnmarshalClient(payload)
+			if err != nil {
+				slog.Warn("WebSocket failed to decode client message", "err", err)
 				continue
 			}
-
-			msg := reflect.ValueOf(ptr).Elem().Interface()
 
 			select {
 			case wsConn.ClientSend <- msg:

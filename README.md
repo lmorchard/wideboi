@@ -281,10 +281,33 @@ Flags:
     make check    # the gate: adds race detector, exit contract, smoke, attach (~50s)
     make race     # go test -race -count=1 ./..., on its own
     make smoke    # scripted acceptance cases, asserted on the pty wire
+    make proto    # regenerate the Go and TypeScript wire bindings
 
 `make check` runs its targets in parallel; `CHECK_JOBS=1` forces serial.
 
 `docs/LESSONS.md` is worth reading before changing anything.
+
+### Wire protocol
+
+`docs/PROTOCOL.md` describes the messages, the framing, and the update and
+patch rules in more detail.
+
+Both transports carry Protocol Buffers. The schema in
+`internal/protocol/wirepb/wideboi.proto` defines a `ClientMessage` and a
+`ServerMessage` envelope, each a `oneof` over the message types. Unix socket
+messages have a four-byte big-endian length prefix; WebSocket messages are one
+binary frame each.
+
+The Go code keeps its own structs in `internal/protocol` and converts them at
+the transport edge in `internal/protocol/codec.go`. When you add a field to a
+message, add it to the schema and the codec: `TestCodecRoundTripsEveryField`
+fails if the codec drops it. The browser uses the generated TypeScript types
+directly.
+
+The generated code is committed. After editing the schema, install
+[`buf`](https://buf.build/docs/installation), run `npm ci --prefix web`, then
+`make proto`. `protoc-gen-go` runs from `go.mod`, so it needs no install;
+the TypeScript generator (`@bufbuild/protoc-gen-es`) needs Node 22 or later.
 
 ## License
 

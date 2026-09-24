@@ -622,3 +622,27 @@ direction that no longer existed. Review caught it; `BuildBindings` now clears
 `HelpGroup`, `HelpKey` — check every consumer of the group,** not just the one
 the change is about. `internal/client/help.go` and `keys.BarItemsFor` are the
 two today.
+
+## On the wire, a missing field means zero — never "unchanged"
+
+Proto3 does not send zero values. A `false` bool, a `0`, an empty string or an
+all-zero style sub-message is simply absent, and it decodes as zero. So a
+`MsgPanePatch` that hides the cursor carries no `cursor_visible` at all.
+
+That is correct today only because patches are row-granular and their cursor
+and mouse fields always overwrite (`protocol.ApplyPanePatch`,
+`GridRenderer.handlePanePatch`). A future "only send what changed" design at
+field level would read absence as "unchanged" and leave a hidden cursor drawn.
+Such a field needs explicit presence (`optional` in the schema). A test in both
+Go (`TestPatchHidingTheCursorDecodesAsHidden`) and the browser pins today's
+behaviour.
+
+Two related traps from the same change:
+
+- **The Go codec is hand-written, so a new struct field can vanish on the wire**
+  while every in-process test passes. `TestCodecRoundTripsEveryField` fills
+  every exported field with a non-zero value and requires an exact round trip;
+  `TestWireSchemaCoversEveryWireType` ties the schema's oneofs to `wireTypes`.
+- **Vitest does not typecheck.** `npm test` passes a web test with a type
+  error; `make check` fails it, because the `web/dist` build runs `tsc` over the
+  tests too. Run `make check`, not just `web-test`, after changing web types.

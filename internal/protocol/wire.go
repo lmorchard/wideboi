@@ -8,15 +8,18 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// This file holds the concrete, gob-safe mirrors of the two upstream
-// types a cell update needs: uv.Style and uv.Key.
+// This file holds the concrete mirrors of the two upstream types a cell
+// update needs: uv.Style and uv.Key. They are the in-process model;
+// codec.go maps them to the protobuf wire schema.
 //
 // Neither could travel as-is. uv.Style's Fg, Bg and UnderlineColor are
-// color.Color *interfaces*, and uv.KeyEvent is an interface too. gob
-// refuses to encode an interface value whose concrete type has not been
-// registered, and the refusal is an error on a write pump, not a panic:
-// before this existed, the first coloured cell a child emitted killed
-// the socket and the attached client exited silently.
+// color.Color *interfaces*, and uv.KeyEvent is an interface too. The
+// socket used to carry gob, which refuses to encode an interface value
+// whose concrete type has not been registered, and the refusal is an
+// error on a write pump, not a panic: before this existed, the first
+// coloured cell a child emitted killed the socket and the attached client
+// exited silently. A schema-driven codec has the same need -- it can
+// only map declared, concrete fields.
 //
 // Registering the implementations instead of mirroring them was the
 // obvious alternative and the wrong one. The set is open-ended --

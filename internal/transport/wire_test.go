@@ -2,7 +2,6 @@ package transport
 
 import (
 	"bytes"
-	"encoding/gob"
 	"image/color"
 	"reflect"
 	"testing"
@@ -12,21 +11,29 @@ import (
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
-// roundtrip encodes v through the same interface-valued gob path the
-// socket pumps use -- Encode(&msg) where msg is a ServerMessage /
-// ClientMessage -- and decodes it back. Encoding the concrete type
-// directly would not exercise gob's interface machinery, which is
-// exactly where the attach-killing defect lived.
+// roundtrip sends v through the same path the socket pumps use -- the
+// codec, then a length-prefixed frame -- and decodes it back. Client
+// messages go through the client envelope, everything else the server's.
 func roundtrip(t *testing.T, v any) any {
 	t.Helper()
-	var buf bytes.Buffer
-	var out any
-
-	var in ServerMessage = v
-	if err := gob.NewEncoder(&buf).Encode(&in); err != nil {
+	marshal, unmarshal := protocol.MarshalClient, protocol.UnmarshalClient
+	if _, err := marshal(v); err != nil {
+		marshal, unmarshal = protocol.MarshalServer, protocol.UnmarshalServer
+	}
+	payload, err := marshal(v)
+	if err != nil {
 		t.Fatalf("encode %T: %v", v, err)
 	}
-	if err := gob.NewDecoder(&buf).Decode(&out); err != nil {
+	var wire bytes.Buffer
+	if err := writeFrame(&wire, payload); err != nil {
+		t.Fatalf("frame %T: %v", v, err)
+	}
+	framed, err := readFrame(&wire)
+	if err != nil {
+		t.Fatalf("read frame %T: %v", v, err)
+	}
+	out, err := unmarshal(framed)
+	if err != nil {
 		t.Fatalf("decode %T: %v", v, err)
 	}
 	return out

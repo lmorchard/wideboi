@@ -4,7 +4,7 @@ import { WideboiClient } from './client';
 import { GridRenderer } from './renderer';
 import { sendKeyboardInput, sendTextInput } from './input';
 import { consumeLinkToken } from './token';
-import type { WSEnvelope } from './protocol';
+import { MouseKind, PaneStatus, VerbType } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 const linkToken = consumeLinkToken(window.location, window.history);
 
@@ -143,7 +143,7 @@ export class WideboiApp extends LitElement {
   private inPrefixMode = false;
   private previousFocusId = 0;
   private pendingFocusId = 0;
-  private paneStatuses: Record<number, number> = {};
+  private paneStatuses: Record<number, PaneStatus> = {};
   private listeners?: AbortController;
   private pointer?: { id: number; paneID: number; placement: import('./protocol').PlacementData; button: number; tracking: boolean; focusOnClick: boolean; dragged: boolean; startX: number; startY: number };
 
@@ -165,7 +165,7 @@ export class WideboiApp extends LitElement {
         
         if (this.client && this.connected) {
             const size = this.renderer.getGridSize();
-            this.client.send('MsgResize', { Cols: size.cols, Rows: size.rows });
+            this.client.send({ case: 'resize', value: { cols: size.cols, rows: size.rows } });
         }
       }
     });
@@ -255,31 +255,41 @@ export class WideboiApp extends LitElement {
       this.renderer?.stop();
       this.errorMsg = 'Disconnected from server.';
     }
-    client.onMessage = (env: WSEnvelope) => {
+    client.onMessage = (message) => {
       if (this.client !== client || !this.renderer) return;
 
-      if (env.t === 'MsgLayoutSnapshot') {
-        this.renderer.handleLayoutSnapshot(env.p);
-        this.activePanes = env.p.Columns?.map((c: any) => c.PaneID) || [];
-        this.focusedPaneId = this.renderer.getFocusedPaneId();
-        if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
-          this.focusPane(this.pendingFocusId);
-          this.pendingFocusId = 0;
+      switch (message.msg.case) {
+        case 'layoutSnapshot': {
+          const snapshot = message.msg.value;
+          this.renderer.handleLayoutSnapshot(snapshot);
+          this.activePanes = snapshot.columns.map(c => c.paneId);
+          this.focusedPaneId = this.renderer.getFocusedPaneId();
+          if (this.pendingFocusId && this.activePanes.includes(this.pendingFocusId)) {
+            this.focusPane(this.pendingFocusId);
+            this.pendingFocusId = 0;
+          }
+          if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
+          this.paneStatuses = snapshot.paneStatuses;
+          this.paneTitles = snapshot.paneTitles;
+          break;
         }
-        if (!this.activePanes.includes(this.previousFocusId)) this.previousFocusId = 0;
-        this.paneStatuses = env.p.PaneStatuses || {};
-        this.paneTitles = env.p.PaneTitles || {};
-      } else if (env.t === 'MsgPaneCreated') {
-        this.pendingFocusId = env.p.PaneID;
-      } else if (env.t === 'MsgPaneUpdate') {
-        this.renderer.handlePaneUpdate(env.p);
-      } else if (env.t === 'MsgPanePatch') {
-        if (!this.renderer.handlePanePatch(env.p)) {
-          client.send('MsgPaneResync', { PaneID: env.p.PaneID });
+        case 'paneCreated':
+          this.pendingFocusId = message.msg.value.paneId;
+          break;
+        case 'paneUpdate':
+          this.renderer.handlePaneUpdate(message.msg.value);
+          break;
+        case 'panePatch':
+          if (!this.renderer.handlePanePatch(message.msg.value)) {
+            client.send({ case: 'paneResync', value: { paneId: message.msg.value.paneId } });
+          }
+          break;
+        case 'paneClosed': {
+          const closedId = message.msg.value.paneId;
+          this.renderer.handlePaneClosed(closedId);
+          this.activePanes = this.activePanes.filter(id => id !== closedId);
+          break;
         }
-      } else if (env.t === 'MsgPaneClosed') {
-        this.renderer.handlePaneClosed(env.p.PaneID);
-        this.activePanes = this.activePanes.filter(id => id !== env.p.PaneID);
       }
     };
 
@@ -293,14 +303,13 @@ export class WideboiApp extends LitElement {
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
       // Intercept the default prefix (ctrl+b) locally to drive verbs.
-      // 1 = VerbFocusLeft, 2 = VerbFocusRight, 3 = VerbNewColumn, 5 = VerbKillPane
       if (e.ctrlKey && e.key === 'b') {
         this.inPrefixMode = true;
         e.preventDefault();
         return;
       }
       if (this.inPrefixMode) {
-        let verb = 0;
+        let verb = VerbType.UNSPECIFIED;
         // Handle normal key presses and also handle if Ctrl is held down while pressing the key
         const key = e.key.toLowerCase();
         
@@ -312,48 +321,50 @@ export class WideboiApp extends LitElement {
         }
 
         switch (key) {
-          case 'h': case 'arrowleft': verb = 1; break;  // FocusLeft
-          case 'l': case 'arrowright': verb = 2; break; // FocusRight
-          case 'n': verb = 3; break;  // NewColumn
-          case 'w': verb = 4; break;  // CycleWidth
-          case 'x': verb = 5; break;  // KillPane
-          case 'a': verb = 6; break;  // SmartJump
-          case 'p': verb = 8; break;  // GrowWidth
-          case 'o': verb = 9; break;  // ShrinkWidth
-          case 'y': verb = 10; break; // MoveLeft
-          case 'u': verb = 11; break; // MoveRight
-          case 'tab': verb = 12; break; // FocusLast
+          case 'h': case 'arrowleft': verb = VerbType.FOCUS_LEFT; break;
+          case 'l': case 'arrowright': verb = VerbType.FOCUS_RIGHT; break;
+          case 'n': verb = VerbType.NEW_COLUMN; break;
+          case 'w': verb = VerbType.CYCLE_WIDTH; break;
+          case 'x': verb = VerbType.KILL_PANE; break;
+          case 'a': verb = VerbType.SMART_JUMP; break;
+          case 'p': verb = VerbType.GROW_WIDTH; break;
+          case 'o': verb = VerbType.SHRINK_WIDTH; break;
+          case 'y': verb = VerbType.MOVE_LEFT; break;
+          case 'u': verb = VerbType.MOVE_RIGHT; break;
+          case 'tab': verb = VerbType.FOCUS_LAST; break;
         }
         
-        if (verb > 0) {
+        if (verb !== VerbType.UNSPECIFIED) {
           const index = this.activePanes.indexOf(this.focusedPaneId);
-          if (verb === 1 && index > 0) this.focusPane(this.activePanes[index - 1]);
-          else if (verb === 2 && index >= 0 && index < this.activePanes.length - 1) this.focusPane(this.activePanes[index + 1]);
-          else if (verb === 12) this.focusPane(this.previousFocusId);
-          else if (verb === 6) {
-            const rank = (status: number) => status === 4 ? 3 : status === 3 ? 2 : status === 2 ? 1 : 0;
+          if (verb === VerbType.FOCUS_LEFT && index > 0) this.focusPane(this.activePanes[index - 1]);
+          else if (verb === VerbType.FOCUS_RIGHT && index >= 0 && index < this.activePanes.length - 1) this.focusPane(this.activePanes[index + 1]);
+          else if (verb === VerbType.FOCUS_LAST) this.focusPane(this.previousFocusId);
+          else if (verb === VerbType.SMART_JUMP) {
+            const rank = (status: PaneStatus | undefined) =>
+              status === PaneStatus.FAILED ? 3 : status === PaneStatus.DONE ? 2 : status === PaneStatus.NEEDS_INPUT ? 1 : 0;
             const target = this.activePanes.reduce((best, id) => {
               const score = rank(this.paneStatuses[id]);
               return score > rank(this.paneStatuses[best]) ||
                 (score > 0 && score === rank(this.paneStatuses[best]) && id < best) ? id : best;
             }, 0);
             if (target) this.focusPane(target);
-          } else if (![1, 2, 6, 12].includes(verb)) {
-            this.client.send('MsgVerb', { Verb: verb, PaneID: this.focusedPaneId });
+          } else if (![VerbType.FOCUS_LEFT, VerbType.FOCUS_RIGHT, VerbType.SMART_JUMP, VerbType.FOCUS_LAST].includes(verb)) {
+            this.client.send({ case: 'verb', value: { verb, paneId: this.focusedPaneId } });
           }
           
           // If they held Ctrl while pressing the key (e.g. Ctrl-b, then held Ctrl and pressed 'l'),
           // stay in prefix mode so they can repeat it.
           // Note: KillPane ('x') does not repeat in the CLI.
-          const isRepeatable = (verb === 1 || verb === 2 || verb === 8 || verb === 9 || verb === 10 || verb === 11);
+          const isRepeatable = [VerbType.FOCUS_LEFT, VerbType.FOCUS_RIGHT, VerbType.GROW_WIDTH,
+            VerbType.SHRINK_WIDTH, VerbType.MOVE_LEFT, VerbType.MOVE_RIGHT].includes(verb);
           if (!(e.ctrlKey && isRepeatable)) {
              this.inPrefixMode = false;
           }
           
         } else if (key === 'j') {
-          this.client.send('MsgScroll', { PaneID: this.renderer.getFocusedPaneId(), Delta: -10 });
+          this.client.send({ case: 'scroll', value: { paneId: this.renderer.getFocusedPaneId(), delta: -10 } });
         } else if (key === 'k') {
-          this.client.send('MsgScroll', { PaneID: this.renderer.getFocusedPaneId(), Delta: 10 });
+          this.client.send({ case: 'scroll', value: { paneId: this.renderer.getFocusedPaneId(), delta: 10 } });
         } else {
            // Unknown key breaks out of prefix mode
            this.inPrefixMode = false;
@@ -395,7 +406,7 @@ export class WideboiApp extends LitElement {
       };
       this.canvas.setPointerCapture(e.pointerId);
       this.renderer.clearSelection();
-      if (this.pointer.tracking) this.sendPointerMouse(0, e);
+      if (this.pointer.tracking) this.sendPointerMouse(MouseKind.PRESS, e);
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
@@ -404,7 +415,7 @@ export class WideboiApp extends LitElement {
       if (!press || press.id !== e.pointerId || !this.renderer) return;
       const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
       if (x !== press.startX || y !== press.startY) press.dragged = true;
-      if (press.tracking) this.sendPointerMouse(2, e);
+      if (press.tracking) this.sendPointerMouse(MouseKind.MOTION, e);
       else if (press.button === 1) {
         const start = this.pointerCell(press.startX, press.startY, press.placement);
         const end = this.pointerCell(x, y, press.placement);
@@ -415,7 +426,7 @@ export class WideboiApp extends LitElement {
 
     const release = (e: PointerEvent) => {
       if (!this.pointer || this.pointer.id !== e.pointerId) return;
-      if (this.pointer.tracking) this.sendPointerMouse(1, e);
+      if (this.pointer.tracking) this.sendPointerMouse(MouseKind.RELEASE, e);
       else if (this.renderer) {
         if (e.type === 'pointerup' && this.pointer.focusOnClick && !this.pointer.dragged) {
           this.renderer.clearSelection();
@@ -445,22 +456,22 @@ export class WideboiApp extends LitElement {
         // In MsgScroll, Delta > 0 is up (older), Delta < 0 is down (newer).
         // A standard wheel step is often 3 lines.
         const delta = e.deltaY > 0 ? -3 : 3;
-        this.client.send('MsgScroll', { PaneID: hit.paneID, Delta: delta });
+        this.client.send({ case: 'scroll', value: { paneId: hit.paneID, delta } });
       }
     }, { passive: false, signal: this.listeners?.signal });
   }
 
-  private sendPointerMouse(kind: number, e: PointerEvent) {
+  private sendPointerMouse(kind: MouseKind, e: PointerEvent) {
     const press = this.pointer;
     if (!press || !this.client || !this.renderer || !this.connected) return;
     const { x, y } = this.renderer.pixelsToCells(e.clientX, e.clientY);
     const p = press.placement;
     const { x: localX, y: localY } = this.pointerCell(x, y, p);
-    this.client.send('MsgMouse', {
-      PaneID: press.paneID, Kind: kind, X: localX, Y: localY,
-      Button: press.button,
-      Mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
-    });
+    this.client.send({ case: 'mouse', value: {
+      paneId: press.paneID, kind, x: localX, y: localY,
+      button: press.button,
+      mod: (e.shiftKey ? 1 : 0) | (e.altKey ? 2 : 0) | (e.ctrlKey ? 4 : 0)
+    } });
   }
 
   private pointerCell(x: number, y: number, p: import('./protocol').PlacementData) {
@@ -473,7 +484,7 @@ export class WideboiApp extends LitElement {
   private sendAttach() {
      if (!this.renderer || !this.client) return;
      const size = this.renderer.getGridSize();
-     this.client.send('MsgAttach', { Cols: size.cols, Rows: size.rows });
+     this.client.send({ case: 'attach', value: { cols: size.cols, rows: size.rows } });
   }
 
   private handleUrlChange(e: Event) {

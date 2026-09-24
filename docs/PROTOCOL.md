@@ -1,0 +1,169 @@
+# Wire protocol
+
+This document describes how a wideboi client and the wideboi server exchange
+messages. It is written in Simplified Technical English.
+
+## 1. Overview
+
+The server runs the terminal panes. A client shows the panes and sends user
+input to the server.
+
+There are two types of client:
+
+- The terminal client (`wideboi attach`). It connects through a Unix socket.
+- The web client. It connects through a WebSocket.
+
+Both clients use the same messages. The messages are Protocol Buffers
+(protobuf). The schema is `internal/protocol/wirepb/wideboi.proto`.
+
+## 2. Envelopes
+
+Each message goes in an envelope. There are two envelopes:
+
+- `ClientMessage` holds one message from a client to the server.
+- `ServerMessage` holds one message from the server to a client.
+
+Each envelope is a protobuf `oneof`. It holds exactly one message.
+
+## 3. Messages
+
+### 3.1 Client to server
+
+| Message | Purpose |
+|---|---|
+| `MsgAttach` | Connect to the session. Gives the client size. If the session has no panes, the server starts them. |
+| `MsgResize` | Gives a new client size. |
+| `MsgVerb` | Asks for an action, for example "new column" or "kill pane". |
+| `MsgInput` | Sends a key or text to a pane. |
+| `MsgMouse` | Sends a mouse event to a pane. |
+| `MsgScroll` | Scrolls a pane. |
+| `MsgPaneResync` | Asks for a full update of one pane. See section 5. |
+| `MsgStatusRequest` | Asks for a layout snapshot. `wideboi status` uses it. |
+| `MsgDetach` | Disconnects this client. The session continues. |
+| `MsgShutdown` | Stops the session. |
+
+### 3.2 Server to client
+
+| Message | Purpose |
+|---|---|
+| `MsgLayoutSnapshot` | Gives the columns, the pane statuses, and the pane titles. |
+| `MsgPaneCreated` | Tells one client that its `MsgVerb` made a new pane. |
+| `MsgPaneUpdate` | Gives the full contents of one pane. |
+| `MsgPanePatch` | Gives the changed rows of one pane. |
+| `MsgPaneClosed` | Tells the client that a pane closed. The server does not send it at this time. |
+
+Each client keeps its own focus and layout. The server does not send them.
+
+## 4. Transports
+
+### 4.1 Unix socket
+
+A Unix socket is a byte stream. Thus, each message has a frame:
+
+1. A 4-byte length, big-endian.
+2. The protobuf envelope. Its length is the value in step 1.
+
+The maximum frame size is 64 MiB. The code is in
+`internal/transport/frame.go`.
+
+### 4.2 WebSocket
+
+Each WebSocket message holds one envelope as a binary frame. The WebSocket
+does the framing, so there is no length prefix.
+
+If a web client sends a message that is larger than 1 MiB, the server closes
+the connection. The server sends a ping each 30 seconds.
+
+## 5. Pane updates and patches
+
+Each pane has a generation number. The number increases when the pane
+contents change.
+
+The server sends a `MsgPaneUpdate` in these conditions:
+
+- The client does not have the pane yet.
+- The pane size changed.
+- The server sent a `MsgLayoutSnapshot`. Each snapshot is followed by a full
+  update of each pane.
+- The client sent `MsgPaneResync`.
+- Half or more of the rows changed.
+
+In other conditions, the server sends a `MsgPanePatch`. A patch holds:
+
+- The generation that it changes (`base_generation`).
+- The new generation.
+- Each changed row, complete.
+- The cursor position, the cursor visibility, and the mouse mode.
+
+The client applies a patch only if `base_generation` is the same as the
+generation that it has. If it is not the same, the client:
+
+1. Deletes its copy of the pane.
+2. Sends `MsgPaneResync`.
+
+The server then sends a `MsgPaneUpdate` for that pane.
+
+For more data about patches, see `docs/partial-pane-updates.md`. That document
+gives measurements for the earlier JSON encoding.
+
+## 6. A missing field is zero
+
+Protobuf does not send a field that has its zero value. For example, it does
+not send `false`, `0`, an empty string, or an empty style. The receiver reads
+a missing field as zero.
+
+A missing field never means "no change". This is correct because a patch
+always replaces complete rows. Also, a patch always gives the cursor and mouse
+fields.
+
+If you add a field that must mean "no change" when it is missing, use
+`optional` in the schema.
+
+## 7. Errors
+
+On the Unix socket:
+
+- If the peer closes the connection, this is a clean close. This is also
+  true in the middle of a frame.
+- If a complete frame does not decode, this is an error. The connection
+  stops. `wideboi attach` shows the error.
+
+On the WebSocket:
+
+- If a message does not decode, the server writes a warning to the log. The
+  server ignores the message. The connection continues.
+- If a message is not binary, the server does the same.
+
+## 8. The Go code and the web code
+
+The Go code does not use the generated types in the server or the client. It
+uses its own structs in `internal/protocol`. The file
+`internal/protocol/codec.go` converts between the structs and the generated
+types. The conversion occurs only in the transports.
+
+The web client uses the generated TypeScript types directly. Generation
+numbers are `bigint` in TypeScript.
+
+## 9. How to change the protocol
+
+To add a field or a message:
+
+1. Change `internal/protocol/wirepb/wideboi.proto`.
+2. Do `make proto`. This makes the Go and TypeScript files again.
+3. Change the Go struct in `internal/protocol`.
+4. Change `internal/protocol/codec.go`.
+5. For a new message, add it to `wireTypes` in
+   `internal/protocol/wire_test.go`.
+6. Do `make check`.
+
+The tests find these errors:
+
+- `TestCodecRoundTripsEveryField` fails if the codec does not convert a field.
+- `TestWireSchemaCoversEveryWireType` fails if the schema and `wireTypes`
+  have a different number of messages.
+- `TestEnumsMatchWireSchema` fails if an enum value in Go is different from
+  the schema.
+
+`make proto` needs `buf` and Node 22 or later. Do `npm ci --prefix web` first.
+The server and the clients must use the same wideboi version. The protocol
+has no version negotiation.

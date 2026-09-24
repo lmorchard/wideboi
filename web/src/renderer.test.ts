@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GridRenderer } from './renderer';
-import type { MsgLayoutSnapshot, MsgPanePatch, MsgPaneUpdate } from './protocol';
+import { create } from '@bufbuild/protobuf';
+import {
+  CellDataSchema, LineDataSchema, MsgLayoutSnapshotSchema, MsgPanePatchSchema, MsgPaneUpdateSchema,
+  type MsgPaneUpdate,
+} from './gen/internal/protocol/wirepb/wideboi_pb';
 
 describe('GridRenderer frame scheduling', () => {
   const frames = new Map<number, FrameRequestCallback>();
@@ -54,13 +58,8 @@ describe('GridRenderer frame scheduling', () => {
     return new GridRenderer(canvas);
   };
 
-  const layout: MsgLayoutSnapshot = {
-    Columns: [], PaneStatuses: {}, PaneTitles: {},
-  };
-  const pane: MsgPaneUpdate = {
-    PaneID: 1, Generation: 1, Cols: 1, Rows: 1, Lines: [], CursorX: 0, CursorY: 0,
-    CursorVisible: false, MouseTracking: false,
-  };
+  const layout = create(MsgLayoutSnapshotSchema);
+  const pane = create(MsgPaneUpdateSchema, { paneId: 1, generation: 1n, cols: 1, rows: 1 });
 
   it('draws once for a burst and stays idle until another change', () => {
     const r = renderer();
@@ -101,21 +100,20 @@ describe('GridRenderer frame scheduling', () => {
   it('uses wire cell indexes after a wide glyph and forgets closed panes', () => {
     const r = renderer();
     r.resize(80, 80);
-    r.handleLayoutSnapshot({
-      Columns: [{ PaneID: 1, Width: 10, Height: 3 }],
-      PaneStatuses: {}, PaneTitles: {}
-    });
-    const blank = { Content: ' ', Width: 1, Style: undefined as never };
-    r.handlePaneUpdate({
-      PaneID: 1, Generation: 1, Cols: 10, Rows: 3,
-      Lines: [[
-        { Content: '界', Width: 2, Style: undefined as never },
+    r.handleLayoutSnapshot(create(MsgLayoutSnapshotSchema, {
+      columns: [{ paneId: 1, width: 10, height: 3 }],
+    }));
+    const blank = { content: ' ', width: 1 };
+    r.handlePaneUpdate(create(MsgPaneUpdateSchema, {
+      paneId: 1, generation: 1n, cols: 10, rows: 3,
+      lines: [{ cells: [
+        { content: '界', width: 2 },
         blank,
-        { Content: 'B', Width: 1, Style: undefined as never },
+        { content: 'B', width: 1 },
         ...Array(7).fill(blank)
-      ]],
-      CursorX: 0, CursorY: 0, CursorVisible: false, MouseTracking: true
-    });
+      ] }],
+      mouseTracking: true
+    }));
     expect(r.mouseTracking(1)).toBe(true);
     r.setSelection(1, { x: 0, y: 0 }, { x: 2, y: 0 });
     expect(r.selectionText()).toBe('界B');
@@ -132,10 +130,9 @@ describe('GridRenderer frame scheduling', () => {
   it('crops scroll placements at the source column when focus moves', () => {
     const r = renderer();
     r.resize(80, 80);
-    r.handleLayoutSnapshot({
-      Columns: [{ PaneID: 1, Width: 8, Height: 3 }, { PaneID: 2, Width: 8, Height: 3 }],
-      PaneStatuses: {}, PaneTitles: {}
-    });
+    r.handleLayoutSnapshot(create(MsgLayoutSnapshotSchema, {
+      columns: [{ paneId: 1, width: 8, height: 3 }, { paneId: 2, width: 8, height: 3 }],
+    }));
     r.setFocusedPaneId(2);
     expect(r.getPaneHit(0, 1).paneID).toBe(1);
     expect(r.getPaneHit(2, 1).paneID).toBe(2);
@@ -144,27 +141,36 @@ describe('GridRenderer frame scheduling', () => {
 
   it('applies complete changed rows and rejects a stale patch', () => {
     const r = renderer();
-    const cell = (Content: string) => ({ Content, Width: 1, Style: {
-      Fg: { Kind: 0, Index: 0, R: 0, G: 0, B: 0, A: 0 },
-      Bg: { Kind: 0, Index: 0, R: 0, G: 0, B: 0, A: 0 },
-      UnderlineColor: { Kind: 0, Index: 0, R: 0, G: 0, B: 0, A: 0 },
-      Underline: 0, Attrs: 0,
-    } });
-    const full: MsgPaneUpdate = { ...pane, Cols: 2, Rows: 4,
-      Lines: Array.from({ length: 4 }, () => [cell(' '), cell(' ')]) };
+    // No style: the codec omits a zero style, so absence must render as default.
+    const cell = (content: string) => create(CellDataSchema, { content, width: 1 });
+    const row = (...cells: string[]) => create(LineDataSchema, { cells: cells.map(cell) });
+    const full = create(MsgPaneUpdateSchema, { ...pane, cols: 2, rows: 4,
+      lines: Array.from({ length: 4 }, () => row(' ', ' ')) });
     r.handlePaneUpdate(full);
-    const patch: MsgPanePatch = { PaneID: 1, Cols: 2, Rows: 4,
-      BaseGeneration: 1, Generation: 2, ChangedRows: [{ Y: 1, Cells: [cell('X'), cell(' ')] }],
-      CursorX: 1, CursorY: 1, CursorVisible: true, MouseTracking: true };
+    const patch = create(MsgPanePatchSchema, { paneId: 1, cols: 2, rows: 4,
+      baseGeneration: 1n, generation: 2n, changedRows: [{ y: 1, cells: [cell('X'), cell(' ')] }],
+      cursorX: 1, cursorY: 1, cursorVisible: true, mouseTracking: true });
     expect(r.handlePanePatch(patch)).toBe(true);
     const panes = (r as unknown as { panes: Map<number, MsgPaneUpdate> }).panes;
-    expect(panes.get(1)?.Lines[1][0].Content).toBe('X');
-    expect(panes.get(1)?.Lines[0]).toEqual(full.Lines[0]);
-    expect(panes.get(1)?.CursorVisible).toBe(true);
-    expect(panes.get(1)?.MouseTracking).toBe(true);
-    expect(r.handlePanePatch({ ...patch, Generation: 3 })).toBe(false);
+    expect(panes.get(1)?.lines[1].cells[0].content).toBe('X');
+    expect(panes.get(1)?.lines[0]).toEqual(full.lines[0]);
+    expect(panes.get(1)?.cursorVisible).toBe(true);
+    expect(panes.get(1)?.mouseTracking).toBe(true);
+    expect(r.handlePanePatch({ ...patch, generation: 3n })).toBe(false);
     expect(panes.has(1)).toBe(false);
-    r.handlePaneUpdate({ ...full, Generation: 3 });
-    expect(panes.get(1)?.Generation).toBe(3);
+    r.handlePaneUpdate({ ...full, generation: 3n });
+    expect(panes.get(1)?.generation).toBe(3n);
+  });
+
+  it('treats an absent cursor field in a patch as hidden, not unchanged', () => {
+    const r = renderer();
+    r.handlePaneUpdate(create(MsgPaneUpdateSchema, { paneId: 1, generation: 1n, cols: 1, rows: 1,
+      lines: [{ cells: [{ content: ' ', width: 1 }] }], cursorVisible: true, mouseTracking: true }));
+    // Proto3 omits false, so a patch that hides the cursor carries no field.
+    const hide = create(MsgPanePatchSchema, { paneId: 1, cols: 1, rows: 1, baseGeneration: 1n, generation: 2n });
+    expect(r.handlePanePatch(hide)).toBe(true);
+    const panes = (r as unknown as { panes: Map<number, MsgPaneUpdate> }).panes;
+    expect(panes.get(1)?.cursorVisible).toBe(false);
+    expect(panes.get(1)?.mouseTracking).toBe(false);
   });
 });

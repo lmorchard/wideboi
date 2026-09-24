@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"encoding/gob"
 	"errors"
 	"fmt"
 	"io"
@@ -50,7 +49,7 @@ func (c *connErr) Err() error {
 
 // isCleanClose reports whether err is an ordinary end-of-connection
 // rather than something worth telling the user about. A peer that
-// detaches closes its socket, which surfaces as EOF on our decoder and
+// detaches closes its socket, which surfaces as EOF on our frame reader and
 // as ErrClosed on any write that races it; neither is a fault.
 func isCleanClose(err error) bool {
 	// EPIPE and ECONNRESET belong here with EOF: they are what a write
@@ -64,27 +63,6 @@ func isCleanClose(err error) bool {
 		errors.Is(err, syscall.EPIPE) ||
 		errors.Is(err, syscall.ECONNRESET) ||
 		errors.Is(err, context.Canceled)
-}
-
-func init() {
-	gob.Register(protocol.ColumnData{})
-	gob.Register(protocol.CellData{})
-	gob.Register(protocol.LineData{})
-	gob.Register(protocol.MsgPaneUpdate{})
-	gob.Register(protocol.MsgPanePatch{})
-	gob.Register(protocol.MsgPaneResync{})
-	gob.Register(protocol.MsgAttach{})
-	gob.Register(protocol.MsgVerb{})
-	gob.Register(protocol.MsgMouse{})
-	gob.Register(protocol.MsgInput{})
-	gob.Register(protocol.MsgResize{})
-	gob.Register(protocol.MsgScroll{})
-	gob.Register(protocol.MsgShutdown{})
-	gob.Register(protocol.MsgDetach{})
-	gob.Register(protocol.MsgStatusRequest{})
-	gob.Register(protocol.MsgLayoutSnapshot{})
-	gob.Register(protocol.MsgPaneCreated{})
-	gob.Register(protocol.MsgPaneClosed{})
 }
 
 // ErrSessionTaken means another live server holds the session's lock.
@@ -205,8 +183,6 @@ type ServerSocketConn struct {
 	conn       net.Conn
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
-	encoder    *gob.Encoder
-	decoder    *gob.Decoder
 	// closed is shut by Close, so a SendServer blocked on a full
 	// queue is released rather than waiting on a write pump that has
 	// stopped draining.
@@ -223,8 +199,6 @@ func NewServerSocketConn(conn net.Conn, bufSize int) *ServerSocketConn {
 		conn:       conn,
 		ClientSend: make(chan ClientMessage, bufSize),
 		ServerSend: make(chan ServerMessage, bufSize),
-		encoder:    gob.NewEncoder(conn),
-		decoder:    gob.NewDecoder(conn),
 		closed:     make(chan struct{}),
 	}
 }
@@ -247,7 +221,11 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if err := sc.encoder.Encode(&msg); err != nil {
+			payload, err := protocol.MarshalServer(msg)
+			if err == nil {
+				err = writeFrame(sc.conn, payload)
+			}
+			if err != nil {
 				sc.set(fmt.Sprintf("encoding %T to client", msg), err)
 				return
 			}
@@ -258,8 +236,13 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 func (sc *ServerSocketConn) readLoop(ctx context.Context) {
 	defer close(sc.ClientSend)
 	for {
-		var msg ClientMessage
-		if err := sc.decoder.Decode(&msg); err != nil {
+		payload, err := readFrame(sc.conn)
+		if err != nil {
+			sc.set("reading from client", err)
+			return
+		}
+		msg, err := protocol.UnmarshalClient(payload)
+		if err != nil {
 			sc.set("decoding from client", err)
 			return
 		}
@@ -319,8 +302,6 @@ type ClientSocketConn struct {
 	conn       net.Conn
 	ClientSend chan ClientMessage
 	ServerSend chan ServerMessage
-	encoder    *gob.Encoder
-	decoder    *gob.Decoder
 	cancel     context.CancelFunc
 }
 
@@ -333,8 +314,6 @@ func NewClientSocketConn(conn net.Conn, bufSize int) *ClientSocketConn {
 		conn:       conn,
 		ClientSend: make(chan ClientMessage, bufSize),
 		ServerSend: make(chan ServerMessage, bufSize),
-		encoder:    gob.NewEncoder(conn),
-		decoder:    gob.NewDecoder(conn),
 	}
 }
 
@@ -356,7 +335,11 @@ func (cc *ClientSocketConn) writeLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			if err := cc.encoder.Encode(&msg); err != nil {
+			payload, err := protocol.MarshalClient(msg)
+			if err == nil {
+				err = writeFrame(cc.conn, payload)
+			}
+			if err != nil {
 				cc.set(fmt.Sprintf("encoding %T to server", msg), err)
 				return
 			}
@@ -367,8 +350,13 @@ func (cc *ClientSocketConn) writeLoop(ctx context.Context) {
 func (cc *ClientSocketConn) readLoop(ctx context.Context) {
 	defer close(cc.ServerSend)
 	for {
-		var msg ServerMessage
-		if err := cc.decoder.Decode(&msg); err != nil {
+		payload, err := readFrame(cc.conn)
+		if err != nil {
+			cc.set("reading from server", err)
+			return
+		}
+		msg, err := protocol.UnmarshalServer(payload)
+		if err != nil {
 			cc.set("decoding from server", err)
 			return
 		}

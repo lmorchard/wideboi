@@ -9,8 +9,10 @@ const namedCodes: Record<string, number> = {
   Backspace: 127, Tab: 9, Enter: 13, Escape: 27
 };
 
+import type { ClientMsg } from './client';
+
 export interface InputSender {
-  send(type: string, payload: unknown): void;
+  send(msg: ClientMsg): void;
 }
 
 export function sendKeyboardInput(sender: InputSender, paneID: number, event: KeyboardEvent): boolean {
@@ -20,23 +22,19 @@ export function sendKeyboardInput(sender: InputSender, paneID: number, event: Ke
   if (code === undefined || (Array.from(event.key).length !== 1 && !(event.key in namedCodes))) return false;
   const base = /^Key[A-Z]$/.test(event.code) ? event.code.charAt(3).toLowerCase().codePointAt(0)! :
     /^Digit[0-9]$/.test(event.code) ? event.code.charAt(5).codePointAt(0)! : code;
-  sender.send('MsgInput', {
-    PaneID: paneID,
-    Key: {
-      Text: event.key in namedCodes ? '' : event.key,
-      Mod: (event.shiftKey ? 1 : 0) | (event.altKey ? 2 : 0) | (event.ctrlKey ? 4 : 0),
-      Code: base, ShiftedCode: 0, BaseCode: base, IsRepeat: event.repeat
-    },
-    Data: ''
-  });
+  sender.send({ case: 'input', value: {
+    paneId: paneID,
+    key: {
+      text: event.key in namedCodes ? '' : event.key,
+      mod: (event.shiftKey ? 1 : 0) | (event.altKey ? 2 : 0) | (event.ctrlKey ? 4 : 0),
+      code: base, shiftedCode: 0, baseCode: base, isRepeat: event.repeat
+    }
+  } });
   return true;
 }
 
 export function sendTextInput(sender: InputSender, paneID: number, text: string): boolean {
   if (!text) return false;
-  const bytes = new TextEncoder().encode(text);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  sender.send('MsgInput', { PaneID: paneID, Data: btoa(binary) });
+  sender.send({ case: 'input', value: { paneId: paneID, data: new TextEncoder().encode(text) } });
   return true;
 }

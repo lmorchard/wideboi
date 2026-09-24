@@ -1,4 +1,8 @@
-import type { MsgLayoutSnapshot, MsgPanePatch, MsgPaneUpdate, PlacementData } from './protocol';
+import { create } from '@bufbuild/protobuf';
+import type { PlacementData } from './protocol';
+import {
+  LineDataSchema, type MsgLayoutSnapshot, type MsgPanePatch, type MsgPaneUpdate,
+} from './gen/internal/protocol/wirepb/wideboi_pb';
 import { decodeColor } from './colors';
 import { reconcileFocus } from './focus';
 
@@ -62,14 +66,14 @@ export class GridRenderer {
   }
 
   public handleLayoutSnapshot(snapshot: MsgLayoutSnapshot) {
-    this.focusedPaneId = reconcileFocus(this.layout?.Columns || [], snapshot.Columns, this.focusedPaneId);
+    this.focusedPaneId = reconcileFocus(this.layout?.columns || [], snapshot.columns, this.focusedPaneId);
     this.layout = snapshot;
     this.recomputePlacements();
     this.invalidate();
   }
 
   public setFocusedPaneId(paneID: number) {
-    if (this.layout?.Columns.some(c => c.PaneID === paneID)) {
+    if (this.layout?.columns.some(c => c.paneId === paneID)) {
       this.focusedPaneId = paneID;
       this.recomputePlacements();
       this.invalidate();
@@ -77,34 +81,37 @@ export class GridRenderer {
   }
 
   public handlePaneUpdate(update: MsgPaneUpdate) {
-    this.panes.set(update.PaneID, update);
+    this.panes.set(update.paneId, update);
     this.invalidate();
   }
 
+  // Generations are bigint (protobuf-es ignores jstype = JS_NUMBER); they
+  // are only ever compared with each other.
   public handlePanePatch(patch: MsgPanePatch): boolean {
-    const base = this.panes.get(patch.PaneID);
-    if (!base || base.Generation !== patch.BaseGeneration ||
-        base.Cols !== patch.Cols || base.Rows !== patch.Rows ||
-        base.Lines.length !== base.Rows || patch.Generation <= patch.BaseGeneration) {
-      this.panes.delete(patch.PaneID);
+    const base = this.panes.get(patch.paneId);
+    if (!base || base.generation !== patch.baseGeneration ||
+        base.cols !== patch.cols || base.rows !== patch.rows ||
+        base.lines.length !== base.rows || patch.generation <= patch.baseGeneration) {
+      this.panes.delete(patch.paneId);
       this.invalidate();
       return false;
     }
-    const lines = base.Lines.slice();
+    const lines = base.lines.slice();
     const seen = new Set<number>();
-    for (const row of patch.ChangedRows ?? []) {
-      if (row.Y < 0 || row.Y >= base.Rows || seen.has(row.Y) || row.Cells.length !== base.Cols) {
-        this.panes.delete(patch.PaneID);
+    for (const row of patch.changedRows) {
+      if (row.y < 0 || row.y >= base.rows || seen.has(row.y) || row.cells.length !== base.cols) {
+        this.panes.delete(patch.paneId);
         this.invalidate();
         return false;
       }
-      seen.add(row.Y);
-      lines[row.Y] = row.Cells;
+      seen.add(row.y);
+      lines[row.y] = create(LineDataSchema, { cells: row.cells });
     }
-    this.panes.set(patch.PaneID, {
-      PaneID: patch.PaneID, Cols: patch.Cols, Rows: patch.Rows, Lines: lines,
-      Generation: patch.Generation, CursorX: patch.CursorX, CursorY: patch.CursorY,
-      CursorVisible: patch.CursorVisible, MouseTracking: patch.MouseTracking,
+    // Cursor and mouse fields always overwrite: an absent field is false.
+    this.panes.set(patch.paneId, {
+      ...base, lines, generation: patch.generation,
+      cursorX: patch.cursorX, cursorY: patch.cursorY,
+      cursorVisible: patch.cursorVisible, mouseTracking: patch.mouseTracking,
     });
     this.invalidate();
     return true;
@@ -117,7 +124,7 @@ export class GridRenderer {
   }
 
   public mouseTracking(paneID: number): boolean {
-    return this.panes.get(paneID)?.MouseTracking ?? false;
+    return this.panes.get(paneID)?.mouseTracking ?? false;
   }
 
   public setSelection(paneID: number, start: { x: number; y: number }, end: { x: number; y: number }) {
@@ -138,7 +145,7 @@ export class GridRenderer {
     if (a.y > b.y || (a.y === b.y && a.x > b.x)) [a, b] = [b, a];
     const rows: string[] = [];
     for (let y = a.y; y <= b.y; y++) {
-      const line = pane.Lines[y] || [];
+      const line = pane.lines[y]?.cells || [];
       const start = y === a.y ? a.x : 0;
       const end = y === b.y ? b.x : line.length - 1;
       let text = '';
@@ -147,9 +154,9 @@ export class GridRenderer {
         if (!cell) continue;
         let continuation = false;
         for (let back = 1; back <= 3 && x - back >= 0; back++) {
-          if (line[x - back]?.Width > back) { continuation = true; break; }
+          if (line[x - back]?.width > back) { continuation = true; break; }
         }
-        if (!continuation) text += cell.Content || ' ';
+        if (!continuation) text += cell.content || ' ';
       }
       rows.push(text.trimEnd());
     }
@@ -228,7 +235,7 @@ export class GridRenderer {
   private recomputePlacements() {
     if (!this.layout) return;
     const { cols: width, rows } = this.getGridSize();
-    const columns = this.layout.Columns || [];
+    const columns = this.layout.columns || [];
     if (!columns.length || width <= 0 || rows <= 0) {
       this.placements = [];
       return;
@@ -238,11 +245,11 @@ export class GridRenderer {
     let x = 0;
     for (const column of columns) {
       positions.push(x);
-      x += column.Width + 1;
+      x += column.width + 1;
     }
-    const focus = Math.max(columns.findIndex(c => c.PaneID === this.focusedPaneId), 0);
+    const focus = Math.max(columns.findIndex(c => c.paneId === this.focusedPaneId), 0);
     const focusX = positions[focus];
-    const focusWidth = columns[focus].Width;
+    const focusWidth = columns[focus].width;
     if (focusX < this.scrollX) this.scrollX = focusX;
     else if (focusX + focusWidth > this.scrollX + width) {
       this.scrollX = focusX + focusWidth - width;
@@ -250,10 +257,10 @@ export class GridRenderer {
     this.placements = columns.flatMap((column, index): PlacementData[] => {
       const paneX = positions[index] - this.scrollX;
       const left = Math.max(paneX, 0);
-      const right = Math.min(paneX + column.Width, width);
+      const right = Math.min(paneX + column.width, width);
       if (left >= right) return [];
       return [{
-        PaneID: column.PaneID,
+        PaneID: column.paneId,
         Src: { Min: { X: left - paneX, Y: 0 }, Max: { X: right - paneX, Y: height } },
         Dst: { Min: { X: left, Y: 1 }, Max: { X: right, Y: 1 + height } },
         Z: 0, Kind: 0
@@ -272,12 +279,12 @@ export class GridRenderer {
     }
     const grid = this.getGridSize();
     const focused = this.focusedPaneId;
-    const title = this.layout.PaneTitles?.[focused] || `Pane ${focused}`;
+    const title = this.layout.paneTitles[focused] || `Pane ${focused}`;
     this.ctx.fillStyle = '#cccccc';
     this.ctx.font = '14px monospace';
     this.ctx.fillText(title.slice(0, grid.cols), 0, 0);
-    const status = this.layout.Columns.map(c =>
-      `[${c.PaneID}] ${this.layout?.PaneStatuses?.[c.PaneID] || ''}`).join(' ');
+    const status = this.layout.columns.map(c =>
+      `[${c.paneId}] ${this.layout?.paneStatuses[c.paneId] || ''}`).join(' ');
     this.ctx.fillText(status.slice(0, grid.cols), 0, (grid.rows - 1) * this.cellHeight);
   }
 
@@ -309,25 +316,26 @@ export class GridRenderer {
     const offsetX = dstMinX - srcMinX;
     const offsetY = dstMinY - srcMinY;
 
-    for (let y = 0; y < pane.Lines.length; y++) {
+    for (let y = 0; y < pane.lines.length; y++) {
       const screenY = y + offsetY;
       if (screenY < dstMinY || screenY >= dstMinY + dy) continue;
 
-      const line = pane.Lines[y];
+      const line = pane.lines[y]?.cells;
       if (!line) continue;
       
       // LineData has one entry per terminal column. A wide glyph's
       // continuation occupies the next entry; Width is paint width only.
       for (let x = 0; x < line.length; x++) {
         const cell = line[x];
-        if (x > 0 && line[x - 1]?.Width > 1) continue;
+        if (x > 0 && line[x - 1]?.width > 1) continue;
         const screenX = x + offsetX;
         
         if (screenX >= dstMinX && screenX < dstMinX + dx) {
-          const attrs = cell.Style?.Attrs ?? 0;
+          // style and its colours are absent when zero: absence is default.
+          const attrs = cell.style?.attrs ?? 0;
           const reverse = (attrs & 32) !== 0;
-          const normalBg = decodeColor(cell.Style?.Bg, true);
-          const normalFg = decodeColor(cell.Style?.Fg, false);
+          const normalBg = decodeColor(cell.style?.bg, true);
+          const normalFg = decodeColor(cell.style?.fg, false);
           const bg = reverse ? normalFg : normalBg;
           const fg = reverse ? normalBg : normalFg;
           
@@ -336,25 +344,25 @@ export class GridRenderer {
             this.ctx.fillRect(
               screenX * this.cellWidth, 
               screenY * this.cellHeight, 
-              this.cellWidth * (cell.Width || 1), 
+              this.cellWidth * (cell.width || 1), 
               this.cellHeight
             );
           }
 
-          if (cell.Content && cell.Content !== ' ' && !(attrs & 64)) {
+          if (cell.content && cell.content !== ' ' && !(attrs & 64)) {
             this.ctx.fillStyle = fg;
             this.ctx.globalAlpha = attrs & 2 ? 0.5 : 1;
             this.ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}14px monospace`;
             this.ctx.fillText(
-              cell.Content, 
+              cell.content, 
               screenX * this.cellWidth, 
               screenY * this.cellHeight
             );
             this.ctx.globalAlpha = 1;
           }
-          const lineColor = decodeColor(cell.Style?.UnderlineColor, false);
-          if (cell.Style?.Underline) {
-            this.ctx.fillStyle = cell.Style.UnderlineColor?.Kind ? lineColor : fg;
+          const lineColor = decodeColor(cell.style?.underlineColor, false);
+          if (cell.style?.underline) {
+            this.ctx.fillStyle = cell.style.underlineColor?.kind ? lineColor : fg;
             this.ctx.fillRect(screenX * this.cellWidth, (screenY + 1) * this.cellHeight - 2,
               this.cellWidth, 1);
           }
@@ -364,23 +372,23 @@ export class GridRenderer {
               this.cellWidth, 1);
           }
           const sel = this.selection;
-          if (sel?.paneID === pane.PaneID) {
+          if (sel?.paneID === pane.paneId) {
             let a = sel.start, b = sel.end;
             if (a.y > b.y || (a.y === b.y && a.x > b.x)) [a, b] = [b, a];
             if ((y > a.y || (y === a.y && x >= a.x)) &&
                 (y < b.y || (y === b.y && x <= b.x))) {
               this.ctx.fillStyle = 'rgba(100, 160, 220, 0.45)';
               this.ctx.fillRect(screenX * this.cellWidth, screenY * this.cellHeight,
-                this.cellWidth * Math.max(cell.Width || 1, 1), this.cellHeight);
+                this.cellWidth * Math.max(cell.width || 1, 1), this.cellHeight);
             }
           }
         }
       }
     }
 
-    if (pane.CursorVisible && this.focusedPaneId === pane.PaneID) {
-      const curX = pane.CursorX + offsetX;
-      const curY = pane.CursorY + offsetY;
+    if (pane.cursorVisible && this.focusedPaneId === pane.paneId) {
+      const curX = pane.cursorX + offsetX;
+      const curY = pane.cursorY + offsetY;
       
       if (curX >= dstMinX && curX < dstMinX + dx && curY >= dstMinY && curY < dstMinY + dy) {
         this.ctx.fillStyle = '#d4d4d4';
@@ -391,13 +399,13 @@ export class GridRenderer {
           this.cellHeight
         );
         
-        if (curY < pane.Lines.length) {
-            const targetCell = pane.Lines[pane.CursorY]?.[pane.CursorX];
+        if (curY < pane.lines.length) {
+            const targetCell = pane.lines[pane.cursorY]?.cells[pane.cursorX];
             if (targetCell) {
-                if (targetCell && targetCell.Content && targetCell.Content !== ' ') {
+                if (targetCell && targetCell.content && targetCell.content !== ' ') {
                     this.ctx.fillStyle = '#1e1e1e';
                     this.ctx.fillText(
-                        targetCell.Content,
+                        targetCell.content,
                         curX * this.cellWidth,
                         curY * this.cellHeight
                     );
@@ -411,7 +419,7 @@ export class GridRenderer {
     this.ctx.restore();
     
     // Draw border
-    const isFocused = this.focusedPaneId === pane.PaneID;
+    const isFocused = this.focusedPaneId === pane.paneId;
     if (p.Dst.Max.X < this.getGridSize().cols) {
         this.ctx.fillStyle = '#1e1e1e';
         this.ctx.fillRect(

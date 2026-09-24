@@ -10,22 +10,22 @@ it('emits terminal key messages for Unicode, shifted, modified and navigation ke
   const send = vi.fn();
   const sender = { send };
   expect(sendKeyboardInput(sender, 7, key('界', 'KeyA'))).toBe(true);
-  expect(send.mock.lastCall).toEqual(['MsgInput', {
-    PaneID: 7, Key: { Text: '界', Mod: 0, Code: 97, ShiftedCode: 0, BaseCode: 97, IsRepeat: false }, Data: ''
-  }]);
+  expect(send.mock.lastCall).toEqual([{ case: 'input', value: {
+    paneId: 7, key: { text: '界', mod: 0, code: 97, shiftedCode: 0, baseCode: 97, isRepeat: false }
+  } }]);
   sendKeyboardInput(sender, 7, key('!', 'Digit1', { shiftKey: true }));
-  expect(send.mock.lastCall?.[1].Key).toMatchObject({ Text: '!', Mod: 1, Code: 49 });
+  expect(send.mock.lastCall?.[0].value.key).toMatchObject({ text: '!', mod: 1, code: 49 });
   sendKeyboardInput(sender, 7, key('c', 'KeyC', { ctrlKey: true, altKey: true }));
-  expect(send.mock.lastCall?.[1].Key).toMatchObject({ Text: 'c', Mod: 6, Code: 99 });
+  expect(send.mock.lastCall?.[0].value.key).toMatchObject({ text: 'c', mod: 6, code: 99 });
   sendKeyboardInput(sender, 7, key('ArrowLeft', 'ArrowLeft', { ctrlKey: true }));
-  expect(send.mock.lastCall?.[1].Key).toMatchObject({ Text: '', Mod: 4, Code: 0x110004 });
+  expect(send.mock.lastCall?.[0].value.key).toMatchObject({ text: '', mod: 4, code: 0x110004 });
   expect(sendKeyboardInput(sender, 7, key('Process', 'KeyA', { isComposing: true }))).toBe(false);
 });
 
 it('sends pasted and composed text as UTF-8 bytes', () => {
   const send = vi.fn();
   sendTextInput({ send }, 3, 'é界');
-  expect(send).toHaveBeenCalledWith('MsgInput', {
-    PaneID: 3, Data: 'w6nnlYw='
-  });
+  expect(send).toHaveBeenCalledWith({ case: 'input', value: {
+    paneId: 3, data: new TextEncoder().encode('é界')
+  } });
 });
