@@ -523,7 +523,7 @@ func TestLoadProjectConfig(t *testing.T) {
 	}
 	defer os.Chdir(cwd)
 
-	if err := os.WriteFile(".wideboi.toml", []byte("layout = \"scroll\"\n"), 0600); err != nil {
+	if err := os.WriteFile(".wideboi.toml", []byte("layout = \"scroll\"\n[[startup]]\ncommand = \"nvim\"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -531,7 +531,7 @@ func TestLoadProjectConfig(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(xdgDir, "wideboi"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(xdgDir, "wideboi", "config.toml"), []byte("layout = \"cards\"\nprefix = \"ctrl+j\"\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(xdgDir, "wideboi", "config.toml"), []byte("layout = \"cards\"\nprefix = \"ctrl+j\"\n[[startup]]\ncommand = \"htop\"\n[[startup]]\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -549,5 +549,32 @@ func TestLoadProjectConfig(t *testing.T) {
 	}
 	if cfg.Prefix != "ctrl+j" {
 		t.Errorf("Prefix = %q, want 'ctrl+j' from XDG (not overridden)", cfg.Prefix)
+	}
+	if len(cfg.Startup) != 1 || cfg.Startup[0].Command != "nvim" {
+		t.Errorf("Startup = %+v, want project loadout replacing global loadout", cfg.Startup)
+	}
+}
+
+func TestStartupPanesConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	data := "[[startup]]\ncommand = \"nvim\"\nwidth = 100\n[[startup]]\n[[startup]]\ncommand = \"claude\"\nwidth = 80\n"
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Startup) != 3 || cfg.Startup[0].Command != "nvim" || cfg.Startup[0].Width != 100 || cfg.Startup[1].Command != "" || cfg.Startup[2].Command != "claude" || cfg.Startup[2].Width != 80 {
+		t.Fatalf("startup panes = %+v", cfg.Startup)
+	}
+
+	for _, bad := range []string{"[[startup]]\nwidth = 19\n", "[[startup]]\ncommand = \"   \"\n"} {
+		if err := os.WriteFile(path, []byte(bad), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil)); err == nil {
+			t.Errorf("expected invalid startup pane to fail: %q", bad)
+		}
 	}
 }

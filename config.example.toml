@@ -38,6 +38,18 @@ prefix = "ctrl+b"
 # Each preset must be at least 20 columns.
 # width_presets = [40, 60, 80]
 
+# Initial columns for a newly created session. Each [[startup]] entry opens
+# one column, in order. Omit command for an interactive shell; commands run
+# through the configured shell with `-c`. Omit width for the normal width.
+# A project .wideboi.toml can replace the whole list for that project.
+# [[startup]]
+# command = "nvim"
+# width = 100
+# [[startup]]
+# [[startup]]
+# command = "claude"
+# width = 80
+
 # Mouse support: click to focus, wheel to scroll, drag to copy (OSC 52).
 # Set to false to leave the mouse to your terminal, which restores its own
 # selection and scrollback wheel. Defaults to true.

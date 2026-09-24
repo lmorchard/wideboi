@@ -179,6 +179,27 @@ wideboi -c /path/to/custom-config.toml
 
 See [`config.example.toml`](config.example.toml) for an annotated example configuration file.
 
+To open a project loadout when a new session starts, add `[[startup]]` entries
+to `.wideboi.toml` (or your main config). Each entry creates one column in
+order. A `command` runs through the configured shell; omit it for an
+interactive shell. Optional `width` is the column width in cells (at least 20).
+
+```toml
+[[startup]]
+command = "nvim"
+width = 100
+
+[[startup]] # interactive shell
+
+[[startup]]
+command = "claude"
+width = 80
+```
+
+The project list replaces the main config's list. It applies only when the
+server creates its first panes; attaching to an existing session leaves its
+columns as they are. Without a list, wideboi starts two shell columns.
+
 ### Key remapping
 
 You can remap control-mode verbs in the `[keys]` table of your `config.toml`:

@@ -20,17 +20,19 @@ import (
 
 // Server manages multiplexer layout, PTY sessions, and client protocol messages.
 type Server struct {
-	mu         sync.Mutex
-	strip      *layout.Strip
-	panes      map[int]*Pane
-	nextPaneID int
-	cols       int
-	rows       int
-	shell      string
-	cwd        string
-	transports []transport.Transport
-	stopCh     chan struct{}
-	closeOnce  sync.Once
+	mu              sync.Mutex
+	strip           *layout.Strip
+	panes           map[int]*Pane
+	nextPaneID      int
+	cols            int
+	rows            int
+	shell           string
+	cwd             string
+	startup         []StartupPane
+	startupLaunched bool
+	transports      []transport.Transport
+	stopCh          chan struct{}
+	closeOnce       sync.Once
 
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
@@ -74,6 +76,19 @@ type Server struct {
 	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
 	// it, via SetCloseGrace in export_test.go.
 	closeGrace time.Duration
+}
+
+// StartupPane is a pane created on the first attach to a new session.
+type StartupPane struct {
+	Command string
+	Width   int
+}
+
+// SetStartupPanes configures the initial columns in their display order.
+func (s *Server) SetStartupPanes(panes []StartupPane) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.startup = append([]StartupPane(nil), panes...)
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning
@@ -269,9 +284,27 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			s.recomputeSessionSizeLocked()
 		}
 		if len(s.panes) == 0 {
-			_, _ = s.spawnPaneLocked()
-			_, _ = s.spawnPaneLocked()
-			s.strip.FocusLeft()
+			if len(s.startup) == 0 {
+				_, _ = s.spawnPaneLocked()
+				_, _ = s.spawnPaneLocked()
+				s.strip.FocusLeft()
+			} else if !s.startupLaunched {
+				s.startupLaunched = true
+				firstID := 0
+				for _, spec := range s.startup {
+					p, err := s.spawnPaneWithSpecLocked(spec)
+					if err != nil {
+						slog.Error("starting configured pane", "command", spec.Command, "err", err)
+						continue
+					}
+					if firstID == 0 {
+						firstID = p.ID()
+					}
+				}
+				if firstID != 0 {
+					s.strip.FocusPaneID(firstID)
+				}
+			}
 		}
 		s.resizePanesLocked()
 		needBroadcast = true
@@ -383,6 +416,10 @@ func (s *Server) SpawnPane() (int, error) {
 }
 
 func (s *Server) spawnPaneLocked() (*Pane, error) {
+	return s.spawnPaneWithSpecLocked(StartupPane{})
+}
+
+func (s *Server) spawnPaneWithSpecLocked(spec StartupPane) (*Pane, error) {
 	// Close reaps the panes it snapshotted; one spawned after that --
 	// an attach or a new column during the reap -- would be nobody's
 	// to reap.
@@ -395,9 +432,16 @@ func (s *Server) spawnPaneLocked() (*Pane, error) {
 	if paneCols > s.cols && s.cols > 0 {
 		paneCols = s.cols
 	}
+	if spec.Width > 0 {
+		paneCols = spec.Width
+	}
 	paneRows := max(s.rows-2, 20)
 
-	p, err := NewPane(id, []string{s.shell}, paneCols, paneRows, s.cwd)
+	argv := []string{s.shell}
+	if spec.Command != "" {
+		argv = []string{s.shell, "-c", spec.Command}
+	}
+	p, err := NewPane(id, argv, paneCols, paneRows, s.cwd)
 	if err != nil {
 		return nil, err
 	}
