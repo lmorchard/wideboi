@@ -483,7 +483,8 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	}
 	s.nextPaneID++
 	id := s.nextPaneID
-	paneCols := max((s.cols-1)/2, 40)
+	presets := s.strip.WidthPresets()
+	paneCols := presets[len(presets)-1]
 	if paneCols > s.cols && s.cols > 0 {
 		paneCols = s.cols
 	}

@@ -20,6 +20,7 @@ func TestConfiguredStartupPanes(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "started")
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 	srv.SetStartupPanes([]server.StartupPane{
 		{Command: fmt.Sprintf("printf started > %q; exec sleep 30", marker), Width: 77},
 		{Width: 90},
@@ -97,6 +98,7 @@ func TestServerLifecycleAndAttach(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -122,6 +124,7 @@ func TestServerVerbHandling(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -187,6 +190,7 @@ func TestResizePropagatesToPanes(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -236,6 +240,7 @@ func TestResizeKeepsFullWidthForClippedPane(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -290,6 +295,7 @@ func TestResizeCoversFullyScrolledOffPane(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -352,6 +358,7 @@ func TestConcurrentResizeAndPaneExitRace(t *testing.T) {
 	tp := transport.NewInProcChannel(256)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -427,6 +434,7 @@ func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
 	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Width: 59}, {Width: 59}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
