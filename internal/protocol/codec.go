@@ -161,6 +161,8 @@ func MarshalServer(msg any) ([]byte, error) {
 			stats.Clients = append(stats.Clients, encodeClientTraffic(c))
 		}
 		env.Msg = &wirepb.ServerMessage_TrafficStats{TrafficStats: stats}
+	case MsgFocusPane:
+		env.Msg = &wirepb.ServerMessage_FocusPane{FocusPane: &wirepb.MsgFocusPane{PaneId: int32(m.PaneID)}}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -256,6 +258,8 @@ func UnmarshalServer(data []byte) (any, error) {
 			stats.Clients = append(stats.Clients, decodeClientTraffic(c))
 		}
 		return stats, nil
+	case *wirepb.ServerMessage_FocusPane:
+		return MsgFocusPane{PaneID: int(m.FocusPane.PaneId)}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}

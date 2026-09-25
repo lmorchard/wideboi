@@ -114,18 +114,19 @@ func TestWireSchemaCoversEveryWireType(t *testing.T) {
 // the wrong verb or mouse kind.
 func TestEnumsMatchWireSchema(t *testing.T) {
 	verbs := map[VerbType]wirepb.VerbType{
-		VerbFocusLeft:   wirepb.VerbType_VERB_TYPE_FOCUS_LEFT,
-		VerbFocusRight:  wirepb.VerbType_VERB_TYPE_FOCUS_RIGHT,
-		VerbNewColumn:   wirepb.VerbType_VERB_TYPE_NEW_COLUMN,
-		VerbCycleWidth:  wirepb.VerbType_VERB_TYPE_CYCLE_WIDTH,
-		VerbKillPane:    wirepb.VerbType_VERB_TYPE_KILL_PANE,
-		VerbSmartJump:   wirepb.VerbType_VERB_TYPE_SMART_JUMP,
-		VerbToggleCards: wirepb.VerbType_VERB_TYPE_TOGGLE_CARDS,
-		VerbGrowWidth:   wirepb.VerbType_VERB_TYPE_GROW_WIDTH,
-		VerbShrinkWidth: wirepb.VerbType_VERB_TYPE_SHRINK_WIDTH,
-		VerbMoveLeft:    wirepb.VerbType_VERB_TYPE_MOVE_LEFT,
-		VerbMoveRight:   wirepb.VerbType_VERB_TYPE_MOVE_RIGHT,
-		VerbFocusLast:   wirepb.VerbType_VERB_TYPE_FOCUS_LAST,
+		VerbFocusLeft:    wirepb.VerbType_VERB_TYPE_FOCUS_LEFT,
+		VerbFocusRight:   wirepb.VerbType_VERB_TYPE_FOCUS_RIGHT,
+		VerbNewColumn:    wirepb.VerbType_VERB_TYPE_NEW_COLUMN,
+		VerbCycleWidth:   wirepb.VerbType_VERB_TYPE_CYCLE_WIDTH,
+		VerbKillPane:     wirepb.VerbType_VERB_TYPE_KILL_PANE,
+		VerbSmartJump:    wirepb.VerbType_VERB_TYPE_SMART_JUMP,
+		VerbToggleCards:  wirepb.VerbType_VERB_TYPE_TOGGLE_CARDS,
+		VerbGrowWidth:    wirepb.VerbType_VERB_TYPE_GROW_WIDTH,
+		VerbShrinkWidth:  wirepb.VerbType_VERB_TYPE_SHRINK_WIDTH,
+		VerbMoveLeft:     wirepb.VerbType_VERB_TYPE_MOVE_LEFT,
+		VerbMoveRight:    wirepb.VerbType_VERB_TYPE_MOVE_RIGHT,
+		VerbFocusLast:    wirepb.VerbType_VERB_TYPE_FOCUS_LAST,
+		VerbToggleStatus: wirepb.VerbType_VERB_TYPE_TOGGLE_STATUS,
 	}
 	for goVal, wireVal := range verbs {
 		if int32(goVal) != int32(wireVal) {

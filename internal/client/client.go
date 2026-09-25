@@ -276,6 +276,11 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			c.paneMetadata = make(map[int]protocol.MsgPaneMetadata)
 		}
 		c.paneMetadata[m.PaneID] = m
+
+	case protocol.MsgFocusPane:
+		c.strip.FocusPaneID(m.PaneID)
+		c.focusPaneID = c.strip.FocusedPaneID()
+		c.updatePlacementsLocked()
 	}
 }
 

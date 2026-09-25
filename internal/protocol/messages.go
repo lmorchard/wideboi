@@ -26,6 +26,7 @@ const (
 	VerbMoveLeft
 	VerbMoveRight
 	VerbFocusLast
+	VerbToggleStatus
 )
 
 // PaneStatus represents the current state of a pane's process.
@@ -282,6 +283,11 @@ type MsgPaneMetadata struct {
 	PaneID   int               `json:"pane_id"`
 	CWD      string            `json:"cwd"`
 	UserVars map[string]string `json:"user_vars"`
+}
+
+// MsgFocusPane instructs the client to switch focus to a specific pane.
+type MsgFocusPane struct {
+	PaneID int `json:"pane_id"`
 }
 
 // MsgTrafficRequest asks the server for a MsgTrafficStats reply, sent only

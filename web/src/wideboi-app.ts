@@ -653,6 +653,10 @@ export class WideboiApp extends LitElement {
           this.paneMetadata = { ...this.paneMetadata, [meta.paneId]: meta };
           break;
         }
+        case 'focusPane': {
+          this.focusPane(message.msg.value.paneId);
+          break;
+        }
       }
     };
 

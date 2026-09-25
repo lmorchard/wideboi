@@ -60,6 +60,8 @@ type Pane struct {
 
 	dead atomic.Bool
 
+	isDashboard bool
+
 	failMu   sync.Mutex
 	failures []error
 }
@@ -96,11 +98,31 @@ func NewPane(id int, argv []string, cols, rows int, dir string) (*Pane, error) {
 	}, nil
 }
 
+// NewCustomPane creates a non-PTY pane backed by an explicit term.Grid.
+func NewCustomPane(id int, grid term.Grid, cols, rows int) *Pane {
+	return &Pane{
+		id:     id,
+		grid:   grid,
+		cols:   cols,
+		rows:   rows,
+		input:  make(chan uv.Event, keyQueueDepth),
+		closed: make(chan struct{}),
+	}
+}
+
 // ID returns the pane's unique identifier.
 func (p *Pane) ID() int { return p.id }
 
 // Start begins pumping bytes between the child and the emulator.
 func (p *Pane) Start(onExit func()) {
+	if p.pty == nil {
+		go func() {
+			<-p.closed
+			onExit()
+		}()
+		return
+	}
+
 	// PTY output -> emulator.
 	go func() {
 		defer func() {
@@ -424,7 +446,9 @@ func (p *Pane) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.closed)
 
-		p.pty.Hangup(p.graceOrDefault())
+		if p.pty != nil {
+			p.pty.Hangup(p.graceOrDefault())
+		}
 		p.renderMu.Lock()
 		gridErr := p.grid.Close()
 		p.renderMu.Unlock()
