@@ -6,7 +6,10 @@ import (
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/keys"
+	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/transport"
 )
 
 // A user in control mode who cannot see how to quit or how to get back
@@ -88,35 +91,102 @@ func TestNormalStatusNamesTheConfiguredPrefix(t *testing.T) {
 	}
 }
 
-// The inversion is the mode indicator. A partly-inverted row reads as a
-// rendering glitch rather than a mode, so the line must fill the whole
-// budget.
-func TestControlStatusInvertsTheWholeRow(t *testing.T) {
-	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
-	got, style := c.statusLineLocked(99)
-	if style.Attrs&uv.AttrReverse == 0 {
-		t.Errorf("control status is not reverse video: %+v", style)
+// The hints row carries the charcoal background across the whole budget.
+func TestControlHintsRowHasCharcoalBackground(t *testing.T) {
+	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true, theme: DefaultTheme()}
+	got, style := c.controlHintsLineLocked(99)
+	if style.Bg != ansi.IndexedColor(236) {
+		t.Errorf("control hints background = %v, want ansi.IndexedColor(236)", style.Bg)
+	}
+	if style.Attrs&uv.AttrReverse != 0 {
+		t.Errorf("control hints should not have AttrReverse: %+v", style)
 	}
 	if n := runeLen(got); n != 99 {
-		t.Errorf("control status is %d cells, want the full 99 so the whole row inverts: %q", n, got)
+		t.Errorf("control hints is %d cells, want the full 99 so the whole row has background: %q", n, got)
 	}
 	if !strings.Contains(got, "q quit") {
-		t.Errorf("control status does not name the quit verb: %q", got)
+		t.Errorf("control hints does not name the quit verb: %q", got)
 	}
 }
 
-func TestSetControlModeSwitchesTheStatusLine(t *testing.T) {
-	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b"}
-	normal, _ := c.statusLineLocked(99)
-	c.SetControlMode(true)
-	control, _ := c.statusLineLocked(99)
-	if normal == control {
-		t.Errorf("status line is identical in both modes: %q", normal)
+func TestControlModeDisplaysHintsAboveStatusBar(t *testing.T) {
+	ch := transport.NewInProcChannel(64)
+	c := NewClient(ch, 100, 24, "C-b")
+	c.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+	})
+
+	// Before control mode: bottom row 23 has normal status bar.
+	scrBefore := newFakeHostScreen(100, 24)
+	c.Draw(scrBefore)
+	bottomBefore := scrBefore.text()[23]
+	if !strings.Contains(bottomBefore, "C-b for commands") {
+		t.Fatalf("before control mode: row 23 missing prefix hint: %q", bottomBefore)
 	}
+
+	// Enter control mode.
+	c.SetControlMode(true)
+	scrControl := newFakeHostScreen(100, 24)
+	c.Draw(scrControl)
+
+	// Bottom row 23 must still show the normal status bar!
+	bottomControl := scrControl.text()[23]
+	if !strings.Contains(bottomControl, "C-b for commands") {
+		t.Errorf("during control mode: row 23 missing prefix hint (should still be visible): %q", bottomControl)
+	}
+	if !strings.Contains(bottomControl, "[● 1  ]") {
+		t.Errorf("during control mode: row 23 missing pane badge: %q", bottomControl)
+	}
+
+	// Row 22 (above status bar) must show the control mode hints with charcoal background.
+	hintsRow := scrControl.text()[22]
+	if !strings.Contains(hintsRow, "q quit") {
+		t.Errorf("hints row 22 missing 'q quit': %q", hintsRow)
+	}
+	if !strings.Contains(hintsRow, "esc exit") {
+		t.Errorf("hints row 22 missing 'esc exit': %q", hintsRow)
+	}
+	// Check charcoal background on row 22.
+	cell := scrControl.CellAt(0, 22)
+	if cell == nil {
+		t.Fatal("hints row 22 cell (0, 22) is nil")
+	}
+	if cell.Style.Bg != ansi.IndexedColor(236) {
+		t.Errorf("hints row 22 cell (0, 22) Bg = %v, want ansi.IndexedColor(236)", cell.Style.Bg)
+	}
+	// Check keycap styling (accent/bold) for 'q'.
+	foundQ := false
+	for x := 0; x < 99; x++ {
+		cAt := scrControl.CellAt(x, 22)
+		if cAt != nil && cAt.Content == "q" {
+			foundQ = true
+			if cAt.Style.Fg != ansi.BasicColor(14) {
+				t.Errorf("keycap 'q' Fg = %v, want ansi.BasicColor(14)", cAt.Style.Fg)
+			}
+			if cAt.Style.Attrs&uv.AttrBold == 0 {
+				t.Errorf("keycap 'q' should have AttrBold")
+			}
+			break
+		}
+	}
+	if !foundQ {
+		t.Error("keycap 'q' not found on row 22")
+	}
+
+	// Exit control mode.
 	c.SetControlMode(false)
-	back, _ := c.statusLineLocked(99)
-	if back != normal {
-		t.Errorf("leaving control mode did not restore the status line:\n  got  %q\n  want %q", back, normal)
+	scrAfter := newFakeHostScreen(100, 24)
+	c.Draw(scrAfter)
+	hintsAfter := scrAfter.text()[22]
+	if strings.Contains(hintsAfter, "q quit") {
+		t.Errorf("after leaving control mode: row 22 should not contain 'q quit': %q", hintsAfter)
+	}
+	bottomAfter := scrAfter.text()[23]
+	if !strings.Contains(bottomAfter, "C-b for commands") {
+		t.Errorf("after leaving control mode: row 23 missing prefix hint: %q", bottomAfter)
 	}
 }
 
@@ -136,22 +206,22 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 	}
 }
 
-// The status line is what a user actually reads, so assert through it
+// The control hints line is what a user actually reads, so assert through it
 // as well as through controlHelp: a Client that never passed its own
 // detachable flag down would pass the test above and still show the
 // wrong menu.
 func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
 	local := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
-	got, _ := local.statusLineLocked(99)
+	got, _ := local.controlHintsLineLocked(99)
 	if strings.Contains(got, "d detach") {
-		t.Errorf("in-process status line offers %q: %q", "d detach", got)
+		t.Errorf("in-process hints line offers %q: %q", "d detach", got)
 	}
 
 	attached := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
 	attached.SetDetachable(true)
-	got, _ = attached.statusLineLocked(99)
+	got, _ = attached.controlHintsLineLocked(99)
 	if !strings.Contains(got, "d detach") {
-		t.Errorf("attached status line omits %q: %q", "d detach", got)
+		t.Errorf("attached hints line omits %q: %q", "d detach", got)
 	}
 }
 
@@ -169,9 +239,9 @@ func TestCustomBindingsInControlHelpAndHelpLines(t *testing.T) {
 	c.SetDetachable(true)
 	c.SetControlMode(true)
 
-	status, _ := c.statusLineLocked(79)
+	status, _ := c.controlHintsLineLocked(79)
 	if !strings.Contains(status, "k kill") {
-		t.Errorf("status line should contain 'k kill', got: %q", status)
+		t.Errorf("hints line should contain 'k kill', got: %q", status)
 	}
 	if !strings.Contains(status, "hjel move") {
 		t.Errorf("status line should contain 'hjel move', got: %q", status)

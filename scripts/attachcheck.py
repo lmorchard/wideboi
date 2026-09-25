@@ -44,7 +44,7 @@ from ptylib import (
 # -- whether the first frame beats the server's opening snapshot is a
 # race, and a reattach usually loses it, painting "pane 0" once before
 # the real focus arrives.
-from smoke import CUP, EMPTY_SYNC_UPDATE, focus_pane_id
+from smoke import CUP, EMPTY_SYNC_UPDATE, focus_pane_id, strip_ansi
 
 BIN = "./bin/wideboi"
 COLS, ROWS = 80, 24
@@ -338,7 +338,7 @@ def case_attached_control_mode_offers_detach(fail):
         c = Client()
         c.type(b"\x02", settle=1.0)
         c.type(b"\x02w")
-        out = c.output()
+        out = strip_ansi(c.output())
         if b"d detach" not in out:
             fail("attached control mode does not offer 'd detach'")
         for verb in (b"q quit", b"esc exit"):
@@ -470,7 +470,7 @@ def case_plain_wideboi_offers_detach(fail):
     c, srv = owned_session(fail)
     try:
         c.type(b"\x02", settle=1.0)
-        if b"d detach" not in c.output():
+        if b"d detach" not in strip_ansi(c.output()):
             fail("plain wideboi's control mode does not offer 'd detach'")
         c.type(b"\x1b", settle=0.5)
     finally:

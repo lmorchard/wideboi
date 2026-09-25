@@ -4,6 +4,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/client"
 	"github.com/lmorchard/wideboi/internal/config"
@@ -126,5 +127,35 @@ func TestThemeCustomConfig(t *testing.T) {
 	dStyle := th.StatusStyle(protocol.StatusDone)
 	if dStyle.Fg != ansi.BasicColor(4) { // blue = 4
 		t.Errorf("custom Done Fg = %v, want ansi.BasicColor(4)", dStyle.Fg)
+	}
+}
+
+func TestThemeHeaderDefaults(t *testing.T) {
+	th := client.DefaultTheme()
+	if th.HeaderFocus.Bg != ansi.IndexedColor(236) {
+		t.Errorf("HeaderFocus.Bg = %v, want ansi.IndexedColor(236)", th.HeaderFocus.Bg)
+	}
+	if th.HeaderFocus.Attrs&uv.AttrReverse != 0 {
+		t.Errorf("HeaderFocus should not have AttrReverse")
+	}
+}
+
+func TestThemeParseBg(t *testing.T) {
+	cfg := config.ThemeConfig{
+		HeaderFocus: "bg:236 bold",
+		Header:      "bg:black faint",
+	}
+	th := client.NewTheme(cfg, func(k string) string { return "" })
+	if th.HeaderFocus.Bg != ansi.IndexedColor(236) {
+		t.Errorf("HeaderFocus.Bg = %v, want ansi.IndexedColor(236)", th.HeaderFocus.Bg)
+	}
+	if th.HeaderFocus.Attrs&uv.AttrBold == 0 {
+		t.Errorf("HeaderFocus should have AttrBold")
+	}
+	if th.Header.Bg != ansi.BasicColor(0) {
+		t.Errorf("Header.Bg = %v, want ansi.BasicColor(0)", th.Header.Bg)
+	}
+	if th.Header.Attrs&uv.AttrFaint == 0 {
+		t.Errorf("Header should have AttrFaint")
 	}
 }

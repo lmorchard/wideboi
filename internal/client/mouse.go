@@ -139,6 +139,13 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		c.sel = nil
 		p := c.hitTestLocked(pt)
 		if p == nil {
+			if m.Button == uv.MouseLeft && pt.Y == c.rows-1 && (!c.controlMode || c.rows >= 3) {
+				if id := c.statusBarBadgeAtLocked(pt.X); id > 0 && id != c.focusPaneID {
+					c.strip.FocusPaneID(id)
+					c.focusPaneID = c.strip.FocusedPaneID()
+					c.updatePlacementsLocked()
+				}
+			}
 			break
 		}
 		cp := c.contentHitLocked(pt)

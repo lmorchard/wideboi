@@ -22,6 +22,11 @@ type Theme struct {
 	Dim          uv.Style
 	Divider      uv.Style
 	FocusDivider uv.Style
+	HeaderFocus  uv.Style
+	Header       uv.Style
+	ControlHints uv.Style
+	ControlKey   uv.Style
+	ControlDesc  uv.Style
 	NoColor      bool
 }
 
@@ -102,6 +107,11 @@ func NewTheme(cfg config.ThemeConfig, getenv func(string) string) Theme {
 		Dim:          uv.Style{Attrs: uv.AttrFaint},                         // Dim
 		Divider:      uv.Style{Attrs: uv.AttrFaint},                         // Dim
 		FocusDivider: uv.Style{Fg: ansi.BasicColor(14), Attrs: uv.AttrBold}, // Bright Cyan + Bold
+		HeaderFocus:  uv.Style{Bg: ansi.IndexedColor(236)},                  // Charcoal gray background
+		Header:       uv.Style{},                                            // Default
+		ControlHints: uv.Style{Bg: ansi.IndexedColor(236)},                  // Charcoal gray background
+		ControlKey:   uv.Style{Fg: ansi.BasicColor(14), Bg: ansi.IndexedColor(236), Attrs: uv.AttrBold},
+		ControlDesc:  uv.Style{Bg: ansi.IndexedColor(236), Attrs: uv.AttrFaint},
 		NoColor:      noColor,
 	}
 
@@ -112,6 +122,12 @@ func NewTheme(cfg config.ThemeConfig, getenv func(string) string) Theme {
 		t.Failed.Fg = nil
 		t.Focus.Fg = nil
 		t.FocusDivider.Fg = nil
+		t.HeaderFocus.Bg = nil
+		t.HeaderFocus.Attrs |= uv.AttrBold
+		t.ControlHints.Bg = nil
+		t.ControlKey.Fg = nil
+		t.ControlKey.Bg = nil
+		t.ControlDesc.Bg = nil
 		return t
 	}
 
@@ -140,8 +156,68 @@ func NewTheme(cfg config.ThemeConfig, getenv func(string) string) Theme {
 	if s, ok := parseStyleString(cfg.FocusDivider); ok {
 		t.FocusDivider = s
 	}
+	if s, ok := parseStyleString(cfg.HeaderFocus); ok {
+		t.HeaderFocus = s
+	}
+	if s, ok := parseStyleString(cfg.Header); ok {
+		t.Header = s
+	}
+	if s, ok := parseStyleString(cfg.ControlHints); ok {
+		t.ControlHints = s
+	}
+	if s, ok := parseStyleString(cfg.ControlKey); ok {
+		t.ControlKey = s
+	}
+	if s, ok := parseStyleString(cfg.ControlDesc); ok {
+		t.ControlDesc = s
+	}
 
 	return t
+}
+
+func parseColor(val string) (ansi.Color, bool) {
+	switch val {
+	case "black":
+		return ansi.BasicColor(0), true
+	case "red":
+		return ansi.BasicColor(1), true
+	case "green":
+		return ansi.BasicColor(2), true
+	case "yellow":
+		return ansi.BasicColor(3), true
+	case "blue":
+		return ansi.BasicColor(4), true
+	case "magenta":
+		return ansi.BasicColor(5), true
+	case "cyan":
+		return ansi.BasicColor(6), true
+	case "white":
+		return ansi.BasicColor(7), true
+	case "bright_black", "bright-black", "gray", "grey":
+		return ansi.BasicColor(8), true
+	case "bright_red", "bright-red":
+		return ansi.BasicColor(9), true
+	case "bright_green", "bright-green":
+		return ansi.BasicColor(10), true
+	case "bright_yellow", "bright-yellow":
+		return ansi.BasicColor(11), true
+	case "bright_blue", "bright-blue":
+		return ansi.BasicColor(12), true
+	case "bright_magenta", "bright-magenta":
+		return ansi.BasicColor(13), true
+	case "bright_cyan", "bright-cyan":
+		return ansi.BasicColor(14), true
+	case "bright_white", "bright-white":
+		return ansi.BasicColor(15), true
+	default:
+		if idx, err := strconv.Atoi(val); err == nil && idx >= 0 && idx <= 255 {
+			if idx < 16 {
+				return ansi.BasicColor(idx), true
+			}
+			return ansi.IndexedColor(idx), true
+		}
+		return nil, false
+	}
 }
 
 func parseStyleString(val string) (uv.Style, bool) {
@@ -153,52 +229,20 @@ func parseStyleString(val string) (uv.Style, bool) {
 	var style uv.Style
 	parts := strings.Fields(val)
 	for _, p := range parts {
-		switch p {
-		case "bold":
+		switch {
+		case p == "bold":
 			style.Attrs |= uv.AttrBold
-		case "faint", "dim":
+		case p == "faint" || p == "dim":
 			style.Attrs |= uv.AttrFaint
-		case "reverse", "invert":
+		case p == "reverse" || p == "invert":
 			style.Attrs |= uv.AttrReverse
-		case "black":
-			style.Fg = ansi.BasicColor(0)
-		case "red":
-			style.Fg = ansi.BasicColor(1)
-		case "green":
-			style.Fg = ansi.BasicColor(2)
-		case "yellow":
-			style.Fg = ansi.BasicColor(3)
-		case "blue":
-			style.Fg = ansi.BasicColor(4)
-		case "magenta":
-			style.Fg = ansi.BasicColor(5)
-		case "cyan":
-			style.Fg = ansi.BasicColor(6)
-		case "white":
-			style.Fg = ansi.BasicColor(7)
-		case "bright_black", "bright-black", "gray", "grey":
-			style.Fg = ansi.BasicColor(8)
-		case "bright_red", "bright-red":
-			style.Fg = ansi.BasicColor(9)
-		case "bright_green", "bright-green":
-			style.Fg = ansi.BasicColor(10)
-		case "bright_yellow", "bright-yellow":
-			style.Fg = ansi.BasicColor(11)
-		case "bright_blue", "bright-blue":
-			style.Fg = ansi.BasicColor(12)
-		case "bright_magenta", "bright-magenta":
-			style.Fg = ansi.BasicColor(13)
-		case "bright_cyan", "bright-cyan":
-			style.Fg = ansi.BasicColor(14)
-		case "bright_white", "bright-white":
-			style.Fg = ansi.BasicColor(15)
+		case strings.HasPrefix(p, "bg:"):
+			if c, ok := parseColor(strings.TrimPrefix(p, "bg:")); ok {
+				style.Bg = c
+			}
 		default:
-			if idx, err := strconv.Atoi(p); err == nil && idx >= 0 && idx <= 255 {
-				if idx < 16 {
-					style.Fg = ansi.BasicColor(idx)
-				} else {
-					style.Fg = ansi.IndexedColor(idx)
-				}
+			if c, ok := parseColor(p); ok {
+				style.Fg = c
 			}
 		}
 	}

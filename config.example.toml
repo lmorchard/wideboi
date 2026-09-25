@@ -77,6 +77,11 @@ prefix = "ctrl+b"
 # dim           = "dim"
 # divider       = "dim"
 # focus_divider = "bright_cyan bold"
+# header_focus  = "bg:236"
+# header        = ""
+# control_hints = "bg:236"
+# control_key   = "bright_cyan bold bg:236"
+# control_desc  = "dim bg:236"
 
 # Log verbosity for $TMPDIR/wideboi-<uid>/{client,server}.log:
 # "trace", "debug", "info" (default), "warn" or "error". The logs are
