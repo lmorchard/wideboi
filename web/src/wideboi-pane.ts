@@ -80,6 +80,20 @@ export class WideboiPane extends LitElement {
   private observer?: ResizeObserver;
   private followBottom = true;
 
+  panCells(cells: number) {
+    this.viewport.scrollLeft = Math.max(0, this.viewport.scrollLeft + cells * this.cellWidth);
+  }
+
+  revealCursor() {
+    if (!this.pane) return;
+    const x = this.pane.cursorX * this.cellWidth;
+    const width = this.viewport.clientWidth;
+    if (x < this.viewport.scrollLeft) this.viewport.scrollLeft = x;
+    else if (x + this.cellWidth > this.viewport.scrollLeft + width) {
+      this.viewport.scrollLeft = x + this.cellWidth - width;
+    }
+  }
+
   get hasVerticalOverflow(): boolean {
     return this.viewport.scrollHeight > this.viewport.clientHeight + 1;
   }

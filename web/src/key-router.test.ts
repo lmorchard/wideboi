@@ -108,6 +108,16 @@ describe('KeyRouter', () => {
     expect(router.inPrefix).toBe(false);
   });
 
+  it('keeps shifted pan separate from lowercase focus and toggles follow', () => {
+    const router = new KeyRouter('ctrl+b');
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent('H', 'KeyH', { shiftKey: true }))).toEqual({ type: 'pan', direction: -1 });
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent('L', 'KeyL', { shiftKey: true }))).toEqual({ type: 'pan', direction: 1 });
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent('f', 'KeyF'))).toEqual({ type: 'toggle_follow_pty' });
+  });
+
   it('supports custom prefix like ctrl+a or ctrl+space', () => {
     const router = new KeyRouter('ctrl+a');
     expect(router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }))).toEqual({ type: 'forward' });

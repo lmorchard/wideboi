@@ -7,6 +7,8 @@ export type KeyRouterAction =
   | { type: 'verb'; verb: VerbType }
   | { type: 'scroll'; delta: number }
   | { type: 'toggle_cards' }
+  | { type: 'pan'; direction: number }
+  | { type: 'toggle_follow_pty' }
   | { type: 'focus_column'; column: number }
   | { type: 'toggle_help' };
 
@@ -100,6 +102,15 @@ export class KeyRouter {
     }
 
     const key = e.key.toLowerCase();
+
+    if (e.key === 'H' || e.key === 'L') {
+      this.prefixActive = false;
+      return { type: 'pan', direction: e.key === 'H' ? -1 : 1 };
+    }
+    if (key === 'f') {
+      this.prefixActive = false;
+      return { type: 'toggle_follow_pty' };
+    }
 
     // 2. Escape or Ctrl+C exits prefix mode.
     if (key === 'escape' || (e.ctrlKey && key === 'c')) {

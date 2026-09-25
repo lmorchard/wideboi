@@ -10,7 +10,7 @@ it('ignores events from a connection replaced during reconnect', () => {
     onclose?: () => void;
     onmessage?: (event: { data: ArrayBuffer }) => void;
     binaryType = 'blob';
-    protocol = 'wideboi.v10';
+    protocol = 'wideboi.v11';
     onerror?: () => void;
     constructor() { sockets.push(this); }
     close() {}

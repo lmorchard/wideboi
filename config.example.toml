@@ -44,6 +44,9 @@ prefix = "ctrl+b"
 # Each preset must be at least 20 columns.
 # width_presets = [40, 60, 80]
 
+# Cells moved by H/L horizontal pan in the terminal client (default 10).
+# pan_step = 10
+
 # Initial columns for a newly created session. Each [[startup]] entry opens
 # one column, in order. Omit command for an interactive shell; commands run
 # through the configured shell with `-c`. Width must be 20–4096 cells;
@@ -110,9 +113,8 @@ prefix = "ctrl+b"
 # - No two actions may share a key, even if the other action is left at
 #   its defaults: remap it too.
 # - quit cannot be unbound; it is the only way to end the session.
-# - Every single lowercase letter (a-z) bound to an action gets a matching
-#   ctrl repeat chord (e.g. key "x" -> "ctrl+x" repeat), except toggle_cards:
-#   repeating a toggle only undoes it.
+# - Most lowercase letter actions get a ctrl repeat chord. Toggles and
+#   uppercase pan keys do not. Uppercase and lowercase keys are distinct.
 [keys]
 # Navigation & Scrolling
 focus_left   = ["h", "left"]   # Move focus to the left column
@@ -125,6 +127,9 @@ new_column   = "n"    # Open a new column
 cycle_width  = "w"    # Cycle width of focused column across presets
 shrink_width = "o"    # Shrink focused column width by 10 cells (overlay only)
 grow_width   = "p"    # Grow focused column width by 10 cells (overlay only)
+pan_left     = "H"    # Pan focused pane left by pan_step cells
+pan_right    = "L"    # Pan focused pane right by pan_step cells
+follow_pty   = "f"    # Toggle following PTY width for all panes
 move_left    = "y"    # Move focused column one place left (overlay only)
 move_right   = "u"    # Move focused column one place right (overlay only)
 kill_pane    = "x"    # Kill focused pane
@@ -132,6 +137,7 @@ smart_jump   = "a"    # Jump to pane requesting attention (OSC 133 / prompt)
 toggle_status= "s"    # Open or focus the pane status dashboard
 focus_last   = "tab"  # Focus the previously focused pane (overlay only)
 toggle_cards = "c"    # Toggle cards / scrolling layout (help overlay only)
+claim_size   = "S"    # Claim session PTY sizes using this client's widths
 
 # Session Controls
 help         = "?"    # Show the control-mode help overlay

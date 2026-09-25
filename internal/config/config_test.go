@@ -293,6 +293,23 @@ width_presets = [10, 80]
 	}
 }
 
+func TestPanStepConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("pan_step = 17\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil))
+	if err != nil || cfg.PanStep != 17 {
+		t.Fatalf("pan_step = %d, err = %v", cfg.PanStep, err)
+	}
+	if err := os.WriteFile(path, []byte("pan_step = 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil)); err == nil {
+		t.Fatal("zero pan_step accepted")
+	}
+}
+
 // Mouse capture is on unless the file says otherwise. The field is a
 // pointer so an absent key and an explicit false are distinguishable;
 // a plain bool would read an absent key as "off".

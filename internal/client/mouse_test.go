@@ -431,7 +431,7 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 		t.Fatal("an unchanged snapshot cleared the selection")
 	}
 
-	// Pane 1 widens: its rect changes.
+	// A different client's PTY resize does not change this client's viewport.
 	cli.SetLayoutMode(protocol.LayoutScroll)
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: []protocol.ColumnData{
@@ -439,6 +439,14 @@ func TestSelectionClearsWhenPaneMoves(t *testing.T) {
 			{PaneID: 2, Width: 40, Height: 22},
 		},
 	})
+	cli.mu.Lock()
+	if cli.sel == nil {
+		t.Fatal("remote PTY resize cleared a local selection")
+	}
+	cli.displayWidths[1] = 60
+	cli.strip.SetColumnWidth(1, 60)
+	cli.updatePlacementsLocked()
+	cli.mu.Unlock()
 	cli.mu.Lock()
 	defer cli.mu.Unlock()
 	if cli.sel != nil {

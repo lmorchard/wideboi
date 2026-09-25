@@ -12,6 +12,7 @@ var wireTypes = []any{
 	MsgAttach{},
 	MsgStatusRequest{},
 	MsgVerb{},
+	MsgSetPaneWidth{},
 	MsgMouse{},
 	MsgInput{},
 	MsgResize{},

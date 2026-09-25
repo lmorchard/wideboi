@@ -38,6 +38,14 @@ func TestBlitClipsToDestination(t *testing.T) {
 	assertLines(t, got, want)
 }
 
+func TestBlitSourceCropsAndPadsLocalViewport(t *testing.T) {
+	src := compose.NewSurface(6, 1)
+	compose.WriteString(src, 0, 0, "abcdef")
+	dst := compose.NewSurface(9, 1)
+	compose.BlitSource(dst, src, image.Rect(3, 0, 12, 1), image.Rect(0, 0, 9, 1))
+	assertLines(t, compose.Text(dst, dst.Bounds()), []string{"def      "})
+}
+
 func TestBlitLaterDrawsCoverEarlierOnes(t *testing.T) {
 	under := compose.NewSurface(6, 1)
 	compose.WriteString(under, 0, 0, "UUUUUU")

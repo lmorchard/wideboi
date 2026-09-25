@@ -61,6 +61,10 @@ Press `Ctrl+b` to enter control mode, then press an action key:
 | `/` | Search text in screen and scrollback |
 | `n` | Open a new pane column |
 | `w` | Cycle column width |
+| `o` / `p` | Shrink / grow this client's pane width by 10 cells |
+| `H` / `L` | Pan the focused pane left / right by 10 cells |
+| `f` | Toggle following PTY widths for all panes |
+| `S` | Claim PTY sizing using this client's pane widths |
 | `x` | Close the focused pane |
 | `c` | Switch layout between cards mode and scrolling strip mode |
 | `d` | Detach from the session |
@@ -78,6 +82,8 @@ wideboi provides two client layout modes:
 - **Scrolling Strip Mode (`scroll`):** Panes sit side by side in a wide horizontal row. The viewport scrolls as you change focus.
 
 Press `Ctrl+b` and then press `c` to toggle between modes. Each connected client can choose its own layout mode independently.
+
+Each client also keeps its own width and horizontal pan for each pane, in either layout. Width edits only resize the PTY when that client owns session sizing. Claim with `Ctrl+b S` to take ownership; another client can claim it later. PTY output leaves the pan in place, while typing or pasting brings the cursor into view. Set `pan_step` in the config to change the default 10-cell pan distance.
 
 ---
 

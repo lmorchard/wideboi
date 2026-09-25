@@ -599,6 +599,15 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			}
 		}
 
+	case protocol.MsgSetPaneWidth:
+		if tp == s.sizeOwner && m.Width >= layout.MinColumnWidth && m.Width <= 4096 {
+			if old, ok := s.strip.ColumnWidth(m.PaneID); ok && old != m.Width {
+				s.strip.SetColumnWidth(m.PaneID, m.Width)
+				s.resizePanesLocked()
+				needBroadcast = true
+			}
+		}
+
 	case protocol.MsgVerb:
 		switch m.Verb {
 		case protocol.VerbNewColumn:
@@ -607,14 +616,20 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			}
 			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
-			s.strip.CycleWidth(m.PaneID)
-			s.resizePanesLocked()
+			if tp == s.sizeOwner {
+				s.strip.CycleWidth(m.PaneID)
+				s.resizePanesLocked()
+			}
 		case protocol.VerbGrowWidth:
-			s.strip.GrowWidth(m.PaneID, 10)
-			s.resizePanesLocked()
+			if tp == s.sizeOwner {
+				s.strip.GrowWidth(m.PaneID, 10)
+				s.resizePanesLocked()
+			}
 		case protocol.VerbShrinkWidth:
-			s.strip.ShrinkWidth(m.PaneID, 10)
-			s.resizePanesLocked()
+			if tp == s.sizeOwner {
+				s.strip.ShrinkWidth(m.PaneID, 10)
+				s.resizePanesLocked()
+			}
 		case protocol.VerbMoveLeft:
 			s.strip.MoveLeft(m.PaneID)
 		case protocol.VerbMoveRight:
@@ -639,13 +654,32 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				s.updateDashboardLocked()
 			}
 		case protocol.VerbClaimSize:
+			valid := true
+			for id, width := range m.Widths {
+				if width < layout.MinColumnWidth || width > 4096 {
+					valid = false
+					break
+				}
+				if _, ok := s.strip.ColumnWidth(id); !ok {
+					valid = false
+					break
+				}
+			}
+			if !valid {
+				break
+			}
 			s.sizeOwner = tp
+			for id, width := range m.Widths {
+				s.strip.SetColumnWidth(id, width)
+			}
 			if sz, ok := s.clientSizes[tp]; ok && sz.Cols > 0 && sz.Rows > 0 {
 				oldCols, oldRows := s.cols, s.rows
 				s.cols, s.rows = sz.Cols, sz.Rows
-				if s.cols != oldCols || s.rows != oldRows {
+				if s.cols != oldCols || s.rows != oldRows || len(m.Widths) > 0 {
 					s.resizePanesLocked()
 				}
+			} else if len(m.Widths) > 0 {
+				s.resizePanesLocked()
 			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client

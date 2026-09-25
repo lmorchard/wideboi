@@ -715,6 +715,8 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	}
 
 	cli := client.NewClient(cConn, width, height, cfg.PrefixLabel)
+	cli.SetPanStep(cfg.PanStep)
+	cli.SetWidthPresets(cfg.WidthPresets)
 	cli.SetTheme(client.NewTheme(cfg.Theme, nil))
 	cli.SetLayoutMode(cfg.LayoutMode)
 	cli.SetBindings(bindings)
@@ -881,6 +883,10 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					cli.ToggleLayout()
 				case routeScroll:
 					cli.SendScroll(ctx, act.Scroll)
+				case routePan:
+					cli.PanFocused(act.Pan)
+				case routeToggleFollowPTY:
+					cli.ToggleFollowPTY()
 				case routeSearchStart:
 					cli.StartSearch()
 				case routeSearchEdit:

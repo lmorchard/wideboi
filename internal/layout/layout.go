@@ -301,6 +301,21 @@ func (s *Strip) ColumnWidth(paneID int) (int, bool) {
 	return 0, false
 }
 
+// SetColumnWidth changes one column's logical width. Callers decide whether
+// that column is a PTY size or a client-local display width.
+func (s *Strip) SetColumnWidth(paneID, width int) bool {
+	if width < MinColumnWidth {
+		return false
+	}
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			s.columns[i].Width = width
+			return true
+		}
+	}
+	return false
+}
+
 // PaneIDs returns every pane currently in the strip, whether or not
 // ComputePlacements would give it a Placement. A column scrolled fully
 // off-screen has no Placement at all (ComputePlacements drops it via

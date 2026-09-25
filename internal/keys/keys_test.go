@@ -66,7 +66,11 @@ func TestTableIsWellFormed(t *testing.T) {
 			if (b.Column < 1 || b.Column > 9) && b.Column != keys.LastColumn {
 				t.Errorf("%q is ActionFocusColumn with Column %d; want 1-9 or LastColumn", b.Key, b.Column)
 			}
-		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit, keys.ActionToggleLayout, keys.ActionSearch:
+		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit, keys.ActionToggleLayout, keys.ActionSearch, keys.ActionToggleFollowPTY:
+		case keys.ActionPan:
+			if b.Pan == 0 {
+				t.Errorf("%q has zero pan", b.Key)
+			}
 		default:
 			t.Errorf("%q has unknown Action %v", b.Key, b.Action)
 		}
@@ -431,6 +435,25 @@ func TestBuildBindingsUnknownActionRejected(t *testing.T) {
 		t.Error("expected error for unknown action, got nil")
 	} else if !strings.Contains(err.Error(), "unknown action") {
 		t.Errorf("expected error to mention 'unknown action', got %v", err)
+	}
+}
+
+func TestUppercasePanBindingsStayDistinctFromFocus(t *testing.T) {
+	b, err := keys.BuildBindings(map[string][]string{keys.ActionNamePanLeft: {"H"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var focus, pan bool
+	for _, item := range b {
+		if item.Key == "h" && item.ActionName == keys.ActionNameFocusLeft {
+			focus = true
+		}
+		if item.Key == "H" && item.ActionName == keys.ActionNamePanLeft {
+			pan = true
+		}
+	}
+	if !focus || !pan {
+		t.Fatalf("focus h and pan H not both present: %v", b)
 	}
 }
 

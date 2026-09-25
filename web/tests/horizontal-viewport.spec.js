@@ -12,10 +12,10 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v10';
+        this.protocol = 'wideboi.v11';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v10')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -47,10 +47,15 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
     const { clientMessages } = await import('/tests/browser-fixture.ts');
     return clientMessages(window.testSockets[0].sent).filter(msg => msg.case === 'resize').length;
   });
-  const cardWidth = page.getByRole('combobox', { name: 'Card width' });
+  const cardWidth = page.getByRole('spinbutton', { name: 'Pane width' });
   const controlBounds = await cardWidth.boundingBox();
   expect(controlBounds.x + controlBounds.width).toBeLessThanOrEqual(500);
-  await cardWidth.selectOption('40');
+  await cardWidth.fill('40');
+  await cardWidth.dispatchEvent('change');
+  await expect.poll(() => page.evaluate(async () => {
+    const { clientMessages } = await import('/tests/browser-fixture.ts');
+    return clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'setPaneWidth')?.value.width;
+  })).toBe(40);
 
   const pane = page.locator('wideboi-pane');
   const viewport = pane.locator('.viewport');
@@ -65,6 +70,11 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
     } }));
   });
   await expect(cardWidth).toHaveValue('40');
+  await page.getByRole('button', { name: 'Fit to Window' }).click();
+  await expect.poll(() => page.evaluate(async () => {
+    const { clientMessages } = await import('/tests/browser-fixture.ts');
+    return clientMessages(window.testSockets[0].sent).findLast(msg => msg.case === 'verb')?.value.widths?.[1];
+  })).toBe(40);
   await expect.poll(() => viewport.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
   const counts = async () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
@@ -90,7 +100,8 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
   })).toBeGreaterThan(40);
   const after = await counts();
   expect(after).toEqual(before);
-  await cardWidth.selectOption('terminal');
+  await cardWidth.fill('80');
+  await cardWidth.dispatchEvent('change');
   await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBe(0);
   expect(await counts()).toEqual(before);
 });

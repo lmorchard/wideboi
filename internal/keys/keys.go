@@ -39,6 +39,9 @@ const (
 	ActionNameToggleCards  = "toggle_cards"
 	ActionNameToggleStatus = "toggle_status"
 	ActionNameClaimSize    = "claim_size"
+	ActionNamePanLeft      = "pan_left"
+	ActionNamePanRight     = "pan_right"
+	ActionNameFollowPTY    = "follow_pty"
 	ActionNameHelp         = "help"
 	ActionNameSearch       = "search"
 	ActionNameDetach       = "detach"
@@ -72,6 +75,8 @@ const (
 	// scrolling strip. Client-local: layout is presentation (#92).
 	ActionToggleLayout
 	ActionSearch
+	ActionPan
+	ActionToggleFollowPTY
 )
 
 // LastColumn is Column's value for "the rightmost column, however many
@@ -105,6 +110,7 @@ type Binding struct {
 	// Scroll is the offset delta when Action is ActionScroll. Positive
 	// moves back into history; internal/server/term clamps both ends.
 	Scroll int
+	Pan    int
 	// Column is the 1-based position ActionFocusColumn focuses, or
 	// LastColumn.
 	Column int
@@ -152,7 +158,7 @@ const (
 	helpWidth     = "shrink / grow this column's width"
 	helpMove      = "move this column left / right"
 	helpAttention = "jump to attention / status dashboard"
-	helpView      = "toggle cards / claim session size"
+	helpView      = "cards / claim size / pan / follow PTY"
 )
 
 // Bindings is the table, in status-bar display order.
@@ -208,6 +214,12 @@ var Bindings = slices.Concat([]Binding{
 		NoRepeat: true, Long: "toggle the card layout", HelpGroup: helpView},
 	{ActionName: ActionNameClaimSize, Key: "S", Action: ActionVerb, Verb: protocol.VerbClaimSize,
 		NoRepeat: true, Long: "claim session size for this window", HelpGroup: helpView},
+	{ActionName: ActionNamePanLeft, Key: "H", Action: ActionPan, Pan: -1, NoRepeat: true,
+		Long: "pan focused pane left", HelpGroup: helpView},
+	{ActionName: ActionNamePanRight, Key: "L", Action: ActionPan, Pan: 1, NoRepeat: true,
+		Long: "pan focused pane right", HelpGroup: helpView},
+	{ActionName: ActionNameFollowPTY, Key: "f", Action: ActionToggleFollowPTY, NoRepeat: true,
+		Long: "toggle following PTY widths", HelpGroup: helpView},
 	{ActionName: ActionNameQuit, Key: "q", Action: ActionQuit, Essential: true,
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},
 	{ActionName: ActionNameExit, Key: "esc", Action: ActionExit, Essential: true,
@@ -315,6 +327,9 @@ var validActions = map[string]string{
 	ActionNameFocusLast:    ActionNameFocusLast,
 	ActionNameToggleCards:  ActionNameToggleCards,
 	ActionNameClaimSize:    ActionNameClaimSize,
+	ActionNamePanLeft:      ActionNamePanLeft,
+	ActionNamePanRight:     ActionNamePanRight,
+	ActionNameFollowPTY:    ActionNameFollowPTY,
 	ActionNameHelp:         ActionNameHelp,
 	ActionNameSearch:       ActionNameSearch,
 	ActionNameDetach:       ActionNameDetach,
@@ -355,7 +370,10 @@ var validNamedKeys = map[string]bool{
 
 // validateKey normalizes one configured key for act and checks it can be bound.
 func validateKey(act, key string) (string, error) {
-	k := strings.ToLower(strings.TrimSpace(key))
+	k := strings.TrimSpace(key)
+	if len([]rune(k)) != 1 {
+		k = strings.ToLower(k)
+	}
 	if k == "" {
 		return "", fmt.Errorf("key for action %q cannot be empty", act)
 	}
@@ -421,7 +439,7 @@ func BuildBindings(custom map[string][]string) ([]Binding, error) {
 	for act, ks := range custom {
 		canonical, ok := validActions[act]
 		if !ok {
-			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, move_left, move_right, kill_pane, smart_jump, toggle_status, focus_last, toggle_cards, help, detach, quit, exit", act)
+			return nil, fmt.Errorf("unknown action %q; valid actions include focus_left, pan_left, pan_right, follow_pty, cycle_width, claim_size, toggle_cards, help, detach, quit, exit", act)
 		}
 		if canonical == ActionNameQuit && len(ks) == 0 {
 			return nil, fmt.Errorf("action %q cannot be unbound: it is the only way to end the session", act)
