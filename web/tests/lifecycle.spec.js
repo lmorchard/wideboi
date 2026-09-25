@@ -244,3 +244,91 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
   await expect(page.getByText('Focus Pane:')).toBeVisible();
   await expect(page.locator('.stats-overlay')).toHaveCount(0);
 });
+
+test('client handles prefix, double prefix, column focus, layout switch, and help overlay', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.testSockets = [];
+    window.WebSocket = class {
+      static OPEN = 1;
+      constructor(url, protocols) {
+        this.protocol = 'wideboi.v5';
+        this.readyState = 0;
+        this.sent = [];
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
+      }
+      send(data) { this.sent.push(new Uint8Array(data)); }
+      close() { this.readyState = 3; this.onclose?.(); }
+      open() { this.readyState = 1; this.onopen?.(); }
+      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+  await expect(page.getByText('Focus Pane:')).toBeVisible();
+
+  const messages = () => page.evaluate(async () => {
+    const { clientMessages } = await import('/tests/browser-fixture.ts');
+    return clientMessages(window.testSockets.at(-1).sent).map(msg => ({
+      case: msg.case, value: msg.value,
+    }));
+  });
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    const socket = window.testSockets[0];
+    socket.message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [
+        { paneId: 1, width: 40, height: 10 },
+        { paneId: 2, width: 40, height: 10 },
+        { paneId: 3, width: 40, height: 10 },
+      ],
+      paneTitles: { 1: 'First', 2: 'Second', 3: 'Third' },
+    } }));
+  });
+
+  await page.locator('wideboi-pane canvas').first().focus();
+
+  // 1. Double prefix: Ctrl+B then Ctrl+B sends literal Ctrl+B key
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('Control+b');
+  await expect.poll(async () => (await messages()).some(msg =>
+    msg.case === 'input' && msg.value.paneId === 1 && msg.value.key?.code === 98 && msg.value.key?.mod === 4
+  )).toBe(true);
+
+  // 2. Column jump: Ctrl+B then '2' focuses pane 2
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('2');
+  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('2');
+
+  // Jump to last column: Ctrl+B then '0' focuses pane 3
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('0');
+  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('3');
+
+  // 3. Layout toggle: Ctrl+B then 'c' toggles between cards and scroll
+  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('c');
+  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('scroll');
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('c');
+  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+
+  // 4. Help overlay: Ctrl+B then '?' opens help dialog
+  await expect(page.locator('.help-dialog')).toHaveCount(0);
+  await page.keyboard.press('Control+b');
+  await page.keyboard.press('?');
+  await expect(page.locator('.help-dialog')).toBeVisible();
+  await expect(page.locator('.help-dialog')).toContainText('wideboi Shortcuts');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.help-dialog')).toHaveCount(0);
+
+  // 5. Configurable prefix: Change prefix to Ctrl+A
+  await page.getByRole('combobox', { name: 'Prefix' }).selectOption('ctrl+a');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.prefix'))).toBe('ctrl+a');
+  await page.locator('wideboi-pane canvas').nth(2).focus();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('1');
+  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
+});
