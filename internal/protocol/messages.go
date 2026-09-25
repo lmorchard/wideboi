@@ -214,6 +214,10 @@ type MsgResize struct {
 type MsgScroll struct {
 	PaneID int
 	Delta  int
+	// SetAbsolute makes Offset the desired per-client view offset. Search
+	// uses this because new output may pin a scrolled view between requests.
+	SetAbsolute bool
+	Offset      int
 }
 
 // MsgHistoryRequest asks for the focused pane's current physical text rows.

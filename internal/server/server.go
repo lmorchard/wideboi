@@ -606,6 +606,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			}
 			cur := offsets[m.PaneID]
 			newOffset := cur + m.Delta
+			if m.SetAbsolute {
+				newOffset = m.Offset
+			}
 			maxOffset := p.ScrollbackLen()
 			if newOffset < 0 {
 				newOffset = 0

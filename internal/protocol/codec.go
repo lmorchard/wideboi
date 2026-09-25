@@ -30,7 +30,7 @@ func MarshalClient(msg any) ([]byte, error) {
 	case MsgResize:
 		env.Msg = &wirepb.ClientMessage_Resize{Resize: &wirepb.MsgResize{Cols: int32(m.Cols), Rows: int32(m.Rows)}}
 	case MsgScroll:
-		env.Msg = &wirepb.ClientMessage_Scroll{Scroll: &wirepb.MsgScroll{PaneId: int32(m.PaneID), Delta: int32(m.Delta)}}
+		env.Msg = &wirepb.ClientMessage_Scroll{Scroll: &wirepb.MsgScroll{PaneId: int32(m.PaneID), Delta: int32(m.Delta), SetAbsolute: m.SetAbsolute, Offset: int32(m.Offset)}}
 	case MsgHistoryRequest:
 		env.Msg = &wirepb.ClientMessage_HistoryRequest{HistoryRequest: &wirepb.MsgHistoryRequest{PaneId: int32(m.PaneID)}}
 	case MsgPaneResync:
@@ -66,7 +66,7 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_Resize:
 		return MsgResize{Cols: int(m.Resize.Cols), Rows: int(m.Resize.Rows)}, nil
 	case *wirepb.ClientMessage_Scroll:
-		return MsgScroll{PaneID: int(m.Scroll.PaneId), Delta: int(m.Scroll.Delta)}, nil
+		return MsgScroll{PaneID: int(m.Scroll.PaneId), Delta: int(m.Scroll.Delta), SetAbsolute: m.Scroll.SetAbsolute, Offset: int(m.Scroll.Offset)}, nil
 	case *wirepb.ClientMessage_HistoryRequest:
 		return MsgHistoryRequest{PaneID: int(m.HistoryRequest.PaneId)}, nil
 	case *wirepb.ClientMessage_PaneResync:

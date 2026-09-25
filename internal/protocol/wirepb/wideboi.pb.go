@@ -1766,6 +1766,8 @@ type MsgScroll struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PaneId        int32                  `protobuf:"varint,1,opt,name=pane_id,json=paneId,proto3" json:"pane_id,omitempty"`
 	Delta         int32                  `protobuf:"varint,2,opt,name=delta,proto3" json:"delta,omitempty"`
+	SetAbsolute   bool                   `protobuf:"varint,3,opt,name=set_absolute,json=setAbsolute,proto3" json:"set_absolute,omitempty"`
+	Offset        int32                  `protobuf:"varint,4,opt,name=offset,proto3" json:"offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1810,6 +1812,20 @@ func (x *MsgScroll) GetPaneId() int32 {
 func (x *MsgScroll) GetDelta() int32 {
 	if x != nil {
 		return x.Delta
+	}
+	return 0
+}
+
+func (x *MsgScroll) GetSetAbsolute() bool {
+	if x != nil {
+		return x.SetAbsolute
+	}
+	return false
+}
+
+func (x *MsgScroll) GetOffset() int32 {
+	if x != nil {
+		return x.Offset
 	}
 	return 0
 }
@@ -2776,10 +2792,12 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x04data\x18\x03 \x01(\fR\x04data\"3\n" +
 	"\tMsgResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\x05R\x04cols\x12\x12\n" +
-	"\x04rows\x18\x02 \x01(\x05R\x04rows\":\n" +
+	"\x04rows\x18\x02 \x01(\x05R\x04rows\"u\n" +
 	"\tMsgScroll\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x14\n" +
-	"\x05delta\x18\x02 \x01(\x05R\x05delta\",\n" +
+	"\x05delta\x18\x02 \x01(\x05R\x05delta\x12!\n" +
+	"\fset_absolute\x18\x03 \x01(\bR\vsetAbsolute\x12\x16\n" +
+	"\x06offset\x18\x04 \x01(\x05R\x06offset\",\n" +
 	"\x11MsgHistoryRequest\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\"h\n" +
 	"\x12MsgHistorySnapshot\x12\x17\n" +

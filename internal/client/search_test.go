@@ -38,8 +38,8 @@ func TestSearchScreenScrollbackNavigationAndRestore(t *testing.T) {
 	_ = takeSearchMessage(t, tp)
 	c.HandleServerMsg(protocol.MsgHistorySnapshot{PaneID: 1, ScrollbackLen: 4,
 		Rows: []string{"needle old", "other", "needle middle", "other", "needle screen", "other", ""}})
-	if got := takeSearchMessage(t, tp).(protocol.MsgScroll).Delta; got != -2 {
-		t.Fatalf("screen match delta = %d, want -2", got)
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 0 {
+		t.Fatalf("screen match scroll = %+v, want absolute 0", got)
 	}
 	if c.search.selected != 2 || len(c.search.matches) != 3 {
 		t.Fatalf("matches = %+v selected %d", c.search.matches, c.search.selected)
@@ -48,12 +48,12 @@ func TestSearchScreenScrollbackNavigationAndRestore(t *testing.T) {
 	_ = takeSearchMessage(t, tp)
 	c.HandleServerMsg(protocol.MsgHistorySnapshot{PaneID: 1, ScrollbackLen: 4,
 		Rows: []string{"needle old", "other", "needle middle", "other", "needle screen", "other", ""}})
-	if got := takeSearchMessage(t, tp).(protocol.MsgScroll).Delta; got != 2 {
-		t.Fatalf("previous delta = %d, want 2", got)
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 {
+		t.Fatalf("previous scroll = %+v, want absolute 2", got)
 	}
 	c.SearchEnd(ctx, true, false)
-	if len(tp.ClientSend) != 0 || c.search != nil {
-		t.Fatal("restore should close search at original offset")
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 || c.search != nil {
+		t.Fatalf("restore = %+v, want original offset 2 and closed search", got)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestSearchNoMatchAndHistoryReplacement(t *testing.T) {
 	c.SearchNavigate(ctx, 1)
 	_ = takeSearchMessage(t, tp)
 	c.HandleServerMsg(protocol.MsgHistorySnapshot{PaneID: 1, ScrollbackLen: 3, Rows: []string{"new", "本 here", "line", "live"}})
-	if got := takeSearchMessage(t, tp).(protocol.MsgScroll).Delta; got != 2 {
-		t.Fatalf("new history match delta = %d, want 2", got)
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 {
+		t.Fatalf("new history scroll = %+v, want absolute 2", got)
 	}
 	if c.search.matches[0].row != 1 {
 		t.Fatalf("match after replacement = %+v", c.search.matches)
@@ -101,15 +101,15 @@ func TestTwoClientsSearchSamePaneIndependently(t *testing.T) {
 		Rows: []string{"alpha", "beta", "other", "other", "live", "", ""}}
 	first.HandleServerMsg(snapshot)
 	second.HandleServerMsg(snapshot)
-	if got := takeSearchMessage(t, firstWire).(protocol.MsgScroll).Delta; got != 4 {
-		t.Fatalf("first delta = %d", got)
+	if got := takeSearchMessage(t, firstWire).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 4 {
+		t.Fatalf("first scroll = %+v", got)
 	}
-	if got := takeSearchMessage(t, secondWire).(protocol.MsgScroll).Delta; got != 3 {
-		t.Fatalf("second delta = %d", got)
+	if got := takeSearchMessage(t, secondWire).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 3 {
+		t.Fatalf("second scroll = %+v", got)
 	}
 	first.SearchEnd(ctx, false, true)
-	if got := takeSearchMessage(t, firstWire).(protocol.MsgScroll).Delta; got != -4 {
-		t.Fatalf("first live delta = %d", got)
+	if got := takeSearchMessage(t, firstWire).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 0 {
+		t.Fatalf("first live scroll = %+v", got)
 	}
 	if second.search == nil || second.search.query != "beta" {
 		t.Fatal("second client's search was changed")

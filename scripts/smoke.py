@@ -932,14 +932,23 @@ def case_search_history_and_restore(fail):
     s = Session(cols=100, rows=30)
     # The command text contains no literal needle, so the only history
     # match comes from the shell's output, not readline's command echo.
-    s.type("printf '\\156\\145\\145\\144\\154\\145\\n'\r")
+    s.type("printf 'prefix-%b-suffix\\n' '\\156\\145\\145\\144\\154\\145'\r")
     s.type("seq 1 40\r")
     before = len(s.output())
     s.type("\x02/needle\r")
+    # The snapshot reply can arrive after the first quiet window, and
+    # the diff renderer may write only "1/1" over "searching…" rather
+    # than retransmitting the unchanged "search " prefix.
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        found = s.output()[before:]
+        if b"1/1" in found and b"prefix-needle-suffix" in found:
+            break
+        time.sleep(0.02)
     found = s.output()[before:]
-    if b"search 1/1" not in found:
+    if b"1/1" not in found:
         fail("search did not show its match count on the host status row")
-    if b"needle" not in found:
+    if b"prefix-needle-suffix" not in found:
         fail("search did not repaint the earlier matching row")
     s.type("\x1b")
     if b"focus: [pane" not in s.output()[before:]:

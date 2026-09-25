@@ -22,7 +22,6 @@ type searchState struct {
 	pending                              int // 0: first match, +1/-1: navigate
 	matches                              []historyMatch
 	selected                             int
-	requestedOffset                      int
 }
 
 func findHistoryMatches(rows []string, query string) []historyMatch {
@@ -52,8 +51,7 @@ func (c *Client) StartSearch() {
 	}
 	pu := c.paneUpdates[c.focusPaneID]
 	c.search = &searchState{paneID: c.focusPaneID, priorOffset: pu.ScrollOffset,
-		priorHistoryLen: pu.ScrollbackLen, input: true, selected: -1,
-		requestedOffset: pu.ScrollOffset}
+		priorHistoryLen: pu.ScrollbackLen, input: true, selected: -1}
 }
 
 func (c *Client) SearchEdit(text string, backspace bool) {
@@ -139,13 +137,7 @@ func (c *Client) applyHistoryLocked(snapshot protocol.MsgHistorySnapshot) {
 }
 
 func (c *Client) scrollSearchToLocked(ctx context.Context, s *searchState, target int) {
-	delta := target - s.requestedOffset
-	if delta == 0 {
-		return
-	}
-	if c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: s.paneID, Delta: delta}) {
-		s.requestedOffset = target
-	}
+	c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: s.paneID, SetAbsolute: true, Offset: target})
 }
 
 func (c *Client) searchStatusLocked() string {

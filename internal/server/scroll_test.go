@@ -103,6 +103,21 @@ func TestIndependentScrollTwoClients(t *testing.T) {
 	}
 }
 
+func TestAbsoluteScrollIgnoresOffsetShiftFromNewOutput(t *testing.T) {
+	grid := term.NewVT(20, 5)
+	t.Cleanup(func() { _ = grid.Close() })
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(grid, "line %02d\r\n", i)
+	}
+	s := &Server{panes: map[int]*Pane{1: {id: 1, grid: grid, cols: 20, rows: 5}}}
+	tp := transport.NewInProcChannel(16)
+	s.clientScrollOffsets = map[transport.Transport]map[int]int{tp: {1: 9}}
+	s.handleClientMsg(context.Background(), tp, protocol.MsgScroll{PaneID: 1, SetAbsolute: true, Offset: 2})
+	if got := s.clientScrollOffsets[tp][1]; got != 2 {
+		t.Fatalf("absolute scroll landed at %d, want 2", got)
+	}
+}
+
 func TestScrolledClientStaysInHistoryWithUnreadOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
