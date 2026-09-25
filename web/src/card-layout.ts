@@ -16,7 +16,7 @@ export interface CardLayout {
 
 const MIN_SLIVER_WIDTH = 4;
 
-// Positions are in terminal cells. The elements retain their full logical widths;
+// Positions are in display cells. The elements retain their chosen card widths;
 // later cards cover their predecessors to leave visible slivers.
 export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewportWidth: number, previousFirst: number, stackFocusId: number | null = focusedPaneId): CardLayout {
   if (!columns.length || viewportWidth <= 0) {

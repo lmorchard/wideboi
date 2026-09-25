@@ -31,7 +31,6 @@ export class WideboiPane extends LitElement {
     .viewport {
       width: 100%;
       height: 100%;
-      overflow-x: hidden;
       overflow-y: auto;
       scrollbar-width: thin;
       overscroll-behavior-y: contain;
@@ -57,7 +56,6 @@ export class WideboiPane extends LitElement {
     }
     canvas {
       display: block;
-      width: 100%;
       outline: none;
     }
     @media (prefers-reduced-motion: reduce) {
@@ -72,6 +70,7 @@ export class WideboiPane extends LitElement {
   @property() cardLabel = '';
   @property({ type: Boolean }) running = false;
   @property({ type: Number }) cellWidth = 1;
+  @property({ type: Number }) displayCols = 0;
   // Read once when the painter is created; only set with ?stats=1.
   @property({ attribute: false }) stats?: RenderStats;
 
@@ -155,9 +154,10 @@ export class WideboiPane extends LitElement {
   focusInput() { this.canvas.focus({ preventScroll: true }); }
 
   render() { return html`
-    <div class="viewport" @scroll=${this.onViewportScroll}>
+    <div class="viewport" style=${`overflow-x: ${this.pane && this.pane.cols > this.displayCols ? 'auto' : 'hidden'}`}
+      @scroll=${this.onViewportScroll}>
       <canvas tabindex=${this.focused ? 0 : -1}
-        style=${`height: ${this.pane ? `${this.pane.rows * CELL_HEIGHT}px` : '100%'}`}></canvas>
+        style=${`width: ${this.pane ? `${this.pane.cols * this.cellWidth}px` : '100%'}; height: ${this.pane ? `${this.pane.rows * CELL_HEIGHT}px` : '100%'}`}></canvas>
     </div>
     <span class="card-label">${this.cardLabel}</span>`; }
 }

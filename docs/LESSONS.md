@@ -229,6 +229,14 @@ viewport move the local view; they must not send `MsgResize` or change the
 server-managed scrollback offset. Canvas-relative pointer coordinates already
 include the viewport's scroll offset because its bounding rectangle moves.
 
+The same separation applies across columns: a browser card's displayed width
+can be narrower than `MsgPaneUpdate.Cols`. Size its canvas from the pane's
+terminal grid and its outer element from the client's chosen display width.
+The inner scroll viewport provides horizontal panning; reusing the display
+width for the canvas silently discards the right-hand cells and misroutes mouse
+coordinates after a pan. A card-width choice is client view state, so it must
+not send `MsgResize` or overwrite the server's column width.
+
 Browser tests that replace `window.WebSocket` also intercept Vite's development
 socket. Identify the app connection by its offered version subprotocol,
 not a URL suffix: on Linux CI, Vite's socket matched `/ws`, closed, and the test
