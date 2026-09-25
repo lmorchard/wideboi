@@ -103,6 +103,7 @@ type Grid interface {
 	Status() protocol.PaneStatus
 
 	ScrollbackLen() int
+	HistoryRows() (int, []string)
 	ScrollOffset() int
 	SetScrollOffset(offset int)
 
@@ -675,7 +676,38 @@ func (g *vtGrid) CursorPosition() image.Point {
 func (g *vtGrid) CursorVisible() bool { return g.cursorVisible.Load() }
 
 func (g *vtGrid) ScrollbackLen() int { return g.em.ScrollbackLen() }
-func (g *vtGrid) ScrollOffset() int  { return int(g.scrollOffset.Load()) }
+
+// HistoryRows copies physical terminal rows under the same lock used by
+// DrawAt. Soft wraps remain separate rows: the emulator exposes no wrap bit.
+func (g *vtGrid) HistoryRows() (int, []string) {
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
+	sbLen := g.em.ScrollbackLen()
+	cols, screenRows := g.em.Width(), g.em.Height()
+	rows := make([]string, 0, sbLen+screenRows)
+	for y := 0; y < sbLen+screenRows; y++ {
+		var b strings.Builder
+		for x := 0; x < cols; x++ {
+			var cell *uv.Cell
+			if y < sbLen {
+				cell = g.em.ScrollbackCellAt(x, y)
+			} else {
+				cell = g.em.CellAt(x, y-sbLen)
+			}
+			if cell == nil || cell.Content == "" {
+				b.WriteByte(' ')
+				continue
+			}
+			b.WriteString(cell.Content)
+			if cell.Width > 1 {
+				x += cell.Width - 1
+			}
+		}
+		rows = append(rows, strings.TrimRight(b.String(), " "))
+	}
+	return sbLen, rows
+}
+func (g *vtGrid) ScrollOffset() int { return int(g.scrollOffset.Load()) }
 
 func (g *vtGrid) SetScrollOffset(offset int) {
 	maxOffset := g.em.ScrollbackLen()

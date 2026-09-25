@@ -72,6 +72,7 @@ without doing anything. For the full list, press `?` in control mode.
 | --- | --- |
 | `h` / `l` | focus the column to the left / right (arrow keys work too) |
 | `j` / `k` | scroll this pane's history down / up |
+| `/` | search the focused pane's screen and scrollback |
 | `n` | open a new column |
 | `w` | cycle this column's width |
 | `x` | kill the focused pane |
@@ -86,6 +87,15 @@ without doing anything. For the full list, press `?` in control mode.
 | `q` | end the session: close every pane and stop the server |
 | `esc` | leave control mode |
 | `ctrl+b` | send a literal `ctrl+b` to the pane, and leave control mode |
+
+After `/`, type a case-sensitive plain-text query and press Enter. `n` and
+`N` move to the next and previous match; Enter keeps the selected view,
+Escape restores the view from before the search, and Ctrl+g returns to live
+output. Search stays in this client and never sends the query or navigation
+keys to the child. Matches use physical terminal rows: text split by a soft
+wrap is searched on each row separately. Unicode queries match exactly, and
+history that has rolled out of the scrollback buffer is no longer searchable.
+Browser search is tracked in [issue #222](https://github.com/lmorchard/wideboi/issues/222).
 
 Each pane's header starts with its position, then its ID in brackets:
 ` 2 [7]` is the second column from the left, pane 7. The digit keys go by

@@ -20,4 +20,5 @@ package protocol
 // 4 adds MsgPaneMetadata carrying CWD and OSC 1337 user variables.
 // 5 adds MsgTrafficRequest/MsgTrafficStats (#179).
 // 6 adds VerbToggleStatus and MsgFocusPane (#196).
-const Version uint32 = 6
+// 7 adds client-requested plain-text history snapshots for local search.
+const Version uint32 = 7

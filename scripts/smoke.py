@@ -928,6 +928,25 @@ def case_help_overlay_opens_and_any_key_dismisses(fail):
     s.close()
 
 
+def case_search_history_and_restore(fail):
+    s = Session(cols=100, rows=30)
+    # The command text contains no literal needle, so the only history
+    # match comes from the shell's output, not readline's command echo.
+    s.type("printf '\\156\\145\\145\\144\\154\\145\\n'\r")
+    s.type("seq 1 40\r")
+    before = len(s.output())
+    s.type("\x02/needle\r")
+    found = s.output()[before:]
+    if b"search 1/1" not in found:
+        fail("search did not show its match count on the host status row")
+    if b"needle" not in found:
+        fail("search did not repaint the earlier matching row")
+    s.type("\x1b")
+    if b"focus: [pane" not in s.output()[before:]:
+        fail("Escape did not restore the prior pane view")
+    s.close()
+
+
 def case_help_overlay_works_after_a_focus_switch(fail):
     # A focus switch starts an 8-frame wipe. This does not prove help
     # wins the race against the wipe -- the wipe self-clears in ~128ms
@@ -1115,6 +1134,7 @@ CASES = [
     ("unmodified verb exits control mode", case_unmodified_verb_exits_control_mode),
     ("unknown key exits control mode", case_unknown_key_exits_control_mode),
     ("help overlay opens and any key dismisses", case_help_overlay_opens_and_any_key_dismisses),
+    ("search history and restore", case_search_history_and_restore),
     ("help overlay works after a focus switch", case_help_overlay_works_after_a_focus_switch),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),

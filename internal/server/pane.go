@@ -397,7 +397,11 @@ func (p *Pane) Generation() uint64 { return p.grid.Generation() }
 // OutputGen reports the child terminal output counter; see term.Grid.OutputGen.
 func (p *Pane) OutputGen() uint64 { return p.grid.OutputGen() }
 
-func (p *Pane) ScrollbackLen() int         { return p.grid.ScrollbackLen() }
+func (p *Pane) ScrollbackLen() int { return p.grid.ScrollbackLen() }
+func (p *Pane) HistoryRows() protocol.MsgHistorySnapshot {
+	length, rows := p.grid.HistoryRows()
+	return protocol.MsgHistorySnapshot{PaneID: p.id, ScrollbackLen: length, Rows: rows}
+}
 func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }
 func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 

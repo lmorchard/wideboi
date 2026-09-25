@@ -34,7 +34,7 @@ export class WideboiClient {
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
     // The server must select this version before any shift patches arrive.
     // Browsers reject an upgrade that selects no offered subprotocol.
-    const versionProtocol = "wideboi.v6";
+    const versionProtocol = "wideboi.v7";
     const ws = new WebSocket(this.url, protocol ? [versionProtocol, protocol] : [versionProtocol]);
     ws.binaryType = "arraybuffer";
     this.ws = ws;

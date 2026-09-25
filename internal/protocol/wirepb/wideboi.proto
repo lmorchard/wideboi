@@ -154,6 +154,7 @@ message ServerMessage {
     MsgPaneMetadata pane_metadata = 6;
     MsgTrafficStats traffic_stats = 7;
     MsgFocusPane focus_pane = 8;
+    MsgHistorySnapshot history_snapshot = 9;
   }
 }
 
@@ -208,6 +209,14 @@ message MsgScroll {
   int32 delta = 2;
 }
 
+// Plain physical rows, oldest first. Search is performed by the client.
+message MsgHistoryRequest { int32 pane_id = 1; }
+message MsgHistorySnapshot {
+  int32 pane_id = 1;
+  int32 scrollback_len = 2;
+  repeated string rows = 3;
+}
+
 message MsgPaneResync {
   int32 pane_id = 1;
 }
@@ -231,6 +240,7 @@ message ClientMessage {
     MsgShutdown shutdown = 9;
     MsgStatusRequest status_request = 10;
     MsgTrafficRequest traffic_request = 11;
+    MsgHistoryRequest history_request = 12;
   }
 }
 

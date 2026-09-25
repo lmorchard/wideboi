@@ -67,6 +67,7 @@ type Client struct {
 	prefixLabel        string
 	controlMode        bool
 	helpVisible        bool
+	search             *searchState
 	detachable         bool
 	bindings           []keys.Binding
 	motion             *motion
@@ -276,11 +277,12 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 			c.paneMetadata = make(map[int]protocol.MsgPaneMetadata)
 		}
 		c.paneMetadata[m.PaneID] = m
-
 	case protocol.MsgFocusPane:
 		c.strip.FocusPaneID(m.PaneID)
 		c.focusPaneID = c.strip.FocusedPaneID()
 		c.updatePlacementsLocked()
+	case protocol.MsgHistorySnapshot:
+		c.applyHistoryLocked(m)
 	}
 }
 
@@ -899,6 +901,9 @@ func controlHelp(budget int, detachable bool, custom ...[]keys.Binding) string {
 func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 	if budget < 0 {
 		budget = 0
+	}
+	if c.search != nil {
+		return truncateRunes(c.searchStatusLocked(), budget), uv.Style{Attrs: uv.AttrReverse}
 	}
 	if c.controlMode {
 		menu := truncateRunes(controlHelp(budget, c.detachable, c.bindings), budget)

@@ -216,6 +216,16 @@ type MsgScroll struct {
 	Delta  int
 }
 
+// MsgHistoryRequest asks for the focused pane's current physical text rows.
+type MsgHistoryRequest struct{ PaneID int }
+
+// MsgHistorySnapshot is an atomic copy of scrollback followed by the screen.
+type MsgHistorySnapshot struct {
+	PaneID        int
+	ScrollbackLen int
+	Rows          []string
+}
+
 // MsgDetach tells the server this client is leaving and the session is
 // not. The server hangs up on the sender; for the client that owns the
 // session it also gives the ownership up, for good.

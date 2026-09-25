@@ -39,6 +39,7 @@ const (
 	ActionNameToggleCards  = "toggle_cards"
 	ActionNameToggleStatus = "toggle_status"
 	ActionNameHelp         = "help"
+	ActionNameSearch       = "search"
 	ActionNameDetach       = "detach"
 	ActionNameQuit         = "quit"
 	ActionNameExit         = "exit"
@@ -69,6 +70,7 @@ const (
 	// ActionToggleLayout flips this client between the card fan and the
 	// scrolling strip. Client-local: layout is presentation (#92).
 	ActionToggleLayout
+	ActionSearch
 )
 
 // LastColumn is Column's value for "the rightmost column, however many
@@ -184,6 +186,8 @@ var Bindings = slices.Concat([]Binding{
 	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
 		Long: "focus the previously focused pane"},
 }, digitBindings(), []Binding{
+	{ActionName: ActionNameSearch, Key: "/", Action: ActionSearch, NoRepeat: true,
+		Long: "search the focused pane's history"},
 	{ActionName: ActionNameHelp, Key: "?", Action: ActionHelp,
 		BarGroup: "? help", Long: "show this help"},
 	{ActionName: ActionNameDetach, Key: "d", Action: ActionDetach, NeedsDetach: true,
@@ -307,6 +311,7 @@ var validActions = map[string]string{
 	ActionNameFocusLast:    ActionNameFocusLast,
 	ActionNameToggleCards:  ActionNameToggleCards,
 	ActionNameHelp:         ActionNameHelp,
+	ActionNameSearch:       ActionNameSearch,
 	ActionNameDetach:       ActionNameDetach,
 	ActionNameQuit:         ActionNameQuit,
 	ActionNameExit:         ActionNameExit,

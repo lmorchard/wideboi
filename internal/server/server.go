@@ -407,6 +407,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	createdPaneID := 0
 	focusTargetID := 0
 	var trafficReport *protocol.MsgTrafficStats
+	var historyPane *Pane
 
 	switch m := msg.(type) {
 	case protocol.MsgPaneResync:
@@ -418,6 +419,10 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	case protocol.MsgTrafficRequest:
 		report := s.trafficReportLocked()
 		trafficReport = &report
+	case protocol.MsgHistoryRequest:
+		if tp != nil {
+			historyPane = s.panes[m.PaneID]
+		}
 
 	case protocol.MsgAttach:
 		s.markAttachedLocked(tp)
@@ -632,6 +637,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	s.mu.Unlock()
 	if focusTargetID > 0 && tp != nil {
 		tp.SendServer(ctx, protocol.MsgFocusPane{PaneID: focusTargetID})
+	}
+	if historyPane != nil {
+		tp.SendServer(ctx, historyPane.HistoryRows())
 	}
 	if trafficReport != nil {
 		// Only the requester gets it. Sent outside s.mu: a socket
