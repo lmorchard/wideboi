@@ -12,10 +12,10 @@ test('a short browser pane can reach the bottom of a taller terminal without res
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v6';
+        this.protocol = 'wideboi.v7';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v6')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v7')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -88,4 +88,12 @@ test('a short browser pane can reach the bottom of a taller terminal without res
     return clientMessages(window.testSockets[0].sent).filter(msg => msg.case === 'resize').length;
   });
   expect(sizeAfter).toBe(sizeBefore);
+
+  // Click "Fit to Window" button and verify VerbClaimSize is sent
+  await page.getByRole('button', { name: 'Fit to Window' }).click();
+  const messages = () => page.evaluate(async () => {
+    const { clientMessages } = await import('/tests/browser-fixture.ts');
+    return clientMessages(window.testSockets[0].sent);
+  });
+  await expect.poll(async () => (await messages()).some(msg => msg.case === 'verb' && msg.value.verb === 14)).toBe(true);
 });

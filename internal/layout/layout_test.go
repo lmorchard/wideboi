@@ -418,3 +418,22 @@ func TestKillingLastFocusedPaneForgetsIt(t *testing.T) {
 		t.Errorf("FocusLast with no record moved focus to %d", got)
 	}
 }
+
+func TestComputePlacementsAnchorsToBottomWhenTaller(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 40, 0)
+	// Viewport height 22 -> AvailHeight 20
+	ps := s.ComputePlacements(80, 22)
+	if len(ps) != 1 {
+		t.Fatalf("placements = %d, want 1", len(ps))
+	}
+	if got, want := ps[0].Src.Min.Y, 20; got != want {
+		t.Errorf("Src.Min.Y = %d, want %d", got, want)
+	}
+	if got, want := ps[0].Src.Dy(), 20; got != want {
+		t.Errorf("Src.Dy() = %d, want %d", got, want)
+	}
+	if got, want := ps[0].Dst.Dy(), 20; got != want {
+		t.Errorf("Dst.Dy() = %d, want %d", got, want)
+	}
+}

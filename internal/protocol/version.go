@@ -20,4 +20,5 @@ package protocol
 // 4 adds MsgPaneMetadata carrying CWD and OSC 1337 user variables.
 // 5 adds MsgTrafficRequest/MsgTrafficStats (#179).
 // 6 adds VerbToggleStatus and MsgFocusPane (#196).
-const Version uint32 = 6
+// 7 adds VerbClaimSize to VerbType for multi-client sizing control (#184).
+const Version uint32 = 7

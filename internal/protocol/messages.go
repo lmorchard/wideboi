@@ -27,6 +27,7 @@ const (
 	VerbMoveRight
 	VerbFocusLast
 	VerbToggleStatus
+	VerbClaimSize
 )
 
 // PaneStatus represents the current state of a pane's process.

@@ -314,6 +314,13 @@ func (s *Strip) PaneIDs() []int {
 	return ids
 }
 
+// SetAllColumnHeights updates the logical height of every column in the strip.
+func (s *Strip) SetAllColumnHeights(height int) {
+	for i := range s.columns {
+		s.columns[i].Height = height
+	}
+}
+
 // AvailHeight is the row count available to every pane in a viewport of
 // the given height: the viewport minus 2 rows (1 row header bar + 1 row bottom
 // status bar).
@@ -383,7 +390,8 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 		}
 
 		srcX := dst.Min.X - screenX
-		srcY := dst.Min.Y - 1
+		maxSrcY := max(0, c.Height-availHeight)
+		srcY := maxSrcY + (dst.Min.Y - 1)
 		src := image.Rect(srcX, srcY, srcX+dst.Dx(), srcY+dst.Dy())
 
 		placements = append(placements, Placement{

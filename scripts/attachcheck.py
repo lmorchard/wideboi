@@ -24,6 +24,7 @@ Never hangs: every wait is bounded and every child is reaped.
 """
 
 import argparse
+import json
 import os
 import signal
 import subprocess
@@ -155,13 +156,13 @@ class Client:
     plain=True runs a plain `wideboi` instead, which attaches if a server
     answers and otherwise spawns one and owns the session."""
 
-    def __init__(self, startup=PROMPT_WAIT, plain=False, args=(), gate=None):
+    def __init__(self, startup=PROMPT_WAIT, plain=False, args=(), gate=None, cols=COLS, rows=ROWS):
         argv = harness_args(BIN, *args) if plain else harness_args(BIN, "attach", *args)
         if gate is not None:
             # Held on opening the fifo until something opens its write
             # end, which releases every gated client at once.
             argv = ["/bin/sh", "-c", ': < "$0"; exec "$@"', gate, *argv]
-        self.pid, self.fd = spawn_in_pty(argv, COLS, ROWS, True,
+        self.pid, self.fd = spawn_in_pty(argv, cols, rows, True,
                                          {"WIDEBOI_SOCK": socket_path()})
         self.drainer = Drainer(self.fd)
         self.drainer.start()
@@ -957,6 +958,51 @@ def case_dropped_connection_reconnects(fail):
     finally:
         srv.stop()
 
+def case_small_client_does_not_shrink_session_and_can_claim_size(fail):
+    """A smaller client attaching as a viewer does not shrink the hosted PTYs (#184).
+    Claiming size with C-b S explicitly adopts the smaller client's dimensions."""
+    srv = Server()
+    a = b = None
+    try:
+        a = Client(cols=80, rows=24)
+        time.sleep(0.1)
+
+        def get_col_height():
+            raw = subprocess.check_output([BIN, "--socket", socket_path(), "status", "--json"])
+            data = json.loads(raw)
+            cols = data.get("columns", [])
+            return cols[0]["Height"] if cols else None
+
+        h0 = get_col_height()
+        if h0 != 22:
+            fail(f"initial column height = {h0}, want 22")
+            return
+
+        # Smaller client attaches at 50x14
+        b = Client(cols=50, rows=14)
+        settle_output(b.drainer, timeout=SETTLE)
+
+        h1 = get_col_height()
+        if h1 != 22:
+            fail(f"viewer attached and shrunk column height to {h1}, want 22")
+            return
+
+        # Client b claims size via C-b S
+        b.type(b"\x02S")
+        settle_output(b.drainer, timeout=SETTLE)
+        time.sleep(0.1)
+
+        h2 = get_col_height()
+        if h2 != 12:
+            fail(f"after claim size, column height = {h2}, want 12 (50x14 availHeight)")
+            return
+    finally:
+        for c in (a, b):
+            if c is not None:
+                c.kill()
+        srv.stop()
+
+
 CASES = [
     ("dropped connection reconnects", case_dropped_connection_reconnects),
     ("attach renders pane content over the socket", case_attach_renders_pane_content),
@@ -983,6 +1029,7 @@ CASES = [
     ("focus affects only its own client", case_focus_affects_only_its_own_client),
     ("attach honours its own layout flag", case_attach_layout_flag_is_honoured),
     ("reattach starts from the configured layout", case_reattach_starts_from_the_configured_layout),
+    ("small client does not shrink session and can claim size", case_small_client_does_not_shrink_session_and_can_claim_size),
 ]
 
 
