@@ -934,24 +934,26 @@ def case_search_history_and_restore(fail):
     # match comes from the shell's output, not readline's command echo.
     s.type("printf 'prefix-%b-suffix\\n' '\\156\\145\\145\\144\\154\\145'\r")
     s.type("seq 1 40\r")
+    s.type("printf 'live-tail-marker\\n'\r")
     before = len(s.output())
     s.type("\x02/needle\r")
-    # The snapshot reply can arrive after the first quiet window, and
-    # the diff renderer may write only "1/1" over "searching…" rather
-    # than retransmitting the unchanged "search " prefix.
+    # The snapshot reply can arrive after the first quiet window. Wait
+    # for the actual historical row, which was off-screen before search.
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
         found = s.output()[before:]
-        if b"1/1" in found and b"prefix-needle-suffix" in found:
+        if b"prefix-needle-suffix" in found:
             break
         time.sleep(0.02)
     found = s.output()[before:]
-    if b"1/1" not in found:
-        fail("search did not show its match count on the host status row")
     if b"prefix-needle-suffix" not in found:
         fail("search did not repaint the earlier matching row")
+    before_restore = len(s.output())
     s.type("\x1b")
-    if b"focus: [pane" not in s.output()[before:]:
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and b"live-tail-marker" not in s.output()[before_restore:]:
+        time.sleep(0.02)
+    if b"live-tail-marker" not in s.output()[before_restore:]:
         fail("Escape did not restore the prior pane view")
     s.close()
 

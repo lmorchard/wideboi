@@ -116,6 +116,12 @@ only wideboi emits. For a new test, break the behavior it guards, watch the
 test fail for the intended reason, then restore it. Enumerate finite inputs
 rather than choosing a few rows.
 
+The host renderer sends only changed cells. A status transition can send
+`1/1` over an existing `searching…` label without retransmitting the `search `
+prefix, so a raw-byte assertion for `search 1/1` depends on timing. In PTY
+tests, wait for a distinct pane line to appear after navigation and another
+after restoring the view; assert status formatting in a client unit test.
+
 Check fixture shape and draw order as well as assertions. A one-row reflow
 fixture misses cross-row corruption. A sliver-overflow test on the left side
 missed a spill that the focused card painted over; the rightmost sliver had no

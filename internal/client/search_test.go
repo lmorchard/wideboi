@@ -44,6 +44,9 @@ func TestSearchScreenScrollbackNavigationAndRestore(t *testing.T) {
 	if c.search.selected != 2 || len(c.search.matches) != 3 {
 		t.Fatalf("matches = %+v selected %d", c.search.matches, c.search.selected)
 	}
+	if status, _ := c.statusLineLocked(80); !strings.Contains(status, "search 3/3 row 5") {
+		t.Fatalf("selected match is not visible in status: %q", status)
+	}
 	c.SearchNavigate(ctx, -1)
 	_ = takeSearchMessage(t, tp)
 	c.HandleServerMsg(protocol.MsgHistorySnapshot{PaneID: 1, ScrollbackLen: 4,
