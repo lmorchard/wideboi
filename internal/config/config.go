@@ -38,6 +38,10 @@ type Config struct {
 	// rather than as false. Read MouseEnabled, not this.
 	Mouse        *bool `toml:"mouse"`
 	MouseEnabled bool  `toml:"-"`
+	// AutoCleanup is a pointer so an absent key reads as the default (on)
+	// rather than as false. Read AutoCleanupEnabled, not this.
+	AutoCleanup        *bool `toml:"auto_cleanup"`
+	AutoCleanupEnabled bool  `toml:"-"`
 	// LogLevelName is what was configured; LogLevel is it resolved.
 	LogLevelName string     `toml:"log_level"`
 	LogLevel     slog.Level `toml:"-"`
@@ -235,6 +239,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if fileCfg.Mouse != nil {
 			cfg.Mouse = fileCfg.Mouse
 		}
+		if fileCfg.AutoCleanup != nil {
+			cfg.AutoCleanup = fileCfg.AutoCleanup
+		}
 		if len(fileCfg.WidthPresets) > 0 {
 			cfg.WidthPresets = fileCfg.WidthPresets
 		}
@@ -296,6 +303,18 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if envLevel := getenv("WIDEBOI_LOG_LEVEL"); envLevel != "" {
 		cfg.LogLevelName = envLevel
+	}
+	if envAutoCleanup := getenv("WIDEBOI_AUTO_CLEANUP"); envAutoCleanup != "" {
+		switch strings.ToLower(strings.TrimSpace(envAutoCleanup)) {
+		case "1", "true", "yes", "on":
+			v := true
+			cfg.AutoCleanup = &v
+		case "0", "false", "no", "off":
+			v := false
+			cfg.AutoCleanup = &v
+		default:
+			return Config{}, nil, fmt.Errorf("WIDEBOI_AUTO_CLEANUP %q: want boolean (true/false/1/0/yes/no/on/off)", envAutoCleanup)
+		}
 	}
 
 	// 4. Command line flags
@@ -361,6 +380,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 
 	// Mouse
 	cfg.MouseEnabled = cfg.Mouse == nil || *cfg.Mouse
+
+	// AutoCleanup
+	cfg.AutoCleanupEnabled = cfg.AutoCleanup == nil || *cfg.AutoCleanup
 
 	// Keys
 	lists, err := keyLists(cfg.Keys)

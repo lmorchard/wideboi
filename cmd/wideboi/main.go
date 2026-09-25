@@ -171,6 +171,7 @@ Environment Variables:
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
+  WIDEBOI_AUTO_CLEANUP   Clean dead session artifacts and logs on clean exit (default 1)
   WIDEBOI_TRAFFIC_TIMING =1 to time server render, patch build and encode (status --traffic)
   WIDEBOI_CPUPROFILE     Path prefix for CPU profiles
                          (<prefix>.server|client.cpu.<pid>.pprof)
@@ -409,6 +410,20 @@ func runServer(cfg config.Config, ownerFD int) error {
 	if signalled.Load() {
 		_ = guard.Stop()
 		time.Sleep(signalExitMargin)
+	}
+
+	if cfg.AutoCleanupEnabled && !signalled.Load() && err == nil {
+		// Remove this session's own logs and token before closing the listener
+		// (which releases the flock), preventing a successor from racing.
+		_ = os.Remove(logger.Path(cfg.Socket, "server"))
+		_ = os.Remove(logger.Path(cfg.Socket, "client"))
+		_ = os.Remove(webTokenPath(cfg.Socket))
+
+		_ = sl.Close()
+
+		// Only sweep the dedicated, wideboi-owned session directory. Never sweep
+		// an arbitrary parent directory when a custom socket path was configured.
+		_ = runCleanup(io.Discard, config.SessionDir())
 	}
 	return err
 }

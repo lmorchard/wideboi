@@ -8,7 +8,7 @@
 # Precedence order (highest to lowest):
 #   1. Command-line flags (-l, -p, -s, --shell)
 #   2. Environment variable overrides (WIDEBOI_LAYOUT, WIDEBOI_PREFIX, WIDEBOI_SOCK, WIDEBOI_SHELL,
-#      WIDEBOI_LOG_LEVEL)
+#      WIDEBOI_LOG_LEVEL, WIDEBOI_AUTO_CLEANUP)
 #   3. Configuration file (this file)
 #   4. Defaults (including $SHELL or /bin/sh)
 
@@ -83,6 +83,11 @@ prefix = "ctrl+b"
 # appended to forever, and trace records every message a client receives,
 # so raise it only while chasing something.
 # log_level = "info"
+
+# Automatically clean up dead sockets, web tokens, and remove session logs
+# on clean exit. Preserves logs if terminated abnormally or by signal.
+# Set to false to retain logs for post-exit inspection. Defaults to true.
+# auto_cleanup = true
 
 # Key remapping for control mode
 #
