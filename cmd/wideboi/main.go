@@ -662,6 +662,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	}
 
 	cli := client.NewClient(cConn, width, height, cfg.PrefixLabel)
+	cli.SetTheme(client.NewTheme(cfg.Theme, nil))
 	cli.SetLayoutMode(cfg.LayoutMode)
 	cli.SetBindings(bindings)
 	cli.SetDetachable(true)

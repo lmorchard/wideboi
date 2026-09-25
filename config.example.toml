@@ -62,6 +62,22 @@ prefix = "ctrl+b"
 # selection and scrollback wheel. Defaults to true.
 # mouse = true
 
+# Theme styling for TUI chrome (status bar, badges, dividers, and sliver spines).
+# Color names: "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+# "bright_black" (or "gray"), "bright_red", "bright_green", "bright_yellow",
+# "bright_blue", "bright_magenta", "bright_cyan", "bright_white", or ANSI numbers 0-255.
+# Attributes: "bold", "dim" (or "faint"), "reverse".
+# Respects the standard NO_COLOR environment variable (disabling colors while keeping glyphs/attributes).
+# [theme]
+# working       = "cyan"
+# needs_input   = "yellow bold"
+# done          = "green"
+# failed        = "red bold"
+# focus         = "bright_cyan bold"
+# dim           = "dim"
+# divider       = "dim"
+# focus_divider = "bright_cyan bold"
+
 # Log verbosity for $TMPDIR/wideboi-<uid>/{client,server}.log:
 # "trace", "debug", "info" (default), "warn" or "error". The logs are
 # appended to forever, and trace records every message a client receives,

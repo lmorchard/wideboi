@@ -17,6 +17,4 @@ SYNC_END: present
 C-b
 cards
 commands
-focus
 for
-pane
