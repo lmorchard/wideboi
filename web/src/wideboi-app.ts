@@ -711,6 +711,9 @@ export class WideboiApp extends LitElement {
       if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
       const pane = this.eventPane(e);
       if (pane) {
+        // A short client scrolls within the live terminal grid. Alt+wheel
+        // explicitly navigates terminal history instead.
+        if (pane.hasVerticalOverflow && !e.altKey) return;
         e.preventDefault();
         // e.deltaY > 0 means scrolling down (towards bottom/newer).
         // e.deltaY < 0 means scrolling up (towards top/older).
