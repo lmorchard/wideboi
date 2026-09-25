@@ -100,6 +100,7 @@ func (g *statusGrid) SendMouse(uv.MouseEvent)                {}
 func (g *statusGrid) CursorPosition() image.Point            { return image.Point{} }
 func (g *statusGrid) CursorVisible() bool                    { return false }
 func (g *statusGrid) ScrollbackLen() int                     { return 0 }
+func (g *statusGrid) HistoryRows() (int, []string)           { return 0, nil }
 func (g *statusGrid) ScrollOffset() int                      { return 0 }
 func (g *statusGrid) SetScrollOffset(int)                    {}
 func (g *statusGrid) Draw(uv.Screen, image.Rectangle)        {}

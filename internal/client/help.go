@@ -46,7 +46,6 @@ func helpLines(prefixLabel string, detachable bool, custom ...[]keys.Binding) []
 		"",
 		"hold ctrl to stay in control mode:",
 		fmt.Sprintf("%s ctrl+k ctrl+k k  scrolls up three times", prefixLabel),
-		"",
 		"any key closes this",
 	)
 	return lines

@@ -159,6 +159,7 @@ message ServerMessage {
     MsgSendInputResponse send_input_response = 10;
     MsgCaptureResponse capture_response = 11;
     MsgClosePaneResponse close_pane_response = 12;
+    MsgHistorySnapshot history_snapshot = 13;
   }
 }
 
@@ -211,6 +212,18 @@ message MsgResize {
 message MsgScroll {
   int32 pane_id = 1;
   int32 delta = 2;
+  bool set_absolute = 3;
+  int32 offset = 4;
+  bool anchor_history = 5;
+  int32 history_len = 6;
+}
+
+// Plain physical rows, oldest first. Search is performed by the client.
+message MsgHistoryRequest { int32 pane_id = 1; }
+message MsgHistorySnapshot {
+  int32 pane_id = 1;
+  int32 scrollback_len = 2;
+  repeated string rows = 3;
 }
 
 message MsgPaneResync {
@@ -240,6 +253,7 @@ message ClientMessage {
     MsgSendInputRequest send_input_request = 13;
     MsgCaptureRequest capture_request = 14;
     MsgClosePaneRequest close_pane_request = 15;
+    MsgHistoryRequest history_request = 16;
   }
 }
 

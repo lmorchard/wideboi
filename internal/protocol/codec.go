@@ -30,7 +30,9 @@ func MarshalClient(msg any) ([]byte, error) {
 	case MsgResize:
 		env.Msg = &wirepb.ClientMessage_Resize{Resize: &wirepb.MsgResize{Cols: int32(m.Cols), Rows: int32(m.Rows)}}
 	case MsgScroll:
-		env.Msg = &wirepb.ClientMessage_Scroll{Scroll: &wirepb.MsgScroll{PaneId: int32(m.PaneID), Delta: int32(m.Delta)}}
+		env.Msg = &wirepb.ClientMessage_Scroll{Scroll: &wirepb.MsgScroll{PaneId: int32(m.PaneID), Delta: int32(m.Delta), SetAbsolute: m.SetAbsolute, Offset: int32(m.Offset), AnchorHistory: m.AnchorHistory, HistoryLen: int32(m.HistoryLen)}}
+	case MsgHistoryRequest:
+		env.Msg = &wirepb.ClientMessage_HistoryRequest{HistoryRequest: &wirepb.MsgHistoryRequest{PaneId: int32(m.PaneID)}}
 	case MsgPaneResync:
 		env.Msg = &wirepb.ClientMessage_PaneResync{PaneResync: &wirepb.MsgPaneResync{PaneId: int32(m.PaneID)}}
 	case MsgDetach:
@@ -72,7 +74,9 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_Resize:
 		return MsgResize{Cols: int(m.Resize.Cols), Rows: int(m.Resize.Rows)}, nil
 	case *wirepb.ClientMessage_Scroll:
-		return MsgScroll{PaneID: int(m.Scroll.PaneId), Delta: int(m.Scroll.Delta)}, nil
+		return MsgScroll{PaneID: int(m.Scroll.PaneId), Delta: int(m.Scroll.Delta), SetAbsolute: m.Scroll.SetAbsolute, Offset: int(m.Scroll.Offset), AnchorHistory: m.Scroll.AnchorHistory, HistoryLen: int(m.Scroll.HistoryLen)}, nil
+	case *wirepb.ClientMessage_HistoryRequest:
+		return MsgHistoryRequest{PaneID: int(m.HistoryRequest.PaneId)}, nil
 	case *wirepb.ClientMessage_PaneResync:
 		return MsgPaneResync{PaneID: int(m.PaneResync.PaneId)}, nil
 	case *wirepb.ClientMessage_Detach:
@@ -119,6 +123,12 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_LayoutSnapshot{LayoutSnapshot: snap}
 	case MsgPaneCreated:
 		env.Msg = &wirepb.ServerMessage_PaneCreated{PaneCreated: &wirepb.MsgPaneCreated{PaneId: int32(m.PaneID)}}
+	case MsgHistorySnapshot:
+		rows := make([]string, len(m.Rows))
+		for i, row := range m.Rows {
+			rows[i] = validUTF8(row)
+		}
+		env.Msg = &wirepb.ServerMessage_HistorySnapshot{HistorySnapshot: &wirepb.MsgHistorySnapshot{PaneId: int32(m.PaneID), ScrollbackLen: int32(m.ScrollbackLen), Rows: rows}}
 	case MsgPaneUpdate:
 		update := &wirepb.MsgPaneUpdate{
 			PaneId:        int32(m.PaneID),
@@ -220,6 +230,8 @@ func UnmarshalServer(data []byte) (any, error) {
 		return snap, nil
 	case *wirepb.ServerMessage_PaneCreated:
 		return MsgPaneCreated{PaneID: int(m.PaneCreated.PaneId)}, nil
+	case *wirepb.ServerMessage_HistorySnapshot:
+		return MsgHistorySnapshot{PaneID: int(m.HistorySnapshot.PaneId), ScrollbackLen: int(m.HistorySnapshot.ScrollbackLen), Rows: m.HistorySnapshot.Rows}, nil
 	case *wirepb.ServerMessage_PaneUpdate:
 		src := m.PaneUpdate
 		update := MsgPaneUpdate{

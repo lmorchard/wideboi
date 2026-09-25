@@ -103,6 +103,57 @@ func TestIndependentScrollTwoClients(t *testing.T) {
 	}
 }
 
+func TestAbsoluteScrollIgnoresOffsetShiftFromNewOutput(t *testing.T) {
+	grid := term.NewVT(20, 5)
+	t.Cleanup(func() { _ = grid.Close() })
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(grid, "line %02d\r\n", i)
+	}
+	s := &Server{panes: map[int]*Pane{1: {id: 1, grid: grid, cols: 20, rows: 5}}}
+	tp := transport.NewInProcChannel(16)
+	s.clientScrollOffsets = map[transport.Transport]map[int]int{tp: {1: 9}}
+	s.handleClientMsg(context.Background(), tp, protocol.MsgScroll{PaneID: 1, SetAbsolute: true, Offset: 2})
+	if got := s.clientScrollOffsets[tp][1]; got != 2 {
+		t.Fatalf("absolute scroll landed at %d, want 2", got)
+	}
+}
+
+func TestSearchScrollAnchorsSnapshotAcrossNewOutput(t *testing.T) {
+	grid := term.NewVT(20, 5)
+	t.Cleanup(func() { _ = grid.Close() })
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(grid, "line %02d\r\n", i)
+	}
+	p := &Pane{id: 1, grid: grid, cols: 20, rows: 5}
+	tp := transport.NewInProcChannel(16)
+	s := &Server{panes: map[int]*Pane{1: p}, transports: []transport.Transport{tp}}
+	s.broadcastPaneUpdates(context.Background(), false)
+	drainServerMessages(tp)
+	snapshotLen := p.HistoryRows().ScrollbackLen
+	fmt.Fprint(grid, "new output\r\n")
+	if p.ScrollbackLen() != snapshotLen+1 {
+		t.Fatal("fixture did not append one scrollback row")
+	}
+	s.handleClientMsg(context.Background(), tp, protocol.MsgScroll{
+		PaneID: 1, SetAbsolute: true, Offset: 2, AnchorHistory: true, HistoryLen: snapshotLen,
+	})
+	if got := s.clientScrollOffsets[tp][1]; got != 3 {
+		t.Fatalf("anchored scroll = %d, want 3", got)
+	}
+	s.broadcastPaneUpdates(context.Background(), false)
+	if got := s.clientScrollOffsets[tp][1]; got != 3 {
+		t.Fatalf("broadcast adjusted anchored scroll again: %d", got)
+	}
+	// A match on the old live screen must also move into scrollback when
+	// output arrives; zero is a valid anchored target.
+	s.handleClientMsg(context.Background(), tp, protocol.MsgScroll{
+		PaneID: 1, SetAbsolute: true, Offset: 0, AnchorHistory: true, HistoryLen: snapshotLen,
+	})
+	if got := s.clientScrollOffsets[tp][1]; got != 1 {
+		t.Fatalf("anchored live-screen match = %d, want 1", got)
+	}
+}
+
 func TestScrolledClientStaysInHistoryWithUnreadOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -46,6 +46,36 @@ func TestPrefixEntersControlModeAndIsSwallowed(t *testing.T) {
 	}
 }
 
+func TestSearchKeysStayOutOfPane(t *testing.T) {
+	r := &router{prefix: "ctrl+b"}
+	if got := r.route(ctrl('b')); got.Kind != routeIgnore {
+		t.Fatalf("prefix: %+v", got)
+	}
+	if got := r.route(key('/')); got.Kind != routeSearchStart {
+		t.Fatalf("start: %+v", got)
+	}
+	for _, ev := range []uv.KeyPressEvent{key('e'), key('r'), key('r')} {
+		if got := r.route(ev); got.Kind != routeSearchEdit {
+			t.Fatalf("query key forwarded: %+v", got)
+		}
+	}
+	if got := r.route(key(uv.KeyEnter)); got.Kind != routeSearchCommit {
+		t.Fatalf("commit: %+v", got)
+	}
+	if got := r.route(key('n')); got.Kind != routeSearchNavigate || got.Direction != 1 {
+		t.Fatalf("next: %+v", got)
+	}
+	if got := r.route(uv.KeyPressEvent{Code: 'N', Text: "N"}); got.Kind != routeSearchNavigate || got.Direction != -1 {
+		t.Fatalf("previous: %+v", got)
+	}
+	if got := r.route(key(uv.KeyEscape)); got.Kind != routeSearchCancel {
+		t.Fatalf("cancel: %+v", got)
+	}
+	if got := r.route(key('x')); got.Kind != routeForward {
+		t.Fatalf("search did not release input: %+v", got)
+	}
+}
+
 func TestDoubledPrefixSendsTheLiteralKeyAndLeavesControlMode(t *testing.T) {
 	// Without this there is no way to type the prefix byte into a pane,
 	// and any program that needs it -- readline's backward-char, for one
@@ -164,6 +194,10 @@ func assertAction(t *testing.T, b keys.Binding, got route) {
 	case keys.ActionToggleLayout:
 		if got.Kind != routeToggleLayout {
 			t.Errorf("%q: got %+v, want routeToggleLayout", b.Key, got)
+		}
+	case keys.ActionSearch:
+		if got.Kind != routeSearchStart {
+			t.Errorf("%q: got %+v, want routeSearchStart", b.Key, got)
 		}
 	case keys.ActionHelp, keys.ActionExit:
 		if got.Kind != routeIgnore {

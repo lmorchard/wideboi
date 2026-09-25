@@ -94,6 +94,25 @@ func recvLayoutSnapshot(t *testing.T, ch <-chan transport.ServerMessage, timeout
 	}
 }
 
+func recvLayoutWidth(t *testing.T, ch <-chan transport.ServerMessage, paneID, width int) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-ch:
+			if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+				for _, col := range snap.Columns {
+					if col.PaneID == paneID && col.Width == width {
+						return
+					}
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for pane %d layout width %d", paneID, width)
+		}
+	}
+}
+
 func TestServerLifecycleAndAttach(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
@@ -156,7 +175,7 @@ func TestServerVerbHandling(t *testing.T) {
 	}
 
 	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbGrowWidth, PaneID: focusedID})
-	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	recvLayoutWidth(t, tp.ServerSend, focusedID, initialCols+10)
 
 	grownCols, _, ok := srv.PaneSize(focusedID)
 	if !ok || grownCols != initialCols+10 {
@@ -165,7 +184,7 @@ func TestServerVerbHandling(t *testing.T) {
 
 	// Test ShrinkWidth verb
 	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbShrinkWidth, PaneID: focusedID})
-	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	recvLayoutWidth(t, tp.ServerSend, focusedID, initialCols)
 
 	shrunkCols, _, ok := srv.PaneSize(focusedID)
 	if !ok || shrunkCols != initialCols {

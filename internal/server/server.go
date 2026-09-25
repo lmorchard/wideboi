@@ -427,6 +427,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	focusTargetID := 0
 	closeServer := false
 	var trafficReport *protocol.MsgTrafficStats
+	var historyPane *Pane
 	var splitResp *protocol.MsgSplitResponse
 	var sendResp *protocol.MsgSendInputResponse
 	var captureResp *protocol.MsgCaptureResponse
@@ -484,6 +485,10 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	case protocol.MsgTrafficRequest:
 		report := s.trafficReportLocked()
 		trafficReport = &report
+	case protocol.MsgHistoryRequest:
+		if tp != nil {
+			historyPane = s.panes[m.PaneID]
+		}
 
 	case protocol.MsgAttach:
 		s.startupComplete = true
@@ -694,7 +699,22 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			}
 			cur := offsets[m.PaneID]
 			newOffset := cur + m.Delta
+			if m.SetAbsolute {
+				newOffset = m.Offset
+			}
 			maxOffset := p.ScrollbackLen()
+			if m.SetAbsolute && m.AnchorHistory {
+				newOffset += maxOffset - m.HistoryLen
+				// This request already accounts for growth since the snapshot;
+				// the next broadcast must not pin that growth a second time.
+				if s.paneSbLens == nil {
+					s.paneSbLens = make(map[transport.Transport]map[int]int)
+				}
+				if s.paneSbLens[tp] == nil {
+					s.paneSbLens[tp] = make(map[int]int)
+				}
+				s.paneSbLens[tp][m.PaneID] = maxOffset
+			}
 			if newOffset < 0 {
 				newOffset = 0
 			}
@@ -746,6 +766,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			time.Sleep(50 * time.Millisecond)
 			_ = s.Close()
 		}()
+	}
+	if historyPane != nil {
+		tp.SendServer(ctx, historyPane.HistoryRows())
 	}
 	if trafficReport != nil {
 		// Only the requester gets it. Sent outside s.mu: a socket

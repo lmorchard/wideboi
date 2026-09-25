@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file internal/protocol/wirepb/wideboi.proto.
  */
 export const file_internal_protocol_wirepb_wideboi: GenFile = /*@__PURE__*/
-  fileDesc("CiZpbnRlcm5hbC9wcm90b2NvbC93aXJlcGIvd2lkZWJvaS5wcm90bxIQd2lkZWJvaS5wcm90b2NvbCJxCglDb2xvckRhdGESKQoEa2luZBgBIAEoDjIbLndpZGVib2kucHJvdG9jb2wuQ29sb3JLaW5kEg0KBWluZGV4GAIgASgNEgkKAXIYAyABKA0SCQoBZxgEIAEoDRIJCgFiGAUgASgNEgkKAWEYBiABKA0itQEKCVN0eWxlRGF0YRInCgJmZxgBIAEoCzIbLndpZGVib2kucHJvdG9jb2wuQ29sb3JEYXRhEicKAmJnGAIgASgLMhsud2lkZWJvaS5wcm90b2NvbC5Db2xvckRhdGESNAoPdW5kZXJsaW5lX2NvbG9yGAMgASgLMhsud2lkZWJvaS5wcm90b2NvbC5Db2xvckRhdGESEQoJdW5kZXJsaW5lGAQgASgNEg0KBWF0dHJzGAUgASgNIlYKCENlbGxEYXRhEg8KB2NvbnRlbnQYASABKAkSDQoFd2lkdGgYAiABKAUSKgoFc3R5bGUYAyABKAsyGy53aWRlYm9pLnByb3RvY29sLlN0eWxlRGF0YSI1CghMaW5lRGF0YRIpCgVjZWxscxgBIAMoCzIaLndpZGVib2kucHJvdG9jb2wuQ2VsbERhdGEilQIKDU1zZ1BhbmVVcGRhdGUSDwoHcGFuZV9pZBgBIAEoBRISCgpnZW5lcmF0aW9uGAIgASgEEgwKBGNvbHMYAyABKAUSDAoEcm93cxgEIAEoBRIpCgVsaW5lcxgFIAMoCzIaLndpZGVib2kucHJvdG9jb2wuTGluZURhdGESEAoIY3Vyc29yX3gYBiABKAUSEAoIY3Vyc29yX3kYByABKAUSFgoOY3Vyc29yX3Zpc2libGUYCCABKAgSFgoObW91c2VfdHJhY2tpbmcYCSABKAgSFQoNc2Nyb2xsX29mZnNldBgKIAEoBRIWCg5zY3JvbGxiYWNrX2xlbhgLIAEoBRIVCg11bnJlYWRfb3V0cHV0GAwgASgIIj8KB1BhbmVSb3cSCQoBeRgBIAEoBRIpCgVjZWxscxgCIAMoCzIaLndpZGVib2kucHJvdG9jb2wuQ2VsbERhdGEixwIKDE1zZ1BhbmVQYXRjaBIPCgdwYW5lX2lkGAEgASgFEgwKBGNvbHMYAiABKAUSDAoEcm93cxgDIAEoBRIXCg9iYXNlX2dlbmVyYXRpb24YBCABKAQSEgoKZ2VuZXJhdGlvbhgFIAEoBBIvCgxjaGFuZ2VkX3Jvd3MYBiADKAsyGS53aWRlYm9pLnByb3RvY29sLlBhbmVSb3cSEAoIY3Vyc29yX3gYByABKAUSEAoIY3Vyc29yX3kYCCABKAUSFgoOY3Vyc29yX3Zpc2libGUYCSABKAgSFgoObW91c2VfdHJhY2tpbmcYCiABKAgSEgoKc2hpZnRfcm93cxgLIAEoBRIVCg1zY3JvbGxfb2Zmc2V0GAwgASgFEhYKDnNjcm9sbGJhY2tfbGVuGA0gASgFEhUKDXVucmVhZF9vdXRwdXQYDiABKAgiPAoKQ29sdW1uRGF0YRIPCgdwYW5lX2lkGAEgASgFEg0KBXdpZHRoGAIgASgFEg4KBmhlaWdodBgDIAEoBSLgAgoRTXNnTGF5b3V0U25hcHNob3QSLQoHY29sdW1ucxgBIAMoCzIcLndpZGVib2kucHJvdG9jb2wuQ29sdW1uRGF0YRJMCg1wYW5lX3N0YXR1c2VzGAIgAygLMjUud2lkZWJvaS5wcm90b2NvbC5Nc2dMYXlvdXRTbmFwc2hvdC5QYW5lU3RhdHVzZXNFbnRyeRJICgtwYW5lX3RpdGxlcxgDIAMoCzIzLndpZGVib2kucHJvdG9jb2wuTXNnTGF5b3V0U25hcHNob3QuUGFuZVRpdGxlc0VudHJ5GlEKEVBhbmVTdGF0dXNlc0VudHJ5EgsKA2tleRgBIAEoBRIrCgV2YWx1ZRgCIAEoDjIcLndpZGVib2kucHJvdG9jb2wuUGFuZVN0YXR1czoCOAEaMQoPUGFuZVRpdGxlc0VudHJ5EgsKA2tleRgBIAEoBRINCgV2YWx1ZRgCIAEoCToCOAEiIQoOTXNnUGFuZUNyZWF0ZWQSDwoHcGFuZV9pZBgBIAEoBSIzCg1Nc2dQYW5lQ2xvc2VkEg8KB3BhbmVfaWQYASABKAUSEQoJZXhpdF9jb2RlGAIgASgFIqQBCg9Nc2dQYW5lTWV0YWRhdGESDwoHcGFuZV9pZBgBIAEoBRILCgNjd2QYAiABKAkSQgoJdXNlcl92YXJzGAMgAygLMi8ud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lTWV0YWRhdGEuVXNlclZhcnNFbnRyeRovCg1Vc2VyVmFyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiHwoMTXNnRm9jdXNQYW5lEg8KB3BhbmVfaWQYASABKAUi8gUKDVNlcnZlck1lc3NhZ2USNgoLcGFuZV91cGRhdGUYASABKAsyHy53aWRlYm9pLnByb3RvY29sLk1zZ1BhbmVVcGRhdGVIABI0CgpwYW5lX3BhdGNoGAIgASgLMh4ud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lUGF0Y2hIABI+Cg9sYXlvdXRfc25hcHNob3QYAyABKAsyIy53aWRlYm9pLnByb3RvY29sLk1zZ0xheW91dFNuYXBzaG90SAASOAoMcGFuZV9jcmVhdGVkGAQgASgLMiAud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lQ3JlYXRlZEgAEjYKC3BhbmVfY2xvc2VkGAUgASgLMh8ud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lQ2xvc2VkSAASOgoNcGFuZV9tZXRhZGF0YRgGIAEoCzIhLndpZGVib2kucHJvdG9jb2wuTXNnUGFuZU1ldGFkYXRhSAASOgoNdHJhZmZpY19zdGF0cxgHIAEoCzIhLndpZGVib2kucHJvdG9jb2wuTXNnVHJhZmZpY1N0YXRzSAASNAoKZm9jdXNfcGFuZRgIIAEoCzIeLndpZGVib2kucHJvdG9jb2wuTXNnRm9jdXNQYW5lSAASPAoOc3BsaXRfcmVzcG9uc2UYCSABKAsyIi53aWRlYm9pLnByb3RvY29sLk1zZ1NwbGl0UmVzcG9uc2VIABJFChNzZW5kX2lucHV0X3Jlc3BvbnNlGAogASgLMiYud2lkZWJvaS5wcm90b2NvbC5Nc2dTZW5kSW5wdXRSZXNwb25zZUgAEkAKEGNhcHR1cmVfcmVzcG9uc2UYCyABKAsyJC53aWRlYm9pLnByb3RvY29sLk1zZ0NhcHR1cmVSZXNwb25zZUgAEkUKE2Nsb3NlX3BhbmVfcmVzcG9uc2UYDCABKAsyJi53aWRlYm9pLnByb3RvY29sLk1zZ0Nsb3NlUGFuZVJlc3BvbnNlSABCBQoDbXNnIicKCU1zZ0F0dGFjaBIMCgRjb2xzGAEgASgFEgwKBHJvd3MYAiABKAUiRAoHTXNnVmVyYhIoCgR2ZXJiGAEgASgOMhoud2lkZWJvaS5wcm90b2NvbC5WZXJiVHlwZRIPCgdwYW5lX2lkGAIgASgFInkKCE1zZ01vdXNlEg8KB3BhbmVfaWQYASABKAUSKQoEa2luZBgCIAEoDjIbLndpZGVib2kucHJvdG9jb2wuTW91c2VLaW5kEgkKAXgYAyABKAUSCQoBeRgEIAEoBRIOCgZidXR0b24YBSABKAUSCwoDbW9kGAYgASgFIm4KB0tleURhdGESDAoEdGV4dBgBIAEoCRILCgNtb2QYAiABKAUSDAoEY29kZRgDIAEoBRIUCgxzaGlmdGVkX2NvZGUYBCABKAUSEQoJYmFzZV9jb2RlGAUgASgFEhEKCWlzX3JlcGVhdBgGIAEoCCJRCghNc2dJbnB1dBIPCgdwYW5lX2lkGAEgASgFEiYKA2tleRgCIAEoCzIZLndpZGVib2kucHJvdG9jb2wuS2V5RGF0YRIMCgRkYXRhGAMgASgMIicKCU1zZ1Jlc2l6ZRIMCgRjb2xzGAEgASgFEgwKBHJvd3MYAiABKAUiKwoJTXNnU2Nyb2xsEg8KB3BhbmVfaWQYASABKAUSDQoFZGVsdGEYAiABKAUiIAoNTXNnUGFuZVJlc3luYxIPCgdwYW5lX2lkGAEgASgFIgsKCU1zZ0RldGFjaCINCgtNc2dTaHV0ZG93biISChBNc2dTdGF0dXNSZXF1ZXN0IsYGCg1DbGllbnRNZXNzYWdlEi0KBmF0dGFjaBgBIAEoCzIbLndpZGVib2kucHJvdG9jb2wuTXNnQXR0YWNoSAASKQoEdmVyYhgCIAEoCzIZLndpZGVib2kucHJvdG9jb2wuTXNnVmVyYkgAEisKBW1vdXNlGAMgASgLMhoud2lkZWJvaS5wcm90b2NvbC5Nc2dNb3VzZUgAEisKBWlucHV0GAQgASgLMhoud2lkZWJvaS5wcm90b2NvbC5Nc2dJbnB1dEgAEi0KBnJlc2l6ZRgFIAEoCzIbLndpZGVib2kucHJvdG9jb2wuTXNnUmVzaXplSAASLQoGc2Nyb2xsGAYgASgLMhsud2lkZWJvaS5wcm90b2NvbC5Nc2dTY3JvbGxIABI2CgtwYW5lX3Jlc3luYxgHIAEoCzIfLndpZGVib2kucHJvdG9jb2wuTXNnUGFuZVJlc3luY0gAEi0KBmRldGFjaBgIIAEoCzIbLndpZGVib2kucHJvdG9jb2wuTXNnRGV0YWNoSAASMQoIc2h1dGRvd24YCSABKAsyHS53aWRlYm9pLnByb3RvY29sLk1zZ1NodXRkb3duSAASPAoOc3RhdHVzX3JlcXVlc3QYCiABKAsyIi53aWRlYm9pLnByb3RvY29sLk1zZ1N0YXR1c1JlcXVlc3RIABI+Cg90cmFmZmljX3JlcXVlc3QYCyABKAsyIy53aWRlYm9pLnByb3RvY29sLk1zZ1RyYWZmaWNSZXF1ZXN0SAASOgoNc3BsaXRfcmVxdWVzdBgMIAEoCzIhLndpZGVib2kucHJvdG9jb2wuTXNnU3BsaXRSZXF1ZXN0SAASQwoSc2VuZF9pbnB1dF9yZXF1ZXN0GA0gASgLMiUud2lkZWJvaS5wcm90b2NvbC5Nc2dTZW5kSW5wdXRSZXF1ZXN0SAASPgoPY2FwdHVyZV9yZXF1ZXN0GA4gASgLMiMud2lkZWJvaS5wcm90b2NvbC5Nc2dDYXB0dXJlUmVxdWVzdEgAEkMKEmNsb3NlX3BhbmVfcmVxdWVzdBgPIAEoCzIlLndpZGVib2kucHJvdG9jb2wuTXNnQ2xvc2VQYW5lUmVxdWVzdEgAQgUKA21zZyJGCg9Nc2dTcGxpdFJlcXVlc3QSDwoHY29tbWFuZBgBIAEoCRILCgNjd2QYAiABKAkSFQoNYWZ0ZXJfcGFuZV9pZBgDIAEoBSIyChBNc2dTcGxpdFJlc3BvbnNlEg8KB3BhbmVfaWQYASABKAUSDQoFZXJyb3IYAiABKAkiNAoTTXNnU2VuZElucHV0UmVxdWVzdBIPCgdwYW5lX2lkGAEgASgFEgwKBGRhdGEYAiABKAwiNgoUTXNnU2VuZElucHV0UmVzcG9uc2USDwoHcGFuZV9pZBgBIAEoBRINCgVlcnJvchgCIAEoCSJHChFNc2dDYXB0dXJlUmVxdWVzdBIPCgdwYW5lX2lkGAEgASgFEhIKCnNjcm9sbGJhY2sYAiABKAgSDQoFbGluZXMYAyABKAUiQgoSTXNnQ2FwdHVyZVJlc3BvbnNlEg8KB3BhbmVfaWQYASABKAUSDAoEdGV4dBgCIAEoCRINCgVlcnJvchgDIAEoCSImChNNc2dDbG9zZVBhbmVSZXF1ZXN0Eg8KB3BhbmVfaWQYASABKAUiNgoUTXNnQ2xvc2VQYW5lUmVzcG9uc2USDwoHcGFuZV9pZBgBIAEoBRINCgVlcnJvchgCIAEoCSITChFNc2dUcmFmZmljUmVxdWVzdCJDCgpUaW1pbmdTdGF0Eg0KBWNvdW50GAEgASgEEhMKC3RvdGFsX25hbm9zGAIgASgEEhEKCW1heF9uYW5vcxgDIAEoBCLeAgoNQ2xpZW50VHJhZmZpYxIRCgljbGllbnRfaWQYASABKAUSEQoJdHJhbnNwb3J0GAIgASgJEhgKEGNvbm5lY3RlZF9taWxsaXMYAyABKAMSFAoMZnVsbF91cGRhdGVzGAQgASgEEhMKC3Jvd19wYXRjaGVzGAUgASgEEhUKDXNoaWZ0X3BhdGNoZXMYBiABKAQSFAoMY2hhbmdlZF9yb3dzGAcgASgEEhcKD3Jlc3luY19yZXF1ZXN0cxgIIAEoBBIVCg1zZW5kX2ZhaWx1cmVzGAkgASgEEhAKCG1lc3NhZ2VzGAogASgEEhUKDXBheWxvYWRfYnl0ZXMYCyABKAQSGgoScGFuZV9wYXlsb2FkX2J5dGVzGAwgASgEEhIKCndpcmVfYnl0ZXMYDSABKAQSLAoGZW5jb2RlGA4gASgLMhwud2lkZWJvaS5wcm90b2NvbC5UaW1pbmdTdGF0IoYCCg9Nc2dUcmFmZmljU3RhdHMSFQoNdXB0aW1lX21pbGxpcxgBIAEoAxIWCg50aW1pbmdfZW5hYmxlZBgCIAEoCBIwCgdjbGllbnRzGAMgAygLMh8ud2lkZWJvaS5wcm90b2NvbC5DbGllbnRUcmFmZmljEjEKCGRlcGFydGVkGAQgASgLMh8ud2lkZWJvaS5wcm90b2NvbC5DbGllbnRUcmFmZmljEiwKBnJlbmRlchgFIAEoCzIcLndpZGVib2kucHJvdG9jb2wuVGltaW5nU3RhdBIxCgtidWlsZF9wYXRjaBgGIAEoCzIcLndpZGVib2kucHJvdG9jb2wuVGltaW5nU3RhdCqYAwoIVmVyYlR5cGUSGQoVVkVSQl9UWVBFX1VOU1BFQ0lGSUVEEAASGAoUVkVSQl9UWVBFX0ZPQ1VTX0xFRlQQARIZChVWRVJCX1RZUEVfRk9DVVNfUklHSFQQAhIYChRWRVJCX1RZUEVfTkVXX0NPTFVNThADEhkKFVZFUkJfVFlQRV9DWUNMRV9XSURUSBAEEhcKE1ZFUkJfVFlQRV9LSUxMX1BBTkUQBRIYChRWRVJCX1RZUEVfU01BUlRfSlVNUBAGEhoKFlZFUkJfVFlQRV9UT0dHTEVfQ0FSRFMQBxIYChRWRVJCX1RZUEVfR1JPV19XSURUSBAIEhoKFlZFUkJfVFlQRV9TSFJJTktfV0lEVEgQCRIXChNWRVJCX1RZUEVfTU9WRV9MRUZUEAoSGAoUVkVSQl9UWVBFX01PVkVfUklHSFQQCxIYChRWRVJCX1RZUEVfRk9DVVNfTEFTVBAMEhsKF1ZFUkJfVFlQRV9UT0dHTEVfU1RBVFVTEA0SGAoUVkVSQl9UWVBFX0NMQUlNX1NJWkUQDiqGAQoKUGFuZVN0YXR1cxIUChBQQU5FX1NUQVRVU19JRExFEAASFwoTUEFORV9TVEFUVVNfV09SS0lORxABEhsKF1BBTkVfU1RBVFVTX05FRURTX0lOUFVUEAISFAoQUEFORV9TVEFUVVNfRE9ORRADEhYKElBBTkVfU1RBVFVTX0ZBSUxFRBAEKmMKCUNvbG9yS2luZBITCg9DT0xPUl9LSU5EX05PTkUQABIUChBDT0xPUl9LSU5EX0JBU0lDEAESFgoSQ09MT1JfS0lORF9JTkRFWEVEEAISEwoPQ09MT1JfS0lORF9SR0JBEAMqZgoJTW91c2VLaW5kEhQKEE1PVVNFX0tJTkRfUFJFU1MQABIWChJNT1VTRV9LSU5EX1JFTEVBU0UQARIVChFNT1VTRV9LSU5EX01PVElPThACEhQKEE1PVVNFX0tJTkRfV0hFRUwQA0I3WjVnaXRodWIuY29tL2xtb3JjaGFyZC93aWRlYm9pL2ludGVybmFsL3Byb3RvY29sL3dpcmVwYmIGcHJvdG8z");
+  fileDesc("CiZpbnRlcm5hbC9wcm90b2NvbC93aXJlcGIvd2lkZWJvaS5wcm90bxIQd2lkZWJvaS5wcm90b2NvbCJxCglDb2xvckRhdGESKQoEa2luZBgBIAEoDjIbLndpZGVib2kucHJvdG9jb2wuQ29sb3JLaW5kEg0KBWluZGV4GAIgASgNEgkKAXIYAyABKA0SCQoBZxgEIAEoDRIJCgFiGAUgASgNEgkKAWEYBiABKA0itQEKCVN0eWxlRGF0YRInCgJmZxgBIAEoCzIbLndpZGVib2kucHJvdG9jb2wuQ29sb3JEYXRhEicKAmJnGAIgASgLMhsud2lkZWJvaS5wcm90b2NvbC5Db2xvckRhdGESNAoPdW5kZXJsaW5lX2NvbG9yGAMgASgLMhsud2lkZWJvaS5wcm90b2NvbC5Db2xvckRhdGESEQoJdW5kZXJsaW5lGAQgASgNEg0KBWF0dHJzGAUgASgNIlYKCENlbGxEYXRhEg8KB2NvbnRlbnQYASABKAkSDQoFd2lkdGgYAiABKAUSKgoFc3R5bGUYAyABKAsyGy53aWRlYm9pLnByb3RvY29sLlN0eWxlRGF0YSI1CghMaW5lRGF0YRIpCgVjZWxscxgBIAMoCzIaLndpZGVib2kucHJvdG9jb2wuQ2VsbERhdGEilQIKDU1zZ1BhbmVVcGRhdGUSDwoHcGFuZV9pZBgBIAEoBRISCgpnZW5lcmF0aW9uGAIgASgEEgwKBGNvbHMYAyABKAUSDAoEcm93cxgEIAEoBRIpCgVsaW5lcxgFIAMoCzIaLndpZGVib2kucHJvdG9jb2wuTGluZURhdGESEAoIY3Vyc29yX3gYBiABKAUSEAoIY3Vyc29yX3kYByABKAUSFgoOY3Vyc29yX3Zpc2libGUYCCABKAgSFgoObW91c2VfdHJhY2tpbmcYCSABKAgSFQoNc2Nyb2xsX29mZnNldBgKIAEoBRIWCg5zY3JvbGxiYWNrX2xlbhgLIAEoBRIVCg11bnJlYWRfb3V0cHV0GAwgASgIIj8KB1BhbmVSb3cSCQoBeRgBIAEoBRIpCgVjZWxscxgCIAMoCzIaLndpZGVib2kucHJvdG9jb2wuQ2VsbERhdGEixwIKDE1zZ1BhbmVQYXRjaBIPCgdwYW5lX2lkGAEgASgFEgwKBGNvbHMYAiABKAUSDAoEcm93cxgDIAEoBRIXCg9iYXNlX2dlbmVyYXRpb24YBCABKAQSEgoKZ2VuZXJhdGlvbhgFIAEoBBIvCgxjaGFuZ2VkX3Jvd3MYBiADKAsyGS53aWRlYm9pLnByb3RvY29sLlBhbmVSb3cSEAoIY3Vyc29yX3gYByABKAUSEAoIY3Vyc29yX3kYCCABKAUSFgoOY3Vyc29yX3Zpc2libGUYCSABKAgSFgoObW91c2VfdHJhY2tpbmcYCiABKAgSEgoKc2hpZnRfcm93cxgLIAEoBRIVCg1zY3JvbGxfb2Zmc2V0GAwgASgFEhYKDnNjcm9sbGJhY2tfbGVuGA0gASgFEhUKDXVucmVhZF9vdXRwdXQYDiABKAgiPAoKQ29sdW1uRGF0YRIPCgdwYW5lX2lkGAEgASgFEg0KBXdpZHRoGAIgASgFEg4KBmhlaWdodBgDIAEoBSLgAgoRTXNnTGF5b3V0U25hcHNob3QSLQoHY29sdW1ucxgBIAMoCzIcLndpZGVib2kucHJvdG9jb2wuQ29sdW1uRGF0YRJMCg1wYW5lX3N0YXR1c2VzGAIgAygLMjUud2lkZWJvaS5wcm90b2NvbC5Nc2dMYXlvdXRTbmFwc2hvdC5QYW5lU3RhdHVzZXNFbnRyeRJICgtwYW5lX3RpdGxlcxgDIAMoCzIzLndpZGVib2kucHJvdG9jb2wuTXNnTGF5b3V0U25hcHNob3QuUGFuZVRpdGxlc0VudHJ5GlEKEVBhbmVTdGF0dXNlc0VudHJ5EgsKA2tleRgBIAEoBRIrCgV2YWx1ZRgCIAEoDjIcLndpZGVib2kucHJvdG9jb2wuUGFuZVN0YXR1czoCOAEaMQoPUGFuZVRpdGxlc0VudHJ5EgsKA2tleRgBIAEoBRINCgV2YWx1ZRgCIAEoCToCOAEiIQoOTXNnUGFuZUNyZWF0ZWQSDwoHcGFuZV9pZBgBIAEoBSIzCg1Nc2dQYW5lQ2xvc2VkEg8KB3BhbmVfaWQYASABKAUSEQoJZXhpdF9jb2RlGAIgASgFIqQBCg9Nc2dQYW5lTWV0YWRhdGESDwoHcGFuZV9pZBgBIAEoBRILCgNjd2QYAiABKAkSQgoJdXNlcl92YXJzGAMgAygLMi8ud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lTWV0YWRhdGEuVXNlclZhcnNFbnRyeRovCg1Vc2VyVmFyc0VudHJ5EgsKA2tleRgBIAEoCRINCgV2YWx1ZRgCIAEoCToCOAEiHwoMTXNnRm9jdXNQYW5lEg8KB3BhbmVfaWQYASABKAUitAYKDVNlcnZlck1lc3NhZ2USNgoLcGFuZV91cGRhdGUYASABKAsyHy53aWRlYm9pLnByb3RvY29sLk1zZ1BhbmVVcGRhdGVIABI0CgpwYW5lX3BhdGNoGAIgASgLMh4ud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lUGF0Y2hIABI+Cg9sYXlvdXRfc25hcHNob3QYAyABKAsyIy53aWRlYm9pLnByb3RvY29sLk1zZ0xheW91dFNuYXBzaG90SAASOAoMcGFuZV9jcmVhdGVkGAQgASgLMiAud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lQ3JlYXRlZEgAEjYKC3BhbmVfY2xvc2VkGAUgASgLMh8ud2lkZWJvaS5wcm90b2NvbC5Nc2dQYW5lQ2xvc2VkSAASOgoNcGFuZV9tZXRhZGF0YRgGIAEoCzIhLndpZGVib2kucHJvdG9jb2wuTXNnUGFuZU1ldGFkYXRhSAASOgoNdHJhZmZpY19zdGF0cxgHIAEoCzIhLndpZGVib2kucHJvdG9jb2wuTXNnVHJhZmZpY1N0YXRzSAASNAoKZm9jdXNfcGFuZRgIIAEoCzIeLndpZGVib2kucHJvdG9jb2wuTXNnRm9jdXNQYW5lSAASPAoOc3BsaXRfcmVzcG9uc2UYCSABKAsyIi53aWRlYm9pLnByb3RvY29sLk1zZ1NwbGl0UmVzcG9uc2VIABJFChNzZW5kX2lucHV0X3Jlc3BvbnNlGAogASgLMiYud2lkZWJvaS5wcm90b2NvbC5Nc2dTZW5kSW5wdXRSZXNwb25zZUgAEkAKEGNhcHR1cmVfcmVzcG9uc2UYCyABKAsyJC53aWRlYm9pLnByb3RvY29sLk1zZ0NhcHR1cmVSZXNwb25zZUgAEkUKE2Nsb3NlX3BhbmVfcmVzcG9uc2UYDCABKAsyJi53aWRlYm9pLnByb3RvY29sLk1zZ0Nsb3NlUGFuZVJlc3BvbnNlSAASQAoQaGlzdG9yeV9zbmFwc2hvdBgNIAEoCzIkLndpZGVib2kucHJvdG9jb2wuTXNnSGlzdG9yeVNuYXBzaG90SABCBQoDbXNnIicKCU1zZ0F0dGFjaBIMCgRjb2xzGAEgASgFEgwKBHJvd3MYAiABKAUiRAoHTXNnVmVyYhIoCgR2ZXJiGAEgASgOMhoud2lkZWJvaS5wcm90b2NvbC5WZXJiVHlwZRIPCgdwYW5lX2lkGAIgASgFInkKCE1zZ01vdXNlEg8KB3BhbmVfaWQYASABKAUSKQoEa2luZBgCIAEoDjIbLndpZGVib2kucHJvdG9jb2wuTW91c2VLaW5kEgkKAXgYAyABKAUSCQoBeRgEIAEoBRIOCgZidXR0b24YBSABKAUSCwoDbW9kGAYgASgFIm4KB0tleURhdGESDAoEdGV4dBgBIAEoCRILCgNtb2QYAiABKAUSDAoEY29kZRgDIAEoBRIUCgxzaGlmdGVkX2NvZGUYBCABKAUSEQoJYmFzZV9jb2RlGAUgASgFEhEKCWlzX3JlcGVhdBgGIAEoCCJRCghNc2dJbnB1dBIPCgdwYW5lX2lkGAEgASgFEiYKA2tleRgCIAEoCzIZLndpZGVib2kucHJvdG9jb2wuS2V5RGF0YRIMCgRkYXRhGAMgASgMIicKCU1zZ1Jlc2l6ZRIMCgRjb2xzGAEgASgFEgwKBHJvd3MYAiABKAUifgoJTXNnU2Nyb2xsEg8KB3BhbmVfaWQYASABKAUSDQoFZGVsdGEYAiABKAUSFAoMc2V0X2Fic29sdXRlGAMgASgIEg4KBm9mZnNldBgEIAEoBRIWCg5hbmNob3JfaGlzdG9yeRgFIAEoCBITCgtoaXN0b3J5X2xlbhgGIAEoBSIkChFNc2dIaXN0b3J5UmVxdWVzdBIPCgdwYW5lX2lkGAEgASgFIksKEk1zZ0hpc3RvcnlTbmFwc2hvdBIPCgdwYW5lX2lkGAEgASgFEhYKDnNjcm9sbGJhY2tfbGVuGAIgASgFEgwKBHJvd3MYAyADKAkiIAoNTXNnUGFuZVJlc3luYxIPCgdwYW5lX2lkGAEgASgFIgsKCU1zZ0RldGFjaCINCgtNc2dTaHV0ZG93biISChBNc2dTdGF0dXNSZXF1ZXN0IoYHCg1DbGllbnRNZXNzYWdlEi0KBmF0dGFjaBgBIAEoCzIbLndpZGVib2kucHJvdG9jb2wuTXNnQXR0YWNoSAASKQoEdmVyYhgCIAEoCzIZLndpZGVib2kucHJvdG9jb2wuTXNnVmVyYkgAEisKBW1vdXNlGAMgASgLMhoud2lkZWJvaS5wcm90b2NvbC5Nc2dNb3VzZUgAEisKBWlucHV0GAQgASgLMhoud2lkZWJvaS5wcm90b2NvbC5Nc2dJbnB1dEgAEi0KBnJlc2l6ZRgFIAEoCzIbLndpZGVib2kucHJvdG9jb2wuTXNnUmVzaXplSAASLQoGc2Nyb2xsGAYgASgLMhsud2lkZWJvaS5wcm90b2NvbC5Nc2dTY3JvbGxIABI2CgtwYW5lX3Jlc3luYxgHIAEoCzIfLndpZGVib2kucHJvdG9jb2wuTXNnUGFuZVJlc3luY0gAEi0KBmRldGFjaBgIIAEoCzIbLndpZGVib2kucHJvdG9jb2wuTXNnRGV0YWNoSAASMQoIc2h1dGRvd24YCSABKAsyHS53aWRlYm9pLnByb3RvY29sLk1zZ1NodXRkb3duSAASPAoOc3RhdHVzX3JlcXVlc3QYCiABKAsyIi53aWRlYm9pLnByb3RvY29sLk1zZ1N0YXR1c1JlcXVlc3RIABI+Cg90cmFmZmljX3JlcXVlc3QYCyABKAsyIy53aWRlYm9pLnByb3RvY29sLk1zZ1RyYWZmaWNSZXF1ZXN0SAASOgoNc3BsaXRfcmVxdWVzdBgMIAEoCzIhLndpZGVib2kucHJvdG9jb2wuTXNnU3BsaXRSZXF1ZXN0SAASQwoSc2VuZF9pbnB1dF9yZXF1ZXN0GA0gASgLMiUud2lkZWJvaS5wcm90b2NvbC5Nc2dTZW5kSW5wdXRSZXF1ZXN0SAASPgoPY2FwdHVyZV9yZXF1ZXN0GA4gASgLMiMud2lkZWJvaS5wcm90b2NvbC5Nc2dDYXB0dXJlUmVxdWVzdEgAEkMKEmNsb3NlX3BhbmVfcmVxdWVzdBgPIAEoCzIlLndpZGVib2kucHJvdG9jb2wuTXNnQ2xvc2VQYW5lUmVxdWVzdEgAEj4KD2hpc3RvcnlfcmVxdWVzdBgQIAEoCzIjLndpZGVib2kucHJvdG9jb2wuTXNnSGlzdG9yeVJlcXVlc3RIAEIFCgNtc2ciRgoPTXNnU3BsaXRSZXF1ZXN0Eg8KB2NvbW1hbmQYASABKAkSCwoDY3dkGAIgASgJEhUKDWFmdGVyX3BhbmVfaWQYAyABKAUiMgoQTXNnU3BsaXRSZXNwb25zZRIPCgdwYW5lX2lkGAEgASgFEg0KBWVycm9yGAIgASgJIjQKE01zZ1NlbmRJbnB1dFJlcXVlc3QSDwoHcGFuZV9pZBgBIAEoBRIMCgRkYXRhGAIgASgMIjYKFE1zZ1NlbmRJbnB1dFJlc3BvbnNlEg8KB3BhbmVfaWQYASABKAUSDQoFZXJyb3IYAiABKAkiRwoRTXNnQ2FwdHVyZVJlcXVlc3QSDwoHcGFuZV9pZBgBIAEoBRISCgpzY3JvbGxiYWNrGAIgASgIEg0KBWxpbmVzGAMgASgFIkIKEk1zZ0NhcHR1cmVSZXNwb25zZRIPCgdwYW5lX2lkGAEgASgFEgwKBHRleHQYAiABKAkSDQoFZXJyb3IYAyABKAkiJgoTTXNnQ2xvc2VQYW5lUmVxdWVzdBIPCgdwYW5lX2lkGAEgASgFIjYKFE1zZ0Nsb3NlUGFuZVJlc3BvbnNlEg8KB3BhbmVfaWQYASABKAUSDQoFZXJyb3IYAiABKAkiEwoRTXNnVHJhZmZpY1JlcXVlc3QiQwoKVGltaW5nU3RhdBINCgVjb3VudBgBIAEoBBITCgt0b3RhbF9uYW5vcxgCIAEoBBIRCgltYXhfbmFub3MYAyABKAQi3gIKDUNsaWVudFRyYWZmaWMSEQoJY2xpZW50X2lkGAEgASgFEhEKCXRyYW5zcG9ydBgCIAEoCRIYChBjb25uZWN0ZWRfbWlsbGlzGAMgASgDEhQKDGZ1bGxfdXBkYXRlcxgEIAEoBBITCgtyb3dfcGF0Y2hlcxgFIAEoBBIVCg1zaGlmdF9wYXRjaGVzGAYgASgEEhQKDGNoYW5nZWRfcm93cxgHIAEoBBIXCg9yZXN5bmNfcmVxdWVzdHMYCCABKAQSFQoNc2VuZF9mYWlsdXJlcxgJIAEoBBIQCghtZXNzYWdlcxgKIAEoBBIVCg1wYXlsb2FkX2J5dGVzGAsgASgEEhoKEnBhbmVfcGF5bG9hZF9ieXRlcxgMIAEoBBISCgp3aXJlX2J5dGVzGA0gASgEEiwKBmVuY29kZRgOIAEoCzIcLndpZGVib2kucHJvdG9jb2wuVGltaW5nU3RhdCKGAgoPTXNnVHJhZmZpY1N0YXRzEhUKDXVwdGltZV9taWxsaXMYASABKAMSFgoOdGltaW5nX2VuYWJsZWQYAiABKAgSMAoHY2xpZW50cxgDIAMoCzIfLndpZGVib2kucHJvdG9jb2wuQ2xpZW50VHJhZmZpYxIxCghkZXBhcnRlZBgEIAEoCzIfLndpZGVib2kucHJvdG9jb2wuQ2xpZW50VHJhZmZpYxIsCgZyZW5kZXIYBSABKAsyHC53aWRlYm9pLnByb3RvY29sLlRpbWluZ1N0YXQSMQoLYnVpbGRfcGF0Y2gYBiABKAsyHC53aWRlYm9pLnByb3RvY29sLlRpbWluZ1N0YXQqmAMKCFZlcmJUeXBlEhkKFVZFUkJfVFlQRV9VTlNQRUNJRklFRBAAEhgKFFZFUkJfVFlQRV9GT0NVU19MRUZUEAESGQoVVkVSQl9UWVBFX0ZPQ1VTX1JJR0hUEAISGAoUVkVSQl9UWVBFX05FV19DT0xVTU4QAxIZChVWRVJCX1RZUEVfQ1lDTEVfV0lEVEgQBBIXChNWRVJCX1RZUEVfS0lMTF9QQU5FEAUSGAoUVkVSQl9UWVBFX1NNQVJUX0pVTVAQBhIaChZWRVJCX1RZUEVfVE9HR0xFX0NBUkRTEAcSGAoUVkVSQl9UWVBFX0dST1dfV0lEVEgQCBIaChZWRVJCX1RZUEVfU0hSSU5LX1dJRFRIEAkSFwoTVkVSQl9UWVBFX01PVkVfTEVGVBAKEhgKFFZFUkJfVFlQRV9NT1ZFX1JJR0hUEAsSGAoUVkVSQl9UWVBFX0ZPQ1VTX0xBU1QQDBIbChdWRVJCX1RZUEVfVE9HR0xFX1NUQVRVUxANEhgKFFZFUkJfVFlQRV9DTEFJTV9TSVpFEA4qhgEKClBhbmVTdGF0dXMSFAoQUEFORV9TVEFUVVNfSURMRRAAEhcKE1BBTkVfU1RBVFVTX1dPUktJTkcQARIbChdQQU5FX1NUQVRVU19ORUVEU19JTlBVVBACEhQKEFBBTkVfU1RBVFVTX0RPTkUQAxIWChJQQU5FX1NUQVRVU19GQUlMRUQQBCpjCglDb2xvcktpbmQSEwoPQ09MT1JfS0lORF9OT05FEAASFAoQQ09MT1JfS0lORF9CQVNJQxABEhYKEkNPTE9SX0tJTkRfSU5ERVhFRBACEhMKD0NPTE9SX0tJTkRfUkdCQRADKmYKCU1vdXNlS2luZBIUChBNT1VTRV9LSU5EX1BSRVNTEAASFgoSTU9VU0VfS0lORF9SRUxFQVNFEAESFQoRTU9VU0VfS0lORF9NT1RJT04QAhIUChBNT1VTRV9LSU5EX1dIRUVMEANCN1o1Z2l0aHViLmNvbS9sbW9yY2hhcmQvd2lkZWJvaS9pbnRlcm5hbC9wcm90b2NvbC93aXJlcGJiBnByb3RvMw");
 
 /**
  * @generated from message wideboi.protocol.ColorData
@@ -536,6 +536,12 @@ export type ServerMessage = Message<"wideboi.protocol.ServerMessage"> & {
      */
     value: MsgClosePaneResponse;
     case: "closePaneResponse";
+  } | {
+    /**
+     * @generated from field: wideboi.protocol.MsgHistorySnapshot history_snapshot = 13;
+     */
+    value: MsgHistorySnapshot;
+    case: "historySnapshot";
   } | { case: undefined; value?: undefined };
 };
 
@@ -736,6 +742,26 @@ export type MsgScroll = Message<"wideboi.protocol.MsgScroll"> & {
    * @generated from field: int32 delta = 2;
    */
   delta: number;
+
+  /**
+   * @generated from field: bool set_absolute = 3;
+   */
+  setAbsolute: boolean;
+
+  /**
+   * @generated from field: int32 offset = 4;
+   */
+  offset: number;
+
+  /**
+   * @generated from field: bool anchor_history = 5;
+   */
+  anchorHistory: boolean;
+
+  /**
+   * @generated from field: int32 history_len = 6;
+   */
+  historyLen: number;
 };
 
 /**
@@ -744,6 +770,52 @@ export type MsgScroll = Message<"wideboi.protocol.MsgScroll"> & {
  */
 export const MsgScrollSchema: GenMessage<MsgScroll> = /*@__PURE__*/
   messageDesc(file_internal_protocol_wirepb_wideboi, 20);
+
+/**
+ * Plain physical rows, oldest first. Search is performed by the client.
+ *
+ * @generated from message wideboi.protocol.MsgHistoryRequest
+ */
+export type MsgHistoryRequest = Message<"wideboi.protocol.MsgHistoryRequest"> & {
+  /**
+   * @generated from field: int32 pane_id = 1;
+   */
+  paneId: number;
+};
+
+/**
+ * Describes the message wideboi.protocol.MsgHistoryRequest.
+ * Use `create(MsgHistoryRequestSchema)` to create a new message.
+ */
+export const MsgHistoryRequestSchema: GenMessage<MsgHistoryRequest> = /*@__PURE__*/
+  messageDesc(file_internal_protocol_wirepb_wideboi, 21);
+
+/**
+ * @generated from message wideboi.protocol.MsgHistorySnapshot
+ */
+export type MsgHistorySnapshot = Message<"wideboi.protocol.MsgHistorySnapshot"> & {
+  /**
+   * @generated from field: int32 pane_id = 1;
+   */
+  paneId: number;
+
+  /**
+   * @generated from field: int32 scrollback_len = 2;
+   */
+  scrollbackLen: number;
+
+  /**
+   * @generated from field: repeated string rows = 3;
+   */
+  rows: string[];
+};
+
+/**
+ * Describes the message wideboi.protocol.MsgHistorySnapshot.
+ * Use `create(MsgHistorySnapshotSchema)` to create a new message.
+ */
+export const MsgHistorySnapshotSchema: GenMessage<MsgHistorySnapshot> = /*@__PURE__*/
+  messageDesc(file_internal_protocol_wirepb_wideboi, 22);
 
 /**
  * @generated from message wideboi.protocol.MsgPaneResync
@@ -760,7 +832,7 @@ export type MsgPaneResync = Message<"wideboi.protocol.MsgPaneResync"> & {
  * Use `create(MsgPaneResyncSchema)` to create a new message.
  */
 export const MsgPaneResyncSchema: GenMessage<MsgPaneResync> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 21);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 23);
 
 /**
  * @generated from message wideboi.protocol.MsgDetach
@@ -773,7 +845,7 @@ export type MsgDetach = Message<"wideboi.protocol.MsgDetach"> & {
  * Use `create(MsgDetachSchema)` to create a new message.
  */
 export const MsgDetachSchema: GenMessage<MsgDetach> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 22);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 24);
 
 /**
  * @generated from message wideboi.protocol.MsgShutdown
@@ -786,7 +858,7 @@ export type MsgShutdown = Message<"wideboi.protocol.MsgShutdown"> & {
  * Use `create(MsgShutdownSchema)` to create a new message.
  */
 export const MsgShutdownSchema: GenMessage<MsgShutdown> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 23);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 25);
 
 /**
  * @generated from message wideboi.protocol.MsgStatusRequest
@@ -799,7 +871,7 @@ export type MsgStatusRequest = Message<"wideboi.protocol.MsgStatusRequest"> & {
  * Use `create(MsgStatusRequestSchema)` to create a new message.
  */
 export const MsgStatusRequestSchema: GenMessage<MsgStatusRequest> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 24);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 26);
 
 /**
  * @generated from message wideboi.protocol.ClientMessage
@@ -898,6 +970,12 @@ export type ClientMessage = Message<"wideboi.protocol.ClientMessage"> & {
      */
     value: MsgClosePaneRequest;
     case: "closePaneRequest";
+  } | {
+    /**
+     * @generated from field: wideboi.protocol.MsgHistoryRequest history_request = 16;
+     */
+    value: MsgHistoryRequest;
+    case: "historyRequest";
   } | { case: undefined; value?: undefined };
 };
 
@@ -906,7 +984,7 @@ export type ClientMessage = Message<"wideboi.protocol.ClientMessage"> & {
  * Use `create(ClientMessageSchema)` to create a new message.
  */
 export const ClientMessageSchema: GenMessage<ClientMessage> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 25);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 27);
 
 /**
  * @generated from message wideboi.protocol.MsgSplitRequest
@@ -933,7 +1011,7 @@ export type MsgSplitRequest = Message<"wideboi.protocol.MsgSplitRequest"> & {
  * Use `create(MsgSplitRequestSchema)` to create a new message.
  */
 export const MsgSplitRequestSchema: GenMessage<MsgSplitRequest> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 26);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 28);
 
 /**
  * @generated from message wideboi.protocol.MsgSplitResponse
@@ -955,7 +1033,7 @@ export type MsgSplitResponse = Message<"wideboi.protocol.MsgSplitResponse"> & {
  * Use `create(MsgSplitResponseSchema)` to create a new message.
  */
 export const MsgSplitResponseSchema: GenMessage<MsgSplitResponse> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 27);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 29);
 
 /**
  * @generated from message wideboi.protocol.MsgSendInputRequest
@@ -977,7 +1055,7 @@ export type MsgSendInputRequest = Message<"wideboi.protocol.MsgSendInputRequest"
  * Use `create(MsgSendInputRequestSchema)` to create a new message.
  */
 export const MsgSendInputRequestSchema: GenMessage<MsgSendInputRequest> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 28);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 30);
 
 /**
  * @generated from message wideboi.protocol.MsgSendInputResponse
@@ -999,7 +1077,7 @@ export type MsgSendInputResponse = Message<"wideboi.protocol.MsgSendInputRespons
  * Use `create(MsgSendInputResponseSchema)` to create a new message.
  */
 export const MsgSendInputResponseSchema: GenMessage<MsgSendInputResponse> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 29);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 31);
 
 /**
  * @generated from message wideboi.protocol.MsgCaptureRequest
@@ -1026,7 +1104,7 @@ export type MsgCaptureRequest = Message<"wideboi.protocol.MsgCaptureRequest"> & 
  * Use `create(MsgCaptureRequestSchema)` to create a new message.
  */
 export const MsgCaptureRequestSchema: GenMessage<MsgCaptureRequest> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 30);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 32);
 
 /**
  * @generated from message wideboi.protocol.MsgCaptureResponse
@@ -1053,7 +1131,7 @@ export type MsgCaptureResponse = Message<"wideboi.protocol.MsgCaptureResponse"> 
  * Use `create(MsgCaptureResponseSchema)` to create a new message.
  */
 export const MsgCaptureResponseSchema: GenMessage<MsgCaptureResponse> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 31);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 33);
 
 /**
  * @generated from message wideboi.protocol.MsgClosePaneRequest
@@ -1070,7 +1148,7 @@ export type MsgClosePaneRequest = Message<"wideboi.protocol.MsgClosePaneRequest"
  * Use `create(MsgClosePaneRequestSchema)` to create a new message.
  */
 export const MsgClosePaneRequestSchema: GenMessage<MsgClosePaneRequest> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 32);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 34);
 
 /**
  * @generated from message wideboi.protocol.MsgClosePaneResponse
@@ -1092,7 +1170,7 @@ export type MsgClosePaneResponse = Message<"wideboi.protocol.MsgClosePaneRespons
  * Use `create(MsgClosePaneResponseSchema)` to create a new message.
  */
 export const MsgClosePaneResponseSchema: GenMessage<MsgClosePaneResponse> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 33);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 35);
 
 /**
  * Traffic counters for `wideboi status --traffic` (#179). Counts and
@@ -1108,7 +1186,7 @@ export type MsgTrafficRequest = Message<"wideboi.protocol.MsgTrafficRequest"> & 
  * Use `create(MsgTrafficRequestSchema)` to create a new message.
  */
 export const MsgTrafficRequestSchema: GenMessage<MsgTrafficRequest> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 34);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 36);
 
 /**
  * @generated from message wideboi.protocol.TimingStat
@@ -1135,7 +1213,7 @@ export type TimingStat = Message<"wideboi.protocol.TimingStat"> & {
  * Use `create(TimingStatSchema)` to create a new message.
  */
 export const TimingStatSchema: GenMessage<TimingStat> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 35);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 37);
 
 /**
  * @generated from message wideboi.protocol.ClientTraffic
@@ -1227,7 +1305,7 @@ export type ClientTraffic = Message<"wideboi.protocol.ClientTraffic"> & {
  * Use `create(ClientTrafficSchema)` to create a new message.
  */
 export const ClientTrafficSchema: GenMessage<ClientTraffic> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 36);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 38);
 
 /**
  * @generated from message wideboi.protocol.MsgTrafficStats
@@ -1271,7 +1349,7 @@ export type MsgTrafficStats = Message<"wideboi.protocol.MsgTrafficStats"> & {
  * Use `create(MsgTrafficStatsSchema)` to create a new message.
  */
 export const MsgTrafficStatsSchema: GenMessage<MsgTrafficStats> = /*@__PURE__*/
-  messageDesc(file_internal_protocol_wirepb_wideboi, 37);
+  messageDesc(file_internal_protocol_wirepb_wideboi, 39);
 
 /**
  * @generated from enum wideboi.protocol.VerbType

@@ -868,6 +868,20 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					cli.ToggleLayout()
 				case routeScroll:
 					cli.SendScroll(ctx, act.Scroll)
+				case routeSearchStart:
+					cli.StartSearch()
+				case routeSearchEdit:
+					cli.SearchEdit(act.Text, act.Backspace)
+				case routeSearchCommit:
+					cli.SearchCommit(ctx)
+				case routeSearchNavigate:
+					cli.SearchNavigate(ctx, act.Direction)
+				case routeSearchCancel:
+					cli.SearchEnd(ctx, true, false)
+				case routeSearchAccept:
+					cli.SearchEnd(ctx, false, false)
+				case routeSearchLive:
+					cli.SearchEnd(ctx, false, true)
 				case routeFocusColumn:
 					cli.FocusColumn(ctx, act.Column)
 				case routeForward:

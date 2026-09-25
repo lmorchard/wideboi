@@ -41,16 +41,26 @@ const (
 	// routeToggleLayout flips this client's layout. The client does it
 	// alone; nothing is sent (#92).
 	routeToggleLayout
+	routeSearchStart
+	routeSearchEdit
+	routeSearchCommit
+	routeSearchNavigate
+	routeSearchCancel
+	routeSearchAccept
+	routeSearchLive
 )
 
 // route is what the router decided about one key event. It describes an
 // action rather than performing one, so main's event loop stays a
 // dispatch and the decision stays testable.
 type route struct {
-	Kind   routeKind
-	Verb   protocol.VerbType
-	Scroll int
-	Column int
+	Kind      routeKind
+	Verb      protocol.VerbType
+	Scroll    int
+	Column    int
+	Text      string
+	Backspace bool
+	Direction int
 }
 
 type router struct {
@@ -76,7 +86,8 @@ type router struct {
 	// main mirrors it to the client after every key exactly as it does
 	// with control, so the bar, the overlay and the router cannot
 	// disagree about which mode is active.
-	help bool
+	help   bool
+	search int // 0: off, 1: query input, 2: match navigation
 	// bindings is the active set of control mode bindings. If empty or nil,
 	// defaults to keys.Bindings.
 	bindings []keys.Binding
@@ -85,6 +96,46 @@ type router struct {
 // route decides what to do with one key press, updating the mode as a
 // side effect.
 func (r *router) route(ev uv.KeyPressEvent) route {
+	if r.search != 0 {
+		if ev.MatchString("esc") {
+			r.search = 0
+			return route{Kind: routeSearchCancel}
+		}
+		if ev.MatchString("ctrl+g") {
+			r.search = 0
+			return route{Kind: routeSearchLive}
+		}
+		if ev.MatchString("enter") {
+			if r.search == 1 {
+				r.search = 2
+				return route{Kind: routeSearchCommit}
+			}
+			r.search = 0
+			return route{Kind: routeSearchAccept}
+		}
+		if r.search == 1 {
+			if ev.MatchString("backspace") {
+				return route{Kind: routeSearchEdit, Backspace: true}
+			}
+			if ev.Mod == 0 || ev.Mod == uv.ModShift {
+				value := ev.Text
+				if value == "" && ev.Code >= 32 && ev.Code < 127 {
+					value = string(ev.Code)
+				}
+				if value != "" {
+					return route{Kind: routeSearchEdit, Text: value}
+				}
+			}
+			return route{Kind: routeIgnore}
+		}
+		if ev.Text == "N" || ev.Code == 'N' {
+			return route{Kind: routeSearchNavigate, Direction: -1}
+		}
+		if ev.MatchString("n") {
+			return route{Kind: routeSearchNavigate, Direction: 1}
+		}
+		return route{Kind: routeIgnore}
+	}
 	// The overlay swallows whatever dismisses it. Checked before the
 	// table so that pressing `k` to close help cannot also scroll, and
 	// before the prefix so the overlay is never a mode you can stack
@@ -153,6 +204,10 @@ func (r *router) fire(b keys.Binding, sticky bool) route {
 		// NoRepeat, so sticky is always false: toggles once and leaves,
 		// as it did when it was a verb.
 		return route{Kind: routeToggleLayout}
+	case keys.ActionSearch:
+		r.search = 1
+		r.control = false
+		return route{Kind: routeSearchStart}
 	case keys.ActionQuit:
 		// ctrl+q is exactly q: "quit but stay in control mode" is not a
 		// thing, because the client is leaving.

@@ -933,6 +933,36 @@ def case_help_overlay_opens_and_any_key_dismisses(fail):
     s.close()
 
 
+def case_search_history_and_restore(fail):
+    s = Session(cols=100, rows=30)
+    # The command text contains no literal needle, so the only history
+    # match comes from the shell's output, not readline's command echo.
+    s.type("printf 'prefix-%b-suffix\\n' '\\156\\145\\145\\144\\154\\145'\r")
+    s.type("seq 1 40\r")
+    s.type("printf 'live-tail-marker\\n'\r")
+    before = len(s.output())
+    s.type("\x02/needle\r")
+    # The snapshot reply can arrive after the first quiet window. Wait
+    # for the actual historical row, which was off-screen before search.
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        found = s.output()[before:]
+        if b"prefix-needle-suffix" in found:
+            break
+        time.sleep(0.02)
+    found = s.output()[before:]
+    if b"prefix-needle-suffix" not in found:
+        fail("search did not repaint the earlier matching row")
+    before_restore = len(s.output())
+    s.type("\x1b")
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and b"live-tail-marker" not in s.output()[before_restore:]:
+        time.sleep(0.02)
+    if b"live-tail-marker" not in s.output()[before_restore:]:
+        fail("Escape did not restore the prior pane view")
+    s.close()
+
+
 def case_help_overlay_works_after_a_focus_switch(fail):
     # A focus switch starts an 8-frame wipe. This does not prove help
     # wins the race against the wipe -- the wipe self-clears in ~128ms
@@ -1120,6 +1150,7 @@ CASES = [
     ("unmodified verb exits control mode", case_unmodified_verb_exits_control_mode),
     ("unknown key exits control mode", case_unknown_key_exits_control_mode),
     ("help overlay opens and any key dismisses", case_help_overlay_opens_and_any_key_dismisses),
+    ("search history and restore", case_search_history_and_restore),
     ("help overlay works after a focus switch", case_help_overlay_works_after_a_focus_switch),
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),

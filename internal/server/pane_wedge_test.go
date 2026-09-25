@@ -69,6 +69,7 @@ func (g *blockingGrid) Title() string                          { return "" }
 func (g *blockingGrid) CWD() string                            { return "" }
 func (g *blockingGrid) UserVars() map[string]string            { return nil }
 func (g *blockingGrid) ScrollbackLen() int                     { return 0 }
+func (g *blockingGrid) HistoryRows() (int, []string)           { return 0, nil }
 func (g *blockingGrid) ScrollOffset() int                      { return 0 }
 func (g *blockingGrid) SetScrollOffset(int)                    {}
 func (g *blockingGrid) Generation() uint64                     { return 0 }

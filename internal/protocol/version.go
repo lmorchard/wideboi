@@ -22,4 +22,6 @@ package protocol
 // 6 adds VerbToggleStatus and MsgFocusPane (#196).
 // 7 adds VerbClaimSize to VerbType for multi-client sizing control (#184).
 // 8 adds agent-friendly pane control requests and responses (split, send, capture, close) (#198).
-const Version uint32 = 8
+// 9 adds client-requested plain-text history snapshots and absolute
+// per-client scroll requests for local search (#183).
+const Version uint32 = 9

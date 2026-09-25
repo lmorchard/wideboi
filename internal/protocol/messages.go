@@ -215,6 +215,24 @@ type MsgResize struct {
 type MsgScroll struct {
 	PaneID int
 	Delta  int
+	// SetAbsolute makes Offset the desired per-client view offset. Search
+	// uses this because new output may pin a scrolled view between requests.
+	SetAbsolute bool
+	Offset      int
+	// AnchorHistory adjusts an absolute offset for rows appended since
+	// HistoryLen was copied. Search uses it to keep a match in view.
+	AnchorHistory bool
+	HistoryLen    int
+}
+
+// MsgHistoryRequest asks for the focused pane's current physical text rows.
+type MsgHistoryRequest struct{ PaneID int }
+
+// MsgHistorySnapshot is an atomic copy of scrollback followed by the screen.
+type MsgHistorySnapshot struct {
+	PaneID        int
+	ScrollbackLen int
+	Rows          []string
 }
 
 // MsgDetach tells the server this client is leaving and the session is
