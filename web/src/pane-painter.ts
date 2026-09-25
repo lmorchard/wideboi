@@ -11,6 +11,7 @@ export class PanePainter {
   private selection?: { start: CellPoint; end: CellPoint };
   private width = 0;
   private height = 0;
+  private zoom = 1.0;
   private frame: number | null = null;
   private running = false;
   private readonly onVisibilityChange = () => {
@@ -57,6 +58,13 @@ export class PanePainter {
     this.invalidate();
   }
 
+  setZoom(zoom: number) {
+    if (this.zoom === zoom) return;
+    this.zoom = zoom;
+    this.applyTransform();
+    this.invalidate();
+  }
+
   setSelection(start: CellPoint, end: CellPoint) {
     this.selection = { start, end };
     this.invalidate();
@@ -80,8 +88,17 @@ export class PanePainter {
     // CSS controls canvas size; never write its inline width or height here.
     if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
     if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.invalidate();
+    this.applyTransform();
+    if (this.running && !document.hidden) {
+      this.draw();
+    } else {
+      this.invalidate();
+    }
+  }
+
+  private applyTransform() {
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx.setTransform(dpr * this.zoom, 0, 0, dpr * this.zoom, 0, 0);
   }
 
   private cancelFrame() {
@@ -110,17 +127,19 @@ export class PanePainter {
 
   private draw() {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.width, this.height);
+    const logicalWidth = this.zoom > 0 ? this.width / this.zoom : this.width;
+    const logicalHeight = this.zoom > 0 ? this.height / this.zoom : this.height;
+    ctx.clearRect(0, 0, logicalWidth, logicalHeight);
     const pane = this.pane;
     if (!pane) return;
     ctx.font = FONT;
     ctx.textBaseline = 'top';
-    for (let y = 0; y < pane.lines.length && y * CELL_HEIGHT < this.height; y++) {
+    for (let y = 0; y < pane.lines.length && y * CELL_HEIGHT < logicalHeight; y++) {
       const line = pane.lines[y]?.cells;
       if (!line) continue;
       // LineData has one entry per terminal column. A wide glyph's
       // continuation occupies the next entry; Width is paint width only.
-      for (let x = 0; x < line.length && x * this.cellWidth < this.width; x++) {
+      for (let x = 0; x < line.length && x * this.cellWidth < logicalWidth; x++) {
         const cell = line[x];
         if (x > 0 && line[x - 1]?.width > 1) continue;
         const attrs = cell.style?.attrs ?? 0;
@@ -139,7 +158,7 @@ export class PanePainter {
           ctx.fillStyle = fg;
           ctx.globalAlpha = attrs & 2 ? 0.5 : 1;
           ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}${FONT}`;
-          ctx.fillText(cell.content, px, py);
+          ctx.fillText(cell.content, px, py + 1);
           ctx.globalAlpha = 1;
         }
         if (cell.style?.underline) {
@@ -164,21 +183,21 @@ export class PanePainter {
     if (pane.cursorVisible && this.focused) {
       const px = pane.cursorX * this.cellWidth;
       const py = pane.cursorY * CELL_HEIGHT;
-      if (px < this.width && py < this.height) {
+      if (px < logicalWidth && py < logicalHeight) {
         ctx.fillStyle = '#d4d4d4';
         ctx.fillRect(px, py, this.cellWidth, CELL_HEIGHT);
         const cell = pane.lines[pane.cursorY]?.cells[pane.cursorX];
         if (cell?.content && cell.content !== ' ') {
           ctx.fillStyle = '#1e1e1e';
           ctx.font = FONT;
-          ctx.fillText(cell.content, px, py);
+          ctx.fillText(cell.content, px, py + 1);
         }
       }
     }
-    if (pane.scrollOffset > 0 && this.height > CELL_HEIGHT) {
-      const footerY = Math.floor(this.height / CELL_HEIGHT) * CELL_HEIGHT - CELL_HEIGHT;
+    if (pane.scrollOffset > 0 && logicalHeight > CELL_HEIGHT) {
+      const footerY = Math.floor(logicalHeight / CELL_HEIGHT) * CELL_HEIGHT - CELL_HEIGHT;
       ctx.fillStyle = '#333333';
-      ctx.fillRect(0, footerY, this.width, CELL_HEIGHT);
+      ctx.fillRect(0, footerY, logicalWidth, CELL_HEIGHT);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px monospace';
       let footerText = ` [▲ scroll +${pane.scrollOffset}/${pane.scrollbackLen}`;

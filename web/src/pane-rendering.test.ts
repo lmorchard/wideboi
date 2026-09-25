@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from '@bufbuild/protobuf';
 import { PaneStore, selectionText } from './pane-state';
 import { PanePainter } from './pane-painter';
+import { WideboiPane } from './wideboi-pane';
 import { RenderStats } from './stats';
 import {
   CellDataSchema, LineDataSchema, MsgPanePatchSchema, MsgPaneUpdateSchema,
@@ -128,7 +129,7 @@ describe('per-pane painting', () => {
     const ctx = { setTransform: vi.fn(), clearRect, fillRect, fillText };
     const canvas = { width: 0, height: 0, style: { width: '', height: '' },
       getContext: () => ctx } as unknown as HTMLCanvasElement;
-    return { painter: new PanePainter(canvas, 8, stats), canvas };
+    return { painter: new PanePainter(canvas, 8, stats), canvas, ctx };
   };
 
   it('records full, patch, resync and draw timings only when given stats', () => {
@@ -232,5 +233,56 @@ describe('per-pane painting', () => {
     const calls = fillText.mock.calls.map(c => c[0]);
     expect(calls.some(text => typeof text === 'string' && text.includes('▲ scroll +7/50') && text.includes('new output'))).toBe(true);
     p.stop();
+  });
+
+  it('scales 2D transform and redraws when zoom changes', () => {
+    const { painter: p, ctx } = painter();
+    p.start();
+    p.resize(100, 100);
+    expect(ctx.setTransform).toHaveBeenLastCalledWith(1, 0, 0, 1, 0, 0);
+    p.setZoom(1.5);
+    expect(ctx.setTransform).toHaveBeenLastCalledWith(1.5, 0, 0, 1.5, 0, 0);
+    expect(frames.size).toBe(1);
+    flush();
+    p.setZoom(0.75);
+    expect(ctx.setTransform).toHaveBeenLastCalledWith(0.75, 0, 0, 0.75, 0, 0);
+    p.stop();
+  });
+
+  it('clears canvas even when pane is undefined', () => {
+    const { painter: p } = painter();
+    p.start();
+    p.resize(100, 100);
+    p.setPane(undefined);
+    flush();
+    expect(clearRect).toHaveBeenCalledWith(0, 0, 100, 100);
+    p.stop();
+  });
+
+  it('calculates cellAt coordinates correctly under zoom', () => {
+    const fakePane = {
+      canvas: {
+        getBoundingClientRect: () => ({ left: 20, top: 40, width: 800, height: 400 }),
+      },
+      pane: { cols: 80, rows: 24 },
+      cellWidth: 10,
+      zoom: 1.0,
+    };
+    // At zoom = 1.0: cellWidth = 10, cellHeight = 16.8
+    // point: (clientX=50, clientY=74) -> dx = 30 -> col 3, dy = 34 -> row 2
+    let pt = WideboiPane.prototype.cellAt.call(fakePane, 50, 74);
+    expect(pt).toEqual({ x: 3, y: 2 });
+
+    // At zoom = 2.0: effectiveCellWidth = 20, effectiveCellHeight = 33.6
+    fakePane.zoom = 2.0;
+    // dx = 40 -> col 2, dy = 68 -> row 2
+    pt = WideboiPane.prototype.cellAt.call(fakePane, 60, 108);
+    expect(pt).toEqual({ x: 2, y: 2 });
+
+    // At zoom = 0.5: effectiveCellWidth = 5, effectiveCellHeight = 8.4
+    fakePane.zoom = 0.5;
+    // dx = 30 -> col 6, dy = 34 -> row 4
+    pt = WideboiPane.prototype.cellAt.call(fakePane, 50, 74);
+    expect(pt).toEqual({ x: 6, y: 4 });
   });
 });
