@@ -121,7 +121,7 @@ Open the link printed on startup (which contains the security token) in your web
 http://127.0.0.1:8080/#token=<generated-token>
 ```
 
-You can attach terminal clients to the same session simultaneously with `wideboi attach`.
+You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
 
 ---
 
