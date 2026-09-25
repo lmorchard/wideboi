@@ -89,7 +89,17 @@ func (wsConn *WebSocketServerConn) writeLoop(ctx context.Context) {
 
 			wsConn.mu.Lock()
 			_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
+			// MsgTrafficStats is a measurement response requested by scripts/traffic.py.
+			// Disabling compression for it leaves its wire size as exactly the
+			// uncompressed payload plus frame header, so discounting the reply does
+			// not over-subtract compressed wire bytes.
+			if _, isTraffic := msg.(protocol.MsgTrafficStats); isTraffic {
+				wsConn.conn.EnableWriteCompression(false)
+			}
 			err = wsConn.conn.WriteMessage(websocket.BinaryMessage, payload)
+			if _, isTraffic := msg.(protocol.MsgTrafficStats); isTraffic {
+				wsConn.conn.EnableWriteCompression(true)
+			}
 			wsConn.mu.Unlock()
 
 			if err != nil {

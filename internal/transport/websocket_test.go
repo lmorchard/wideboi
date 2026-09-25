@@ -327,3 +327,168 @@ func TestWebSocketWritePumpSkipsAnUnencodableMessage(t *testing.T) {
 		t.Fatalf("got %#v, want the MsgPaneClosed sent after the unencodable message", got)
 	}
 }
+
+func TestWebSocketCompressionRoundTripAndWireBytes(t *testing.T) {
+	upgrader := websocket.Upgrader{
+		EnableCompression: true,
+	}
+	var serverWSConn *transport.WebSocketServerConn
+	var cw *transport.CountingResponseWriter
+	connErr := make(chan error, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cw = transport.NewCountingResponseWriter(w)
+		c, err := upgrader.Upgrade(cw, r, nil)
+		if err != nil {
+			connErr <- err
+			return
+		}
+		serverWSConn = transport.NewWebSocketServerConn(c, 16, cw)
+		serverWSConn.RunPumps(ctx)
+		connErr <- nil
+	}))
+	defer s.Close()
+
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	dialer := websocket.Dialer{
+		EnableCompression: true,
+	}
+	clientConn, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer clientConn.Close()
+	if err := <-connErr; err != nil {
+		t.Fatalf("upgrade failed: %v", err)
+	}
+	defer serverWSConn.Close()
+
+	// Build a typical 80x24 blank pane snapshot
+	lines := make([]protocol.LineData, 24)
+	for i := range lines {
+		lines[i] = make(protocol.LineData, 80)
+		for j := range lines[i] {
+			lines[i][j] = protocol.CellData{Content: " ", Width: 1}
+		}
+	}
+	update := protocol.MsgPaneUpdate{
+		PaneID:     1,
+		Generation: 1,
+		Cols:       80,
+		Rows:       24,
+		Lines:      lines,
+	}
+
+	payload, err := protocol.MarshalServer(update)
+	if err != nil {
+		t.Fatalf("marshal update: %v", err)
+	}
+	rawPayloadSize := len(payload)
+	if rawPayloadSize < 10000 {
+		t.Fatalf("expected raw payload size > 10KB, got %d", rawPayloadSize)
+	}
+
+	wireBefore := cw.WireBytes()
+	serverWSConn.SendServer(ctx, update)
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	got := readServer(t, clientConn)
+	gotUpdate, ok := got.(protocol.MsgPaneUpdate)
+	if !ok {
+		t.Fatalf("got %T, want MsgPaneUpdate", got)
+	}
+	if gotUpdate.PaneID != 1 || gotUpdate.Cols != 80 || gotUpdate.Rows != 24 {
+		t.Fatalf("unexpected update fields: %+v", gotUpdate)
+	}
+
+	var wireWritten uint64
+	for start := time.Now(); time.Since(start) < time.Second; time.Sleep(time.Millisecond) {
+		if n := cw.WireBytes() - wireBefore; n > 0 {
+			wireWritten = n
+			break
+		}
+	}
+
+	// Wire bytes for the compressed frame should be a fraction of the raw payload
+	if wireWritten >= uint64(rawPayloadSize)/4 {
+		t.Fatalf("wire bytes %d not compressed significantly compared to raw payload %d", wireWritten, rawPayloadSize)
+	}
+}
+
+func TestWebSocketTrafficStatsSentUncompressed(t *testing.T) {
+	upgrader := websocket.Upgrader{
+		EnableCompression: true,
+	}
+	var serverWSConn *transport.WebSocketServerConn
+	var cw *transport.CountingResponseWriter
+	connErr := make(chan error, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cw = transport.NewCountingResponseWriter(w)
+		c, err := upgrader.Upgrade(cw, r, nil)
+		if err != nil {
+			connErr <- err
+			return
+		}
+		serverWSConn = transport.NewWebSocketServerConn(c, 16, cw)
+		serverWSConn.RunPumps(ctx)
+		connErr <- nil
+	}))
+	defer s.Close()
+
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	dialer := websocket.Dialer{
+		EnableCompression: true,
+	}
+	clientConn, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatalf("dial failed: %v", err)
+	}
+	defer clientConn.Close()
+	if err := <-connErr; err != nil {
+		t.Fatalf("upgrade failed: %v", err)
+	}
+	defer serverWSConn.Close()
+
+	trafficStats := protocol.MsgTrafficStats{
+		Clients: []protocol.ClientTraffic{{ClientID: 1, Messages: 10}},
+	}
+	trafficPayload, err := protocol.MarshalServer(trafficStats)
+	if err != nil {
+		t.Fatalf("marshal traffic stats: %v", err)
+	}
+
+	wireBefore := cw.WireBytes()
+	serverWSConn.SendServer(ctx, trafficStats)
+
+	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	gotTraffic := readServer(t, clientConn)
+	if _, ok := gotTraffic.(protocol.MsgTrafficStats); !ok {
+		t.Fatalf("got %T, want MsgTrafficStats", gotTraffic)
+	}
+
+	var wireWritten uint64
+	for start := time.Now(); time.Since(start) < time.Second; time.Sleep(time.Millisecond) {
+		if n := cw.WireBytes() - wireBefore; n > 0 {
+			wireWritten = n
+			break
+		}
+	}
+
+	// Uncompressed frame header for small payload is 2 bytes (unmasked from server) or 4 bytes
+	headerLen := uint64(2)
+	if len(trafficPayload) >= 126 {
+		headerLen = 4
+	}
+	expectedWire := uint64(len(trafficPayload)) + headerLen
+	if wireWritten != expectedWire {
+		t.Fatalf("traffic wire bytes = %d, want exact uncompressed wire bytes = %d (payload %d + header %d)",
+			wireWritten, expectedWire, len(trafficPayload), headerLen)
+	}
+}

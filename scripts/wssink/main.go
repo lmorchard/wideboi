@@ -50,7 +50,11 @@ func main() {
 	if *token != "" {
 		protocols = append(protocols, "wideboi-token."+base64.RawURLEncoding.EncodeToString([]byte(*token)))
 	}
-	dialer := websocket.Dialer{Subprotocols: protocols, HandshakeTimeout: 5 * time.Second}
+	dialer := websocket.Dialer{
+		Subprotocols:      protocols,
+		HandshakeTimeout:  5 * time.Second,
+		EnableCompression: true,
+	}
 	conn, resp, err := dialer.Dial(*url, nil)
 	if err != nil {
 		if resp != nil {
