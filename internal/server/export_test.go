@@ -1,6 +1,11 @@
 package server
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"github.com/lmorchard/wideboi/internal/transport"
+)
 
 // SetCloseGrace shortens the hangup grace for panes this server spawns.
 //
@@ -12,4 +17,26 @@ func (s *Server) SetCloseGrace(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeGrace = d
+}
+
+// AddClientForTest registers an additional client transport and runs its loop.
+func (s *Server) AddClientForTest(ctx context.Context, tp transport.Transport) {
+	s.mu.Lock()
+	s.transports = append(s.transports, tp)
+	s.mu.Unlock()
+	go s.handleClientConnLoop(ctx, tp)
+}
+
+// SessionDimensions reports the server's logical cols and rows.
+func (s *Server) SessionDimensions() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cols, s.rows
+}
+
+// SizeOwner reports the current size-owning transport.
+func (s *Server) SizeOwner() transport.Transport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sizeOwner
 }

@@ -38,6 +38,7 @@ const (
 	VerbType_VERB_TYPE_MOVE_RIGHT    VerbType = 11
 	VerbType_VERB_TYPE_FOCUS_LAST    VerbType = 12
 	VerbType_VERB_TYPE_TOGGLE_STATUS VerbType = 13
+	VerbType_VERB_TYPE_CLAIM_SIZE    VerbType = 14
 )
 
 // Enum value maps for VerbType.
@@ -57,6 +58,7 @@ var (
 		11: "VERB_TYPE_MOVE_RIGHT",
 		12: "VERB_TYPE_FOCUS_LAST",
 		13: "VERB_TYPE_TOGGLE_STATUS",
+		14: "VERB_TYPE_CLAIM_SIZE",
 	}
 	VerbType_value = map[string]int32{
 		"VERB_TYPE_UNSPECIFIED":   0,
@@ -73,6 +75,7 @@ var (
 		"VERB_TYPE_MOVE_RIGHT":    11,
 		"VERB_TYPE_FOCUS_LAST":    12,
 		"VERB_TYPE_TOGGLE_STATUS": 13,
+		"VERB_TYPE_CLAIM_SIZE":    14,
 	}
 )
 
@@ -2694,7 +2697,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\bdeparted\x18\x04 \x01(\v2\x1f.wideboi.protocol.ClientTrafficR\bdeparted\x124\n" +
 	"\x06render\x18\x05 \x01(\v2\x1c.wideboi.protocol.TimingStatR\x06render\x12=\n" +
 	"\vbuild_patch\x18\x06 \x01(\v2\x1c.wideboi.protocol.TimingStatR\n" +
-	"buildPatch*\xfe\x02\n" +
+	"buildPatch*\x98\x03\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +
@@ -2710,7 +2713,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x12\x18\n" +
 	"\x14VERB_TYPE_MOVE_RIGHT\x10\v\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LAST\x10\f\x12\x1b\n" +
-	"\x17VERB_TYPE_TOGGLE_STATUS\x10\r*\x86\x01\n" +
+	"\x17VERB_TYPE_TOGGLE_STATUS\x10\r\x12\x18\n" +
+	"\x14VERB_TYPE_CLAIM_SIZE\x10\x0e*\x86\x01\n" +
 	"\n" +
 	"PaneStatus\x12\x14\n" +
 	"\x10PANE_STATUS_IDLE\x10\x00\x12\x17\n" +

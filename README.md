@@ -80,6 +80,7 @@ without doing anything. For the full list, press `?` in control mode.
 | `1`–`9` / `0` | focus the column at that position from the left / the last column |
 | `tab` | focus the previously focused pane |
 | `c` | switch this terminal between the card fan and the scrolling strip |
+| `S` | claim session terminal size for this window |
 | `y` / `u` | move this column one place left / right |
 | `?` | show the full help overlay |
 | `d` | detach, leaving the session running |
@@ -143,6 +144,28 @@ bypass (usually `Shift`-drag, or `Option`-drag in macOS terminals).
 
 To leave the mouse to your terminal entirely, put `mouse = false` in your
 config file.
+
+## Multi-client sizing and navigation
+
+When multiple clients connect to a session:
+
+- **First client sets geometry:** The first client to attach establishes the
+  session dimensions (`rows` and initial column layout) and becomes the active
+  size owner.
+- **Viewers attach without shrinking PTYs:** Subsequent clients (such as a
+  smaller terminal or browser window) attach as viewers. Their attach and window
+  resizes do not shrink or reflow the hosted PTYs for other clients.
+- **Bottom-anchored viewports:** When a client's viewport fits fewer rows than
+  the hosted pane, the viewport anchors to the bottom lines where shell prompts,
+  agent outputs, and the cursor live. In the web UI, mouse wheel scrolling
+  pans through the active terminal grid before entering scrollback history; in
+  the terminal client, the bottom lines remain visible while `k` and mouse wheel
+  navigate scrollback history.
+- **Claiming size:** Any client can explicitly take size ownership:
+  - In a terminal client: press `ctrl+b S` in control mode.
+  - In the web UI: click the **Fit to Window** button in the toolbar.
+- **Stable disconnects:** When the size owner disconnects, the session
+  dimensions remain locked at their current geometry.
 
 ## Web client
 
