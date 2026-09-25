@@ -35,6 +35,7 @@ type Server struct {
 	cwd             string
 	startup         []StartupPane
 	startupLaunched bool
+	startupComplete bool
 	transports      []transport.Transport
 	stopCh          chan struct{}
 	closeOnce       sync.Once
@@ -375,6 +376,9 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 // Run executes the main server event loop, processing client messages and polling descendants.
 func (s *Server) Run(ctx context.Context) error {
 	s.mu.Lock()
+	if s.owner == nil {
+		s.startupComplete = true
+	}
 	initialTransports := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()
 
@@ -403,6 +407,15 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+// StartupComplete reports whether the server finished initial startup.
+// For a server spawned by an owner, this means the owner successfully attached.
+// For an unowned server, startup completes once it enters the main event loop.
+func (s *Server) StartupComplete() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.startupComplete
+}
+
 func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
 	needBroadcast := false
@@ -425,6 +438,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		trafficReport = &report
 
 	case protocol.MsgAttach:
+		s.startupComplete = true
 		s.markAttachedLocked(tp)
 		if s.attachedTransports == nil {
 			s.attachedTransports = make(map[transport.Transport]bool)

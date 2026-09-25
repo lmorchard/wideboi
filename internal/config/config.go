@@ -75,14 +75,15 @@ const maxStartupWidth = 4096
 
 // ConfigFlags contains command-line flag overrides passed into Load.
 type ConfigFlags struct {
-	ConfigFile     string
-	Layout         string
-	Prefix         string
-	Socket         string
-	Session        string
-	Websocket      string
-	WebsocketToken string
-	Shell          string
+	ConfigFile         string
+	Layout             string
+	Prefix             string
+	Socket             string
+	Session            string
+	Websocket          string
+	WebsocketToken     string
+	Shell              string
+	DisableAutoCleanup bool
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -335,6 +336,10 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if flags.Shell != "" {
 		cfg.Shell = flags.Shell
+	}
+	if flags.DisableAutoCleanup {
+		v := false
+		cfg.AutoCleanup = &v
 	}
 
 	// 5. Validation

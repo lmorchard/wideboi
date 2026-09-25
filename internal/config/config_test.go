@@ -390,6 +390,15 @@ func TestLoadAutoCleanup(t *testing.T) {
 	if !cfg.AutoCleanupEnabled {
 		t.Error("AutoCleanupEnabled = false when env WIDEBOI_AUTO_CLEANUP='true' overrides TOML false")
 	}
+
+	// 8. DisableAutoCleanup flag overrides TOML and env
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPathTrue, DisableAutoCleanup: true}, mockEnv(map[string]string{"WIDEBOI_AUTO_CLEANUP": "true"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.AutoCleanupEnabled {
+		t.Error("AutoCleanupEnabled = true when DisableAutoCleanup flag is true")
+	}
 }
 
 func TestLoadLogLevel(t *testing.T) {
