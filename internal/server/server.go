@@ -145,6 +145,7 @@ type Server struct {
 // StartupPane is a pane created on the first attach to a new session.
 type StartupPane struct {
 	Command string
+	Dir     string
 	Width   int
 }
 
@@ -411,9 +412,56 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	resyncPaneID := 0
 	createdPaneID := 0
 	focusTargetID := 0
+	closeServer := false
 	var trafficReport *protocol.MsgTrafficStats
+	var splitResp *protocol.MsgSplitResponse
+	var sendResp *protocol.MsgSendInputResponse
+	var captureResp *protocol.MsgCaptureResponse
+	var closeResp *protocol.MsgClosePaneResponse
 
 	switch m := msg.(type) {
+	case protocol.MsgSplitRequest:
+		if m.AfterPaneID > 0 {
+			if _, ok := s.panes[m.AfterPaneID]; !ok {
+				splitResp = &protocol.MsgSplitResponse{Error: fmt.Sprintf("pane %d not found", m.AfterPaneID)}
+				break
+			}
+		}
+		spec := StartupPane{Command: m.Command, Dir: m.Cwd}
+		p, err := s.spawnPaneWithSpecLocked(spec, m.AfterPaneID)
+		if err != nil {
+			splitResp = &protocol.MsgSplitResponse{Error: err.Error()}
+		} else {
+			splitResp = &protocol.MsgSplitResponse{PaneID: p.ID()}
+			needBroadcast = true
+		}
+	case protocol.MsgSendInputRequest:
+		p, ok := s.panes[m.PaneID]
+		if !ok {
+			sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
+		} else {
+			if _, err := p.Write(m.Data); err != nil {
+				sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: err.Error()}
+			} else {
+				sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID}
+			}
+		}
+	case protocol.MsgCaptureRequest:
+		p, ok := s.panes[m.PaneID]
+		if !ok {
+			captureResp = &protocol.MsgCaptureResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
+		} else {
+			text := p.CaptureText(m.Scrollback, m.Lines)
+			captureResp = &protocol.MsgCaptureResponse{PaneID: m.PaneID, Text: text}
+		}
+	case protocol.MsgClosePaneRequest:
+		if _, ok := s.panes[m.PaneID]; !ok {
+			closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
+		} else {
+			closeServer = s.removePaneLocked(m.PaneID)
+			needBroadcast = true
+			closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID}
+		}
 	case protocol.MsgPaneResync:
 		resyncPaneID = m.PaneID
 		s.trafficLocked(tp).counts.ResyncRequests++
@@ -521,8 +569,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			// and a column's width goes wherever the column goes.
 			s.strip.MoveRight(m.PaneID)
 		case protocol.VerbKillPane:
-			if m.PaneID > 0 {
-				s.removePaneLocked(m.PaneID)
+			if _, ok := s.panes[m.PaneID]; ok {
+				closeServer = s.removePaneLocked(m.PaneID)
 				s.resizePanesLocked()
 			}
 		case protocol.VerbToggleStatus:
@@ -661,8 +709,29 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 
 	s.mu.Unlock()
-	if focusTargetID > 0 && tp != nil {
-		tp.SendServer(ctx, protocol.MsgFocusPane{PaneID: focusTargetID})
+	if tp != nil {
+		if focusTargetID > 0 {
+			tp.SendServer(ctx, protocol.MsgFocusPane{PaneID: focusTargetID})
+		}
+		if splitResp != nil {
+			tp.SendServer(ctx, *splitResp)
+		}
+		if sendResp != nil {
+			tp.SendServer(ctx, *sendResp)
+		}
+		if captureResp != nil {
+			tp.SendServer(ctx, *captureResp)
+		}
+		if closeResp != nil {
+			tp.SendServer(ctx, *closeResp)
+		}
+	}
+	if closeServer {
+		go func() {
+			// Give the response a moment to flush over the socket before tearing down
+			time.Sleep(50 * time.Millisecond)
+			_ = s.Close()
+		}()
 	}
 	if trafficReport != nil {
 		// Only the requester gets it. Sent outside s.mu: a socket
@@ -735,7 +804,11 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	if spec.Command != "" {
 		argv = []string{s.shell, "-c", spec.Command}
 	}
-	p, err := NewPane(id, argv, paneCols, paneRows, s.cwd)
+	cwd := s.cwd
+	if spec.Dir != "" {
+		cwd = spec.Dir
+	}
+	p, err := NewPane(id, argv, paneCols, paneRows, cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -789,10 +862,10 @@ func (s *Server) onPaneExit(id int) {
 	}
 }
 
-func (s *Server) removePaneLocked(id int) {
+func (s *Server) removePaneLocked(id int) bool {
 	p, ok := s.panes[id]
 	if !ok {
-		return
+		return false
 	}
 	if id == s.statusPaneID {
 		s.statusPaneID = 0
@@ -811,10 +884,8 @@ func (s *Server) removePaneLocked(id int) {
 			break
 		}
 	}
-	if !hasTerminalPanes {
-		go s.Close()
-	}
 	go p.Close()
+	return !hasTerminalPanes
 }
 
 func (s *Server) spawnDashboardPaneLocked(afterPaneID int) (*Pane, error) {

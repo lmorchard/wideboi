@@ -76,6 +76,7 @@ func (g *blockingGrid) OutputGen() uint64                      { return 0 }
 func (g *blockingGrid) Draw(uv.Screen, image.Rectangle)        {}
 func (g *blockingGrid) DrawAt(uv.Screen, image.Rectangle, int) {}
 func (g *blockingGrid) CellAt(x, y int) *uv.Cell               { return nil }
+func (g *blockingGrid) CaptureText(bool, int) string           { return "" }
 func (g *blockingGrid) Size() (int, int)                       { return 10, 10 }
 
 // Resize blocks until Close is called, standing in for term.Reflow's real

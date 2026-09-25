@@ -50,12 +50,13 @@ var (
 )
 
 type cliOptions struct {
-	subcommand string
-	flags      config.ConfigFlags
-	showVer    bool
-	showHelp   bool
-	jsonOut    bool
-	trafficOut bool
+	subcommand     string
+	subcommandArgs []string
+	flags          config.ConfigFlags
+	showVer        bool
+	showHelp       bool
+	jsonOut        bool
+	trafficOut     bool
 	// ownerFD is the inherited connection a spawning plain wideboi owns
 	// this server through, or -1. Internal: see spawnServer.
 	ownerFD int
@@ -73,6 +74,11 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close") {
+			opts.subcommand = arg
+			opts.subcommandArgs = args[i+1:]
+			break
+		}
 		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help") {
 			opts.subcommand = arg
 			continue
@@ -141,6 +147,14 @@ func printHelp(w io.Writer) {
                              Show the layout snapshot and pane statuses
   wideboi [flags] status --traffic [--json]
                              Show pane updates and bytes sent to each client
+  wideboi [flags] split [--cwd <dir>] [--after <pane-id>] [command...]
+                             Create a pane, optionally run command, and print its ID
+  wideboi [flags] send <pane-id> <text> [--enter|-e]
+                             Send input to a pane (literal by default; -e adds Enter)
+  wideboi [flags] capture <pane-id> [--scrollback|-S] [--lines|-n <count>]
+                             Read a pane's terminal text
+  wideboi [flags] close <pane-id>
+                             Close a pane using hangup semantics
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
@@ -226,6 +240,14 @@ func main() {
 		fatal(runCleanup(os.Stdout, config.SessionDir()))
 	case "ls":
 		fatal(runList(os.Stdout))
+	case "split":
+		fatal(runSplit(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
+	case "send":
+		fatal(runSend(cfg, opts.subcommandArgs, os.Stderr))
+	case "capture":
+		fatal(runCapture(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
+	case "close":
+		fatal(runClose(cfg, opts.subcommandArgs, os.Stderr))
 	default:
 		fatal(run(cfg, bindings))
 	}

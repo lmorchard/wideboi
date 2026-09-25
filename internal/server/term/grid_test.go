@@ -496,3 +496,72 @@ func TestGenerationAdvancesOnScrollOnlyWhenTheOffsetMoves(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureTextVisible(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	fmt.Fprintf(g, "hello world\r\nfoo   \r\n")
+	got := g.CaptureText(false, 0)
+	want := "hello world\nfoo\n"
+	if got != want {
+		t.Fatalf("CaptureText(false, 0) = %q, want %q", got, want)
+	}
+}
+
+func TestCaptureTextWideCharacters(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	fmt.Fprintf(g, "你好世界\r\n")
+	got := g.CaptureText(false, 0)
+	want := "你好世界\n"
+	if got != want {
+		t.Fatalf("CaptureText(false, 0) = %q, want %q", got, want)
+	}
+}
+
+func TestCaptureTextScrollback(t *testing.T) {
+	g := term.NewVT(10, 3)
+	defer g.Close()
+
+	for i := 0; i < 6; i++ {
+		fmt.Fprintf(g, "line %d\r\n", i)
+	}
+
+	got := g.CaptureText(true, 0)
+	want := "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n"
+	if got != want {
+		t.Fatalf("CaptureText(true, 0) = %q, want %q", got, want)
+	}
+
+	gotLimited := g.CaptureText(true, 2)
+	wantLimited := "line 4\nline 5\n"
+	if gotLimited != wantLimited {
+		t.Fatalf("CaptureText(true, 2) = %q, want %q", gotLimited, wantLimited)
+	}
+}
+
+func TestCaptureTextDoesNotRaceWrite(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(g, "init %d\r\n", i)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			_ = g.CaptureText(true, 5)
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	for i := 0; i < 50; i++ {
+		fmt.Fprintf(g, "write %d\r\n", i)
+		time.Sleep(time.Millisecond)
+	}
+	<-done
+}

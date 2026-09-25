@@ -21,4 +21,5 @@ package protocol
 // 5 adds MsgTrafficRequest/MsgTrafficStats (#179).
 // 6 adds VerbToggleStatus and MsgFocusPane (#196).
 // 7 adds VerbClaimSize to VerbType for multi-client sizing control (#184).
-const Version uint32 = 7
+// 8 adds agent-friendly pane control requests and responses (split, send, capture, close) (#198).
+const Version uint32 = 8

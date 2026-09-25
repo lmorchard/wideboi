@@ -105,6 +105,7 @@ func (g *statusGrid) SetScrollOffset(int)                    {}
 func (g *statusGrid) Draw(uv.Screen, image.Rectangle)        {}
 func (g *statusGrid) DrawAt(uv.Screen, image.Rectangle, int) {}
 func (g *statusGrid) CellAt(x, y int) *uv.Cell               { return nil }
+func (g *statusGrid) CaptureText(bool, int) string           { return "" }
 func (g *statusGrid) Size() (int, int)                       { return 10, 10 }
 func (g *statusGrid) Resize(cols, rows int)                  {}
 func (g *statusGrid) Close() error                           { return nil }
