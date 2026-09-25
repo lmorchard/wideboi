@@ -15,6 +15,7 @@ import { createSearchSession, applySnapshot, cancelSearch, liveSearch, formatSea
 
 const linkToken = consumeLinkToken(window.location, window.history);
 const STATS_REPORT_MS = 5000;
+const NARROW_VIEW = '(max-width: 480px)';
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
@@ -24,7 +25,7 @@ export class WideboiApp extends LitElement {
       flex-direction: column;
       z-index: 20;
       width: 100vw;
-      height: 100vh;
+      height: var(--app-height, 100vh);
       overflow: hidden;
       background: #1e1e1e;
       position: relative;
@@ -181,6 +182,61 @@ export class WideboiApp extends LitElement {
     }
     @media (max-width: 650px) {
       .toolbar .tip { display: none; }
+    }
+    .mobile-bar, .mobile-dock { display: none; }
+    .mobile-bar {
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.35rem;
+      background: #252526;
+      color: #ccc;
+      font: 13px sans-serif;
+    }
+    .mobile-bar select { flex: 1; min-width: 0; }
+    .mobile-bar button, .mobile-dock button, .mobile-bar select {
+      min-height: 40px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background: #3c3c3c;
+      color: #eee;
+      font-size: 14px;
+    }
+    .mobile-bar button:disabled, .mobile-dock button:disabled { opacity: 0.4; }
+    .mobile-dock {
+      flex-direction: column;
+      gap: 0.3rem;
+      padding: 0.35rem;
+      padding-bottom: max(0.35rem, env(safe-area-inset-bottom));
+      background: #252526;
+      border-top: 1px solid #3c3c3c;
+    }
+    .mobile-compose { display: flex; gap: 0.3rem; align-items: stretch; }
+    .mobile-compose textarea {
+      flex: 1;
+      min-width: 0;
+      max-height: 5lh;
+      min-height: 40px;
+      resize: vertical;
+      box-sizing: border-box;
+      padding: 0.5rem;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background: #333;
+      color: #eee;
+      font: 16px sans-serif;
+    }
+    .mobile-compose button { min-width: 64px; }
+    .mobile-keys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.3rem; }
+    .mobile-keys button { min-width: 0; padding: 0; }
+    .mobile-keys button[aria-pressed="true"] { background: #0e639c; }
+    .pane-strip.mobile { overflow: hidden; }
+    .pane-strip.mobile wideboi-pane { width: 100% !important; border: 0; }
+    .pane-strip.mobile wideboi-pane:not([focused]) { display: none; }
+    @media (max-width: 480px) {
+      .toolbar { display: none; }
+      .mobile-bar { display: flex; }
+      .mobile-dock { display: flex; }
+      .title { display: none; }
     }
     .overlay {
       position: absolute;
@@ -345,6 +401,7 @@ export class WideboiApp extends LitElement {
   private readonly stats = statsEnabled(window.location.search) ? new RenderStats() : undefined;
   private panes = new PaneStore(this.stats);
   private resizeObserver: ResizeObserver;
+  private readonly narrowMedia = window.matchMedia(NARROW_VIEW);
   private cellWidth = 1;
   private statsTimer?: ReturnType<typeof setInterval>;
 
@@ -401,6 +458,9 @@ export class WideboiApp extends LitElement {
   private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
   @state() private layoutMode: 'scroll' | 'cards' = 'cards';
+  @state() private mobile = this.narrowMedia.matches;
+  @state() private mobileDraft = '';
+  @state() private mobileCtrl = false;
   @state() private cardWidth: number | null = null;
   @state() private searchState: SearchState | null = null;
   private pendingNav: 0 | 1 | -1 = 0;
@@ -414,7 +474,7 @@ export class WideboiApp extends LitElement {
     const animations = Array.from(this.movement.values()).filter(animation =>
       animation.playState === 'running' || animation.playState === 'paused');
     void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
-      if (this.layoutMode !== 'cards' || this.focusedPaneId !== paneID || this.focusTransition !== transition) return;
+      if (this.mobile || this.layoutMode !== 'cards' || this.focusedPaneId !== paneID || this.focusTransition !== transition) return;
       if (Array.from(this.movement.values()).some(animation =>
         animation.playState === 'running' || animation.playState === 'paused')) {
         this.finishFocusStack(paneID, transition);
@@ -528,22 +588,22 @@ export class WideboiApp extends LitElement {
     }
     if (paneID === this.focusedPaneId) {
       void this.updateComplete.then(() => {
-        this.focusedPane()?.focusInput();
+        if (!this.mobile) this.focusedPane()?.focusInput();
         this.revealFocus();
       });
       return;
     }
     const previous = this.panePositions();
     const transition = ++this.focusTransition;
-    if (this.layoutMode === 'cards') this.stackFocusId = null;
+    if (this.layoutMode === 'cards' && !this.mobile) this.stackFocusId = null;
     this.previousFocusId = this.focusedPaneId;
     this.focusedPaneId = paneID;
     void this.updateComplete.then(() => {
-      if (this.layoutMode === 'cards') {
+      if (this.layoutMode === 'cards' && !this.mobile) {
         this.animateReorder(previous);
         this.finishFocusStack(paneID, transition);
       }
-      this.focusedPane()?.focusInput();
+      if (!this.mobile) this.focusedPane()?.focusInput();
       this.revealFocus();
     });
   }
@@ -554,7 +614,7 @@ export class WideboiApp extends LitElement {
   }
 
   private revealFocus() {
-    if (this.layoutMode === 'cards') return;
+    if (this.mobile || this.layoutMode === 'cards') return;
     const pane = this.focusedPane();
     if (!pane) return;
     pane.scrollIntoView({ block: 'nearest', inline: 'nearest',
@@ -567,6 +627,7 @@ export class WideboiApp extends LitElement {
   }
 
   private animateReorder(previous: Map<number, number>) {
+    if (this.mobile) return;
     for (const animation of this.movement.values()) animation.cancel();
     this.movement.clear();
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -591,7 +652,7 @@ export class WideboiApp extends LitElement {
   }
 
   private sendResizeIfChanged() {
-    if (!this.client || !this.connected || !this.lastSentSize) return;
+    if (this.mobile || !this.client || !this.connected || !this.lastSentSize) return;
     const size = this.getGridSize();
     if (size.cols > 0 && size.rows > 2 &&
         (size.cols !== this.lastSentSize.cols || size.rows !== this.lastSentSize.rows)) {
@@ -614,6 +675,7 @@ export class WideboiApp extends LitElement {
 
   firstUpdated() {
     this.listeners = new AbortController();
+    this.setupViewport();
     this.cellWidth = measureCellWidth();
     this.resizeObserver.observe(this.paneStrip);
     this.requestUpdate();
@@ -626,9 +688,30 @@ export class WideboiApp extends LitElement {
     super.connectedCallback();
     if (this.paneStrip && !this.listeners) {
       this.listeners = new AbortController();
+      this.setupViewport();
       this.resizeObserver.observe(this.paneStrip);
       this.setupKeyboard();
       this.setupMouse();
+    }
+  }
+
+  private setupViewport() {
+    const syncWidth = () => {
+      this.mobile = this.narrowMedia.matches;
+      this.syncVisibleHeight();
+      if (!this.mobile) this.sendResizeIfChanged();
+    };
+    this.narrowMedia.addEventListener('change', syncWidth, { signal: this.listeners?.signal });
+    window.visualViewport?.addEventListener('resize', () => this.syncVisibleHeight(),
+      { signal: this.listeners?.signal });
+    this.syncVisibleHeight();
+  }
+
+  private syncVisibleHeight() {
+    if (this.mobile && window.visualViewport) {
+      this.style.setProperty('--app-height', `${window.visualViewport.height}px`);
+    } else {
+      this.style.removeProperty('--app-height');
     }
   }
 
@@ -682,6 +765,8 @@ export class WideboiApp extends LitElement {
     this.connected = false;
     this.lastSentSize = undefined;
     this.keyRouter.reset();
+    this.mobileDraft = '';
+    this.mobileCtrl = false;
     this.pendingFocusId = 0;
     this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
@@ -727,6 +812,7 @@ export class WideboiApp extends LitElement {
       if (this.client !== client) return;
       this.connected = false;
       this.keyRouter.reset();
+      this.mobileCtrl = false;
       this.stopStatsReport();
       this.errorMsg = 'Disconnected from server.';
     }
@@ -797,7 +883,7 @@ export class WideboiApp extends LitElement {
           this.focusedPaneId = nextFocus;
           let transition = this.focusTransition;
           if (this.stackFocusId === closedId || focusChanged) {
-            this.stackFocusId = this.layoutMode === 'cards' && focusChanged ? null : nextFocus;
+            this.stackFocusId = this.layoutMode === 'cards' && !this.mobile && focusChanged ? null : nextFocus;
             transition = ++this.focusTransition;
           }
           if (this.previousFocusId === closedId) this.previousFocusId = 0;
@@ -816,8 +902,8 @@ export class WideboiApp extends LitElement {
           void this.updateComplete.then(() => {
             this.animateReorder(previous);
             if (focusChanged) {
-              this.focusedPane()?.focusInput();
-              if (this.layoutMode === 'cards') this.finishFocusStack(nextFocus, transition);
+              if (!this.mobile) this.focusedPane()?.focusInput();
+              if (this.layoutMode === 'cards' && !this.mobile) this.finishFocusStack(nextFocus, transition);
             }
             const animations = Array.from(this.movement.values());
             void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
@@ -847,9 +933,11 @@ export class WideboiApp extends LitElement {
   }
 
   private setupKeyboard() {
+    const fromFormControl = (e: Event) => e.composedPath().some(node =>
+      node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement ||
+      node instanceof HTMLSelectElement || node instanceof HTMLButtonElement);
     document.addEventListener('keydown', (e) => {
       if (!this.connected || !this.client) return;
-      const target = (e.composedPath()[0] || e.target) as HTMLElement;
       if (this.showHelp) {
         if (e.key === 'Escape' || e.key === '?' || (e.ctrlKey && e.key === 'c')) {
           this.closeHelp();
@@ -857,13 +945,12 @@ export class WideboiApp extends LitElement {
         }
         return;
       }
+      if (fromFormControl(e)) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
         e.preventDefault();
         this.startSearch();
         return;
       }
-      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement ||
-          target instanceof HTMLButtonElement) return;
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
       if (this.searchState) {
@@ -948,16 +1035,14 @@ export class WideboiApp extends LitElement {
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('paste', (e) => {
-      const target = (e.composedPath()[0] || e.target) as HTMLElement;
-      if (!this.connected || !this.client || target instanceof HTMLInputElement) return;
+      if (!this.connected || !this.client || fromFormControl(e)) return;
       const value = e.clipboardData?.getData('text/plain') || '';
       if (!sendTextInput(this.client, this.focusedPaneId, value)) return;
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('compositionend', (e) => {
-      const target = (e.composedPath()[0] || e.target) as HTMLElement;
-      if (!this.connected || !this.client || target instanceof HTMLInputElement) return;
+      if (!this.connected || !this.client || fromFormControl(e)) return;
       sendTextInput(this.client, this.focusedPaneId, (e as CompositionEvent).data);
     }, { signal: this.listeners?.signal });
   }
@@ -969,6 +1054,7 @@ export class WideboiApp extends LitElement {
 
     this.paneStrip.addEventListener('pointerdown', (e) => {
       if (!this.connected || !this.client) return;
+      if (this.mobile) return;
       const pane = this.eventPane(e);
       if (!pane) return;
       const start = pane.cellAt(e.clientX, e.clientY);
@@ -986,6 +1072,7 @@ export class WideboiApp extends LitElement {
     }, { signal: this.listeners?.signal });
 
     this.paneStrip.addEventListener('pointermove', (e) => {
+      if (this.mobile) return;
       const press = this.pointer;
       if (!press || press.id !== e.pointerId) return;
       const end = press.pane.cellAt(e.clientX, e.clientY);
@@ -999,6 +1086,7 @@ export class WideboiApp extends LitElement {
     }, { signal: this.listeners?.signal });
 
     const release = (e: PointerEvent) => {
+      if (this.mobile) return;
       if (!this.pointer || this.pointer.id !== e.pointerId) return;
       if (this.pointer.tracking) this.sendPointerMouse(MouseKind.RELEASE, e);
       else {
@@ -1020,7 +1108,17 @@ export class WideboiApp extends LitElement {
     this.paneStrip.addEventListener('pointerup', release, { signal: this.listeners?.signal });
     this.paneStrip.addEventListener('pointercancel', release, { signal: this.listeners?.signal });
 
+    this.paneStrip.addEventListener('click', (e) => {
+      if (!this.mobile) return;
+      const pane = this.eventPane(e);
+      if (pane) {
+        this.focusPane(pane.paneId);
+        this.renderRoot.querySelector<HTMLTextAreaElement>('.mobile-compose textarea')?.focus();
+      }
+    }, { signal: this.listeners?.signal });
+
     this.paneStrip.addEventListener('wheel', (e) => {
+      if (this.mobile) return;
       if (!this.connected || !this.client) return;
       // Leave horizontal gestures to the pane viewport or outer strip.
       if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
@@ -1086,6 +1184,40 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  private moveMobilePane(delta: number) {
+    const index = this.activePanes.indexOf(this.focusedPaneId);
+    const next = this.activePanes[index + delta];
+    if (next !== undefined) this.focusPane(next);
+  }
+
+  private sendMobileKey(key: string, code: string) {
+    if (!this.client || !this.connected || !this.focusedPaneId) return;
+    const ctrl = this.mobileCtrl;
+    const event = new KeyboardEvent('keydown', { key, code, ctrlKey: ctrl });
+    sendKeyboardInput(this.client, this.focusedPaneId, event);
+    this.mobileCtrl = false;
+  }
+
+  private handleMobileDraftKey(e: KeyboardEvent) {
+    if (!this.client || !this.connected) return;
+    if (this.mobileCtrl && e.key.length === 1) {
+      this.sendMobileKey(e.key, e.code);
+      e.preventDefault();
+    } else if (e.ctrlKey || e.altKey || e.key === 'Escape' || e.key === 'Tab' ||
+               (this.mobileDraft === '' && e.key.startsWith('Arrow'))) {
+      if (sendKeyboardInput(this.client, this.focusedPaneId, e)) e.preventDefault();
+    }
+  }
+
+  private sendMobileDraft() {
+    if (!this.client || !this.connected || !this.mobileDraft) return;
+    if (sendTextInput(this.client, this.focusedPaneId, this.mobileDraft)) {
+      this.mobileDraft = '';
+      const input = this.renderRoot.querySelector<HTMLTextAreaElement>('.mobile-compose textarea');
+      if (input) input.value = '';
+    }
+  }
+
   private openHelp() {
     this.showHelp = true;
     void this.updateComplete.then(() => {
@@ -1096,7 +1228,7 @@ export class WideboiApp extends LitElement {
   private closeHelp() {
     this.showHelp = false;
     void this.updateComplete.then(() => {
-      this.focusedPane()?.focusInput();
+      if (!this.mobile) this.focusedPane()?.focusInput();
     });
   }
 
@@ -1181,8 +1313,9 @@ export class WideboiApp extends LitElement {
   }
 
   render() {
-    const cards = this.layoutMode === 'cards';
+    const cards = this.layoutMode === 'cards' && !this.mobile;
     const displayWidth = (column: ColumnData) =>
+      this.mobile ? Math.max(1, Math.floor(this.cardViewportWidth / this.cellWidth)) :
       cards && this.cardWidth !== null ? Math.min(column.width, this.cardWidth) : column.width;
     const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column) }));
     const stackFocusId = this.stackFocusId === null ? null :
@@ -1225,16 +1358,27 @@ export class WideboiApp extends LitElement {
           <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
           <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
         </div>
+        <div class="mobile-bar">
+          <button aria-label="Previous pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) <= 0}
+            @click=${() => this.moveMobilePane(-1)}>‹</button>
+          <select aria-label="Mobile pane" @change=${this.handlePaneSelect}>
+            ${repeat(this.activePanes, id => id, id => html`
+              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
+            `)}
+          </select>
+          <button aria-label="Next pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) >= this.activePanes.length - 1}
+            @click=${() => this.moveMobilePane(1)}>›</button>
+        </div>
       ` : ''}
       <div class="terminal-shell">
         <div class="title">${this.paneTitles[this.focusedPaneId] ||
           (this.focusedPaneId ? `Pane ${this.focusedPaneId}` : '')}</div>
-        <div class=${cards ? 'pane-strip cards' : 'pane-strip'}>
+        <div class=${this.mobile ? 'pane-strip mobile' : cards ? 'pane-strip cards' : 'pane-strip'}>
           ${repeat(this.columns, column => column.paneId, column => {
             const placement = placements.get(column.paneId);
             return html`
             <wideboi-pane
-              style=${`width: ${displayWidth(column) * this.cellWidth}px; --divider-width: ${cards ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
+              style=${`width: ${this.mobile ? '100%' : `${displayWidth(column) * this.cellWidth}px`}; --divider-width: ${cards || this.mobile ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
               .paneId=${column.paneId}
               .pane=${this.panes.get(column.paneId)}
               .focused=${column.paneId === this.focusedPaneId}
@@ -1314,6 +1458,34 @@ export class WideboiApp extends LitElement {
           })()}</div>
         `}
       </div>
+      ${this.connected ? html`
+        <div class="mobile-dock">
+          <div class="mobile-compose">
+            <textarea aria-label="Command or response" rows="1" placeholder="Command or response"
+              autocapitalize="off" autocorrect="off" spellcheck="false"
+              @input=${(e: Event) => { this.mobileDraft = (e.target as HTMLTextAreaElement).value; }}
+              @keydown=${this.handleMobileDraftKey}></textarea>
+            <button aria-label="Send text" ?disabled=${!this.mobileDraft} @click=${this.sendMobileDraft}>Send</button>
+          </div>
+          <div class="mobile-keys" aria-label="Terminal keys">
+            <button aria-label="Escape key" @click=${() => this.sendMobileKey('Escape', 'Escape')}>Esc</button>
+            <button aria-label="Tab key" @click=${() => this.sendMobileKey('Tab', 'Tab')}>Tab</button>
+            <button aria-label="Control modifier" aria-pressed=${this.mobileCtrl}
+              @click=${() => { this.mobileCtrl = !this.mobileCtrl; }}>Ctrl</button>
+            ${this.mobileCtrl ? html`
+              <button aria-label="C key" @click=${() => this.sendMobileKey('c', 'KeyC')}>C</button>
+              <button aria-label="D key" @click=${() => this.sendMobileKey('d', 'KeyD')}>D</button>
+              <button aria-label="Z key" @click=${() => this.sendMobileKey('z', 'KeyZ')}>Z</button>
+            ` : ''}
+            <button aria-label="Left arrow key" @click=${() => this.sendMobileKey('ArrowLeft', 'ArrowLeft')}>←</button>
+            <button aria-label="Down arrow key" @click=${() => this.sendMobileKey('ArrowDown', 'ArrowDown')}>↓</button>
+            <button aria-label="Up arrow key" @click=${() => this.sendMobileKey('ArrowUp', 'ArrowUp')}>↑</button>
+            <button aria-label="Right arrow key" @click=${() => this.sendMobileKey('ArrowRight', 'ArrowRight')}>→</button>
+            <button aria-label="Backspace key" @click=${() => this.sendMobileKey('Backspace', 'Backspace')}>⌫</button>
+            <button aria-label="Enter key" @click=${() => this.sendMobileKey('Enter', 'Enter')}>↵</button>
+          </div>
+        </div>
+      ` : ''}
       ${this.stats ? html`<pre class="stats-overlay">${this.statsText || 'stats: collecting…'}</pre>` : ''}
       ${this.showHelp ? html`
         <div class="help-overlay" @click=${this.closeHelp}>

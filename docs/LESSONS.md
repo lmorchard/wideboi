@@ -221,6 +221,17 @@ is already visible and leave it offscreen when the animation ends. Reveal the
 focused pane after the move animations settle, including when reduced motion
 skips them.
 
+Document-level keyboard, paste, and composition listeners see a shadow host as
+`event.target`, even when the event came from a text field inside it. Inspect
+`event.composedPath()` before forwarding input to a pane; otherwise a mobile
+draft can send characters before its Send button is pressed.
+
+Shrinking a pane viewport for the on-screen keyboard can fire a scroll event
+before `ResizeObserver`. That event must not change the pane's follow-bottom
+choice based on the new height and old scroll position. Track height changes
+separately so a pane at the bottom follows the new bottom, while a deliberately
+scrolled-up pane keeps its position.
+
 In overlapping cards, use natural left-to-right stacking while focus slides.
 The card to the right must cover the card to its left in either focus direction.
 Raising the new focus immediately covers its right neighbor; keeping the old
