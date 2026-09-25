@@ -504,6 +504,34 @@ func TestPressInTrackingFocusedPaneIsForwarded(t *testing.T) {
 	}
 }
 
+func TestMouseInBlankDisplayCellsStaysWithinPTY(t *testing.T) {
+	cli, ch := newTrackingClient(t, 2)
+	cli.mu.Lock()
+	cli.cols = 140
+	cli.displayWidths[2] = 60
+	cli.strip.SetColumnWidth(2, 60)
+	cli.updatePlacementsLocked()
+	cli.motion = nil
+	cli.mu.Unlock()
+	d := placementFor(cli, 2).Dst
+	if d.Dx() <= 55 {
+		t.Fatalf("fixture did not expose blank staged cells: placement %v", d)
+	}
+	x, y := d.Min.X+55, d.Min.Y+2
+	cli.HandleMouse(context.Background(), press(x, y))
+	cli.HandleMouse(context.Background(), moveTo(x, y))
+	cli.HandleMouse(context.Background(), release(x, y))
+	got := mice(sent(ch))
+	if len(got) != 3 {
+		t.Fatalf("forwarded %d mouse events, want press, motion, release", len(got))
+	}
+	for _, msg := range got {
+		if msg.X != 39 {
+			t.Errorf("mouse X = %d, want last PTY cell 39", msg.X)
+		}
+	}
+}
+
 // The child never sees half a click: the press that focuses a pane is
 // wideboi's, and its release must not arrive alone.
 func TestPressOnUnfocusedTrackingPaneOnlyFocuses(t *testing.T) {

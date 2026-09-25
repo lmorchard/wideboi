@@ -39,7 +39,8 @@ type Pane struct {
 	// concurrently. p.cols/p.rows are plain ints and term.Grid.Resize does
 	// an unlocked read-out/reflow/write-back of the cell buffer, so that
 	// race is real, not theoretical.
-	resizeMu sync.Mutex
+	resizeMu             sync.Mutex
+	lastResizeGeneration uint64
 	// renderMu keeps grid.Close from overlapping a pane snapshot. Renderers
 	// acquire resizeMu first, so a renderer waiting behind a wedged Resize
 	// cannot prevent Close from reaching grid.Close to break that wedge.
@@ -263,7 +264,22 @@ func (p *Pane) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
 func (p *Pane) Resize(cols, rows int) error {
 	p.resizeMu.Lock()
 	defer p.resizeMu.Unlock()
+	return p.resizeLocked(cols, rows)
+}
 
+// ResizeOrdered ignores a geometry snapshot superseded while the server lock
+// was released. Generation is assigned under Server.mu before that release.
+func (p *Pane) ResizeOrdered(cols, rows int, generation uint64) error {
+	p.resizeMu.Lock()
+	defer p.resizeMu.Unlock()
+	if generation <= p.lastResizeGeneration {
+		return nil
+	}
+	p.lastResizeGeneration = generation
+	return p.resizeLocked(cols, rows)
+}
+
+func (p *Pane) resizeLocked(cols, rows int) error {
 	if cols <= 0 || rows <= 0 {
 		return fmt.Errorf("pane %d: refusing resize to %dx%d", p.id, cols, rows)
 	}

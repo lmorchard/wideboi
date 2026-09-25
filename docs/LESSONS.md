@@ -454,3 +454,6 @@ rests on the argument, not the test. Keep it if you touch
 `watchKeptPane`. `make linux-test` runs the Go suite where pty behaviour
 differs.
 
+Under Linux's race detector, a shell printing thousands of lines can still
+be draining after one second. Keep the drain ceiling above that measured
+case, and repeat the kept-pane ordering test under load when changing it.

@@ -112,7 +112,10 @@ test('touch pans without terminal mouse messages and keyboard-sized view does no
   await expect.poll(() => pane.evaluate(el => el.getBoundingClientRect().height)).toBeLessThan(420);
   await expect.poll(() => viewport.evaluate(el =>
     Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThan(2);
-  await viewport.evaluate(el => { el.scrollTop = 0; });
+  await viewport.evaluate(el => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event('scroll'));
+  });
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(0);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 360 });

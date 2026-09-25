@@ -291,6 +291,11 @@ width_presets = [10, 80]
 	if err == nil {
 		t.Errorf("expected error for invalid width_presets, got nil")
 	}
+	_ = os.WriteFile(tomlPath, []byte("width_presets = [4097]\n"), 0600)
+	_, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err == nil {
+		t.Error("expected error for width preset above PTY limit")
+	}
 }
 
 func TestPanStepConfig(t *testing.T) {

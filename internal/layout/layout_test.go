@@ -210,6 +210,22 @@ func TestGrowAndShrinkWidth(t *testing.T) {
 	}
 }
 
+func TestWidthEditsStayWithinPTYLimit(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, layout.MaxColumnWidth-6, 20, 0)
+	s.GrowWidth(1, 10)
+	if width, _ := s.ColumnWidth(1); width != layout.MaxColumnWidth {
+		t.Fatalf("grown width = %d, want %d", width, layout.MaxColumnWidth)
+	}
+	if s.SetColumnWidth(1, layout.MaxColumnWidth+1) {
+		t.Fatal("accepted width above PTY limit")
+	}
+	s.SetWidthPresets([]int{layout.MaxColumnWidth + 1, 80})
+	if presets := s.WidthPresets(); len(presets) != 1 || presets[0] != 80 {
+		t.Fatalf("presets = %v, want [80]", presets)
+	}
+}
+
 func genStrip(t *rapid.T) (*layout.Strip, map[int]int) {
 	numCols := rapid.IntRange(1, 10).Draw(t, "numCols")
 	s := layout.NewStrip()

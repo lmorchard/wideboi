@@ -420,8 +420,8 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		return Config{}, nil, fmt.Errorf("pan_step: must be positive")
 	}
 	for _, p := range cfg.WidthPresets {
-		if p < 20 {
-			return Config{}, nil, fmt.Errorf("width_presets: invalid preset %d (must be at least 20)", p)
+		if p < 20 || p > maxStartupWidth {
+			return Config{}, nil, fmt.Errorf("width_presets: invalid preset %d (must be between 20 and %d)", p, maxStartupWidth)
 		}
 	}
 	for i, pane := range cfg.Startup {

@@ -39,3 +39,20 @@ func TestPerPaneWidthOwnerTransfersOnClaim(t *testing.T) {
 		t.Fatalf("former owner resized PTY to %d", width)
 	}
 }
+
+func TestOlderResizeSnapshotCannotOverwriteNewerWidth(t *testing.T) {
+	p, err := NewPane(1, []string{"/bin/cat"}, 40, 20, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if err := p.ResizeOrdered(80, 20, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ResizeOrdered(60, 20, 1); err != nil {
+		t.Fatal(err)
+	}
+	if cols, _ := p.Size(); cols != 80 {
+		t.Fatalf("stale resize changed pane to %d columns, want 80", cols)
+	}
+}

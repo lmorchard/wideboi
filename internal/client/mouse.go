@@ -114,9 +114,9 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 	if g := c.grab; g != nil {
 		switch ev.(type) {
 		case uv.MouseMotionEvent:
-			out = append(out, protocol.EncodeMouse(g.paneID, ev, g.local(pt)))
+			out = append(out, protocol.EncodeMouse(g.paneID, ev, c.mouseLocalLocked(*g, pt)))
 		case uv.MouseReleaseEvent:
-			out = append(out, protocol.EncodeMouse(g.paneID, ev, g.local(pt)))
+			out = append(out, protocol.EncodeMouse(g.paneID, ev, c.mouseLocalLocked(*g, pt)))
 			c.grab = nil
 		}
 		c.mu.Unlock()
@@ -157,7 +157,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		// not the target of when the user aimed.
 		if tracking && p.PaneID == c.focusPaneID {
 			g := &mouseGrab{paneID: cp.PaneID, dst: cp.Dst, src: cp.Src.Min}
-			out = append(out, protocol.EncodeMouse(g.paneID, ev, g.local(pt)))
+			out = append(out, protocol.EncodeMouse(g.paneID, ev, c.mouseLocalLocked(*g, pt)))
 			c.grab = g
 			break
 		}
@@ -222,7 +222,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		case p == nil:
 		case c.mouseTracking[p.PaneID]:
 			g := mouseGrab{paneID: p.PaneID, dst: p.Dst, src: p.Src.Min}
-			out = append(out, protocol.EncodeMouse(p.PaneID, ev, g.local(pt)))
+			out = append(out, protocol.EncodeMouse(p.PaneID, ev, c.mouseLocalLocked(g, pt)))
 		default:
 			switch m.Button {
 			case uv.MouseWheelUp:
@@ -415,4 +415,18 @@ type mouseGrab struct {
 func (g *mouseGrab) local(pt image.Point) image.Point {
 	pt = clampPt(pt, g.dst)
 	return image.Pt(pt.X-g.dst.Min.X+g.src.X, pt.Y-g.dst.Min.Y+g.src.Y)
+}
+
+// mouseLocalLocked also bounds staged blank cells to the actual PTY size.
+// A client's display width may exceed that size, and the child must never
+// receive coordinates for those extra cells.
+func (c *Client) mouseLocalLocked(g mouseGrab, pt image.Point) image.Point {
+	local := g.local(pt)
+	if width := c.ptyWidths[g.paneID]; width > 0 {
+		local.X = min(local.X, width-1)
+	}
+	if height := c.paneUpdates[g.paneID].Rows; height > 0 {
+		local.Y = min(local.Y, height-1)
+	}
+	return local
 }
