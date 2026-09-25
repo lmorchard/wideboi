@@ -76,6 +76,7 @@ without doing anything. For the full list, press `?` in control mode.
 | `w` | cycle this column's width |
 | `x` | kill the focused pane |
 | `a` | jump to a pane wanting attention |
+| `s` | open or focus pane status dashboard |
 | `1`–`9` / `0` | focus the column at that position from the left / the last column |
 | `tab` | focus the previously focused pane |
 | `c` | switch this terminal between the card fan and the scrolling strip |

@@ -674,6 +674,39 @@ def case_osc133_status_drives_smart_jump(fail):
         fail(f"smart jump landed on pane {landed}, want the failed pane 2")
 
 
+def case_status_dashboard_opens_and_navigates(fail):
+    s = Session()
+    s.type("\x02s")  # open status dashboard
+
+    # Wait for dashboard output
+    deadline = time.time() + 3.0
+    saw_header = False
+    while time.time() < deadline:
+        if b"PANE ID" in s.output():
+            saw_header = True
+            break
+        time.sleep(0.05)
+
+    if not saw_header:
+        s.close()
+        fail("status dashboard did not render table header")
+        return
+
+    # Press Enter to jump to selected pane
+    s.type("\r")
+    deadline = time.time() + 3.0
+    landed = 0
+    while time.time() < deadline:
+        landed = focus_pane_id(s.output(), s.rows)
+        if landed != 0 and landed != 3:
+            break
+        time.sleep(0.05)
+
+    s.close()
+    if landed == 0 or landed == 3:
+        fail(f"Enter on dashboard did not jump to an active pane (focus={landed})")
+
+
 # CardStrategy shipped complete in Plan 8 and was unreachable until
 # Plan 17 -- nothing outside a test ever called Strip.SetStrategy. This
 # asserts the toggle actually reaches the client's placement maths.
@@ -1071,6 +1104,7 @@ CASES = [
     ("config file and key remapping", case_config_file_and_key_remapping),
     ("config key list alias moves focus", case_config_key_list_alias_moves_focus),
     ("osc133 status drives smart jump", case_osc133_status_drives_smart_jump),
+    ("status dashboard opens and navigates", case_status_dashboard_opens_and_navigates),
     ("card layout toggles", case_card_layout_toggles),
     ("scroll mode marks off-screen panes", case_scroll_mode_marks_off_screen_panes),
     ("quit restores the terminal and reaps", case_quit_restores_and_reaps),

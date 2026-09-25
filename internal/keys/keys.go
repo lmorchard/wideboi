@@ -23,24 +23,25 @@ import (
 
 // Canonical action names used in configuration files.
 const (
-	ActionNameFocusLeft   = "focus_left"
-	ActionNameFocusRight  = "focus_right"
-	ActionNameScrollDown  = "scroll_down"
-	ActionNameScrollUp    = "scroll_up"
-	ActionNameNewColumn   = "new_column"
-	ActionNameCycleWidth  = "cycle_width"
-	ActionNameGrowWidth   = "grow_width"
-	ActionNameShrinkWidth = "shrink_width"
-	ActionNameMoveLeft    = "move_left"
-	ActionNameMoveRight   = "move_right"
-	ActionNameKillPane    = "kill_pane"
-	ActionNameSmartJump   = "smart_jump"
-	ActionNameFocusLast   = "focus_last"
-	ActionNameToggleCards = "toggle_cards"
-	ActionNameHelp        = "help"
-	ActionNameDetach      = "detach"
-	ActionNameQuit        = "quit"
-	ActionNameExit        = "exit"
+	ActionNameFocusLeft    = "focus_left"
+	ActionNameFocusRight   = "focus_right"
+	ActionNameScrollDown   = "scroll_down"
+	ActionNameScrollUp     = "scroll_up"
+	ActionNameNewColumn    = "new_column"
+	ActionNameCycleWidth   = "cycle_width"
+	ActionNameGrowWidth    = "grow_width"
+	ActionNameShrinkWidth  = "shrink_width"
+	ActionNameMoveLeft     = "move_left"
+	ActionNameMoveRight    = "move_right"
+	ActionNameKillPane     = "kill_pane"
+	ActionNameSmartJump    = "smart_jump"
+	ActionNameFocusLast    = "focus_last"
+	ActionNameToggleCards  = "toggle_cards"
+	ActionNameToggleStatus = "toggle_status"
+	ActionNameHelp         = "help"
+	ActionNameDetach       = "detach"
+	ActionNameQuit         = "quit"
+	ActionNameExit         = "exit"
 )
 
 // Action is what a binding does when it fires. It is deliberately not
@@ -143,10 +144,11 @@ type Binding struct {
 // at 80x24 (TestHelpOverlayFitsAt80x24), and one line per pair is what
 // keeps it there. Each group's order matches its label: h/l, j/k, o/p, y/u.
 const (
-	helpFocus  = "focus the column left / right"
-	helpScroll = "scroll this pane's history down / up"
-	helpWidth  = "shrink / grow this column's width"
-	helpMove   = "move this column left / right"
+	helpFocus     = "focus the column left / right"
+	helpScroll    = "scroll this pane's history down / up"
+	helpWidth     = "shrink / grow this column's width"
+	helpMove      = "move this column left / right"
+	helpAttention = "jump to attention / status dashboard"
 )
 
 // Bindings is the table, in status-bar display order.
@@ -174,7 +176,9 @@ var Bindings = slices.Concat([]Binding{
 	{ActionName: ActionNameKillPane, Key: "x", Action: ActionVerb, Verb: protocol.VerbKillPane,
 		BarGroup: "x kill", Long: "kill the focused pane"},
 	{ActionName: ActionNameSmartJump, Key: "a", Action: ActionVerb, Verb: protocol.VerbSmartJump,
-		BarGroup: "a attn", Long: "jump to a pane wanting attention"},
+		BarGroup: "a attn", Long: "jump to a pane wanting attention", HelpGroup: helpAttention},
+	{ActionName: ActionNameToggleStatus, Key: "s", Action: ActionVerb, Verb: protocol.VerbToggleStatus,
+		Long: "open or focus pane status dashboard", HelpGroup: helpAttention},
 	// tab has no ctrl form -- CtrlForm wants a single letter, and ctrl+i
 	// decodes as tab anyway -- and repeating a toggle only bounces.
 	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
@@ -285,25 +289,27 @@ func BarItems(detachable bool) (droppable, essential []string) {
 
 // validActions is the set of canonical action names and recognized aliases.
 var validActions = map[string]string{
-	ActionNameFocusLeft:   ActionNameFocusLeft,
-	ActionNameFocusRight:  ActionNameFocusRight,
-	ActionNameScrollDown:  ActionNameScrollDown,
-	ActionNameScrollUp:    ActionNameScrollUp,
-	ActionNameNewColumn:   ActionNameNewColumn,
-	ActionNameCycleWidth:  ActionNameCycleWidth,
-	ActionNameGrowWidth:   ActionNameGrowWidth,
-	ActionNameShrinkWidth: ActionNameShrinkWidth,
-	ActionNameMoveLeft:    ActionNameMoveLeft,
-	ActionNameMoveRight:   ActionNameMoveRight,
-	ActionNameKillPane:    ActionNameKillPane,
-	ActionNameSmartJump:   ActionNameSmartJump,
-	"attn":                ActionNameSmartJump,
-	ActionNameFocusLast:   ActionNameFocusLast,
-	ActionNameToggleCards: ActionNameToggleCards,
-	ActionNameHelp:        ActionNameHelp,
-	ActionNameDetach:      ActionNameDetach,
-	ActionNameQuit:        ActionNameQuit,
-	ActionNameExit:        ActionNameExit,
+	ActionNameFocusLeft:    ActionNameFocusLeft,
+	ActionNameFocusRight:   ActionNameFocusRight,
+	ActionNameScrollDown:   ActionNameScrollDown,
+	ActionNameScrollUp:     ActionNameScrollUp,
+	ActionNameNewColumn:    ActionNameNewColumn,
+	ActionNameCycleWidth:   ActionNameCycleWidth,
+	ActionNameGrowWidth:    ActionNameGrowWidth,
+	ActionNameShrinkWidth:  ActionNameShrinkWidth,
+	ActionNameMoveLeft:     ActionNameMoveLeft,
+	ActionNameMoveRight:    ActionNameMoveRight,
+	ActionNameKillPane:     ActionNameKillPane,
+	ActionNameSmartJump:    ActionNameSmartJump,
+	"attn":                 ActionNameSmartJump,
+	ActionNameToggleStatus: ActionNameToggleStatus,
+	"status":               ActionNameToggleStatus,
+	ActionNameFocusLast:    ActionNameFocusLast,
+	ActionNameToggleCards:  ActionNameToggleCards,
+	ActionNameHelp:         ActionNameHelp,
+	ActionNameDetach:       ActionNameDetach,
+	ActionNameQuit:         ActionNameQuit,
+	ActionNameExit:         ActionNameExit,
 }
 
 // validNamedKeys is the set of non-single-character key names produced by ultraviolet.
@@ -405,7 +411,7 @@ func BuildBindings(custom map[string][]string) ([]Binding, error) {
 	for act, ks := range custom {
 		canonical, ok := validActions[act]
 		if !ok {
-			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, move_left, move_right, kill_pane, smart_jump, focus_last, toggle_cards, help, detach, quit, exit", act)
+			return nil, fmt.Errorf("unknown action %q; valid actions are: focus_left, focus_right, scroll_down, scroll_up, new_column, cycle_width, grow_width, shrink_width, move_left, move_right, kill_pane, smart_jump, toggle_status, focus_last, toggle_cards, help, detach, quit, exit", act)
 		}
 		if canonical == ActionNameQuit && len(ks) == 0 {
 			return nil, fmt.Errorf("action %q cannot be unbound: it is the only way to end the session", act)

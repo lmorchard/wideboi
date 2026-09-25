@@ -71,6 +71,11 @@ describe('KeyRouter', () => {
   it('routes web-specific actions: cards layout, column jumps, help', () => {
     const router = new KeyRouter('ctrl+b');
 
+    // 's' triggers TOGGLE_STATUS
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent('s', 'KeyS'))).toEqual({ type: 'verb', verb: VerbType.TOGGLE_STATUS });
+    expect(router.inPrefix).toBe(false);
+
     // 'c' toggles cards layout
     router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
     expect(router.handle(keyEvent('c', 'KeyC'))).toEqual({ type: 'toggle_cards' });

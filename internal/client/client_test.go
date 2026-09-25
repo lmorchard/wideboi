@@ -72,3 +72,20 @@ func TestClientsKeepIndependentFocusAcrossSnapshots(t *testing.T) {
 		t.Fatalf("focus after pane 3 closed = %d, want 2", first.FocusedPaneID())
 	}
 }
+
+func TestMsgFocusPaneSwitchesFocus(t *testing.T) {
+	cli := client.NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{Columns: []protocol.ColumnData{
+		{PaneID: 1, Width: 40, Height: 22},
+		{PaneID: 2, Width: 40, Height: 22},
+	}})
+
+	if got := cli.FocusedPaneID(); got != 1 {
+		t.Fatalf("initial focus = %d, want 1", got)
+	}
+
+	cli.HandleServerMsg(protocol.MsgFocusPane{PaneID: 2})
+	if got := cli.FocusedPaneID(); got != 2 {
+		t.Fatalf("after MsgFocusPane: focus = %d, want 2", got)
+	}
+}

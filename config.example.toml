@@ -103,6 +103,7 @@ move_left    = "y"    # Move focused column one place left (overlay only)
 move_right   = "u"    # Move focused column one place right (overlay only)
 kill_pane    = "x"    # Kill focused pane
 smart_jump   = "a"    # Jump to pane requesting attention (OSC 133 / prompt)
+toggle_status= "s"    # Open or focus the pane status dashboard
 focus_last   = "tab"  # Focus the previously focused pane (overlay only)
 toggle_cards = "c"    # Toggle cards / scrolling layout (help overlay only)
 

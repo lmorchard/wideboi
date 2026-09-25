@@ -24,19 +24,20 @@ const (
 type VerbType int32
 
 const (
-	VerbType_VERB_TYPE_UNSPECIFIED  VerbType = 0
-	VerbType_VERB_TYPE_FOCUS_LEFT   VerbType = 1
-	VerbType_VERB_TYPE_FOCUS_RIGHT  VerbType = 2
-	VerbType_VERB_TYPE_NEW_COLUMN   VerbType = 3
-	VerbType_VERB_TYPE_CYCLE_WIDTH  VerbType = 4
-	VerbType_VERB_TYPE_KILL_PANE    VerbType = 5
-	VerbType_VERB_TYPE_SMART_JUMP   VerbType = 6
-	VerbType_VERB_TYPE_TOGGLE_CARDS VerbType = 7
-	VerbType_VERB_TYPE_GROW_WIDTH   VerbType = 8
-	VerbType_VERB_TYPE_SHRINK_WIDTH VerbType = 9
-	VerbType_VERB_TYPE_MOVE_LEFT    VerbType = 10
-	VerbType_VERB_TYPE_MOVE_RIGHT   VerbType = 11
-	VerbType_VERB_TYPE_FOCUS_LAST   VerbType = 12
+	VerbType_VERB_TYPE_UNSPECIFIED   VerbType = 0
+	VerbType_VERB_TYPE_FOCUS_LEFT    VerbType = 1
+	VerbType_VERB_TYPE_FOCUS_RIGHT   VerbType = 2
+	VerbType_VERB_TYPE_NEW_COLUMN    VerbType = 3
+	VerbType_VERB_TYPE_CYCLE_WIDTH   VerbType = 4
+	VerbType_VERB_TYPE_KILL_PANE     VerbType = 5
+	VerbType_VERB_TYPE_SMART_JUMP    VerbType = 6
+	VerbType_VERB_TYPE_TOGGLE_CARDS  VerbType = 7
+	VerbType_VERB_TYPE_GROW_WIDTH    VerbType = 8
+	VerbType_VERB_TYPE_SHRINK_WIDTH  VerbType = 9
+	VerbType_VERB_TYPE_MOVE_LEFT     VerbType = 10
+	VerbType_VERB_TYPE_MOVE_RIGHT    VerbType = 11
+	VerbType_VERB_TYPE_FOCUS_LAST    VerbType = 12
+	VerbType_VERB_TYPE_TOGGLE_STATUS VerbType = 13
 )
 
 // Enum value maps for VerbType.
@@ -55,21 +56,23 @@ var (
 		10: "VERB_TYPE_MOVE_LEFT",
 		11: "VERB_TYPE_MOVE_RIGHT",
 		12: "VERB_TYPE_FOCUS_LAST",
+		13: "VERB_TYPE_TOGGLE_STATUS",
 	}
 	VerbType_value = map[string]int32{
-		"VERB_TYPE_UNSPECIFIED":  0,
-		"VERB_TYPE_FOCUS_LEFT":   1,
-		"VERB_TYPE_FOCUS_RIGHT":  2,
-		"VERB_TYPE_NEW_COLUMN":   3,
-		"VERB_TYPE_CYCLE_WIDTH":  4,
-		"VERB_TYPE_KILL_PANE":    5,
-		"VERB_TYPE_SMART_JUMP":   6,
-		"VERB_TYPE_TOGGLE_CARDS": 7,
-		"VERB_TYPE_GROW_WIDTH":   8,
-		"VERB_TYPE_SHRINK_WIDTH": 9,
-		"VERB_TYPE_MOVE_LEFT":    10,
-		"VERB_TYPE_MOVE_RIGHT":   11,
-		"VERB_TYPE_FOCUS_LAST":   12,
+		"VERB_TYPE_UNSPECIFIED":   0,
+		"VERB_TYPE_FOCUS_LEFT":    1,
+		"VERB_TYPE_FOCUS_RIGHT":   2,
+		"VERB_TYPE_NEW_COLUMN":    3,
+		"VERB_TYPE_CYCLE_WIDTH":   4,
+		"VERB_TYPE_KILL_PANE":     5,
+		"VERB_TYPE_SMART_JUMP":    6,
+		"VERB_TYPE_TOGGLE_CARDS":  7,
+		"VERB_TYPE_GROW_WIDTH":    8,
+		"VERB_TYPE_SHRINK_WIDTH":  9,
+		"VERB_TYPE_MOVE_LEFT":     10,
+		"VERB_TYPE_MOVE_RIGHT":    11,
+		"VERB_TYPE_FOCUS_LAST":    12,
+		"VERB_TYPE_TOGGLE_STATUS": 13,
 	}
 )
 
@@ -1137,6 +1140,50 @@ func (x *MsgPaneMetadata) GetUserVars() map[string]string {
 	return nil
 }
 
+type MsgFocusPane struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PaneId        int32                  `protobuf:"varint,1,opt,name=pane_id,json=paneId,proto3" json:"pane_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgFocusPane) Reset() {
+	*x = MsgFocusPane{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgFocusPane) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgFocusPane) ProtoMessage() {}
+
+func (x *MsgFocusPane) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgFocusPane.ProtoReflect.Descriptor instead.
+func (*MsgFocusPane) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *MsgFocusPane) GetPaneId() int32 {
+	if x != nil {
+		return x.PaneId
+	}
+	return 0
+}
+
 type ServerMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Msg:
@@ -1148,6 +1195,7 @@ type ServerMessage struct {
 	//	*ServerMessage_PaneClosed
 	//	*ServerMessage_PaneMetadata
 	//	*ServerMessage_TrafficStats
+	//	*ServerMessage_FocusPane
 	Msg           isServerMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1155,7 +1203,7 @@ type ServerMessage struct {
 
 func (x *ServerMessage) Reset() {
 	*x = ServerMessage{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[12]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1167,7 +1215,7 @@ func (x *ServerMessage) String() string {
 func (*ServerMessage) ProtoMessage() {}
 
 func (x *ServerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[12]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1180,7 +1228,7 @@ func (x *ServerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerMessage.ProtoReflect.Descriptor instead.
 func (*ServerMessage) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{12}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ServerMessage) GetMsg() isServerMessage_Msg {
@@ -1253,6 +1301,15 @@ func (x *ServerMessage) GetTrafficStats() *MsgTrafficStats {
 	return nil
 }
 
+func (x *ServerMessage) GetFocusPane() *MsgFocusPane {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerMessage_FocusPane); ok {
+			return x.FocusPane
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Msg interface {
 	isServerMessage_Msg()
 }
@@ -1285,6 +1342,10 @@ type ServerMessage_TrafficStats struct {
 	TrafficStats *MsgTrafficStats `protobuf:"bytes,7,opt,name=traffic_stats,json=trafficStats,proto3,oneof"`
 }
 
+type ServerMessage_FocusPane struct {
+	FocusPane *MsgFocusPane `protobuf:"bytes,8,opt,name=focus_pane,json=focusPane,proto3,oneof"`
+}
+
 func (*ServerMessage_PaneUpdate) isServerMessage_Msg() {}
 
 func (*ServerMessage_PanePatch) isServerMessage_Msg() {}
@@ -1299,6 +1360,8 @@ func (*ServerMessage_PaneMetadata) isServerMessage_Msg() {}
 
 func (*ServerMessage_TrafficStats) isServerMessage_Msg() {}
 
+func (*ServerMessage_FocusPane) isServerMessage_Msg() {}
+
 type MsgAttach struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Cols          int32                  `protobuf:"varint,1,opt,name=cols,proto3" json:"cols,omitempty"`
@@ -1309,7 +1372,7 @@ type MsgAttach struct {
 
 func (x *MsgAttach) Reset() {
 	*x = MsgAttach{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[13]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1321,7 +1384,7 @@ func (x *MsgAttach) String() string {
 func (*MsgAttach) ProtoMessage() {}
 
 func (x *MsgAttach) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[13]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1334,7 +1397,7 @@ func (x *MsgAttach) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgAttach.ProtoReflect.Descriptor instead.
 func (*MsgAttach) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{13}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *MsgAttach) GetCols() int32 {
@@ -1361,7 +1424,7 @@ type MsgVerb struct {
 
 func (x *MsgVerb) Reset() {
 	*x = MsgVerb{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[14]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1373,7 +1436,7 @@ func (x *MsgVerb) String() string {
 func (*MsgVerb) ProtoMessage() {}
 
 func (x *MsgVerb) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[14]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1386,7 +1449,7 @@ func (x *MsgVerb) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgVerb.ProtoReflect.Descriptor instead.
 func (*MsgVerb) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{14}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *MsgVerb) GetVerb() VerbType {
@@ -1417,7 +1480,7 @@ type MsgMouse struct {
 
 func (x *MsgMouse) Reset() {
 	*x = MsgMouse{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[15]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1429,7 +1492,7 @@ func (x *MsgMouse) String() string {
 func (*MsgMouse) ProtoMessage() {}
 
 func (x *MsgMouse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[15]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1442,7 +1505,7 @@ func (x *MsgMouse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgMouse.ProtoReflect.Descriptor instead.
 func (*MsgMouse) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{15}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *MsgMouse) GetPaneId() int32 {
@@ -1501,7 +1564,7 @@ type KeyData struct {
 
 func (x *KeyData) Reset() {
 	*x = KeyData{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[16]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1513,7 +1576,7 @@ func (x *KeyData) String() string {
 func (*KeyData) ProtoMessage() {}
 
 func (x *KeyData) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[16]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1526,7 +1589,7 @@ func (x *KeyData) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeyData.ProtoReflect.Descriptor instead.
 func (*KeyData) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{16}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *KeyData) GetText() string {
@@ -1582,7 +1645,7 @@ type MsgInput struct {
 
 func (x *MsgInput) Reset() {
 	*x = MsgInput{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[17]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1594,7 +1657,7 @@ func (x *MsgInput) String() string {
 func (*MsgInput) ProtoMessage() {}
 
 func (x *MsgInput) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[17]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1607,7 +1670,7 @@ func (x *MsgInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgInput.ProtoReflect.Descriptor instead.
 func (*MsgInput) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{17}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *MsgInput) GetPaneId() int32 {
@@ -1641,7 +1704,7 @@ type MsgResize struct {
 
 func (x *MsgResize) Reset() {
 	*x = MsgResize{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[18]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1653,7 +1716,7 @@ func (x *MsgResize) String() string {
 func (*MsgResize) ProtoMessage() {}
 
 func (x *MsgResize) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[18]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1666,7 +1729,7 @@ func (x *MsgResize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgResize.ProtoReflect.Descriptor instead.
 func (*MsgResize) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{18}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *MsgResize) GetCols() int32 {
@@ -1693,7 +1756,7 @@ type MsgScroll struct {
 
 func (x *MsgScroll) Reset() {
 	*x = MsgScroll{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[19]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1705,7 +1768,7 @@ func (x *MsgScroll) String() string {
 func (*MsgScroll) ProtoMessage() {}
 
 func (x *MsgScroll) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[19]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1718,7 +1781,7 @@ func (x *MsgScroll) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgScroll.ProtoReflect.Descriptor instead.
 func (*MsgScroll) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{19}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *MsgScroll) GetPaneId() int32 {
@@ -1744,7 +1807,7 @@ type MsgPaneResync struct {
 
 func (x *MsgPaneResync) Reset() {
 	*x = MsgPaneResync{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[20]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1756,7 +1819,7 @@ func (x *MsgPaneResync) String() string {
 func (*MsgPaneResync) ProtoMessage() {}
 
 func (x *MsgPaneResync) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[20]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1769,7 +1832,7 @@ func (x *MsgPaneResync) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgPaneResync.ProtoReflect.Descriptor instead.
 func (*MsgPaneResync) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{20}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *MsgPaneResync) GetPaneId() int32 {
@@ -1787,7 +1850,7 @@ type MsgDetach struct {
 
 func (x *MsgDetach) Reset() {
 	*x = MsgDetach{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[21]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1799,7 +1862,7 @@ func (x *MsgDetach) String() string {
 func (*MsgDetach) ProtoMessage() {}
 
 func (x *MsgDetach) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[21]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1812,7 +1875,7 @@ func (x *MsgDetach) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgDetach.ProtoReflect.Descriptor instead.
 func (*MsgDetach) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{21}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{22}
 }
 
 type MsgShutdown struct {
@@ -1823,7 +1886,7 @@ type MsgShutdown struct {
 
 func (x *MsgShutdown) Reset() {
 	*x = MsgShutdown{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[22]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1835,7 +1898,7 @@ func (x *MsgShutdown) String() string {
 func (*MsgShutdown) ProtoMessage() {}
 
 func (x *MsgShutdown) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[22]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1848,7 +1911,7 @@ func (x *MsgShutdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgShutdown.ProtoReflect.Descriptor instead.
 func (*MsgShutdown) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{22}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{23}
 }
 
 type MsgStatusRequest struct {
@@ -1859,7 +1922,7 @@ type MsgStatusRequest struct {
 
 func (x *MsgStatusRequest) Reset() {
 	*x = MsgStatusRequest{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[23]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1871,7 +1934,7 @@ func (x *MsgStatusRequest) String() string {
 func (*MsgStatusRequest) ProtoMessage() {}
 
 func (x *MsgStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[23]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1884,7 +1947,7 @@ func (x *MsgStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgStatusRequest.ProtoReflect.Descriptor instead.
 func (*MsgStatusRequest) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{23}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{24}
 }
 
 type ClientMessage struct {
@@ -1909,7 +1972,7 @@ type ClientMessage struct {
 
 func (x *ClientMessage) Reset() {
 	*x = ClientMessage{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[24]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1921,7 +1984,7 @@ func (x *ClientMessage) String() string {
 func (*ClientMessage) ProtoMessage() {}
 
 func (x *ClientMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[24]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1934,7 +1997,7 @@ func (x *ClientMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientMessage.ProtoReflect.Descriptor instead.
 func (*ClientMessage) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{24}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ClientMessage) GetMsg() isClientMessage_Msg {
@@ -2123,7 +2186,7 @@ type MsgTrafficRequest struct {
 
 func (x *MsgTrafficRequest) Reset() {
 	*x = MsgTrafficRequest{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[25]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2135,7 +2198,7 @@ func (x *MsgTrafficRequest) String() string {
 func (*MsgTrafficRequest) ProtoMessage() {}
 
 func (x *MsgTrafficRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[25]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2148,7 +2211,7 @@ func (x *MsgTrafficRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgTrafficRequest.ProtoReflect.Descriptor instead.
 func (*MsgTrafficRequest) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{25}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{26}
 }
 
 type TimingStat struct {
@@ -2162,7 +2225,7 @@ type TimingStat struct {
 
 func (x *TimingStat) Reset() {
 	*x = TimingStat{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[26]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2174,7 +2237,7 @@ func (x *TimingStat) String() string {
 func (*TimingStat) ProtoMessage() {}
 
 func (x *TimingStat) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[26]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2187,7 +2250,7 @@ func (x *TimingStat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimingStat.ProtoReflect.Descriptor instead.
 func (*TimingStat) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{26}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *TimingStat) GetCount() uint64 {
@@ -2233,7 +2296,7 @@ type ClientTraffic struct {
 
 func (x *ClientTraffic) Reset() {
 	*x = ClientTraffic{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[27]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2245,7 +2308,7 @@ func (x *ClientTraffic) String() string {
 func (*ClientTraffic) ProtoMessage() {}
 
 func (x *ClientTraffic) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[27]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2258,7 +2321,7 @@ func (x *ClientTraffic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientTraffic.ProtoReflect.Descriptor instead.
 func (*ClientTraffic) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{27}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ClientTraffic) GetClientId() int32 {
@@ -2373,7 +2436,7 @@ type MsgTrafficStats struct {
 
 func (x *MsgTrafficStats) Reset() {
 	*x = MsgTrafficStats{}
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[28]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2385,7 +2448,7 @@ func (x *MsgTrafficStats) String() string {
 func (*MsgTrafficStats) ProtoMessage() {}
 
 func (x *MsgTrafficStats) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[28]
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2398,7 +2461,7 @@ func (x *MsgTrafficStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MsgTrafficStats.ProtoReflect.Descriptor instead.
 func (*MsgTrafficStats) Descriptor() ([]byte, []int) {
-	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{28}
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *MsgTrafficStats) GetUptimeMillis() int64 {
@@ -2532,7 +2595,9 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\tuser_vars\x18\x03 \x03(\v2/.wideboi.protocol.MsgPaneMetadata.UserVarsEntryR\buserVars\x1a;\n" +
 	"\rUserVarsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x8a\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +
+	"\fMsgFocusPane\x12\x17\n" +
+	"\apane_id\x18\x01 \x01(\x05R\x06paneId\"\xcb\x04\n" +
 	"\rServerMessage\x12B\n" +
 	"\vpane_update\x18\x01 \x01(\v2\x1f.wideboi.protocol.MsgPaneUpdateH\x00R\n" +
 	"paneUpdate\x12?\n" +
@@ -2543,7 +2608,9 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\vpane_closed\x18\x05 \x01(\v2\x1f.wideboi.protocol.MsgPaneClosedH\x00R\n" +
 	"paneClosed\x12H\n" +
 	"\rpane_metadata\x18\x06 \x01(\v2!.wideboi.protocol.MsgPaneMetadataH\x00R\fpaneMetadata\x12H\n" +
-	"\rtraffic_stats\x18\a \x01(\v2!.wideboi.protocol.MsgTrafficStatsH\x00R\ftrafficStatsB\x05\n" +
+	"\rtraffic_stats\x18\a \x01(\v2!.wideboi.protocol.MsgTrafficStatsH\x00R\ftrafficStats\x12?\n" +
+	"\n" +
+	"focus_pane\x18\b \x01(\v2\x1e.wideboi.protocol.MsgFocusPaneH\x00R\tfocusPaneB\x05\n" +
 	"\x03msg\"3\n" +
 	"\tMsgAttach\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\x05R\x04cols\x12\x12\n" +
@@ -2627,7 +2694,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\bdeparted\x18\x04 \x01(\v2\x1f.wideboi.protocol.ClientTrafficR\bdeparted\x124\n" +
 	"\x06render\x18\x05 \x01(\v2\x1c.wideboi.protocol.TimingStatR\x06render\x12=\n" +
 	"\vbuild_patch\x18\x06 \x01(\v2\x1c.wideboi.protocol.TimingStatR\n" +
-	"buildPatch*\xe1\x02\n" +
+	"buildPatch*\xfe\x02\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +
@@ -2642,7 +2709,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x13VERB_TYPE_MOVE_LEFT\x10\n" +
 	"\x12\x18\n" +
 	"\x14VERB_TYPE_MOVE_RIGHT\x10\v\x12\x18\n" +
-	"\x14VERB_TYPE_FOCUS_LAST\x10\f*\x86\x01\n" +
+	"\x14VERB_TYPE_FOCUS_LAST\x10\f\x12\x1b\n" +
+	"\x17VERB_TYPE_TOGGLE_STATUS\x10\r*\x86\x01\n" +
 	"\n" +
 	"PaneStatus\x12\x14\n" +
 	"\x10PANE_STATUS_IDLE\x10\x00\x12\x17\n" +
@@ -2674,7 +2742,7 @@ func file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_protocol_wirepb_wideboi_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_internal_protocol_wirepb_wideboi_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
+var file_internal_protocol_wirepb_wideboi_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_internal_protocol_wirepb_wideboi_proto_goTypes = []any{
 	(VerbType)(0),             // 0: wideboi.protocol.VerbType
 	(PaneStatus)(0),           // 1: wideboi.protocol.PaneStatus
@@ -2692,26 +2760,27 @@ var file_internal_protocol_wirepb_wideboi_proto_goTypes = []any{
 	(*MsgPaneCreated)(nil),    // 13: wideboi.protocol.MsgPaneCreated
 	(*MsgPaneClosed)(nil),     // 14: wideboi.protocol.MsgPaneClosed
 	(*MsgPaneMetadata)(nil),   // 15: wideboi.protocol.MsgPaneMetadata
-	(*ServerMessage)(nil),     // 16: wideboi.protocol.ServerMessage
-	(*MsgAttach)(nil),         // 17: wideboi.protocol.MsgAttach
-	(*MsgVerb)(nil),           // 18: wideboi.protocol.MsgVerb
-	(*MsgMouse)(nil),          // 19: wideboi.protocol.MsgMouse
-	(*KeyData)(nil),           // 20: wideboi.protocol.KeyData
-	(*MsgInput)(nil),          // 21: wideboi.protocol.MsgInput
-	(*MsgResize)(nil),         // 22: wideboi.protocol.MsgResize
-	(*MsgScroll)(nil),         // 23: wideboi.protocol.MsgScroll
-	(*MsgPaneResync)(nil),     // 24: wideboi.protocol.MsgPaneResync
-	(*MsgDetach)(nil),         // 25: wideboi.protocol.MsgDetach
-	(*MsgShutdown)(nil),       // 26: wideboi.protocol.MsgShutdown
-	(*MsgStatusRequest)(nil),  // 27: wideboi.protocol.MsgStatusRequest
-	(*ClientMessage)(nil),     // 28: wideboi.protocol.ClientMessage
-	(*MsgTrafficRequest)(nil), // 29: wideboi.protocol.MsgTrafficRequest
-	(*TimingStat)(nil),        // 30: wideboi.protocol.TimingStat
-	(*ClientTraffic)(nil),     // 31: wideboi.protocol.ClientTraffic
-	(*MsgTrafficStats)(nil),   // 32: wideboi.protocol.MsgTrafficStats
-	nil,                       // 33: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
-	nil,                       // 34: wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
-	nil,                       // 35: wideboi.protocol.MsgPaneMetadata.UserVarsEntry
+	(*MsgFocusPane)(nil),      // 16: wideboi.protocol.MsgFocusPane
+	(*ServerMessage)(nil),     // 17: wideboi.protocol.ServerMessage
+	(*MsgAttach)(nil),         // 18: wideboi.protocol.MsgAttach
+	(*MsgVerb)(nil),           // 19: wideboi.protocol.MsgVerb
+	(*MsgMouse)(nil),          // 20: wideboi.protocol.MsgMouse
+	(*KeyData)(nil),           // 21: wideboi.protocol.KeyData
+	(*MsgInput)(nil),          // 22: wideboi.protocol.MsgInput
+	(*MsgResize)(nil),         // 23: wideboi.protocol.MsgResize
+	(*MsgScroll)(nil),         // 24: wideboi.protocol.MsgScroll
+	(*MsgPaneResync)(nil),     // 25: wideboi.protocol.MsgPaneResync
+	(*MsgDetach)(nil),         // 26: wideboi.protocol.MsgDetach
+	(*MsgShutdown)(nil),       // 27: wideboi.protocol.MsgShutdown
+	(*MsgStatusRequest)(nil),  // 28: wideboi.protocol.MsgStatusRequest
+	(*ClientMessage)(nil),     // 29: wideboi.protocol.ClientMessage
+	(*MsgTrafficRequest)(nil), // 30: wideboi.protocol.MsgTrafficRequest
+	(*TimingStat)(nil),        // 31: wideboi.protocol.TimingStat
+	(*ClientTraffic)(nil),     // 32: wideboi.protocol.ClientTraffic
+	(*MsgTrafficStats)(nil),   // 33: wideboi.protocol.MsgTrafficStats
+	nil,                       // 34: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
+	nil,                       // 35: wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
+	nil,                       // 36: wideboi.protocol.MsgPaneMetadata.UserVarsEntry
 }
 var file_internal_protocol_wirepb_wideboi_proto_depIdxs = []int32{
 	2,  // 0: wideboi.protocol.ColorData.kind:type_name -> wideboi.protocol.ColorKind
@@ -2724,41 +2793,42 @@ var file_internal_protocol_wirepb_wideboi_proto_depIdxs = []int32{
 	6,  // 7: wideboi.protocol.PaneRow.cells:type_name -> wideboi.protocol.CellData
 	9,  // 8: wideboi.protocol.MsgPanePatch.changed_rows:type_name -> wideboi.protocol.PaneRow
 	11, // 9: wideboi.protocol.MsgLayoutSnapshot.columns:type_name -> wideboi.protocol.ColumnData
-	33, // 10: wideboi.protocol.MsgLayoutSnapshot.pane_statuses:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
-	34, // 11: wideboi.protocol.MsgLayoutSnapshot.pane_titles:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
-	35, // 12: wideboi.protocol.MsgPaneMetadata.user_vars:type_name -> wideboi.protocol.MsgPaneMetadata.UserVarsEntry
+	34, // 10: wideboi.protocol.MsgLayoutSnapshot.pane_statuses:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
+	35, // 11: wideboi.protocol.MsgLayoutSnapshot.pane_titles:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
+	36, // 12: wideboi.protocol.MsgPaneMetadata.user_vars:type_name -> wideboi.protocol.MsgPaneMetadata.UserVarsEntry
 	8,  // 13: wideboi.protocol.ServerMessage.pane_update:type_name -> wideboi.protocol.MsgPaneUpdate
 	10, // 14: wideboi.protocol.ServerMessage.pane_patch:type_name -> wideboi.protocol.MsgPanePatch
 	12, // 15: wideboi.protocol.ServerMessage.layout_snapshot:type_name -> wideboi.protocol.MsgLayoutSnapshot
 	13, // 16: wideboi.protocol.ServerMessage.pane_created:type_name -> wideboi.protocol.MsgPaneCreated
 	14, // 17: wideboi.protocol.ServerMessage.pane_closed:type_name -> wideboi.protocol.MsgPaneClosed
 	15, // 18: wideboi.protocol.ServerMessage.pane_metadata:type_name -> wideboi.protocol.MsgPaneMetadata
-	32, // 19: wideboi.protocol.ServerMessage.traffic_stats:type_name -> wideboi.protocol.MsgTrafficStats
-	0,  // 20: wideboi.protocol.MsgVerb.verb:type_name -> wideboi.protocol.VerbType
-	3,  // 21: wideboi.protocol.MsgMouse.kind:type_name -> wideboi.protocol.MouseKind
-	20, // 22: wideboi.protocol.MsgInput.key:type_name -> wideboi.protocol.KeyData
-	17, // 23: wideboi.protocol.ClientMessage.attach:type_name -> wideboi.protocol.MsgAttach
-	18, // 24: wideboi.protocol.ClientMessage.verb:type_name -> wideboi.protocol.MsgVerb
-	19, // 25: wideboi.protocol.ClientMessage.mouse:type_name -> wideboi.protocol.MsgMouse
-	21, // 26: wideboi.protocol.ClientMessage.input:type_name -> wideboi.protocol.MsgInput
-	22, // 27: wideboi.protocol.ClientMessage.resize:type_name -> wideboi.protocol.MsgResize
-	23, // 28: wideboi.protocol.ClientMessage.scroll:type_name -> wideboi.protocol.MsgScroll
-	24, // 29: wideboi.protocol.ClientMessage.pane_resync:type_name -> wideboi.protocol.MsgPaneResync
-	25, // 30: wideboi.protocol.ClientMessage.detach:type_name -> wideboi.protocol.MsgDetach
-	26, // 31: wideboi.protocol.ClientMessage.shutdown:type_name -> wideboi.protocol.MsgShutdown
-	27, // 32: wideboi.protocol.ClientMessage.status_request:type_name -> wideboi.protocol.MsgStatusRequest
-	29, // 33: wideboi.protocol.ClientMessage.traffic_request:type_name -> wideboi.protocol.MsgTrafficRequest
-	30, // 34: wideboi.protocol.ClientTraffic.encode:type_name -> wideboi.protocol.TimingStat
-	31, // 35: wideboi.protocol.MsgTrafficStats.clients:type_name -> wideboi.protocol.ClientTraffic
-	31, // 36: wideboi.protocol.MsgTrafficStats.departed:type_name -> wideboi.protocol.ClientTraffic
-	30, // 37: wideboi.protocol.MsgTrafficStats.render:type_name -> wideboi.protocol.TimingStat
-	30, // 38: wideboi.protocol.MsgTrafficStats.build_patch:type_name -> wideboi.protocol.TimingStat
-	1,  // 39: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry.value:type_name -> wideboi.protocol.PaneStatus
-	40, // [40:40] is the sub-list for method output_type
-	40, // [40:40] is the sub-list for method input_type
-	40, // [40:40] is the sub-list for extension type_name
-	40, // [40:40] is the sub-list for extension extendee
-	0,  // [0:40] is the sub-list for field type_name
+	33, // 19: wideboi.protocol.ServerMessage.traffic_stats:type_name -> wideboi.protocol.MsgTrafficStats
+	16, // 20: wideboi.protocol.ServerMessage.focus_pane:type_name -> wideboi.protocol.MsgFocusPane
+	0,  // 21: wideboi.protocol.MsgVerb.verb:type_name -> wideboi.protocol.VerbType
+	3,  // 22: wideboi.protocol.MsgMouse.kind:type_name -> wideboi.protocol.MouseKind
+	21, // 23: wideboi.protocol.MsgInput.key:type_name -> wideboi.protocol.KeyData
+	18, // 24: wideboi.protocol.ClientMessage.attach:type_name -> wideboi.protocol.MsgAttach
+	19, // 25: wideboi.protocol.ClientMessage.verb:type_name -> wideboi.protocol.MsgVerb
+	20, // 26: wideboi.protocol.ClientMessage.mouse:type_name -> wideboi.protocol.MsgMouse
+	22, // 27: wideboi.protocol.ClientMessage.input:type_name -> wideboi.protocol.MsgInput
+	23, // 28: wideboi.protocol.ClientMessage.resize:type_name -> wideboi.protocol.MsgResize
+	24, // 29: wideboi.protocol.ClientMessage.scroll:type_name -> wideboi.protocol.MsgScroll
+	25, // 30: wideboi.protocol.ClientMessage.pane_resync:type_name -> wideboi.protocol.MsgPaneResync
+	26, // 31: wideboi.protocol.ClientMessage.detach:type_name -> wideboi.protocol.MsgDetach
+	27, // 32: wideboi.protocol.ClientMessage.shutdown:type_name -> wideboi.protocol.MsgShutdown
+	28, // 33: wideboi.protocol.ClientMessage.status_request:type_name -> wideboi.protocol.MsgStatusRequest
+	30, // 34: wideboi.protocol.ClientMessage.traffic_request:type_name -> wideboi.protocol.MsgTrafficRequest
+	31, // 35: wideboi.protocol.ClientTraffic.encode:type_name -> wideboi.protocol.TimingStat
+	32, // 36: wideboi.protocol.MsgTrafficStats.clients:type_name -> wideboi.protocol.ClientTraffic
+	32, // 37: wideboi.protocol.MsgTrafficStats.departed:type_name -> wideboi.protocol.ClientTraffic
+	31, // 38: wideboi.protocol.MsgTrafficStats.render:type_name -> wideboi.protocol.TimingStat
+	31, // 39: wideboi.protocol.MsgTrafficStats.build_patch:type_name -> wideboi.protocol.TimingStat
+	1,  // 40: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry.value:type_name -> wideboi.protocol.PaneStatus
+	41, // [41:41] is the sub-list for method output_type
+	41, // [41:41] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_internal_protocol_wirepb_wideboi_proto_init() }
@@ -2766,7 +2836,7 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 	if File_internal_protocol_wirepb_wideboi_proto != nil {
 		return
 	}
-	file_internal_protocol_wirepb_wideboi_proto_msgTypes[12].OneofWrappers = []any{
+	file_internal_protocol_wirepb_wideboi_proto_msgTypes[13].OneofWrappers = []any{
 		(*ServerMessage_PaneUpdate)(nil),
 		(*ServerMessage_PanePatch)(nil),
 		(*ServerMessage_LayoutSnapshot)(nil),
@@ -2774,8 +2844,9 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 		(*ServerMessage_PaneClosed)(nil),
 		(*ServerMessage_PaneMetadata)(nil),
 		(*ServerMessage_TrafficStats)(nil),
+		(*ServerMessage_FocusPane)(nil),
 	}
-	file_internal_protocol_wirepb_wideboi_proto_msgTypes[24].OneofWrappers = []any{
+	file_internal_protocol_wirepb_wideboi_proto_msgTypes[25].OneofWrappers = []any{
 		(*ClientMessage_Attach)(nil),
 		(*ClientMessage_Verb)(nil),
 		(*ClientMessage_Mouse)(nil),
@@ -2794,7 +2865,7 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_protocol_wirepb_wideboi_proto_rawDesc), len(file_internal_protocol_wirepb_wideboi_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   32,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

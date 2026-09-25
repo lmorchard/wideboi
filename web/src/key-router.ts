@@ -144,6 +144,7 @@ export class KeyRouter {
       case 'w': verb = VerbType.CYCLE_WIDTH; break;
       case 'x': verb = VerbType.KILL_PANE; break;
       case 'a': verb = VerbType.SMART_JUMP; break;
+      case 's': verb = VerbType.TOGGLE_STATUS; break;
       case 'p': verb = VerbType.GROW_WIDTH; break;
       case 'o': verb = VerbType.SHRINK_WIDTH; break;
       case 'y': verb = VerbType.MOVE_LEFT; break;

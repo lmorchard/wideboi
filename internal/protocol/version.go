@@ -19,4 +19,5 @@ package protocol
 // and MsgPanePatch for independent per-client scrollback.
 // 4 adds MsgPaneMetadata carrying CWD and OSC 1337 user variables.
 // 5 adds MsgTrafficRequest/MsgTrafficStats (#179).
-const Version uint32 = 5
+// 6 adds VerbToggleStatus and MsgFocusPane (#196).
+const Version uint32 = 6

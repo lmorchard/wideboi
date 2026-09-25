@@ -25,6 +25,7 @@ enum VerbType {
   VERB_TYPE_MOVE_LEFT = 10;
   VERB_TYPE_MOVE_RIGHT = 11;
   VERB_TYPE_FOCUS_LAST = 12;
+  VERB_TYPE_TOGGLE_STATUS = 13;
 }
 
 enum PaneStatus {
@@ -139,6 +140,10 @@ message MsgPaneMetadata {
   map<string, string> user_vars = 3;
 }
 
+message MsgFocusPane {
+  int32 pane_id = 1;
+}
+
 message ServerMessage {
   oneof msg {
     MsgPaneUpdate pane_update = 1;
@@ -148,6 +153,7 @@ message ServerMessage {
     MsgPaneClosed pane_closed = 5;
     MsgPaneMetadata pane_metadata = 6;
     MsgTrafficStats traffic_stats = 7;
+    MsgFocusPane focus_pane = 8;
   }
 }
 

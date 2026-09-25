@@ -16,8 +16,10 @@ import (
 	"sync"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -36,6 +38,9 @@ type Server struct {
 	transports      []transport.Transport
 	stopCh          chan struct{}
 	closeOnce       sync.Once
+
+	statusPaneID int
+	dashboard    *Dashboard
 
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
@@ -400,6 +405,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	sendMetadata := false
 	resyncPaneID := 0
 	createdPaneID := 0
+	focusTargetID := 0
 	var trafficReport *protocol.MsgTrafficStats
 
 	switch m := msg.(type) {
@@ -497,6 +503,17 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				s.removePaneLocked(m.PaneID)
 				s.resizePanesLocked()
 			}
+		case protocol.VerbToggleStatus:
+			if s.statusPaneID != 0 {
+				focusTargetID = s.statusPaneID
+			} else {
+				if p, err := s.spawnDashboardPaneLocked(m.PaneID); err == nil {
+					createdPaneID = p.ID()
+					focusTargetID = p.ID()
+				}
+				s.resizePanesLocked()
+				s.updateDashboardLocked()
+			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client
 			// may still send it; there is nothing to do.
@@ -504,11 +521,36 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		// Every other verb changes the strip. The reserved one changes
 		// nothing, and a snapshot costs a forced resend of every pane to
 		// every client, so it must not broadcast.
-		if m.Verb != protocol.VerbToggleCards {
+		if m.Verb != protocol.VerbToggleCards && (m.Verb != protocol.VerbToggleStatus || createdPaneID != 0) {
 			needBroadcast = true
 		}
 
 	case protocol.MsgInput:
+		if m.PaneID == s.statusPaneID && s.dashboard != nil {
+			var key uv.KeyEvent
+			if !m.Key.IsZero() {
+				key = m.Key.Decode()
+			} else if len(m.Data) > 0 {
+				if len(m.Data) == 1 && (m.Data[0] == '\r' || m.Data[0] == '\n') {
+					key = uv.KeyPressEvent{Code: 13}
+				} else if len(m.Data) == 1 && m.Data[0] == 'j' {
+					key = uv.KeyPressEvent{Code: 'j'}
+				} else if len(m.Data) == 1 && m.Data[0] == 'k' {
+					key = uv.KeyPressEvent{Code: 'k'}
+				}
+			}
+			if key != nil {
+				targetID, handled := s.dashboard.HandleKey(key)
+				if handled {
+					if targetID > 0 {
+						focusTargetID = targetID
+					}
+					s.updateDashboardLocked()
+					needPaneBroadcast = true
+				}
+			}
+			break
+		}
 		if p, ok := s.panes[m.PaneID]; ok {
 			if tp != nil && s.clientScrollOffsets != nil && s.clientScrollOffsets[tp] != nil && s.clientScrollOffsets[tp][m.PaneID] > 0 {
 				s.clientScrollOffsets[tp][m.PaneID] = 0
@@ -532,6 +574,17 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		}
 
 	case protocol.MsgMouse:
+		if m.PaneID == s.statusPaneID && s.dashboard != nil {
+			targetID, handled := s.dashboard.HandleMouse(m.Decode())
+			if handled {
+				if targetID > 0 {
+					focusTargetID = targetID
+				}
+				s.updateDashboardLocked()
+				needPaneBroadcast = true
+			}
+			break
+		}
 		if p, ok := s.panes[m.PaneID]; ok {
 			p.SendMouse(m.Decode())
 		}
@@ -577,6 +630,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 
 	s.mu.Unlock()
+	if focusTargetID > 0 && tp != nil {
+		tp.SendServer(ctx, protocol.MsgFocusPane{PaneID: focusTargetID})
+	}
 	if trafficReport != nil {
 		// Only the requester gets it. Sent outside s.mu: a socket
 		// SendServer can block on a full queue.
@@ -672,16 +728,34 @@ func (s *Server) onPaneExit(id int) {
 		s.mu.Unlock()
 		return
 	}
+	if id == s.statusPaneID {
+		s.statusPaneID = 0
+		s.dashboard = nil
+	}
 	s.strip.KillPane(id)
 	p := s.panes[id]
 	delete(s.panes, id)
 	delete(s.lastCWD, id)
 	delete(s.lastUserVars, id)
 	s.resizePanesLocked()
+	s.updateDashboardLocked()
+
+	hasTerminalPanes := false
+	for pid, pane := range s.panes {
+		if pid != s.statusPaneID && !pane.isDashboard {
+			hasTerminalPanes = true
+			break
+		}
+	}
+	shouldClose := !hasTerminalPanes
 	s.mu.Unlock()
 
 	s.broadcastLayout(context.Background())
 	_ = p.Close()
+
+	if shouldClose {
+		_ = s.Close()
+	}
 }
 
 func (s *Server) removePaneLocked(id int) {
@@ -689,11 +763,90 @@ func (s *Server) removePaneLocked(id int) {
 	if !ok {
 		return
 	}
+	if id == s.statusPaneID {
+		s.statusPaneID = 0
+		s.dashboard = nil
+	}
 	s.strip.KillPane(id)
 	delete(s.panes, id)
 	delete(s.lastCWD, id)
 	delete(s.lastUserVars, id)
+	s.updateDashboardLocked()
+
+	hasTerminalPanes := false
+	for pid, pane := range s.panes {
+		if pid != s.statusPaneID && !pane.isDashboard {
+			hasTerminalPanes = true
+			break
+		}
+	}
+	if !hasTerminalPanes {
+		go s.Close()
+	}
 	go p.Close()
+}
+
+func (s *Server) spawnDashboardPaneLocked(afterPaneID int) (*Pane, error) {
+	if s.stoppingLocked() {
+		return nil, fmt.Errorf("server is shutting down")
+	}
+	s.nextPaneID++
+	id := s.nextPaneID
+	presets := s.strip.WidthPresets()
+	paneCols := presets[len(presets)-1]
+	if paneCols > s.cols && s.cols > 0 {
+		paneCols = s.cols
+	}
+	paneRows := max(s.rows-2, 20)
+
+	grid := term.NewVT(paneCols, paneRows)
+	_, _ = grid.Write([]byte("\x1b]0;Dashboard\x07"))
+
+	p := NewCustomPane(id, grid, paneCols, paneRows)
+	p.isDashboard = true
+	s.statusPaneID = id
+	s.dashboard = NewDashboard()
+
+	s.panes[id] = p
+	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
+
+	p.Start(func() {
+		s.onPaneExit(id)
+	})
+
+	return p, nil
+}
+
+func (s *Server) updateDashboardLocked() {
+	if s.statusPaneID == 0 || s.dashboard == nil {
+		return
+	}
+	p, ok := s.panes[s.statusPaneID]
+	if !ok {
+		return
+	}
+	cols := s.strip.Columns()
+	var infos []PaneInfo
+	glyphs := s.statusGlyphsLocked()
+	titles := s.paneTitlesLocked()
+	focusedID := s.strip.FocusedPaneID()
+	for _, c := range cols {
+		if c.PaneID == s.statusPaneID {
+			continue
+		}
+		infos = append(infos, PaneInfo{
+			ID:      c.PaneID,
+			Status:  glyphs[c.PaneID],
+			Title:   titles[c.PaneID],
+			CWD:     s.lastCWD[c.PaneID],
+			Width:   c.Width,
+			Height:  c.Height,
+			Focused: c.PaneID == focusedID,
+		})
+	}
+	dbCols, dbRows := p.Size()
+	data := s.dashboard.Render(infos, dbCols, dbRows)
+	_, _ = p.grid.Write(data)
 }
 
 // recomputeSessionSizeLocked updates s.cols and s.rows to the minimum dimensions
@@ -940,6 +1093,7 @@ func (s *Server) broadcastMetadataIfChanged(ctx context.Context) bool {
 		s.mu.Unlock()
 		return false
 	}
+	s.updateDashboardLocked()
 	tps := append([]transport.Transport{}, s.transports...)
 	s.mu.Unlock()
 
@@ -1030,6 +1184,7 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 	defer s.layoutSendMu.Unlock()
 
 	s.mu.Lock()
+	s.updateDashboardLocked()
 	statuses := s.statusGlyphsLocked()
 	titles := s.paneTitlesLocked()
 	cols := layout.ToColumnData(s.strip.Columns())
