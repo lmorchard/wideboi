@@ -86,6 +86,11 @@ describe('KeyRouter', () => {
     expect(router.handle(keyEvent('?', 'Slash', { shiftKey: true }))).toEqual({ type: 'toggle_help' });
     expect(router.inPrefix).toBe(false);
 
+    // '/' triggers search
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent('/', 'Slash'))).toEqual({ type: 'search' });
+    expect(router.inPrefix).toBe(false);
+
     // '1'-'9' and '0' focus columns
     for (let i = 1; i <= 9; i++) {
       router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));

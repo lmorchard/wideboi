@@ -10,7 +10,8 @@ import { sendKeyboardInput, sendTextInput } from './input';
 import { KeyRouter } from './key-router';
 import { consumeLinkToken } from './token';
 import { RenderStats, formatSummary, statsEnabled } from './stats';
-import { MouseKind, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { MouseKind, MsgHistorySnapshot, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { createSearchSession, applySnapshot, cancelSearch, liveSearch, formatSearchStatus, type SearchState } from './search';
 
 const linkToken = consumeLinkToken(window.location, window.history);
 const STATS_REPORT_MS = 5000;
@@ -36,6 +37,7 @@ export class WideboiApp extends LitElement {
       min-width: 0;
       font: 14px monospace;
       color: #ccc;
+      position: relative;
     }
     .title, .status {
       height: 16.8px;
@@ -44,6 +46,65 @@ export class WideboiApp extends LitElement {
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+    }
+    .status.search-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 22px;
+      line-height: 22px;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0 0.5rem;
+      background: #252526;
+      border-top: 1px solid #3c3c3c;
+      overflow: hidden;
+      font: 12px monospace;
+      color: #ccc;
+      z-index: 15;
+    }
+    .status.search-bar input.search-input {
+      background: #1e1e1e;
+      border: 1px solid #555;
+      color: #ccc;
+      padding: 1px 4px;
+      font: 12px monospace;
+      border-radius: 2px;
+      outline: none;
+      height: 18px;
+      box-sizing: border-box;
+      width: 140px;
+    }
+    .status.search-bar input.search-input:focus {
+      border-color: #007fd4;
+    }
+    .status.search-bar button.search-btn {
+      background: #3c3c3c;
+      color: #ccc;
+      border: 1px solid #555;
+      padding: 0 5px;
+      height: 18px;
+      line-height: 16px;
+      font-size: 11px;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    .status.search-bar button.search-btn:hover:not(:disabled) {
+      background: #4c4c4c;
+      color: #fff;
+    }
+    .status.search-bar button.search-btn:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+    .status.search-bar .search-msg {
+      margin-left: 0.4rem;
+      color: #aaa;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .pane-strip {
       display: flex;
@@ -76,10 +137,10 @@ export class WideboiApp extends LitElement {
     .toolbar {
       background: #252526;
       border-bottom: 1px solid #3c3c3c;
-      padding: 0.4rem 1rem;
+      padding: 0.4rem 0.6rem;
       display: flex;
       flex-wrap: wrap;
-      gap: 0.4rem 0.8rem;
+      gap: 0.4rem 0.5rem;
       align-items: center;
       white-space: nowrap;
       flex: none;
@@ -343,6 +404,8 @@ export class WideboiApp extends LitElement {
   @state() private displayWidths: Record<number, number> = {};
   @state() private followPTY = false;
   private pendingReveal = new Set<number>();
+  @state() private searchState: SearchState | null = null;
+  private pendingNav: 0 | 1 | -1 = 0;
   private cardFirst = 0;
   private cardViewportWidth = 0;
   private stripScrollLeft = 0;
@@ -364,8 +427,107 @@ export class WideboiApp extends LitElement {
     });
   }
 
+  public startSearch = () => {
+    if (!this.focusedPaneId) return;
+    const fp = this.panes.get(this.focusedPaneId);
+    const priorOffset = fp?.scrollOffset ?? 0;
+    const priorHistoryLen = fp?.scrollbackLen ?? 0;
+    const query = this.searchState?.query || '';
+    this.searchState = createSearchSession(this.focusedPaneId, priorOffset, priorHistoryLen, query);
+    this.pendingNav = 0;
+    void this.updateComplete.then(() => {
+      const input = this.shadowRoot?.querySelector<HTMLInputElement>('.search-input');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    });
+  };
+
+  public commitSearch() {
+    if (!this.searchState || !this.searchState.query || !this.client) return;
+    this.searchState = { ...this.searchState, status: 'searching' };
+    this.pendingNav = 0;
+    this.client.send({ case: 'historyRequest', value: { paneId: this.searchState.paneId } });
+  }
+
+  public navigateSearch(direction: 1 | -1) {
+    if (!this.searchState || !this.searchState.query || !this.client) return;
+    this.pendingNav = direction;
+    this.searchState = { ...this.searchState, status: 'searching' };
+    this.client.send({ case: 'historyRequest', value: { paneId: this.searchState.paneId } });
+  }
+
+  public acceptSearch() {
+    if (!this.searchState) return;
+    this.searchState = null;
+    this.pendingNav = 0;
+    this.focusedPane()?.focusInput();
+  }
+
+  public cancelSearch() {
+    if (!this.searchState || !this.client) return;
+    const cmd = cancelSearch(this.searchState);
+    this.client.send({
+      case: 'scroll',
+      value: {
+        paneId: cmd.paneId,
+        delta: 0,
+        setAbsolute: true,
+        offset: cmd.offset,
+        anchorHistory: cmd.anchorHistory,
+        historyLen: cmd.historyLen,
+      },
+    });
+    this.searchState = null;
+    this.pendingNav = 0;
+    this.focusedPane()?.focusInput();
+  }
+
+  public liveSearch() {
+    if (!this.searchState || !this.client) return;
+    const cmd = liveSearch(this.searchState);
+    this.client.send({
+      case: 'scroll',
+      value: {
+        paneId: cmd.paneId,
+        delta: 0,
+        setAbsolute: true,
+        offset: cmd.offset,
+        anchorHistory: cmd.anchorHistory,
+        historyLen: cmd.historyLen,
+      },
+    });
+    this.searchState = null;
+    this.pendingNav = 0;
+    this.focusedPane()?.focusInput();
+  }
+
+  private handleHistorySnapshot(snapshot: MsgHistorySnapshot) {
+    if (!this.searchState || this.searchState.paneId !== snapshot.paneId || !this.client) return;
+    const res = applySnapshot(this.searchState, snapshot, this.pendingNav);
+    this.pendingNav = 0;
+    this.searchState = res.nextState;
+    if (res.scrollMsg) {
+      this.client.send({
+        case: 'scroll',
+        value: {
+          paneId: res.scrollMsg.paneId,
+          delta: 0,
+          setAbsolute: true,
+          offset: res.scrollMsg.offset,
+          anchorHistory: res.scrollMsg.anchorHistory,
+          historyLen: res.scrollMsg.historyLen,
+        },
+      });
+    }
+  }
+
   private focusPane(paneID: number) {
     if (!this.activePanes.includes(paneID)) return;
+    if (this.searchState && this.searchState.paneId !== paneID) {
+      this.cancelSearch();
+    }
     if (paneID === this.focusedPaneId) {
       void this.updateComplete.then(() => {
         this.focusedPane()?.focusInput();
@@ -678,6 +840,10 @@ export class WideboiApp extends LitElement {
           }
           if (this.previousFocusId === closedId) this.previousFocusId = 0;
           if (this.pendingFocusId === closedId) this.pendingFocusId = 0;
+          if (this.searchState && this.searchState.paneId === closedId) {
+            this.searchState = null;
+            this.pendingNav = 0;
+          }
           if (this.pointer?.pane.paneId === closedId) this.pointer = undefined;
           if (this.selectedPane?.paneId === closedId) this.selectedPane = undefined;
           if (this.paneMetadata[closedId]) {
@@ -708,6 +874,10 @@ export class WideboiApp extends LitElement {
           this.focusPane(message.msg.value.paneId);
           break;
         }
+        case 'historySnapshot': {
+          this.handleHistorySnapshot(message.msg.value);
+          break;
+        }
       }
     };
 
@@ -717,6 +887,7 @@ export class WideboiApp extends LitElement {
   private setupKeyboard() {
     document.addEventListener('keydown', (e) => {
       if (!this.connected || !this.client) return;
+      const target = (e.composedPath()[0] || e.target) as HTMLElement;
       if (this.showHelp) {
         if (e.key === 'Escape' || e.key === '?' || (e.ctrlKey && e.key === 'c')) {
           this.closeHelp();
@@ -724,13 +895,50 @@ export class WideboiApp extends LitElement {
         }
         return;
       }
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement ||
-          e.target instanceof HTMLButtonElement) return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
+        e.preventDefault();
+        this.startSearch();
+        return;
+      }
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement ||
+          target instanceof HTMLButtonElement) return;
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
+
+      if (this.searchState) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          this.cancelSearch();
+          return;
+        }
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.acceptSearch();
+          return;
+        }
+        if (e.ctrlKey && (e.key === 'g' || e.code === 'KeyG')) {
+          e.preventDefault();
+          this.liveSearch();
+          return;
+        }
+        if (e.key === 'n' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();
+          this.navigateSearch(1);
+          return;
+        }
+        if (e.key === 'N' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();
+          this.navigateSearch(-1);
+          return;
+        }
+      }
 
       const action = this.keyRouter.handle(e);
       switch (action.type) {
         case 'ignore':
+          e.preventDefault();
+          return;
+        case 'search':
+          this.startSearch();
           e.preventDefault();
           return;
         case 'send_literal_key':
@@ -793,7 +1001,8 @@ export class WideboiApp extends LitElement {
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('paste', (e) => {
-      if (!this.connected || !this.client || e.target instanceof HTMLInputElement) return;
+      const target = (e.composedPath()[0] || e.target) as HTMLElement;
+      if (!this.connected || !this.client || target instanceof HTMLInputElement) return;
       const value = e.clipboardData?.getData('text/plain') || '';
       if (!sendTextInput(this.client, this.focusedPaneId, value)) return;
       this.pendingReveal.add(this.focusedPaneId);
@@ -802,7 +1011,8 @@ export class WideboiApp extends LitElement {
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('compositionend', (e) => {
-      if (!this.connected || !this.client || e.target instanceof HTMLInputElement) return;
+      const target = (e.composedPath()[0] || e.target) as HTMLElement;
+      if (!this.connected || !this.client || target instanceof HTMLInputElement) return;
       sendTextInput(this.client, this.focusedPaneId, (e as CompositionEvent).data);
     }, { signal: this.listeners?.signal });
   }
@@ -1053,6 +1263,7 @@ export class WideboiApp extends LitElement {
             <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
           </select>
           <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
+          <button class="claim-size-btn search-btn" @click=${this.startSearch} title="Search pane history (/ or Ctrl+F)">Search</button>
           <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
           <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
         </div>
@@ -1081,14 +1292,69 @@ export class WideboiApp extends LitElement {
           ${cards && layout?.hiddenLeft ? html`<span class="card-count left">+${layout.hiddenLeft}</span>` : ''}
           ${cards && layout?.hiddenRight ? html`<span class="card-count right">+${layout.hiddenRight}</span>` : ''}
         </div>
-        <div class="status">${(() => {
-          const fp = this.panes.get(this.focusedPaneId);
-          const focusScroll = (fp && fp.scrollOffset > 0) ? `focus: [${this.focusedPaneId} ★] [scroll +${fp.scrollOffset}${fp.unreadOutput ? ' ⤓' : ''}]  ` : '';
-          const items = this.columns.map(column =>
-            `[${column.paneId}] ${PaneStatus[this.paneStatuses[column.paneId] ?? PaneStatus.IDLE] || ''}`
-          ).join('  ');
-          return `${focusScroll}${items}`;
-        })()}</div>
+        ${this.searchState ? html`
+          <div class="status search-bar">
+            <span>search /</span>
+            <input
+              class="search-input"
+              type="text"
+              .value=${this.searchState.query}
+              @input=${(e: InputEvent) => {
+                if (this.searchState) {
+                  this.searchState = {
+                    ...this.searchState,
+                    query: (e.target as HTMLInputElement).value,
+                    status: 'input',
+                  };
+                }
+              }}
+              @keydown=${(e: KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  if (this.searchState?.status === 'input') {
+                    this.commitSearch();
+                  } else if (this.searchState?.matches.length) {
+                    this.navigateSearch(e.shiftKey ? -1 : 1);
+                  }
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  this.cancelSearch();
+                } else if (e.ctrlKey && (e.key === 'g' || e.code === 'KeyG')) {
+                  e.preventDefault();
+                  this.liveSearch();
+                }
+              }}
+              placeholder="find in history..."
+            />
+            <button
+              class="search-btn prev-btn"
+              ?disabled=${!this.searchState.matches.length}
+              @click=${() => this.navigateSearch(-1)}
+              title="Previous match (Shift+Enter or N)"
+            >▲ Prev</button>
+            <button
+              class="search-btn next-btn"
+              ?disabled=${!this.searchState.matches.length}
+              @click=${() => this.navigateSearch(1)}
+              title="Next match (Enter or n)"
+            >▼ Next</button>
+            <button class="search-btn keep-btn" @click=${() => this.acceptSearch()} title="Keep current scroll (Enter)">Keep</button>
+            <button class="search-btn restore-btn" @click=${() => this.cancelSearch()} title="Restore previous view (Esc)">Restore</button>
+            <button class="search-btn live-btn" @click=${() => this.liveSearch()} title="Jump to bottom (Ctrl+G)">Live</button>
+            <span class="search-msg">
+              ${formatSearchStatus(this.searchState)}
+            </span>
+          </div>
+        ` : html`
+          <div class="status">${(() => {
+            const fp = this.panes.get(this.focusedPaneId);
+            const focusScroll = (fp && fp.scrollOffset > 0) ? `focus: [${this.focusedPaneId} ★] [scroll +${fp.scrollOffset}${fp.unreadOutput ? ' ⤓' : ''}]  ` : '';
+            const items = this.columns.map(column =>
+              `[${column.paneId}] ${PaneStatus[this.paneStatuses[column.paneId] ?? PaneStatus.IDLE] || ''}`
+            ).join('  ');
+            return `${focusScroll}${items}`;
+          })()}</div>
+        `}
       </div>
       ${this.stats ? html`<pre class="stats-overlay">${this.statsText || 'stats: collecting…'}</pre>` : ''}
       ${this.showHelp ? html`
@@ -1115,6 +1381,7 @@ export class WideboiApp extends LitElement {
                 <tr><td><kbd>f</kbd></td><td>Toggle following PTY widths</td></tr>
                 <tr><td><kbd>y</kbd> / <kbd>u</kbd></td><td>Move column left / right</td></tr>
                 <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Scroll history down / up</td></tr>
+                <tr><td><kbd>/</kbd></td><td>Search focused pane history (Ctrl+F)</td></tr>
                 <tr><td><kbd>x</kbd></td><td>Kill focused pane</td></tr>
                 <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
                 <tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd></td><td>Cancel prefix mode</td></tr>

@@ -110,8 +110,7 @@ export class PanePainter {
 
   private draw() {
     const ctx = this.ctx;
-    ctx.fillStyle = '#1e1e1e';
-    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.clearRect(0, 0, this.width, this.height);
     const pane = this.pane;
     if (!pane) return;
     ctx.font = FONT;
