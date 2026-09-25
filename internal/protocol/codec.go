@@ -22,7 +22,16 @@ func MarshalClient(msg any) ([]byte, error) {
 	case MsgAttach:
 		env.Msg = &wirepb.ClientMessage_Attach{Attach: &wirepb.MsgAttach{Cols: int32(m.Cols), Rows: int32(m.Rows)}}
 	case MsgVerb:
-		env.Msg = &wirepb.ClientMessage_Verb{Verb: &wirepb.MsgVerb{Verb: wirepb.VerbType(m.Verb), PaneId: int32(m.PaneID)}}
+		widths := make(map[int32]int32, len(m.Widths))
+		for id, width := range m.Widths {
+			widths[int32(id)] = int32(width)
+		}
+		if m.Widths == nil {
+			widths = nil
+		}
+		env.Msg = &wirepb.ClientMessage_Verb{Verb: &wirepb.MsgVerb{Verb: wirepb.VerbType(m.Verb), PaneId: int32(m.PaneID), Widths: widths}}
+	case MsgSetPaneWidth:
+		env.Msg = &wirepb.ClientMessage_SetPaneWidth{SetPaneWidth: &wirepb.MsgSetPaneWidth{PaneId: int32(m.PaneID), Width: int32(m.Width)}}
 	case MsgMouse:
 		env.Msg = &wirepb.ClientMessage_Mouse{Mouse: &wirepb.MsgMouse{PaneId: int32(m.PaneID), Kind: wirepb.MouseKind(m.Kind), X: int32(m.X), Y: int32(m.Y), Button: int32(m.Button), Mod: int32(m.Mod)}}
 	case MsgInput:
@@ -68,7 +77,16 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_Attach:
 		return MsgAttach{Cols: int(m.Attach.Cols), Rows: int(m.Attach.Rows)}, nil
 	case *wirepb.ClientMessage_Verb:
-		return MsgVerb{Verb: VerbType(m.Verb.Verb), PaneID: int(m.Verb.PaneId)}, nil
+		var widths map[int]int
+		if m.Verb.Widths != nil {
+			widths = make(map[int]int, len(m.Verb.Widths))
+			for id, width := range m.Verb.Widths {
+				widths[int(id)] = int(width)
+			}
+		}
+		return MsgVerb{Verb: VerbType(m.Verb.Verb), PaneID: int(m.Verb.PaneId), Widths: widths}, nil
+	case *wirepb.ClientMessage_SetPaneWidth:
+		return MsgSetPaneWidth{PaneID: int(m.SetPaneWidth.PaneId), Width: int(m.SetPaneWidth.Width)}, nil
 	case *wirepb.ClientMessage_Mouse:
 		return MsgMouse{PaneID: int(m.Mouse.PaneId), Kind: MouseKind(m.Mouse.Kind), X: int(m.Mouse.X), Y: int(m.Mouse.Y), Button: int(m.Mouse.Button), Mod: int(m.Mouse.Mod)}, nil
 	case *wirepb.ClientMessage_Input:

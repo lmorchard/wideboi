@@ -8,10 +8,10 @@ async function connect(page) {
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v10';
+        this.protocol = 'wideboi.v11';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v10')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -76,6 +76,16 @@ test('narrow view shows one pane and sends draft text separately from Enter', as
   expect(afterEnter[1].value.key.code).toBe(13);
 });
 
+test('sending a mobile draft reveals the cursor after horizontal panning', async ({ page }) => {
+  await connect(page);
+  const viewport = page.locator('wideboi-pane').first().locator('.viewport');
+  await viewport.evaluate(el => { el.scrollLeft = el.scrollWidth; });
+  await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+  await page.getByRole('textbox', { name: 'Command or response' }).fill('x');
+  await page.getByRole('button', { name: 'Send text' }).click();
+  await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBe(0);
+});
+
 test('touch pans without terminal mouse messages and keyboard-sized view does not resize PTY', async ({ page }) => {
   await connect(page);
   const pane = page.locator('wideboi-pane').first();
@@ -102,7 +112,10 @@ test('touch pans without terminal mouse messages and keyboard-sized view does no
   await expect.poll(() => pane.evaluate(el => el.getBoundingClientRect().height)).toBeLessThan(420);
   await expect.poll(() => viewport.evaluate(el =>
     Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThan(2);
-  await viewport.evaluate(el => { el.scrollTop = 0; });
+  await viewport.evaluate(el => {
+    el.scrollTop = 0;
+    el.dispatchEvent(new Event('scroll'));
+  });
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(0);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 360 });

@@ -55,6 +55,12 @@ type Client struct {
 	cols               int
 	rows               int
 	strip              *layout.Strip
+	ptyWidths          map[int]int
+	displayWidths      map[int]int
+	panX               map[int]int
+	pendingReveal      map[int]bool
+	followPTY          bool
+	panStep            int
 	placements         []protocol.PlacementData
 	focusPaneID        int
 	pendingFocusPaneID int
@@ -113,16 +119,21 @@ func (c *Client) positionsLocked() map[int]int {
 // name it.
 func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Client {
 	return &Client{
-		transport:    tp,
-		cols:         cols,
-		rows:         rows,
-		strip:        layout.NewStrip(),
-		prefixLabel:  prefixLabel,
-		mirrors:      make(map[int]*PaneMirror),
-		paneUpdates:  make(map[int]protocol.MsgPaneUpdate),
-		cursorInfos:  make(map[int]cursorPos),
-		paneMetadata: make(map[int]protocol.MsgPaneMetadata),
-		theme:        DefaultTheme(),
+		transport:     tp,
+		cols:          cols,
+		rows:          rows,
+		strip:         layout.NewStrip(),
+		ptyWidths:     make(map[int]int),
+		displayWidths: make(map[int]int),
+		panX:          make(map[int]int),
+		pendingReveal: make(map[int]bool),
+		panStep:       10,
+		prefixLabel:   prefixLabel,
+		mirrors:       make(map[int]*PaneMirror),
+		paneUpdates:   make(map[int]protocol.MsgPaneUpdate),
+		cursorInfos:   make(map[int]cursorPos),
+		paneMetadata:  make(map[int]protocol.MsgPaneMetadata),
+		theme:         DefaultTheme(),
 	}
 }
 
@@ -131,6 +142,83 @@ func (c *Client) SetTheme(t Theme) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.theme = t
+}
+
+func (c *Client) SetPanStep(step int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if step > 0 {
+		c.panStep = step
+	}
+}
+
+func (c *Client) SetWidthPresets(presets []int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.strip.SetWidthPresets(presets)
+}
+
+func (c *Client) clampPanLocked(id int) {
+	c.panX[id] = max(0, min(c.panX[id], c.ptyWidths[id]-c.displayWidths[id]))
+}
+
+func (c *Client) computePlacementsLocked() []protocol.PlacementData {
+	ps := layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+	for i := range ps {
+		if ps[i].Kind == protocol.PlacementFull {
+			ps[i].Src = ps[i].Src.Add(image.Pt(c.panX[ps[i].PaneID], 0))
+		}
+	}
+	return ps
+}
+
+func (c *Client) revealCursorLocked(id int) {
+	info, ok := c.cursorInfos[id]
+	if !ok || c.displayWidths[id] <= 0 {
+		return
+	}
+	old := c.panX[id]
+	x := info.pt.X
+	if x < old {
+		c.panX[id] = x
+	}
+	if x >= old+c.displayWidths[id] {
+		c.panX[id] = x - c.displayWidths[id] + 1
+	}
+	c.clampPanLocked(id)
+	if old != c.panX[id] {
+		c.updatePlacementsLocked()
+	}
+}
+
+func (c *Client) PanFocused(delta int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	id := c.focusPaneID
+	if id == 0 {
+		return
+	}
+	old := c.panX[id]
+	c.panX[id] += delta * c.panStep
+	c.clampPanLocked(id)
+	if old != c.panX[id] {
+		c.updatePlacementsLocked()
+	}
+}
+
+func (c *Client) ToggleFollowPTY() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.followPTY = !c.followPTY
+	if !c.followPTY {
+		return
+	}
+	for id, width := range c.ptyWidths {
+		c.displayWidths[id] = width
+		c.strip.SetColumnWidth(id, width)
+		c.clampPanLocked(id)
+	}
+	c.updatePlacementsLocked()
 }
 
 func (c *Client) SetTransport(tp transport.Transport) {
@@ -190,13 +278,24 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		if c.focusPaneID == 0 && len(m.Columns) > 0 {
 			c.focusPaneID = m.Columns[0].PaneID
 		}
-		c.strip.SyncColumns(m.Columns, c.focusPaneID)
+		displayColumns := make([]protocol.ColumnData, len(m.Columns))
+		copy(displayColumns, m.Columns)
+		for i, col := range displayColumns {
+			c.ptyWidths[col.PaneID] = col.Width
+			if c.displayWidths[col.PaneID] == 0 || c.followPTY {
+				c.displayWidths[col.PaneID] = col.Width
+			}
+			col.Width = c.displayWidths[col.PaneID]
+			displayColumns[i] = col
+			c.clampPanLocked(col.PaneID)
+		}
+		c.strip.SyncColumns(displayColumns, c.focusPaneID)
 		c.focusPaneID = c.strip.FocusedPaneID()
 
 		// With no columns ComputePlacements returns nil, which is what
 		// an empty session should draw. The server sent its own
 		// placements for that case until #47; they were always nil.
-		c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+		c.placements = c.computePlacementsLocked()
 		c.paneStatuses = m.PaneStatuses
 		c.paneTitles = m.PaneTitles
 		if c.sel != nil && !c.selectionStillPlacedLocked() {
@@ -261,6 +360,14 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		for id := range c.paneMetadata {
 			if !live[id] {
 				delete(c.paneMetadata, id)
+			}
+		}
+		for id := range c.displayWidths {
+			if !live[id] {
+				delete(c.displayWidths, id)
+				delete(c.ptyWidths, id)
+				delete(c.panX, id)
+				delete(c.pendingReveal, id)
 			}
 		}
 
@@ -329,6 +436,10 @@ func (c *Client) applyPaneUpdateLocked(m protocol.MsgPaneUpdate) {
 	c.cursorInfos[m.PaneID] = cursorPos{
 		pt:      image.Pt(m.CursorX, m.CursorY),
 		visible: m.CursorVisible,
+	}
+	if c.pendingReveal[m.PaneID] {
+		delete(c.pendingReveal, m.PaneID)
+		c.revealCursorLocked(m.PaneID)
 	}
 	if c.mouseTracking == nil {
 		c.mouseTracking = make(map[int]bool)
@@ -599,7 +710,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			c.drawSliverLocked(dst, p, st)
 		default:
 			if mirror, ok := c.mirrors[p.PaneID]; ok {
-				compose.Blit(dst, mirror.Surface, p.Dst)
+				compose.BlitSource(dst, mirror.Surface, p.Src, p.Dst)
 			}
 			if pu, ok := c.paneUpdates[p.PaneID]; ok && pu.ScrollOffset > 0 && p.Dst.Dy() > 1 {
 				footerY := p.Dst.Max.Y - 1
@@ -1282,7 +1393,7 @@ func (c *Client) updatePlacementsLocked() {
 	prevTarget := c.placements
 	prevOnScreen := c.currentPlacementsLocked()
 
-	c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+	c.placements = c.computePlacementsLocked()
 
 	if c.focusPaneID != 0 && !placementsEqual(prevTarget, c.placements) {
 		c.motion = &motion{from: prevOnScreen, to: c.placements, total: motionFrames}
@@ -1314,7 +1425,7 @@ func (c *Client) ToggleLayout() {
 func (c *Client) setLayoutModeLocked(mode protocol.LayoutMode) {
 	c.layoutMode = mode
 	layout.ApplyMode(c.strip, mode)
-	c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+	c.placements = c.computePlacementsLocked()
 }
 
 // runeLen counts cells the way compose.WriteString consumes them: one
@@ -1366,6 +1477,35 @@ func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
 			c.focusPaneID = c.strip.FocusedPaneID()
 			c.updatePlacementsLocked()
 		}
+	case protocol.VerbCycleWidth, protocol.VerbGrowWidth, protocol.VerbShrinkWidth:
+		id := c.focusPaneID
+		if id == 0 {
+			break
+		}
+		c.followPTY = false
+		switch v {
+		case protocol.VerbCycleWidth:
+			c.strip.CycleWidth(id)
+		case protocol.VerbGrowWidth:
+			c.strip.GrowWidth(id, 10)
+		case protocol.VerbShrinkWidth:
+			c.strip.ShrinkWidth(id, 10)
+		}
+		for _, col := range c.strip.Columns() {
+			if col.PaneID == id {
+				c.displayWidths[id] = col.Width
+				break
+			}
+		}
+		c.clampPanLocked(id)
+		c.updatePlacementsLocked()
+		c.transport.SendClient(ctx, protocol.MsgSetPaneWidth{PaneID: id, Width: c.displayWidths[id]})
+	case protocol.VerbClaimSize:
+		widths := make(map[int]int, len(c.displayWidths))
+		for id, width := range c.displayWidths {
+			widths[id] = width
+		}
+		c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v, PaneID: c.focusPaneID, Widths: widths})
 	default:
 		focused := c.focusPaneID
 		c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v, PaneID: focused})
@@ -1423,6 +1563,8 @@ func (c *Client) FocusColumn(ctx context.Context, n int) {
 func (c *Client) SendKey(ctx context.Context, k uv.KeyEvent) {
 	c.mu.Lock()
 	focusedID := c.focusPaneID
+	c.pendingReveal[focusedID] = true
+	c.revealCursorLocked(focusedID)
 	c.mu.Unlock()
 
 	if focusedID > 0 {
@@ -1434,6 +1576,8 @@ func (c *Client) SendKey(ctx context.Context, k uv.KeyEvent) {
 func (c *Client) SendInput(ctx context.Context, data []byte) {
 	c.mu.Lock()
 	focusedID := c.focusPaneID
+	c.pendingReveal[focusedID] = true
+	c.revealCursorLocked(focusedID)
 	c.mu.Unlock()
 
 	if focusedID > 0 {
@@ -1462,7 +1606,7 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	// toward a layout that no longer exists. Snap instead.
 	c.motion = nil
 	if c.strip != nil && c.strip.ColCount() > 0 {
-		c.placements = layout.ToProtocol(c.strip.ComputePlacements(c.cols, c.rows))
+		c.placements = c.computePlacementsLocked()
 	}
 	c.mu.Unlock()
 

@@ -255,6 +255,9 @@ Multiple clients can attach to the same session simultaneously:
 - **Claiming Size:** Any client can assume size ownership:
   - In a terminal client: Press `Ctrl+b S`.
   - In the web client: Click **Fit to Window**.
+- **Per-pane width:** Each client keeps its own width and horizontal pan for each pane in both layouts. Terminal `Ctrl+b w`, `o`, and `p` adjust the focused width; `H` and `L` pan by `pan_step` cells (10 by default). The web toolbar edits the focused pane width. A viewer's width edit only changes its viewport.
+- **Owning PTY sizes:** A claim applies that client's per-pane widths to the PTYs. Further width edits by the owner resize the matching PTY immediately. A later claim transfers ownership. Terminal `Ctrl+b f` and the web **Follow PTY** control toggle whether all local widths track PTY width changes; manual width edits turn following off.
+- **Cursor reveal:** Background output leaves each pane's horizontal pan alone. Typing or pasting moves the pan just enough to show the cursor, including its resulting position.
 - **Disconnection:** When the current size owner disconnects, the session preserves its established dimensions.
 
 ---
@@ -480,7 +483,7 @@ You can remap control-mode action keys in the `[keys]` table:
 - **Quit Action:** The `quit` action cannot be unbound.
 - **Reserved Keys:** You cannot bind `i`, `m`, or `[` because their terminal control codes conflict with `Tab`, `Enter`, and `Escape`.
 - **No Collisions:** Two actions cannot share the same key.
-- **Automatic Repeats:** Every single letter `a` through `z` mapped to an action automatically receives a `Ctrl+<letter>` sticky repeat chord (except `toggle_cards`, where `Ctrl+c` remains an exit key).
+- **Automatic Repeats:** Lowercase letter bindings can receive a `Ctrl+<letter>` sticky repeat chord. Toggles and uppercase `H`/`L` pan bindings do not. Uppercase and lowercase keys are distinct in custom mappings.
 - **Fixed Keys:** Number keys `0` through `9` are fixed for column indexing and cannot be rebound.
 
 ### Command-Line Flags

@@ -458,10 +458,12 @@ export class WideboiApp extends LitElement {
   private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
   @state() private layoutMode: 'scroll' | 'cards' = 'cards';
+  @state() private displayWidths: Record<number, number> = {};
+  @state() private followPTY = false;
+  private pendingReveal = new Set<number>();
   @state() private mobile = this.narrowMedia.matches;
   @state() private mobileDraft = '';
   @state() private mobileCtrl = false;
-  @state() private cardWidth: number | null = null;
   @state() private searchState: SearchState | null = null;
   private pendingNav: 0 | 1 | -1 = 0;
   private cardFirst = 0;
@@ -611,6 +613,30 @@ export class WideboiApp extends LitElement {
   private focusedPane(): WideboiPane | undefined {
     return Array.from(this.paneStrip?.querySelectorAll('wideboi-pane') || [])
       .find(element => element.paneId === this.focusedPaneId);
+  }
+
+  private revealPendingCursor(paneID: number) {
+    if (!this.pendingReveal.delete(paneID)) return;
+    void this.updateComplete.then(() => Array.from(this.paneStrip.querySelectorAll('wideboi-pane'))
+      .find(pane => pane.paneId === paneID)?.revealCursor());
+  }
+
+  private editWidth(width: number) {
+    const id = this.focusedPaneId;
+    if (!id || !Number.isInteger(width) || width < 20 || width > 4096) return;
+    this.followPTY = false;
+    this.displayWidths = { ...this.displayWidths, [id]: width };
+    this.client?.send({ case: 'setPaneWidth', value: { paneId: id, width } });
+  }
+
+  private cycleWidth(verb: VerbType) {
+    const current = this.displayWidths[this.focusedPaneId];
+    if (!current) return;
+    let next = current;
+    if (verb === VerbType.CYCLE_WIDTH) next = [40, 60, 80].find(width => width > current) ?? 40;
+    if (verb === VerbType.GROW_WIDTH) next = Math.min(4096, current + 10);
+    if (verb === VerbType.SHRINK_WIDTH) next = Math.max(20, current - 10);
+    this.editWidth(next);
   }
 
   private revealFocus() {
@@ -771,6 +797,8 @@ export class WideboiApp extends LitElement {
     this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
     this.columns = [];
+    this.displayWidths = {};
+    this.pendingReveal.clear();
     this.activePanes = [];
     this.focusedPaneId = 0;
     this.previousFocusId = 0;
@@ -825,6 +853,14 @@ export class WideboiApp extends LitElement {
           const previous = this.panePositions();
           const previousFocus = this.focusedPaneId;
           this.focusedPaneId = reconcileFocus(this.columns, snapshot.columns, this.focusedPaneId);
+          const widths = { ...this.displayWidths };
+          for (const column of snapshot.columns) {
+            if (widths[column.paneId] === undefined || this.followPTY) widths[column.paneId] = column.width;
+          }
+          for (const id of Object.keys(widths)) {
+            if (!snapshot.columns.some(column => column.paneId === Number(id))) delete widths[Number(id)];
+          }
+          this.displayWidths = widths;
           this.columns = snapshot.columns;
           this.activePanes = snapshot.columns.map(c => c.paneId);
           if (this.focusedPaneId !== previousFocus) {
@@ -863,12 +899,14 @@ export class WideboiApp extends LitElement {
         case 'paneUpdate':
           this.panes.update(message.msg.value);
           this.requestUpdate();
+          this.revealPendingCursor(message.msg.value.paneId);
           break;
         case 'panePatch':
           if (!this.panes.patch(message.msg.value)) {
             client.send({ case: 'paneResync', value: { paneId: message.msg.value.paneId } });
           }
           this.requestUpdate();
+          this.revealPendingCursor(message.msg.value.paneId);
           break;
         case 'paneClosed': {
           const closedId = message.msg.value.paneId;
@@ -992,7 +1030,11 @@ export class WideboiApp extends LitElement {
           return;
         case 'send_literal_key':
         case 'forward':
-          if (sendKeyboardInput(this.client, this.focusedPaneId, e)) e.preventDefault();
+          if (sendKeyboardInput(this.client, this.focusedPaneId, e)) {
+            this.pendingReveal.add(this.focusedPaneId);
+            this.focusedPane()?.revealCursor();
+            e.preventDefault();
+          }
           return;
         case 'scroll':
           this.client.send({ case: 'scroll', value: { paneId: this.focusedPaneId, delta: action.delta } });
@@ -1000,6 +1042,15 @@ export class WideboiApp extends LitElement {
           return;
         case 'toggle_cards':
           this.setLayoutMode(this.layoutMode === 'cards' ? 'scroll' : 'cards');
+          e.preventDefault();
+          return;
+        case 'pan':
+          this.focusedPane()?.panCells(action.direction * 10);
+          e.preventDefault();
+          return;
+        case 'toggle_follow_pty':
+          this.followPTY = !this.followPTY;
+          if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width]));
           e.preventDefault();
           return;
         case 'focus_column':
@@ -1025,6 +1076,8 @@ export class WideboiApp extends LitElement {
                 (score > 0 && score === rank(this.paneStatuses[best]) && id < best) ? id : best;
             }, 0);
             if (target) this.focusPane(target);
+          } else if ([VerbType.CYCLE_WIDTH, VerbType.GROW_WIDTH, VerbType.SHRINK_WIDTH].includes(verb)) {
+            this.cycleWidth(verb);
           } else if (![VerbType.FOCUS_LEFT, VerbType.FOCUS_RIGHT, VerbType.SMART_JUMP, VerbType.FOCUS_LAST].includes(verb)) {
             this.client.send({ case: 'verb', value: { verb, paneId: this.focusedPaneId } });
           }
@@ -1038,6 +1091,8 @@ export class WideboiApp extends LitElement {
       if (!this.connected || !this.client || fromFormControl(e)) return;
       const value = e.clipboardData?.getData('text/plain') || '';
       if (!sendTextInput(this.client, this.focusedPaneId, value)) return;
+      this.pendingReveal.add(this.focusedPaneId);
+      this.focusedPane()?.revealCursor();
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
@@ -1194,7 +1249,10 @@ export class WideboiApp extends LitElement {
     if (!this.client || !this.connected || !this.focusedPaneId) return;
     const ctrl = this.mobileCtrl;
     const event = new KeyboardEvent('keydown', { key, code, ctrlKey: ctrl });
-    sendKeyboardInput(this.client, this.focusedPaneId, event);
+    if (sendKeyboardInput(this.client, this.focusedPaneId, event)) {
+      this.pendingReveal.add(this.focusedPaneId);
+      this.focusedPane()?.revealCursor();
+    }
     this.mobileCtrl = false;
   }
 
@@ -1205,13 +1263,19 @@ export class WideboiApp extends LitElement {
       e.preventDefault();
     } else if (e.ctrlKey || e.altKey || e.key === 'Escape' || e.key === 'Tab' ||
                (this.mobileDraft === '' && e.key.startsWith('Arrow'))) {
-      if (sendKeyboardInput(this.client, this.focusedPaneId, e)) e.preventDefault();
+      if (sendKeyboardInput(this.client, this.focusedPaneId, e)) {
+        this.pendingReveal.add(this.focusedPaneId);
+        this.focusedPane()?.revealCursor();
+        e.preventDefault();
+      }
     }
   }
 
   private sendMobileDraft() {
     if (!this.client || !this.connected || !this.mobileDraft) return;
     if (sendTextInput(this.client, this.focusedPaneId, this.mobileDraft)) {
+      this.pendingReveal.add(this.focusedPaneId);
+      this.focusedPane()?.revealCursor();
       this.mobileDraft = '';
       const input = this.renderRoot.querySelector<HTMLTextAreaElement>('.mobile-compose textarea');
       if (input) input.value = '';
@@ -1269,7 +1333,7 @@ export class WideboiApp extends LitElement {
     this.sendResizeIfChanged();
     this.client.send({
       case: 'verb',
-      value: { verb: VerbType.CLAIM_SIZE, paneId: this.focusedPaneId },
+      value: { verb: VerbType.CLAIM_SIZE, paneId: this.focusedPaneId, widths: this.displayWidths },
     });
   }
 
@@ -1295,15 +1359,7 @@ export class WideboiApp extends LitElement {
     });
   }
 
-  private handleCardWidthSelect(e: Event) {
-    const value = (e.target as HTMLSelectElement).value;
-    if (value === 'terminal') {
-      this.cardWidth = null;
-      return;
-    }
-    const width = Number(value);
-    if ([40, 60, 80].includes(width)) this.cardWidth = width;
-  }
+  private handleWidthInput(e: Event) { this.editWidth(Number((e.target as HTMLInputElement).value)); }
 
   private handleLayoutSelect(e: Event) {
     const mode = (e.target as HTMLSelectElement).value;
@@ -1316,7 +1372,7 @@ export class WideboiApp extends LitElement {
     const cards = this.layoutMode === 'cards' && !this.mobile;
     const displayWidth = (column: ColumnData) =>
       this.mobile ? Math.max(1, Math.floor(this.cardViewportWidth / this.cellWidth)) :
-      cards && this.cardWidth !== null ? Math.min(column.width, this.cardWidth) : column.width;
+      this.displayWidths[column.paneId] ?? column.width;
     const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column) }));
     const stackFocusId = this.stackFocusId === null ? null :
       (this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId);
@@ -1338,15 +1394,11 @@ export class WideboiApp extends LitElement {
             <option value="scroll" .selected=${!cards}>Scroll</option>
             <option value="cards" .selected=${cards}>Cards</option>
           </select>
-          ${cards ? html`
-            <label for="card-width">Card width:</label>
-            <select id="card-width" aria-label="Card width" @change=${this.handleCardWidthSelect}>
-              <option value="terminal" .selected=${this.cardWidth === null}>Terminal</option>
-              <option value="40" .selected=${this.cardWidth === 40}>40 cols</option>
-              <option value="60" .selected=${this.cardWidth === 60}>60 cols</option>
-              <option value="80" .selected=${this.cardWidth === 80}>80 cols</option>
-            </select>
-          ` : ''}
+          <label for="pane-width">Pane width:</label>
+          <input id="pane-width" aria-label="Pane width" type="number" min="20" max="4096"
+            .value=${String(this.displayWidths[this.focusedPaneId] ?? '')} @change=${this.handleWidthInput}>
+          <label><input type="checkbox" aria-label="Follow PTY widths" .checked=${this.followPTY}
+            @change=${() => { this.followPTY = !this.followPTY; if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width])); }}>Follow PTY</label>
           <label for="prefix-key">Prefix:</label>
           <select id="prefix-key" aria-label="Prefix key" @change=${this.handlePrefixChange}>
             <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
@@ -1507,6 +1559,8 @@ export class WideboiApp extends LitElement {
                 <tr><td><kbd>n</kbd></td><td>New column</td></tr>
                 <tr><td><kbd>w</kbd></td><td>Cycle column width</td></tr>
                 <tr><td><kbd>o</kbd> / <kbd>p</kbd></td><td>Shrink / grow column width</td></tr>
+                <tr><td><kbd>H</kbd> / <kbd>L</kbd></td><td>Pan focused pane left / right</td></tr>
+                <tr><td><kbd>f</kbd></td><td>Toggle following PTY widths</td></tr>
                 <tr><td><kbd>y</kbd> / <kbd>u</kbd></td><td>Move column left / right</td></tr>
                 <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Scroll history down / up</td></tr>
                 <tr><td><kbd>/</kbd></td><td>Search focused pane history (Ctrl+F)</td></tr>

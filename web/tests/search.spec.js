@@ -8,10 +8,10 @@ function setupMockSocket(page) {
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v10';
+        this.protocol = 'wideboi.v11';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v10')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }

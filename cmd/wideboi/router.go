@@ -33,6 +33,8 @@ const (
 	routeIgnore
 	routeVerb
 	routeScroll
+	routePan
+	routeToggleFollowPTY
 	routeQuit
 	routeDetach
 	// routeFocusColumn focuses a column by position. The client
@@ -57,6 +59,7 @@ type route struct {
 	Kind      routeKind
 	Verb      protocol.VerbType
 	Scroll    int
+	Pan       int
 	Column    int
 	Text      string
 	Backspace bool
@@ -197,6 +200,10 @@ func (r *router) fire(b keys.Binding, sticky bool) route {
 		return route{Kind: routeVerb, Verb: b.Verb}
 	case keys.ActionScroll:
 		return route{Kind: routeScroll, Scroll: b.Scroll}
+	case keys.ActionPan:
+		return route{Kind: routePan, Pan: b.Pan}
+	case keys.ActionToggleFollowPTY:
+		return route{Kind: routeToggleFollowPTY}
 	case keys.ActionFocusColumn:
 		// Digits have no ctrl form, so sticky is always false here.
 		return route{Kind: routeFocusColumn, Column: b.Column}

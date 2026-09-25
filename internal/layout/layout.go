@@ -29,8 +29,11 @@ type Column struct {
 // DefaultWidthPresets is the default cycle sequence when none is configured.
 var DefaultWidthPresets = []int{40, 60, 80}
 
-// MinColumnWidth is the smallest logical column width allowed when shrinking.
-const MinColumnWidth = 20
+// Column widths are bounded by the PTY protocol's accepted range.
+const (
+	MinColumnWidth = 20
+	MaxColumnWidth = 4096
+)
 
 // Strip manages a horizontal sequence of columns and viewport scrolling.
 type Strip struct {
@@ -56,12 +59,12 @@ func NewStrip() *Strip {
 }
 
 // SetWidthPresets configures the sequence of presets used by CycleWidth.
-// Values <= 0 are filtered out. If the resulting slice is empty,
+// Values outside the column width range are filtered out. If the resulting slice is empty,
 // DefaultWidthPresets is used.
 func (s *Strip) SetWidthPresets(presets []int) {
 	valid := make([]int, 0, len(presets))
 	for _, p := range presets {
-		if p >= MinColumnWidth {
+		if p >= MinColumnWidth && p <= MaxColumnWidth {
 			valid = append(valid, p)
 		}
 	}
@@ -187,7 +190,7 @@ func (s *Strip) GrowWidth(paneID int, delta int) {
 	}
 	for i := range s.columns {
 		if s.columns[i].PaneID == paneID {
-			s.columns[i].Width += delta
+			s.columns[i].Width = min(s.columns[i].Width+delta, MaxColumnWidth)
 			return
 		}
 	}
@@ -299,6 +302,21 @@ func (s *Strip) ColumnWidth(paneID int) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// SetColumnWidth changes one column's logical width. Callers decide whether
+// that column is a PTY size or a client-local display width.
+func (s *Strip) SetColumnWidth(paneID, width int) bool {
+	if width < MinColumnWidth || width > MaxColumnWidth {
+		return false
+	}
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			s.columns[i].Width = width
+			return true
+		}
+	}
+	return false
 }
 
 // PaneIDs returns every pane currently in the strip, whether or not

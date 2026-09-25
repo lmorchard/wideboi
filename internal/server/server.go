@@ -98,6 +98,10 @@ type Server struct {
 	// clientSizes records the last known window dimensions of each connected client.
 	clientSizes map[transport.Transport]protocol.MsgResize
 
+	// resizeGeneration orders snapshots that release s.mu while applying
+	// geometry. An older request must not overwrite a newer resize.
+	resizeGeneration uint64
+
 	// sizeOwner is the client whose viewport dimensions currently define
 	// the session PTY rows and columns. Initially set by the first client
 	// to attach. Viewers connect without altering session geometry. Any
@@ -599,6 +603,15 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			}
 		}
 
+	case protocol.MsgSetPaneWidth:
+		if tp == s.sizeOwner && m.Width >= layout.MinColumnWidth && m.Width <= layout.MaxColumnWidth {
+			if old, ok := s.strip.ColumnWidth(m.PaneID); ok && old != m.Width {
+				s.strip.SetColumnWidth(m.PaneID, m.Width)
+				s.resizePanesLocked()
+				needBroadcast = true
+			}
+		}
+
 	case protocol.MsgVerb:
 		switch m.Verb {
 		case protocol.VerbNewColumn:
@@ -607,14 +620,20 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			}
 			s.resizePanesLocked()
 		case protocol.VerbCycleWidth:
-			s.strip.CycleWidth(m.PaneID)
-			s.resizePanesLocked()
+			if tp == s.sizeOwner {
+				s.strip.CycleWidth(m.PaneID)
+				s.resizePanesLocked()
+			}
 		case protocol.VerbGrowWidth:
-			s.strip.GrowWidth(m.PaneID, 10)
-			s.resizePanesLocked()
+			if tp == s.sizeOwner {
+				s.strip.GrowWidth(m.PaneID, 10)
+				s.resizePanesLocked()
+			}
 		case protocol.VerbShrinkWidth:
-			s.strip.ShrinkWidth(m.PaneID, 10)
-			s.resizePanesLocked()
+			if tp == s.sizeOwner {
+				s.strip.ShrinkWidth(m.PaneID, 10)
+				s.resizePanesLocked()
+			}
 		case protocol.VerbMoveLeft:
 			s.strip.MoveLeft(m.PaneID)
 		case protocol.VerbMoveRight:
@@ -639,13 +658,32 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				s.updateDashboardLocked()
 			}
 		case protocol.VerbClaimSize:
+			valid := true
+			for id, width := range m.Widths {
+				if width < layout.MinColumnWidth || width > layout.MaxColumnWidth {
+					valid = false
+					break
+				}
+				if _, ok := s.strip.ColumnWidth(id); !ok {
+					valid = false
+					break
+				}
+			}
+			if !valid {
+				break
+			}
 			s.sizeOwner = tp
+			for id, width := range m.Widths {
+				s.strip.SetColumnWidth(id, width)
+			}
 			if sz, ok := s.clientSizes[tp]; ok && sz.Cols > 0 && sz.Rows > 0 {
 				oldCols, oldRows := s.cols, s.rows
 				s.cols, s.rows = sz.Cols, sz.Rows
-				if s.cols != oldCols || s.rows != oldRows {
+				if s.cols != oldCols || s.rows != oldRows || len(m.Widths) > 0 {
 					s.resizePanesLocked()
 				}
+			} else if len(m.Widths) > 0 {
+				s.resizePanesLocked()
 			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client
@@ -919,7 +957,7 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 // reader to reach EOF before reporting the exit. EOF normally follows
 // the reap within a read; it never comes while a background job still
 // holds the pty, and the exit must not wait on that job.
-const keptDrainCeiling = time.Second
+const keptDrainCeiling = 3 * time.Second
 
 // watchKeptPane records a kept pane's exit and leaves the pane in place,
 // screen intact, until something closes it.
@@ -1202,6 +1240,8 @@ func (s *Server) resizePanesLocked() {
 		w, h int
 	}
 
+	s.resizeGeneration++
+	generation := s.resizeGeneration
 	h := layout.AvailHeight(s.rows)
 	s.strip.SetAllColumnHeights(h)
 	var jobs []resizeJob
@@ -1224,7 +1264,7 @@ func (s *Server) resizePanesLocked() {
 	defer s.mu.Lock()
 
 	for _, j := range jobs {
-		if err := j.pane.Resize(j.w, j.h); err != nil {
+		if err := j.pane.ResizeOrdered(j.w, j.h, generation); err != nil {
 			j.pane.recordFailure(fmt.Errorf("resize to %dx%d: %w", j.w, j.h, err))
 		}
 	}

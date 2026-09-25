@@ -291,6 +291,28 @@ width_presets = [10, 80]
 	if err == nil {
 		t.Errorf("expected error for invalid width_presets, got nil")
 	}
+	_ = os.WriteFile(tomlPath, []byte("width_presets = [4097]\n"), 0600)
+	_, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err == nil {
+		t.Error("expected error for width preset above PTY limit")
+	}
+}
+
+func TestPanStepConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("pan_step = 17\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil))
+	if err != nil || cfg.PanStep != 17 {
+		t.Fatalf("pan_step = %d, err = %v", cfg.PanStep, err)
+	}
+	if err := os.WriteFile(path, []byte("pan_step = 0\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil)); err == nil {
+		t.Fatal("zero pan_step accepted")
+	}
 }
 
 // Mouse capture is on unless the file says otherwise. The field is a

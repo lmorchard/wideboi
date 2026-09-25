@@ -31,6 +31,7 @@ type Config struct {
 	PrefixLabel  string              `toml:"-"`
 	Shell        string              `toml:"shell"`
 	WidthPresets []int               `toml:"width_presets"`
+	PanStep      int                 `toml:"pan_step"`
 	Startup      []StartupPane       `toml:"startup"`
 	Theme        ThemeConfig         `toml:"theme"`
 	Keys         map[string]any      `toml:"keys"`
@@ -182,6 +183,7 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	// is the wideboi-specific environment override that takes precedence over TOML.
 	cfg := Config{
 		Layout:         "cards",
+		PanStep:        10,
 		Prefix:         "ctrl+b",
 		Socket:         DefaultSocketPath(),
 		Session:        "default",
@@ -209,6 +211,12 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		var fileCfg Config
 		if err := toml.Unmarshal(data, &fileCfg); err != nil {
 			return fmt.Errorf("parsing config file %q: %w", cfgFile, err)
+		}
+		var panSetting struct {
+			PanStep *int `toml:"pan_step"`
+		}
+		if err := toml.Unmarshal(data, &panSetting); err != nil {
+			return err
 		}
 		if fileCfg.Layout != "" {
 			cfg.Layout = fileCfg.Layout
@@ -250,6 +258,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		}
 		if len(fileCfg.WidthPresets) > 0 {
 			cfg.WidthPresets = fileCfg.WidthPresets
+		}
+		if panSetting.PanStep != nil {
+			cfg.PanStep = *panSetting.PanStep
 		}
 		if fileCfg.Startup != nil {
 			cfg.Startup = fileCfg.Startup
@@ -405,9 +416,12 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 
 	// Width presets
+	if cfg.PanStep <= 0 {
+		return Config{}, nil, fmt.Errorf("pan_step: must be positive")
+	}
 	for _, p := range cfg.WidthPresets {
-		if p < 20 {
-			return Config{}, nil, fmt.Errorf("width_presets: invalid preset %d (must be at least 20)", p)
+		if p < 20 || p > maxStartupWidth {
+			return Config{}, nil, fmt.Errorf("width_presets: invalid preset %d (must be between 20 and %d)", p, maxStartupWidth)
 		}
 	}
 	for i, pane := range cfg.Startup {

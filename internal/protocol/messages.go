@@ -199,6 +199,16 @@ type MsgAttach struct {
 type MsgVerb struct {
 	Verb   VerbType
 	PaneID int
+	// Widths is the claiming client's desired PTY width for each live pane.
+	// Only VerbClaimSize uses it; omitted panes keep their current width.
+	Widths map[int]int
+}
+
+// MsgSetPaneWidth applies an exact width only when sent by the size owner.
+// Viewers edit their own viewport without changing session PTYs.
+type MsgSetPaneWidth struct {
+	PaneID int
+	Width  int
 }
 
 // MouseKind identifies the kind of mouse event forwarded to a pane.

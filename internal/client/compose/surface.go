@@ -27,6 +27,41 @@ func Blit(dst uv.Screen, src Surface, dest image.Rectangle) {
 	src.Draw(dst, dest)
 }
 
+// BlitSource copies a selected source rectangle into dest. Cells outside the
+// source buffer are blank, which lets a local viewport be wider than its PTY.
+// A wide glyph cut by either edge is blank rather than half-rendered.
+func BlitSource(dst uv.Screen, src Surface, area, dest image.Rectangle) {
+	blank := uv.NewCell(dst.WidthMethod(), " ")
+	for y := dest.Min.Y; y < dest.Max.Y; y++ {
+		sy := area.Min.Y + y - dest.Min.Y
+		for x := dest.Min.X; x < dest.Max.X; x++ {
+			sx := area.Min.X + x - dest.Min.X
+			if sx < 0 || sy < 0 || sx >= src.Width() || sy >= src.Height() {
+				dst.SetCell(x, y, blank)
+				continue
+			}
+			cell := src.CellAt(sx, sy)
+			if cell == nil {
+				dst.SetCell(x, y, blank)
+				continue
+			}
+			if sx > 0 {
+				if prev := src.CellAt(sx-1, sy); prev != nil && prev.Width > 1 {
+					if sx == area.Min.X {
+						dst.SetCell(x, y, blank)
+					}
+					continue
+				}
+			}
+			if cell.Width > 1 && (x+cell.Width > dest.Max.X || sx+cell.Width > src.Width()) {
+				dst.SetCell(x, y, blank)
+				continue
+			}
+			dst.SetCell(x, y, cell)
+		}
+	}
+}
+
 // WriteString writes plain unstyled text into s starting at (x, y).
 // Delegates to WriteStyled with a zero style.
 //
