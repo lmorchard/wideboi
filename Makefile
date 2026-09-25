@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test web-test web-build proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check traffic print-go-version
+.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check traffic print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -58,6 +58,15 @@ quick: fmt-check lint seam-check test web-test
 
 test: web/dist
 	go test ./...
+
+# linux-test runs the Go tests in a Linux container at the go.mod pin.
+# Sockets and ptys behave differently there -- a peer hanging up reads
+# ECONNRESET rather than EOF, and a pty can outlive its session leader --
+# so socket- and pty-lifecycle changes want a run here before pushing
+# (docs/LESSONS.md). LINUX_TEST_ARGS narrows it, e.g. -run TestWait.
+linux-test: web/dist
+	docker run --rm -v "$(CURDIR)":/src -w /src golang:$$($(MAKE) -s print-go-version) \
+		go test -count=1 $(LINUX_TEST_ARGS) ./...
 
 web-test: web/dist
 	cd web && npm test

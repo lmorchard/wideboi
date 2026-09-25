@@ -41,6 +41,37 @@ const (
 	StatusFailed
 )
 
+var paneStatusNames = [...]string{
+	StatusIdle:       "idle",
+	StatusWorking:    "working",
+	StatusNeedsInput: "needs_input",
+	StatusDone:       "done",
+	StatusFailed:     "failed",
+}
+
+// String returns the status's name, as status --json and the status
+// table show it.
+func (s PaneStatus) String() string {
+	if s >= 0 && int(s) < len(paneStatusNames) {
+		return paneStatusNames[s]
+	}
+	return "idle"
+}
+
+// MarshalText makes JSON carry the name rather than the enum's integer.
+func (s PaneStatus) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
+
+// UnmarshalText is MarshalText's inverse; an unknown name is an error.
+func (s *PaneStatus) UnmarshalText(b []byte) error {
+	for i, name := range paneStatusNames {
+		if name == string(b) {
+			*s = PaneStatus(i)
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown pane status %q", b)
+}
+
 // Glyph returns a single-character representation of the status for display.
 func (s PaneStatus) Glyph() string {
 	switch s {
@@ -59,9 +90,9 @@ func (s PaneStatus) Glyph() string {
 
 // ColumnData describes a column's logical width and height.
 type ColumnData struct {
-	PaneID int
-	Width  int
-	Height int
+	PaneID int `json:"pane_id"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
 }
 
 // CellData carries one cell's text content, width, and style across transport.
@@ -302,6 +333,10 @@ type MsgPaneMetadata struct {
 	PaneID   int               `json:"pane_id"`
 	CWD      string            `json:"cwd"`
 	UserVars map[string]string `json:"user_vars"`
+	// Exited is true once a kept pane's process has exited (split --keep);
+	// ExitCode is meaningful only then.
+	Exited   bool `json:"exited"`
+	ExitCode int  `json:"exit_code"`
 }
 
 // MsgFocusPane instructs the client to switch focus to a specific pane.
@@ -395,6 +430,9 @@ type MsgSplitRequest struct {
 	Command     string `json:"command"`
 	Cwd         string `json:"cwd"`
 	AfterPaneID int    `json:"after_pane_id"`
+	// Keep retains the pane, screen and exit code intact, after its
+	// process exits, until it is closed.
+	Keep bool `json:"keep"`
 }
 
 // MsgSplitResponse returns the ID of the created pane or an error.
@@ -438,4 +476,18 @@ type MsgClosePaneRequest struct {
 type MsgClosePaneResponse struct {
 	PaneID int    `json:"pane_id"`
 	Error  string `json:"error,omitempty"`
+}
+
+// MsgWaitRequest asks to be told when a pane's process exits. The server
+// answers once, with MsgWaitResponse, when that happens.
+type MsgWaitRequest struct {
+	PaneID int `json:"pane_id"`
+}
+
+// MsgWaitResponse carries the exit code of the pane's process (128+signal
+// for a signal death), or an error if it cannot be known.
+type MsgWaitResponse struct {
+	PaneID   int    `json:"pane_id"`
+	ExitCode int    `json:"exit_code"`
+	Error    string `json:"error,omitempty"`
 }

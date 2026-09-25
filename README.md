@@ -62,19 +62,23 @@ that session with a build that matches it, or start a new one alongside with
 
 Sessions can be controlled headlessly by scripts and agents using pane IDs without attaching an interactive client:
 
-    # Create a pane running a command and capture its assigned pane ID
-    PANE_ID=$(./bin/wideboi split make test)
+    # Run a command in a new pane (starting the session if none is running);
+    # --keep holds the pane, screen and exit code, after the command exits
+    PANE_ID=$(./bin/wideboi split --keep make test)
 
-    # Send input text (use -e or --enter to append Enter)
-    ./bin/wideboi send $PANE_ID "git status" -e
+    # Block until it exits, and exit with its exit code (124 on --timeout)
+    ./bin/wideboi wait $PANE_ID
 
     # Read current visible terminal text (-S includes scrollback, -n limits lines)
     ./bin/wideboi capture $PANE_ID
 
+    # Send input text (use -e or --enter to append Enter; quote text with spaces)
+    ./bin/wideboi send $PANE_ID "git status" -e
+
     # Close the pane using hangup semantics
     ./bin/wideboi close $PANE_ID
 
-All control subcommands accept `-L <name>` and `-s <path>` to target a specific session, return deterministic exit codes (0 on success, 1 on error), and report errors on stderr if a pane ID does not exist or the server is unreachable. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.
+All control subcommands accept `-L <name>` and `-s <path>` to target a specific session and report errors on stderr if a pane ID does not exist or the server is unreachable. `wait` exits with the pane process's code; the others exit 0 on success and 1 on error. `status --json` reports pane statuses by name (`idle`, `working`, `needs_input`, `done`, `failed`) and, for kept panes, `exited` and `exit_code`. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.
 
 ## Keys
 

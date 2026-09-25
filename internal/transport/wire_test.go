@@ -176,7 +176,7 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 			ChangedRows: []protocol.PaneRow{{Y: 0, Cells: protocol.LineData{{Content: "世", Width: 2}}}}},
 		protocol.MsgPaneResync{PaneID: 1},
 		protocol.MsgPaneClosed{PaneID: 4, ExitCode: 130},
-		protocol.MsgSplitRequest{Command: "ls", Cwd: "/tmp", AfterPaneID: 2},
+		protocol.MsgSplitRequest{Command: "ls", Cwd: "/tmp", AfterPaneID: 2, Keep: true},
 		protocol.MsgSplitResponse{PaneID: 3, Error: "something"},
 		protocol.MsgSendInputRequest{PaneID: 1, Data: []byte("date\n")},
 		protocol.MsgSendInputResponse{PaneID: 1, Error: ""},
@@ -184,6 +184,8 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgCaptureResponse{PaneID: 2, Text: "hello\nworld\n", Error: ""},
 		protocol.MsgClosePaneRequest{PaneID: 4},
 		protocol.MsgClosePaneResponse{PaneID: 4, Error: ""},
+		protocol.MsgWaitRequest{PaneID: 5},
+		protocol.MsgWaitResponse{PaneID: 5, ExitCode: 143, Error: "gone"},
 	}
 
 	for _, msg := range msgs {

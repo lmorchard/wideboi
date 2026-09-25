@@ -62,6 +62,12 @@ type Pane struct {
 
 	isDashboard bool
 
+	// exited and exitCode record a kept pane's exit (split --keep); see
+	// Server.watchKeptPane.
+	exitMu   sync.Mutex
+	exited   bool
+	exitCode int
+
 	failMu   sync.Mutex
 	failures []error
 }
@@ -266,7 +272,9 @@ func (p *Pane) Resize(cols, rows int) error {
 	}
 	p.cols, p.rows = cols, rows
 	p.grid.Resize(cols, rows)
-	if p.pty != nil {
+	// An exited kept pane still reflows its screen, but there is no
+	// child left to tell.
+	if _, exited := p.ExitStatus(); p.pty != nil && !exited {
 		return p.pty.Resize(cols, rows)
 	}
 	return nil
@@ -317,8 +325,41 @@ func (p *Pane) CWD() string { return p.grid.CWD() }
 // UserVars reports the pane's agent metadata set via OSC 1337.
 func (p *Pane) UserVars() map[string]string { return p.grid.UserVars() }
 
-// Status reports the current agent status of the pane.
-func (p *Pane) Status() protocol.PaneStatus { return p.grid.Status() }
+// Status reports the current agent status of the pane. A kept pane whose
+// process has exited reports done or failed by its exit code, whatever
+// its output last said.
+func (p *Pane) Status() protocol.PaneStatus {
+	if code, exited := p.ExitStatus(); exited {
+		if code == 0 {
+			return protocol.StatusDone
+		}
+		return protocol.StatusFailed
+	}
+	return p.grid.Status()
+}
+
+// ExitStatus reports whether a kept pane's process has exited, and its
+// exit code. Unkept panes never report exited: they are removed instead.
+func (p *Pane) ExitStatus() (code int, exited bool) {
+	p.exitMu.Lock()
+	defer p.exitMu.Unlock()
+	return p.exitCode, p.exited
+}
+
+func (p *Pane) markExited(code int) {
+	p.exitMu.Lock()
+	p.exited, p.exitCode = true, code
+	p.exitMu.Unlock()
+}
+
+// reapedExitCode is the child's exit status if it has been reaped.
+// Custom panes have no child and so no status.
+func (p *Pane) reapedExitCode() (int, bool) {
+	if p.pty == nil {
+		return 0, false
+	}
+	return p.pty.ExitCode()
+}
 
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport at the
 // pane's current scroll offset.

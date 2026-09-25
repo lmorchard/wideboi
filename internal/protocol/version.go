@@ -24,4 +24,5 @@ package protocol
 // 8 adds agent-friendly pane control requests and responses (split, send, capture, close) (#198).
 // 9 adds client-requested plain-text history snapshots and absolute
 // per-client scroll requests for local search (#183).
-const Version uint32 = 9
+// 10 adds split keep, pane exit metadata, and wait requests/responses (#227).
+const Version uint32 = 10

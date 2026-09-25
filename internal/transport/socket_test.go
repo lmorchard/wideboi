@@ -3,6 +3,7 @@ package transport_test
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -290,5 +291,42 @@ func TestServerWritePumpSkipsAnUnencodableMessage(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("the message after an unencodable one never arrived; the write pump died")
+	}
+}
+
+// TestServerSocketConnDrain pins Drain: it returns true once everything
+// queued has been written -- so a Close after it loses nothing -- and
+// false, within its ceiling, when the pump cannot write.
+func TestServerSocketConnDrain(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer theirs.Close()
+	sc := transport.NewServerSocketConn(ours, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sc.RunPumps(ctx)
+
+	// Nothing reads theirs yet, so the pipe write blocks: not drained.
+	sc.SendServer(ctx, protocol.MsgPaneClosed{PaneID: 1})
+	if sc.Drain(100 * time.Millisecond) {
+		t.Fatal("Drain reported drained while the write was blocked")
+	}
+
+	// A reader lets the frame through; Drain then succeeds, and a Close
+	// right after cannot cut the frame off.
+	got := make(chan error, 1)
+	go func() {
+		_, err := io.ReadFull(theirs, make([]byte, 4))
+		got <- err
+		_, _ = io.Copy(io.Discard, theirs)
+	}()
+	if !sc.Drain(2 * time.Second) {
+		t.Fatal("Drain did not report drained once the peer read")
+	}
+	if err := <-got; err != nil {
+		t.Fatalf("peer read: %v", err)
+	}
+	_ = sc.Close()
+	if sc.Drain(time.Second) {
+		t.Error("Drain reported drained on a closed connection")
 	}
 }

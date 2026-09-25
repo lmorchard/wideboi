@@ -23,10 +23,26 @@ type Pane struct {
 	// done closes when the child has been reaped. Exactly one goroutine
 	// ever calls Wait, because a second call fails.
 	done chan struct{}
+
+	// exitCode is written by the reaper before it closes done; the
+	// close publishes it. See ExitCode.
+	exitCode int
 }
 
 // Done returns a channel closed when the pane's child process exits.
 func (p *Pane) Done() <-chan struct{} { return p.done }
+
+// ExitCode reports the child's exit status once it has been reaped: its
+// exit code, or 128+signal if a signal killed it, as a shell reports it.
+// reaped is false while the child is still running.
+func (p *Pane) ExitCode() (code int, reaped bool) {
+	select {
+	case <-p.done:
+		return p.exitCode, true
+	default:
+		return 0, false
+	}
+}
 
 // PID returns the root process PID of the spawned child.
 func (p *Pane) PID() int {
@@ -90,10 +106,22 @@ func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
 	// again itself.
 	go func() {
 		_ = cmd.Wait()
+		p.exitCode = exitStatus(cmd.ProcessState)
 		close(p.done)
 	}()
 
 	return p, nil
+}
+
+// exitStatus renders a reaped child's status the way a shell's $? does.
+func exitStatus(ps *os.ProcessState) int {
+	if ps == nil {
+		return -1
+	}
+	if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return ps.ExitCode()
 }
 
 // Resize reports a new logical size to the child.

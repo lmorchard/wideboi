@@ -421,3 +421,25 @@ over a sink's own WebSocket instead, and it waits out the idle flip around
 each workload. A render timed under heavy output also includes waiting on the
 emulator's write lock. Check its CPU profile before blaming rendering. See
 `docs/partial-pane-updates.md` (#179).
+
+## A process exit and its pty EOF are separate events
+
+`split --keep` (#227) keeps a pane after its process exits. The server
+normally notices an exit when the pty reader hits EOF. But the exit *code*
+only exists after the reap (`ptyx.Pane.ExitCode`), and the two events have
+no fixed order:
+
+- A background job holding the pty keeps EOF away after the shell has been
+  reaped. On Linux that's real; macOS hangs up the pty when the session
+  leader exits.
+- The reap can beat the reader to the child's last bytes. So a pane that
+  reports "exited" at the reap lets `wait` then `capture` miss the end of
+  the output.
+
+A kept pane therefore reports its exit after the reap *and* the drain to
+EOF, with `keptDrainCeiling` bounding the second. The ordering test never
+failed before the fix, because the window is sub-millisecond, so the rule
+rests on the argument, not the test. Keep it if you touch
+`watchKeptPane`. `make linux-test` runs the Go suite where pty behaviour
+differs.
+

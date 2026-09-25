@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -320,5 +321,19 @@ func TestParseCLIPaneControl(t *testing.T) {
 		if tt.wantSession != "" && opts.flags.Session != tt.wantSession {
 			t.Errorf("parseCLI(%v).flags.Session = %q, want %q", tt.args, opts.flags.Session, tt.wantSession)
 		}
+	}
+}
+
+// TestParseCLIGlobalArgs pins what split hands a server it auto-spawns:
+// the global flags before the subcommand, and nothing of the
+// subcommand's own.
+func TestParseCLIGlobalArgs(t *testing.T) {
+	opts, err := parseCLI([]string{"-L", "work", "--disable-auto-cleanup", "split", "--keep", "make", "-j4"})
+	if err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	want := []string{"-L", "work", "--disable-auto-cleanup"}
+	if strings.Join(opts.globalArgs, " ") != strings.Join(want, " ") {
+		t.Errorf("globalArgs = %q, want %q", opts.globalArgs, want)
 	}
 }

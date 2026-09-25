@@ -148,3 +148,41 @@ func TestWriteBoundedDeadline(t *testing.T) {
 		t.Fatalf("write returned in %v, expected ~50ms", elapsed)
 	}
 }
+
+// TestExitCode pins the status a shell would report: the child's exit
+// code, 128+signal for a signal death, and nothing before the reap.
+func TestExitCode(t *testing.T) {
+	cases := []struct {
+		script string
+		want   int
+	}{
+		{"exit 0", 0},
+		{"exit 3", 3},
+		{"kill -TERM $$", 128 + int(syscall.SIGTERM)},
+	}
+	for _, c := range cases {
+		p, err := ptyx.Spawn([]string{"/bin/sh", "-c", c.script}, 40, 10, t.TempDir())
+		if err != nil {
+			t.Fatalf("Spawn(%q): %v", c.script, err)
+		}
+		select {
+		case <-p.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q: child never reaped", c.script)
+		}
+		code, reaped := p.ExitCode()
+		if !reaped || code != c.want {
+			t.Errorf("%q: ExitCode() = (%d, %v), want (%d, true)", c.script, code, reaped, c.want)
+		}
+		p.Hangup(testGrace)
+	}
+
+	p, err := ptyx.Spawn([]string{"/bin/sh", "-c", "read x"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, reaped := p.ExitCode(); reaped {
+		t.Error("ExitCode() reported reaped for a child still blocked in read")
+	}
+	p.Hangup(2 * time.Second)
+}

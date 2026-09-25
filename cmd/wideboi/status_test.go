@@ -161,6 +161,16 @@ func TestRunStatusJSON(t *testing.T) {
 			t.Errorf("JSON output missing top-level key %q", key)
 		}
 	}
+	// Statuses are names, not the enum's integers (#227).
+	if got := raw["pane_statuses"].(map[string]any)["3"]; got != "idle" {
+		t.Errorf("pane_statuses[3] = %#v, want \"idle\"", got)
+	}
+	col := raw["columns"].([]any)[0].(map[string]any)
+	for _, key := range []string{"pane_id", "width", "height"} {
+		if _, ok := col[key]; !ok {
+			t.Errorf("columns[0] missing key %q: %+v", key, col)
+		}
+	}
 	paneMeta := raw["pane_metadata"].(map[string]any)["3"].(map[string]any)
 	for _, key := range []string{"pane_id", "cwd", "user_vars"} {
 		if _, ok := paneMeta[key]; !ok {
