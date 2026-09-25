@@ -8,10 +8,10 @@ async function connect(page) {
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v11';
+        this.protocol = 'wideboi.v12';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -50,7 +50,7 @@ async function sent(page) {
   });
 }
 
-test('narrow view shows one pane and sends draft text separately from Enter', async ({ page }) => {
+test('narrow view shows one pane and sends draft text followed by Enter', async ({ page }) => {
   await connect(page);
   await expect(page.getByRole('combobox', { name: 'Mobile pane' })).toBeVisible();
   await page.setViewportSize({ width: 320, height: 700 });
@@ -67,13 +67,11 @@ test('narrow view shows one pane and sends draft text separately from Enter', as
   await page.getByRole('button', { name: 'Send text' }).click();
   const afterSend = await sent(page);
   const inputs = afterSend.filter(msg => msg.case === 'input');
-  expect(inputs).toHaveLength(1);
+  expect(inputs).toHaveLength(2);
   expect(inputs[0].value.paneId).toBe(2);
   expect(new TextDecoder().decode(inputs[0].value.data)).toBe('echo hello');
-  await page.getByRole('button', { name: 'Enter key' }).click();
-  const afterEnter = (await sent(page)).filter(msg => msg.case === 'input');
-  expect(afterEnter).toHaveLength(2);
-  expect(afterEnter[1].value.key.code).toBe(13);
+  expect(inputs[1].value.paneId).toBe(2);
+  expect(inputs[1].value.key.code).toBe(13);
 });
 
 test('sending a mobile draft reveals the cursor after horizontal panning', async ({ page }) => {
@@ -148,3 +146,114 @@ test('terminal key buttons work and composing draft text stays in the draft', as
   expect(inputs[1].value.key.mod & 4).toBe(4);
   await expect(page.getByRole('button', { name: 'Control modifier' })).toHaveAttribute('aria-pressed', 'false');
 });
+
+test('Ctrl+R shortcut can be sent from on-screen controls', async ({ page }) => {
+  await connect(page);
+  await page.getByRole('button', { name: 'Control modifier' }).click();
+  await expect(page.getByRole('button', { name: 'R key', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'R key', exact: true }).click();
+  const inputs = (await sent(page)).filter(msg => msg.case === 'input');
+  expect(inputs).toHaveLength(1);
+  expect(inputs[0].value.key.code).toBe(114);
+  expect(inputs[0].value.key.mod & 4).toBe(4);
+  await expect(page.getByRole('button', { name: 'Control modifier' })).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('direct input mode forwards keystrokes immediately to the terminal', async ({ page }) => {
+  await connect(page);
+  await page.getByRole('button', { name: 'Direct input mode' }).click();
+  const directInput = page.getByRole('textbox', { name: 'Direct terminal input' });
+  await expect(directInput).toBeVisible();
+  await directInput.press('q');
+  const inputs = (await sent(page)).filter(msg => msg.case === 'input');
+  expect(inputs).toHaveLength(1);
+  expect(inputs[0].value.key.code).toBe(113);
+  await page.getByRole('button', { name: 'Draft mode' }).click();
+  await expect(page.getByRole('textbox', { name: 'Command or response' })).toBeVisible();
+});
+
+test('macro panel opens, shows macros with Enter indicators, and executes ordered steps without implicit Enter', async ({ page }) => {
+  await connect(page);
+  await page.getByRole('button', { name: 'Macros panel' }).click();
+  const sheet = page.getByRole('region', { name: 'Macros list' });
+  await expect(sheet).toBeVisible();
+
+  const gitStatusBtn = page.getByRole('button', { name: 'Run macro Git Status' });
+  await expect(gitStatusBtn).toBeVisible();
+  await expect(gitStatusBtn.locator('.mobile-macro-enter')).toHaveText('↵');
+
+  const historySearchBtn = page.getByRole('button', { name: 'Run macro History Search' });
+  await expect(historySearchBtn).toBeVisible();
+  await expect(historySearchBtn.locator('.mobile-macro-enter')).toHaveCount(0);
+
+  await gitStatusBtn.click();
+  await expect(sheet).toBeHidden();
+
+  const inputs = (await sent(page)).filter(msg => msg.case === 'input');
+  expect(inputs).toHaveLength(2);
+  expect(inputs[0].value.paneId).toBe(1);
+  expect(new TextDecoder().decode(inputs[0].value.data)).toBe('git status');
+  expect(inputs[1].value.paneId).toBe(1);
+  expect(inputs[1].value.key.code).toBe(13);
+});
+
+test('macro editor allows editing and saving macros to server', async ({ page }) => {
+  await connect(page);
+  await page.getByRole('button', { name: 'Macros panel' }).click();
+  await page.getByRole('button', { name: 'Edit macros' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Configure Macros' });
+  await expect(dialog).toBeVisible();
+
+  await dialog.locator('input[name="macroName"]').fill('Test Echo');
+  await dialog.locator('input[name="macroVal"]').fill('echo ok');
+  await dialog.getByRole('button', { name: 'Add Macro' }).click();
+
+  await expect(dialog.getByText('Test Echo ↵')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Save to Server' }).click();
+  await expect(dialog).toBeHidden();
+
+  const saveMsgs = (await sent(page)).filter(msg => msg.case === 'saveMacros');
+  expect(saveMsgs).toHaveLength(1);
+  expect(saveMsgs[0].value.macros.some(m => m.name === 'Test Echo')).toBe(true);
+});
+
+test('macro editor allows building multi-step sequences', async ({ page }) => {
+  await connect(page);
+  await page.getByRole('button', { name: 'Macros panel' }).click();
+  await page.getByRole('button', { name: 'Edit macros' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Configure Macros' });
+  await expect(dialog).toBeVisible();
+
+  await dialog.locator('input[name="macroName"]').fill('Vim Force Quit');
+
+  await dialog.locator('select[name="macroType"]').selectOption('key');
+  await dialog.locator('input[name="macroVal"]').fill('Escape');
+  await dialog.getByRole('button', { name: 'Add Step to Sequence' }).click();
+
+  await dialog.locator('select[name="macroType"]').selectOption('text');
+  await dialog.locator('input[name="macroVal"]').fill(':q!');
+  await dialog.getByRole('button', { name: 'Add Step to Sequence' }).click();
+
+  await expect(dialog.getByText('1. Key: Escape')).toBeVisible();
+  await expect(dialog.getByText('2. Text: ":q!"')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Add Macro' }).click();
+  await expect(dialog.getByText('Vim Force Quit ↵')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Save to Server' }).click();
+  await expect(dialog).toBeHidden();
+
+  const saveMsgs = (await sent(page)).filter(msg => msg.case === 'saveMacros');
+  const vimMacro = saveMsgs[0]?.value.macros.find(m => m.name === 'Vim Force Quit');
+  expect(vimMacro).toBeDefined();
+  expect(vimMacro.steps).toHaveLength(3);
+  expect(vimMacro.steps[0].key).toBe('Escape');
+  expect(vimMacro.steps[1].text).toBe(':q!');
+  expect(vimMacro.steps[2].key).toBe('Enter');
+});
+
+
+

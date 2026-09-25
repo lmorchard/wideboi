@@ -740,3 +740,62 @@ divider = "dim"
 		t.Errorf("cfg.Theme.Divider = %q, want 'dim'", cfg.Theme.Divider)
 	}
 }
+
+func TestMacrosConfig(t *testing.T) {
+	// 1. Defaults when empty
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	macros := cfg.ResolvedMacros()
+	if len(macros) == 0 {
+		t.Fatal("expected default macros, got 0")
+	}
+	if macros[0].Name != "History Search" {
+		t.Errorf("got %q, want 'History Search'", macros[0].Name)
+	}
+
+	// 2. Custom macros loaded from TOML
+	tomlContent := `
+[[macros]]
+name = "My Macro"
+steps = [
+  { text = "echo hi" },
+  { key = "Enter" }
+]
+`
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "wideboi.toml")
+	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfgCustom, _, err := config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	customMacros := cfgCustom.ResolvedMacros()
+	if len(customMacros) != 1 {
+		t.Fatalf("expected 1 macro, got %d", len(customMacros))
+	}
+	if customMacros[0].Name != "My Macro" {
+		t.Errorf("got %q, want 'My Macro'", customMacros[0].Name)
+	}
+	if len(customMacros[0].Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(customMacros[0].Steps))
+	}
+	if customMacros[0].Steps[0].Text != "echo hi" {
+		t.Errorf("got step 0 text %q, want 'echo hi'", customMacros[0].Steps[0].Text)
+	}
+
+	// 3. SaveMacrosFile and reload from UserMacrosPath
+	macrosFile := filepath.Join(dir, "macros.toml")
+	if err := config.SaveMacrosFile(macrosFile, customMacros); err != nil {
+		t.Fatal(err)
+	}
+	// Verify file was written and can be read back
+	env := mockEnv(map[string]string{"XDG_CONFIG_HOME": dir})
+	macrosPath := config.UserMacrosPath(env)
+	if macrosPath != filepath.Join(dir, "wideboi", "macros.toml") {
+		t.Errorf("unexpected UserMacrosPath: %q", macrosPath)
+	}
+}

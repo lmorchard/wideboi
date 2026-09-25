@@ -14,10 +14,10 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v11';
+        this.protocol = 'wideboi.v12';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -84,10 +84,10 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v11';
+        this.protocol = 'wideboi.v12';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -183,10 +183,10 @@ test('?stats=1 shows the stats overlay and reports periodically', async ({ page 
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v11';
+        this.protocol = 'wideboi.v12';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -229,9 +229,9 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v11';
+        this.protocol = 'wideboi.v12';
         this.readyState = 0;
-        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
       }
       send() {}
       close() { this.readyState = 3; this.onclose?.(); }
@@ -251,10 +251,10 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v11';
+        this.protocol = 'wideboi.v12';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }

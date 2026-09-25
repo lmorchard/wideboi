@@ -12,6 +12,7 @@ import { consumeLinkToken } from './token';
 import { RenderStats, formatSummary, statsEnabled } from './stats';
 import { MouseKind, MsgHistorySnapshot, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { createSearchSession, applySnapshot, cancelSearch, liveSearch, formatSearchStatus, type SearchState } from './search';
+import { executeMacro, macroEndsWithEnter, DEFAULT_MACROS, type Macro, type MacroStep } from './macros';
 
 const linkToken = consumeLinkToken(window.location, window.history);
 const STATS_REPORT_MS = 5000;
@@ -193,6 +194,12 @@ export class WideboiApp extends LitElement {
       font: 13px sans-serif;
     }
     .mobile-bar select { flex: 1; min-width: 0; }
+    .mobile-bar button {
+      min-width: 52px;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0 0.8rem;
+    }
     .mobile-bar button, .mobile-dock button, .mobile-bar select {
       min-height: 40px;
       border: 1px solid #555;
@@ -210,25 +217,298 @@ export class WideboiApp extends LitElement {
       background: #252526;
       border-top: 1px solid #3c3c3c;
     }
-    .mobile-compose { display: flex; gap: 0.3rem; align-items: stretch; }
-    .mobile-compose textarea {
+    .mobile-input-bar {
+      display: flex;
+      gap: 0.3rem;
+      align-items: center;
+      min-height: 40px;
+    }
+    .mobile-mode-toggle {
+      display: inline-flex;
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid #555;
+      flex-shrink: 0;
+      height: 40px;
+      box-sizing: border-box;
+    }
+    .mobile-mode-toggle button {
+      border: none;
+      border-radius: 0;
+      padding: 0 0.55rem;
+      background: #333;
+      color: #aaa;
+      font-size: 13px;
+      cursor: pointer;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .mobile-mode-toggle button.active, .mobile-mode-toggle button[aria-pressed="true"] {
+      background: #0e639c;
+      color: #fff;
+    }
+    .mobile-draft-input, .mobile-direct-input {
       flex: 1;
       min-width: 0;
-      max-height: 5lh;
-      min-height: 40px;
-      resize: vertical;
+      height: 40px;
+      line-height: 38px;
       box-sizing: border-box;
-      padding: 0.5rem;
+      padding: 0 0.6rem;
+      border-radius: 4px;
+      font: 14px sans-serif;
+      vertical-align: middle;
+    }
+    .mobile-draft-input {
+      border: 1px solid #555;
+      background: #333;
+      color: #eee;
+    }
+    .mobile-direct-input {
+      border: 1px solid #0e639c;
+      background: #1e1e1e;
+      color: #eee;
+    }
+    .mobile-send-btn {
+      flex-shrink: 0;
+      min-width: 50px;
+      height: 40px;
+      padding: 0 0.6rem;
       border: 1px solid #555;
       border-radius: 4px;
       background: #333;
       color: #eee;
-      font: 16px sans-serif;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
     }
-    .mobile-compose button { min-width: 64px; }
+    .mobile-macros-btn {
+      flex-shrink: 0;
+      min-width: 56px;
+      height: 40px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 0 0.5rem;
+      background: #333;
+      color: #eee;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+    }
+    .mobile-macros-btn.active, .mobile-macros-btn[aria-expanded="true"] {
+      background: #0e639c;
+      color: #fff;
+    }
+    .mobile-macros-sheet {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #252526;
+      border-top: 2px solid #0e639c;
+      box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.5);
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      max-height: 50vh;
+      overflow-y: auto;
+      padding: 0.5rem;
+      gap: 0.4rem;
+    }
+    .mobile-macros-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid #3c3c3c;
+    }
+    .mobile-macros-header span {
+      font-weight: bold;
+      font-size: 14px;
+      color: #fff;
+    }
+    .mobile-macros-header .sheet-actions {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    .mobile-macros-header button {
+      padding: 0.2rem 0.5rem;
+      font-size: 12px;
+      background: #3c3c3c;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .mobile-macros-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.4rem;
+    }
+    .mobile-macro-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0.6rem;
+      background: #333;
+      border: 1px solid #444;
+      border-radius: 4px;
+      color: #eee;
+      font-size: 13px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .mobile-macro-item:active {
+      background: #0e639c;
+    }
+    .mobile-macro-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .mobile-macro-enter {
+      font-size: 11px;
+      background: #222;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      color: #79c0ff;
+      margin-left: 0.3rem;
+      flex-shrink: 0;
+    }
+    .macro-editor-modal {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 1rem;
+    }
+    .macro-editor-dialog {
+      background: #252526;
+      border: 1px solid #3c3c3c;
+      border-radius: 6px;
+      width: 100%;
+      max-width: 440px;
+      max-height: 85vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      padding: 1rem;
+      color: #eee;
+    }
+    .macro-editor-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      max-height: 35vh;
+      overflow-y: auto;
+    }
+    .macro-editor-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #333;
+      padding: 0.4rem 0.6rem;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .macro-editor-row button {
+      background: #552222;
+      color: #ff9999;
+      border: 1px solid #883333;
+      border-radius: 3px;
+      padding: 0.2rem 0.4rem;
+      cursor: pointer;
+    }
+    .macro-editor-form {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      background: #1e1e1e;
+      padding: 0.6rem;
+      border-radius: 4px;
+      border: 1px solid #3c3c3c;
+    }
+    .macro-editor-form input, .macro-editor-form select {
+      background: #2d2d2d;
+      border: 1px solid #444;
+      border-radius: 3px;
+      color: #eee;
+      padding: 0.3rem 0.5rem;
+      font-size: 13px;
+    }
+    .macro-draft-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      background: #252526;
+      padding: 0.3rem 0.5rem;
+      border-radius: 4px;
+      border: 1px dashed #555;
+    }
+    .macro-draft-step-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: #79c0ff;
+    }
+    .macro-draft-step-row button {
+      background: transparent;
+      border: none;
+      color: #ff9999;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .macro-editor-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.4rem;
+    }
+    .macro-editor-actions button {
+      padding: 0.3rem 0.7rem;
+      border-radius: 4px;
+      border: 1px solid #555;
+      background: #3c3c3c;
+      color: #eee;
+      cursor: pointer;
+    }
+    .macro-editor-actions button.primary {
+      background: #0e639c;
+      border-color: #1177bb;
+      color: #fff;
+    }
     .mobile-keys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.3rem; }
     .mobile-keys button { min-width: 0; padding: 0; }
     .mobile-keys button[aria-pressed="true"] { background: #0e639c; }
+    .mobile-ctrl-palette {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.3rem;
+      background: #1b2e3e;
+      padding: 0.25rem;
+      border-radius: 4px;
+      border: 1px solid #0e639c;
+    }
+    .mobile-ctrl-palette button {
+      min-width: 0;
+      padding: 0.25rem 0;
+      font-size: 13px;
+      font-weight: bold;
+      background: #23435c;
+      color: #79c0ff;
+    }
     .pane-strip.mobile { overflow: hidden; }
     .pane-strip.mobile wideboi-pane { width: 100% !important; border: 0; }
     .pane-strip.mobile wideboi-pane:not([focused]) { display: none; }
@@ -464,6 +744,22 @@ export class WideboiApp extends LitElement {
   @state() private mobile = this.narrowMedia.matches;
   @state() private mobileDraft = '';
   @state() private mobileCtrl = false;
+  @state() private mobileInputMode: 'draft' | 'direct' = 'draft';
+  @state() private showMacros = false;
+  @state() private showMacroEditor = false;
+  @state() private draftMacroSteps: MacroStep[] = [];
+  @state() private macros: Macro[] = (() => {
+    try {
+      const stored = localStorage.getItem('wideboi.macros');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_MACROS;
+  })();
   @state() private searchState: SearchState | null = null;
   private pendingNav: 0 | 1 | -1 = 0;
   private cardFirst = 0;
@@ -793,6 +1089,9 @@ export class WideboiApp extends LitElement {
     this.keyRouter.reset();
     this.mobileDraft = '';
     this.mobileCtrl = false;
+    this.mobileInputMode = 'draft';
+    this.showMacros = false;
+    this.showMacroEditor = false;
     this.pendingFocusId = 0;
     this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
@@ -962,6 +1261,28 @@ export class WideboiApp extends LitElement {
         }
         case 'historySnapshot': {
           this.handleHistorySnapshot(message.msg.value);
+          break;
+        }
+        case 'macrosSnapshot': {
+          const snap = message.msg.value;
+          if (snap.macros) {
+            this.macros = snap.macros.map(m => ({
+              name: m.name,
+              steps: m.steps.map(s => ({
+                text: s.text || undefined,
+                key: s.key || undefined,
+                code: s.code || undefined,
+                ctrl: s.ctrl || undefined,
+                alt: s.alt || undefined,
+                shift: s.shift || undefined,
+              })),
+            }));
+            try {
+              localStorage.setItem('wideboi.macros', JSON.stringify(this.macros));
+            } catch {
+              // ignore
+            }
+          }
           break;
         }
       }
@@ -1168,7 +1489,11 @@ export class WideboiApp extends LitElement {
       const pane = this.eventPane(e);
       if (pane) {
         this.focusPane(pane.paneId);
-        this.renderRoot.querySelector<HTMLTextAreaElement>('.mobile-compose textarea')?.focus();
+        if (this.mobileInputMode === 'direct') {
+          this.renderRoot.querySelector<HTMLInputElement>('.mobile-input-bar .mobile-direct-input')?.focus();
+        } else {
+          this.renderRoot.querySelector<HTMLInputElement>('.mobile-input-bar .mobile-draft-input')?.focus();
+        }
       }
     }, { signal: this.listeners?.signal });
 
@@ -1258,6 +1583,13 @@ export class WideboiApp extends LitElement {
 
   private handleMobileDraftKey(e: KeyboardEvent) {
     if (!this.client || !this.connected) return;
+    if (e.key === 'Enter') {
+      if (this.mobileDraft) {
+        this.sendMobileDraft();
+      }
+      e.preventDefault();
+      return;
+    }
     if (this.mobileCtrl && e.key.length === 1) {
       this.sendMobileKey(e.key, e.code);
       e.preventDefault();
@@ -1271,14 +1603,115 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  private handleMobileDirectKey(e: KeyboardEvent) {
+    if (!this.client || !this.connected || !this.focusedPaneId) return;
+    if (this.mobileCtrl && e.key.length === 1) {
+      this.sendMobileKey(e.key, e.code);
+      e.preventDefault();
+      const input = e.target as HTMLInputElement;
+      if (input) input.value = '';
+      return;
+    }
+    if (sendKeyboardInput(this.client, this.focusedPaneId, e)) {
+      this.pendingReveal.add(this.focusedPaneId);
+      this.focusedPane()?.revealCursor();
+      e.preventDefault();
+    }
+    const input = e.target as HTMLInputElement;
+    if (input) input.value = '';
+  }
+
+  private handleMobileDirectInput(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (!input || !input.value || !this.client || !this.connected || !this.focusedPaneId) return;
+    if (sendTextInput(this.client, this.focusedPaneId, input.value)) {
+      this.pendingReveal.add(this.focusedPaneId);
+      this.focusedPane()?.revealCursor();
+    }
+    input.value = '';
+  }
+
   private sendMobileDraft() {
     if (!this.client || !this.connected || !this.mobileDraft) return;
-    if (sendTextInput(this.client, this.focusedPaneId, this.mobileDraft)) {
+    const text = this.mobileDraft;
+    if (sendTextInput(this.client, this.focusedPaneId, text)) {
+      const enterEvent = typeof KeyboardEvent !== 'undefined'
+        ? new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter' })
+        : ({ key: 'Enter', code: 'Enter', shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, isComposing: false, repeat: false } as unknown as KeyboardEvent);
+      sendKeyboardInput(this.client, this.focusedPaneId, enterEvent);
       this.pendingReveal.add(this.focusedPaneId);
       this.focusedPane()?.revealCursor();
       this.mobileDraft = '';
-      const input = this.renderRoot.querySelector<HTMLTextAreaElement>('.mobile-compose textarea');
+      const input = this.renderRoot.querySelector<HTMLInputElement>('.mobile-input-bar .mobile-draft-input');
       if (input) input.value = '';
+    }
+  }
+
+  private executeMobileMacro(macro: Macro) {
+    if (!this.client || !this.connected || !this.focusedPaneId) return;
+    executeMacro(this.client, this.focusedPaneId, macro);
+    this.pendingReveal.add(this.focusedPaneId);
+    this.focusedPane()?.revealCursor();
+    this.showMacros = false;
+  }
+
+  private saveMacrosToServer() {
+    if (!this.client || !this.connected) return;
+    this.client.send({
+      case: 'saveMacros',
+      value: {
+        macros: this.macros.map(m => ({
+          name: m.name,
+          steps: m.steps.map(s => ({
+            text: s.text || '',
+            key: s.key || '',
+            code: s.code || '',
+            ctrl: !!s.ctrl,
+            alt: !!s.alt,
+            shift: !!s.shift,
+          })),
+        })),
+      },
+    });
+    try {
+      localStorage.setItem('wideboi.macros', JSON.stringify(this.macros));
+    } catch {
+      // ignore
+    }
+  }
+
+  private deleteMacro(index: number) {
+    this.macros = this.macros.filter((_, i) => i !== index);
+    try {
+      localStorage.setItem('wideboi.macros', JSON.stringify(this.macros));
+    } catch {
+      // ignore
+    }
+  }
+
+  private addDraftStep(type: 'text' | 'key', val: string, ctrl: boolean) {
+    if (!val) return;
+    if (type === 'text') {
+      this.draftMacroSteps = [...this.draftMacroSteps, { text: val }];
+    } else {
+      this.draftMacroSteps = [...this.draftMacroSteps, {
+        key: val,
+        code: val.length === 1 ? `Key${val.toUpperCase()}` : val,
+        ctrl: ctrl || undefined,
+      }];
+    }
+  }
+
+  private removeDraftStep(index: number) {
+    this.draftMacroSteps = this.draftMacroSteps.filter((_, i) => i !== index);
+  }
+
+  private resetMacrosToDefault() {
+    this.macros = DEFAULT_MACROS;
+    try {
+      localStorage.setItem('wideboi.macros', JSON.stringify(this.macros));
+    } catch {
+      // ignore
     }
   }
 
@@ -1512,29 +1945,203 @@ export class WideboiApp extends LitElement {
       </div>
       ${this.connected ? html`
         <div class="mobile-dock">
-          <div class="mobile-compose">
-            <textarea aria-label="Command or response" rows="1" placeholder="Command or response"
-              autocapitalize="off" autocorrect="off" spellcheck="false"
-              @input=${(e: Event) => { this.mobileDraft = (e.target as HTMLTextAreaElement).value; }}
-              @keydown=${this.handleMobileDraftKey}></textarea>
-            <button aria-label="Send text" ?disabled=${!this.mobileDraft} @click=${this.sendMobileDraft}>Send</button>
+          <div class="mobile-input-bar">
+            <div class="mobile-mode-toggle" role="radiogroup" aria-label="Input mode">
+              <button
+                class=${this.mobileInputMode === 'draft' ? 'active' : ''}
+                aria-pressed=${this.mobileInputMode === 'draft'}
+                aria-label="Draft mode"
+                @click=${() => { this.mobileInputMode = 'draft'; }}>Draft</button>
+              <button
+                class=${this.mobileInputMode === 'direct' ? 'active' : ''}
+                aria-pressed=${this.mobileInputMode === 'direct'}
+                aria-label="Direct input mode"
+                @click=${() => {
+                  this.mobileInputMode = 'direct';
+                  void this.updateComplete.then(() => {
+                    this.renderRoot.querySelector<HTMLInputElement>('.mobile-input-bar input.mobile-direct-input')?.focus();
+                  });
+                }}>Direct</button>
+            </div>
+            ${this.mobileInputMode === 'draft' ? html`
+              <input
+                type="text"
+                class="mobile-draft-input"
+                aria-label="Command or response"
+                placeholder="Command or response"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                .value=${this.mobileDraft}
+                @input=${(e: Event) => { this.mobileDraft = (e.target as HTMLInputElement).value; }}
+                @keydown=${this.handleMobileDraftKey} />
+              <button class="mobile-send-btn" aria-label="Send text" ?disabled=${!this.mobileDraft} @click=${this.sendMobileDraft}>Send</button>
+            ` : html`
+              <input
+                type="text"
+                class="mobile-direct-input"
+                aria-label="Direct terminal input"
+                placeholder="Direct terminal keys…"
+                autocapitalize="off"
+                autocorrect="off"
+                spellcheck="false"
+                @keydown=${this.handleMobileDirectKey}
+                @input=${this.handleMobileDirectInput} />
+            `}
+            <button
+              class=${this.showMacros ? 'mobile-macros-btn active' : 'mobile-macros-btn'}
+              aria-label="Macros panel"
+              aria-expanded=${this.showMacros}
+              @click=${() => { this.showMacros = !this.showMacros; }}>Macros</button>
           </div>
           <div class="mobile-keys" aria-label="Terminal keys">
             <button aria-label="Escape key" @click=${() => this.sendMobileKey('Escape', 'Escape')}>Esc</button>
             <button aria-label="Tab key" @click=${() => this.sendMobileKey('Tab', 'Tab')}>Tab</button>
             <button aria-label="Control modifier" aria-pressed=${this.mobileCtrl}
               @click=${() => { this.mobileCtrl = !this.mobileCtrl; }}>Ctrl</button>
-            ${this.mobileCtrl ? html`
-              <button aria-label="C key" @click=${() => this.sendMobileKey('c', 'KeyC')}>C</button>
-              <button aria-label="D key" @click=${() => this.sendMobileKey('d', 'KeyD')}>D</button>
-              <button aria-label="Z key" @click=${() => this.sendMobileKey('z', 'KeyZ')}>Z</button>
-            ` : ''}
             <button aria-label="Left arrow key" @click=${() => this.sendMobileKey('ArrowLeft', 'ArrowLeft')}>←</button>
             <button aria-label="Down arrow key" @click=${() => this.sendMobileKey('ArrowDown', 'ArrowDown')}>↓</button>
             <button aria-label="Up arrow key" @click=${() => this.sendMobileKey('ArrowUp', 'ArrowUp')}>↑</button>
             <button aria-label="Right arrow key" @click=${() => this.sendMobileKey('ArrowRight', 'ArrowRight')}>→</button>
             <button aria-label="Backspace key" @click=${() => this.sendMobileKey('Backspace', 'Backspace')}>⌫</button>
             <button aria-label="Enter key" @click=${() => this.sendMobileKey('Enter', 'Enter')}>↵</button>
+          </div>
+          ${this.mobileCtrl ? html`
+            <div class="mobile-ctrl-palette" aria-label="Ctrl shortcuts">
+              <button aria-label="C key" @click=${() => this.sendMobileKey('c', 'KeyC')}>^C</button>
+              <button aria-label="D key" @click=${() => this.sendMobileKey('d', 'KeyD')}>^D</button>
+              <button aria-label="Z key" @click=${() => this.sendMobileKey('z', 'KeyZ')}>^Z</button>
+              <button aria-label="R key" @click=${() => this.sendMobileKey('r', 'KeyR')}>^R</button>
+              <button aria-label="L key" @click=${() => this.sendMobileKey('l', 'KeyL')}>^L</button>
+              <button aria-label="A key" @click=${() => this.sendMobileKey('a', 'KeyA')}>^A</button>
+              <button aria-label="E key" @click=${() => this.sendMobileKey('e', 'KeyE')}>^E</button>
+              <button aria-label="W key" @click=${() => this.sendMobileKey('w', 'KeyW')}>^W</button>
+              <button aria-label="K key" @click=${() => this.sendMobileKey('k', 'KeyK')}>^K</button>
+              <button aria-label="U key" @click=${() => this.sendMobileKey('u', 'KeyU')}>^U</button>
+            </div>
+          ` : ''}
+        </div>
+        ${this.showMacros ? html`
+          <div class="mobile-macros-sheet" role="region" aria-label="Macros list">
+            <div class="mobile-macros-header">
+              <span>Input Macros</span>
+              <div class="sheet-actions">
+                <button aria-label="Edit macros" @click=${() => { this.showMacroEditor = true; this.showMacros = false; }}>Edit</button>
+                <button aria-label="Close macros" @click=${() => { this.showMacros = false; }}>✕</button>
+              </div>
+            </div>
+            <div class="mobile-macros-grid">
+              ${this.macros.map(macro => html`
+                <button class="mobile-macro-item" @click=${() => this.executeMobileMacro(macro)} aria-label=${`Run macro ${macro.name}`}>
+                  <span class="mobile-macro-name">${macro.name}</span>
+                  ${macroEndsWithEnter(macro) ? html`<span class="mobile-macro-enter" title="Ends with Enter">↵</span>` : ''}
+                </button>
+              `)}
+            </div>
+          </div>
+        ` : ''}
+      ` : ''}
+      ${this.showMacroEditor ? html`
+        <div class="macro-editor-modal" @click=${() => { this.showMacroEditor = false; }}>
+          <div class="macro-editor-dialog" @click=${(e: Event) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="macro-editor-title">
+            <div class="mobile-macros-header">
+              <span id="macro-editor-title">Configure Macros</span>
+              <button aria-label="Close editor" @click=${() => { this.showMacroEditor = false; }}>✕</button>
+            </div>
+            <div class="macro-editor-list" aria-label="Configured macros">
+              ${this.macros.map((m, idx) => html`
+                <div class="macro-editor-row">
+                  <span>${m.name} ${macroEndsWithEnter(m) ? '↵' : ''}</span>
+                  <button aria-label=${`Delete macro ${m.name}`} @click=${() => this.deleteMacro(idx)}>Delete</button>
+                </div>
+              `)}
+            </div>
+            <form class="macro-editor-form" @submit=${(e: Event) => {
+              e.preventDefault();
+              const form = e.target as HTMLFormElement;
+              const name = (form.elements.namedItem('macroName') as HTMLInputElement).value.trim();
+              const type = (form.elements.namedItem('macroType') as HTMLSelectElement).value as 'text' | 'key';
+              const val = (form.elements.namedItem('macroVal') as HTMLInputElement).value;
+              const ctrl = (form.elements.namedItem('macroCtrl') as HTMLInputElement).checked;
+              const enter = (form.elements.namedItem('macroEnter') as HTMLInputElement).checked;
+
+              let steps: MacroStep[] = [];
+              if (this.draftMacroSteps.length > 0) {
+                steps = [...this.draftMacroSteps];
+                if (enter && !macroEndsWithEnter({ name, steps })) {
+                  steps.push({ key: 'Enter', code: 'Enter' });
+                }
+              } else if (name && val) {
+                if (type === 'text') {
+                  steps.push({ text: val });
+                } else {
+                  steps.push({
+                    key: val,
+                    code: val.length === 1 ? `Key${val.toUpperCase()}` : val,
+                    ctrl,
+                  });
+                }
+                if (enter) {
+                  steps.push({ key: 'Enter', code: 'Enter' });
+                }
+              }
+
+              if (name && steps.length > 0) {
+                this.macros = [...this.macros, { name, steps }];
+                this.draftMacroSteps = [];
+                try {
+                  localStorage.setItem('wideboi.macros', JSON.stringify(this.macros));
+                } catch {
+                  // ignore
+                }
+                form.reset();
+              }
+            }}>
+              <strong>Add New Macro</strong>
+              <input name="macroName" placeholder="Macro Name (e.g. Git Log or Vim Quit)" required />
+              ${this.draftMacroSteps.length > 0 ? html`
+                <div class="macro-draft-steps" aria-label="Steps in new macro">
+                  <span style="font-size: 11px; color: #aaa;">Sequence steps:</span>
+                  ${this.draftMacroSteps.map((step, idx) => html`
+                    <div class="macro-draft-step-row">
+                      <span>${idx + 1}. ${step.text ? `Text: "${step.text}"` : `Key: ${step.ctrl ? '^' : ''}${step.key}`}</span>
+                      <button type="button" @click=${() => this.removeDraftStep(idx)}>✕</button>
+                    </div>
+                  `)}
+                </div>
+              ` : ''}
+              <div style="display: flex; gap: 0.3rem;">
+                <select name="macroType" style="flex: 0 0 110px;">
+                  <option value="text">Text</option>
+                  <option value="key">Key</option>
+                </select>
+                <input name="macroVal" placeholder="Text or key name (e.g. git log or r)" style="flex: 1;" />
+              </div>
+              <div style="display: flex; gap: 0.8rem; font-size: 12px; align-items: center; flex-wrap: wrap;">
+                <label><input type="checkbox" name="macroCtrl" /> Ctrl</label>
+                <label><input type="checkbox" name="macroEnter" checked /> Include Enter</label>
+                <button type="button" aria-label="Add Step to Sequence" style="margin-left: auto; padding: 0.2rem 0.5rem; font-size: 11px; background: #3c3c3c; color: #eee; border: 1px solid #555; border-radius: 3px; cursor: pointer;"
+                  @click=${(e: Event) => {
+                    const btn = e.target as HTMLElement;
+                    const form = btn.closest('form') as HTMLFormElement;
+                    const type = (form.elements.namedItem('macroType') as HTMLSelectElement).value as 'text' | 'key';
+                    const input = form.elements.namedItem('macroVal') as HTMLInputElement;
+                    const ctrl = (form.elements.namedItem('macroCtrl') as HTMLInputElement).checked;
+                    if (input.value) {
+                      this.addDraftStep(type, input.value, ctrl);
+                      input.value = '';
+                    }
+                  }}>+ Add Step</button>
+              </div>
+              <button type="submit">Add Macro</button>
+            </form>
+            <div class="macro-editor-actions">
+              <button @click=${this.resetMacrosToDefault}>Reset Defaults</button>
+              <button class="primary" aria-label="Save to Server" @click=${() => {
+                this.saveMacrosToServer();
+                this.showMacroEditor = false;
+              }}>Save to Server</button>
+            </div>
           </div>
         </div>
       ` : ''}
