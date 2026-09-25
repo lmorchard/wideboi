@@ -369,6 +369,14 @@ Open this URL in your web browser. The server serves the HTML/JS application and
 - **Viewport Scrolling:** Mouse wheel scrolling in a pane pans through active rows if the browser window is shorter than the server terminal. Hold `Alt` while scrolling the wheel to navigate scrollback history.
 - **Card Width Selector:** In card layout, select 40, 60, 80, or Terminal columns. If a card is narrower than the terminal grid, horizontal scrolling or trackpad gestures pan across columns without resizing the underlying PTY.
 - **Fit to Window:** Click **Fit to Window** in the top bar to claim terminal geometry ownership for your browser dimensions.
+- **Pane History Search:** Search the focused pane's screen and scrollback history by pressing `Ctrl+b /` (or your configured prefix then `/`), pressing `Ctrl+F` (or `Cmd+F` on macOS), or clicking **Search** in the toolbar.
+  - Type your search query into the bottom overlay input and press `Enter` to find matches.
+  - Keystrokes in the search bar stay local to the browser and are never forwarded to the child terminal process.
+  - Navigate between matches with `n` (next) and `N` (previous) or click the **▲ Prev** / **▼ Next** buttons.
+  - Press `Enter` or click **Keep** to retain the current scrolled view.
+  - Press `Escape` or click **Restore** to cancel search and restore the view prior to searching.
+  - Press `Ctrl+G` or click **Live** to jump back to live terminal output.
+  - Each connected browser maintains its own local query and search navigation state without interfering with other viewers.
 
 ### Remote HTTPS Reverse Proxy Setup
 

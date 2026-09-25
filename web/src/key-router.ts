@@ -8,7 +8,8 @@ export type KeyRouterAction =
   | { type: 'scroll'; delta: number }
   | { type: 'toggle_cards' }
   | { type: 'focus_column'; column: number }
-  | { type: 'toggle_help' };
+  | { type: 'toggle_help' }
+  | { type: 'search' };
 
 export interface ParsedPrefix {
   name: string;
@@ -113,10 +114,14 @@ export class KeyRouter {
       return { type: 'toggle_cards' };
     }
 
-    // 4. Help overlay toggle
+    // 4. Help overlay toggle & search
     if (key === '?' || (e.shiftKey && key === '/')) {
       this.prefixActive = false;
       return { type: 'toggle_help' };
+    }
+    if (key === '/') {
+      this.prefixActive = false;
+      return { type: 'search' };
     }
 
     // 5. Column jumps: 1-9 and 0
