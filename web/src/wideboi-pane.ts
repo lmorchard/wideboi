@@ -28,6 +28,14 @@ export class WideboiPane extends LitElement {
     :host([card-mode][focused]) {
       box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
     }
+    .viewport {
+      width: 100%;
+      height: 100%;
+      overflow-x: hidden;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      overscroll-behavior-y: contain;
+    }
     .card-label { display: none; }
     :host([card-mode]:not([focused])) .card-label {
       display: block;
@@ -50,7 +58,6 @@ export class WideboiPane extends LitElement {
     canvas {
       display: block;
       width: 100%;
-      height: 100%;
       outline: none;
     }
     @media (prefers-reduced-motion: reduce) {
@@ -69,28 +76,51 @@ export class WideboiPane extends LitElement {
   @property({ attribute: false }) stats?: RenderStats;
 
   @query('canvas') private canvas!: HTMLCanvasElement;
+  @query('.viewport') private viewport!: HTMLDivElement;
   private painter?: PanePainter;
   private observer?: ResizeObserver;
+  private followBottom = true;
+
+  get hasVerticalOverflow(): boolean {
+    return this.viewport.scrollHeight > this.viewport.clientHeight + 1;
+  }
+
+  private onViewportScroll() {
+    this.followBottom = this.viewport.scrollHeight - this.viewport.clientHeight - this.viewport.scrollTop < 2;
+  }
+
+  private scrollLiveToBottom() {
+    if (this.followBottom) this.viewport.scrollTop = this.viewport.scrollHeight;
+  }
 
   protected firstUpdated() {
     this.painter = new PanePainter(this.canvas, this.cellWidth, this.stats);
     this.observer = new ResizeObserver(entries => {
       for (const entry of entries) {
-        this.painter?.resize(entry.contentRect.width, entry.contentRect.height);
+        if (entry.target === this.canvas) {
+          this.painter?.resize(entry.contentRect.width, entry.contentRect.height);
+        }
       }
+      this.scrollLiveToBottom();
     });
     this.observer.observe(this.canvas);
+    this.observer.observe(this.viewport);
     const rect = this.canvas.getBoundingClientRect();
     this.painter.resize(rect.width, rect.height);
     this.syncPainter();
+    this.scrollLiveToBottom();
   }
 
-  protected updated() { this.syncPainter(); }
+  protected updated() {
+    this.syncPainter();
+    this.scrollLiveToBottom();
+  }
 
   connectedCallback() {
     super.connectedCallback();
     if (this.painter) {
       this.observer?.observe(this.canvas);
+      this.observer?.observe(this.viewport);
       this.syncPainter();
     }
   }
@@ -124,7 +154,12 @@ export class WideboiPane extends LitElement {
   clearSelection() { this.painter?.clearSelection(); }
   focusInput() { this.canvas.focus({ preventScroll: true }); }
 
-  render() { return html`<canvas tabindex=${this.focused ? 0 : -1}></canvas><span class="card-label">${this.cardLabel}</span>`; }
+  render() { return html`
+    <div class="viewport" @scroll=${this.onViewportScroll}>
+      <canvas tabindex=${this.focused ? 0 : -1}
+        style=${`height: ${this.pane ? `${this.pane.rows * CELL_HEIGHT}px` : '100%'}`}></canvas>
+    </div>
+    <span class="card-label">${this.cardLabel}</span>`; }
 }
 
 declare global {

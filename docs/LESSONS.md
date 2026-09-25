@@ -221,6 +221,14 @@ Raising the new focus immediately covers its right neighbor; keeping the old
 focus on top instead covers its right neighbor. Raise the new focus only after
 the movement finishes.
 
+The browser's pane canvas must cover the terminal's logical rows, even when the
+pane element is shorter. Put it inside a per-pane scroll viewport and let CSS
+clip it. Otherwise the painter stops at the visible element height and lower
+rows from a taller server grid cannot be reached. Scroll events on that inner
+viewport move the local view; they must not send `MsgResize` or change the
+server-managed scrollback offset. Canvas-relative pointer coordinates already
+include the viewport's scroll offset because its bounding rectangle moves.
+
 Browser tests that replace `window.WebSocket` also intercept Vite's development
 socket. Identify the app connection by its offered version subprotocol,
 not a URL suffix: on Linux CI, Vite's socket matched `/ws`, closed, and the test

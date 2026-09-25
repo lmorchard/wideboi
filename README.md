@@ -159,6 +159,12 @@ on that address; no separate Vite server is needed. To attach a terminal client
 to the same session, run `./bin/wideboi attach` in another terminal. End the
 session with `./bin/wideboi kill-session`.
 
+When a pane's terminal grid is taller than its browser viewport, scroll within
+the pane to reach the bottom of the live screen. The wheel pans that viewport;
+Alt+wheel navigates terminal scrollback. When the whole live screen fits, the
+wheel navigates scrollback as before. Panning the live screen does not resize
+the terminal or change another client's view.
+
 The listener is disabled unless you set `--websocket`,
 `WIDEBOI_WEBSOCKET`, or `websocket` in the config file. All three accept an
 address such as `127.0.0.1:8080`. Binding to `:8080` listens on network
