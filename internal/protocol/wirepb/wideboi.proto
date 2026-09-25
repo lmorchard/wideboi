@@ -139,6 +139,8 @@ message MsgPaneMetadata {
   int32 pane_id = 1;
   string cwd = 2;
   map<string, string> user_vars = 3;
+  bool exited = 4;
+  int32 exit_code = 5;
 }
 
 message MsgFocusPane {
@@ -160,6 +162,7 @@ message ServerMessage {
     MsgCaptureResponse capture_response = 11;
     MsgClosePaneResponse close_pane_response = 12;
     MsgHistorySnapshot history_snapshot = 13;
+    MsgWaitResponse wait_response = 14;
   }
 }
 
@@ -254,13 +257,25 @@ message ClientMessage {
     MsgCaptureRequest capture_request = 14;
     MsgClosePaneRequest close_pane_request = 15;
     MsgHistoryRequest history_request = 16;
+    MsgWaitRequest wait_request = 17;
   }
+}
+
+message MsgWaitRequest {
+  int32 pane_id = 1;
+}
+
+message MsgWaitResponse {
+  int32 pane_id = 1;
+  int32 exit_code = 2;
+  string error = 3;
 }
 
 message MsgSplitRequest {
   string command = 1;
   string cwd = 2;
   int32 after_pane_id = 3;
+  bool keep = 4;
 }
 
 message MsgSplitResponse {

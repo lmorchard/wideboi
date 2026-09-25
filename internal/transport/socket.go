@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
@@ -189,6 +190,8 @@ type ServerSocketConn struct {
 	// stopped draining.
 	closed    chan struct{}
 	closeOnce sync.Once
+	// inflight counts messages queued but not yet written; see Drain.
+	inflight atomic.Int64
 }
 
 // NewServerSocketConn wraps a server-side net.Conn with buffered channels.
@@ -228,13 +231,16 @@ func (sc *ServerSocketConn) writeLoop(ctx context.Context) {
 			}
 			payload, encode, err := sc.marshal(msg)
 			if err != nil {
+				sc.inflight.Add(-1)
 				// A message we cannot encode is a server bug, not a dead
 				// peer: dropping it costs one frame, where dropping the
 				// connection cost the session when this was its owner (#175).
 				slog.Error("dropping unencodable message", "type", fmt.Sprintf("%T", msg), "err", err)
 				continue
 			}
-			if err := writeFrame(sc.conn, payload); err != nil {
+			err = writeFrame(sc.conn, payload)
+			sc.inflight.Add(-1)
+			if err != nil {
 				sc.set(fmt.Sprintf("writing %T to client", msg), err)
 				return
 			}
@@ -274,13 +280,39 @@ func (sc *ServerSocketConn) SendServer(ctx context.Context, msg ServerMessage) b
 		return false
 	default:
 	}
+	sc.inflight.Add(1)
 	select {
 	case sc.ServerSend <- msg:
 		return true
 	case <-sc.closed:
-		return false
 	case <-ctx.Done():
-		return false
+	}
+	sc.inflight.Add(-1)
+	return false
+}
+
+// drainPoll is how often Drain looks at the queue.
+const drainPoll = 5 * time.Millisecond
+
+// Drain waits up to within for everything queued by SendServer to be
+// written, and reports whether it was. Close drops whatever is still
+// queued; a server about to close a connection it has just answered on
+// drains it first. False on a closed connection.
+func (sc *ServerSocketConn) Drain(within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for {
+		select {
+		case <-sc.closed:
+			return false
+		default:
+		}
+		if sc.inflight.Load() == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(drainPoll)
 	}
 }
 

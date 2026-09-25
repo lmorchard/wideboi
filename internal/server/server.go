@@ -43,6 +43,10 @@ type Server struct {
 	statusPaneID int
 	dashboard    *Dashboard
 
+	// waiters holds the transports blocked in `wideboi wait` on each
+	// pane, answered when that pane's process exits or it is closed.
+	waiters map[int][]transport.Transport
+
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
 	// tell when either has changed. lastColumns tracks the last broadcast
@@ -148,6 +152,8 @@ type StartupPane struct {
 	Command string
 	Dir     string
 	Width   int
+	// Keep retains the pane after its process exits; see watchKeptPane.
+	Keep bool
 }
 
 // SetStartupPanes configures the initial columns in their display order.
@@ -432,6 +438,10 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	var sendResp *protocol.MsgSendInputResponse
 	var captureResp *protocol.MsgCaptureResponse
 	var closeResp *protocol.MsgClosePaneResponse
+	var waitResp *protocol.MsgWaitResponse
+	// paneClosed closes once a pane removed here has been hung up and its
+	// waiters answered; a server closing with it waits for that first.
+	var paneClosed <-chan struct{}
 
 	switch m := msg.(type) {
 	case protocol.MsgSplitRequest:
@@ -441,18 +451,24 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				break
 			}
 		}
-		spec := StartupPane{Command: m.Command, Dir: m.Cwd}
+		spec := StartupPane{Command: m.Command, Dir: m.Cwd, Keep: m.Keep}
 		p, err := s.spawnPaneWithSpecLocked(spec, m.AfterPaneID)
 		if err != nil {
 			splitResp = &protocol.MsgSplitResponse{Error: err.Error()}
 		} else {
 			splitResp = &protocol.MsgSplitResponse{PaneID: p.ID()}
 			needBroadcast = true
+			// A server that split auto-spawned never sees an attach,
+			// which is otherwise what marks startup done; without this
+			// its clean exit would skip auto-cleanup.
+			s.startupComplete = true
 		}
 	case protocol.MsgSendInputRequest:
 		p, ok := s.panes[m.PaneID]
 		if !ok {
 			sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
+		} else if _, exited := p.ExitStatus(); exited {
+			sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d has exited", m.PaneID)}
 		} else {
 			if _, err := p.Write(m.Data); err != nil {
 				sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: err.Error()}
@@ -472,10 +488,29 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		if _, ok := s.panes[m.PaneID]; !ok {
 			closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
 		} else {
-			closeServer = s.removePaneLocked(m.PaneID)
+			closeServer, paneClosed = s.removePaneLocked(m.PaneID)
 			needBroadcast = true
 			closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID}
 		}
+	case protocol.MsgWaitRequest:
+		// Checked and registered under s.mu, which every exit path takes
+		// before collecting waiters: watchKeptPane marks the exit before
+		// notifyWaiters locks, and an unkept pane leaves s.panes under
+		// the lock before finishWaiters runs. So a waiter either sees
+		// the exit here or is registered in time to hear it.
+		p, ok := s.panes[m.PaneID]
+		if !ok {
+			waitResp = &protocol.MsgWaitResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
+			break
+		}
+		if code, exited := p.ExitStatus(); exited {
+			waitResp = &protocol.MsgWaitResponse{PaneID: m.PaneID, ExitCode: code}
+			break
+		}
+		if s.waiters == nil {
+			s.waiters = make(map[int][]transport.Transport)
+		}
+		s.waiters[m.PaneID] = append(s.waiters[m.PaneID], tp)
 	case protocol.MsgPaneResync:
 		resyncPaneID = m.PaneID
 		s.trafficLocked(tp).counts.ResyncRequests++
@@ -589,7 +624,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			s.strip.MoveRight(m.PaneID)
 		case protocol.VerbKillPane:
 			if _, ok := s.panes[m.PaneID]; ok {
-				closeServer = s.removePaneLocked(m.PaneID)
+				closeServer, paneClosed = s.removePaneLocked(m.PaneID)
 				s.resizePanesLocked()
 			}
 		case protocol.VerbToggleStatus:
@@ -759,11 +794,19 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		if closeResp != nil {
 			tp.SendServer(ctx, *closeResp)
 		}
+		if waitResp != nil {
+			tp.SendServer(ctx, *waitResp)
+		}
 	}
 	if closeServer {
 		go func() {
 			// Give the response a moment to flush over the socket before tearing down
 			time.Sleep(50 * time.Millisecond)
+			// And let the last pane's waiters hear its exit before Close
+			// hangs up their connections.
+			if paneClosed != nil {
+				<-paneClosed
+			}
 			_ = s.Close()
 		}()
 	}
@@ -854,12 +897,98 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	s.panes[id] = p
 	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
 
-	p.Start(func() {
-		// Called when PTY reader hits EOF
-		s.onPaneExit(id)
-	})
+	if spec.Keep {
+		// A kept pane ends when its child is reaped, not at pty EOF: a
+		// background job can hold the pty open past the exit, and the
+		// exit code only exists after the reap. EOF still matters, as
+		// the point where the child's last output is on screen.
+		drained := make(chan struct{})
+		p.Start(func() { close(drained) })
+		go s.watchKeptPane(id, p, drained)
+	} else {
+		p.Start(func() {
+			// Called when PTY reader hits EOF
+			s.onPaneExit(id)
+		})
+	}
 
 	return p, nil
+}
+
+// keptDrainCeiling bounds how long a reaped kept pane waits for its pty
+// reader to reach EOF before reporting the exit. EOF normally follows
+// the reap within a read; it never comes while a background job still
+// holds the pty, and the exit must not wait on that job.
+const keptDrainCeiling = time.Second
+
+// watchKeptPane records a kept pane's exit and leaves the pane in place,
+// screen intact, until something closes it.
+//
+// The exit is reported only once the child is reaped *and* the reader
+// has drained the pty (or keptDrainCeiling passed). The reap can beat
+// the reader to the child's final bytes, and a waiter that captures as
+// soon as it hears the exit must see them.
+func (s *Server) watchKeptPane(id int, p *Pane, drained <-chan struct{}) {
+	select {
+	case <-p.pty.Done():
+	case <-p.closed:
+		return
+	}
+	select {
+	case <-drained:
+	case <-time.After(keptDrainCeiling):
+	case <-p.closed:
+		return
+	}
+	code, _ := p.pty.ExitCode()
+	p.markExited(code)
+	s.notifyWaiters(id, code, "")
+	s.broadcastLayout(context.Background())
+}
+
+// waiterSendCeiling bounds each wait answer, so a waiter whose connection
+// has stalled cannot hold up the others.
+const waiterSendCeiling = time.Second
+
+// notifyWaiters answers everyone waiting on pane id, once, and returns
+// the transports it answered.
+func (s *Server) notifyWaiters(id, code int, errMsg string) []transport.Transport {
+	s.mu.Lock()
+	tps := s.waiters[id]
+	delete(s.waiters, id)
+	s.mu.Unlock()
+	resp := protocol.MsgWaitResponse{PaneID: id, ExitCode: code, Error: errMsg}
+	for _, tp := range tps {
+		ctx, cancel := context.WithTimeout(context.Background(), waiterSendCeiling)
+		tp.SendServer(ctx, resp)
+		cancel()
+	}
+	return tps
+}
+
+// waiterDrainCeiling bounds the wait for a wait answer to reach the wire
+// before the session hangs up the waiter's connection.
+const waiterDrainCeiling = 500 * time.Millisecond
+
+// drainAnswered lets wait answers just queued on tps reach the wire. A
+// transport's Close drops whatever is still queued, and these answers
+// are followed closely by the session hanging up.
+func drainAnswered(tps []transport.Transport) {
+	for _, tp := range tps {
+		if d, ok := tp.(interface{ Drain(time.Duration) bool }); ok {
+			d.Drain(waiterDrainCeiling)
+		}
+	}
+}
+
+// finishWaiters answers waiters on a pane that has been closed. Close
+// hung it up and waited for the reap, so the code is normally there; a
+// child that outlived the grace has none to give.
+func (s *Server) finishWaiters(id int, p *Pane) []transport.Transport {
+	if code, ok := p.reapedExitCode(); ok {
+		return s.notifyWaiters(id, code, "")
+	}
+	return s.notifyWaiters(id, 0, fmt.Sprintf("pane %d closed before its process exited", id))
 }
 
 func (s *Server) onPaneExit(id int) {
@@ -893,16 +1022,23 @@ func (s *Server) onPaneExit(id int) {
 
 	s.broadcastLayout(context.Background())
 	_ = p.Close()
+	// Before any s.Close below, so a waiter hears the code before its
+	// connection goes.
+	answered := s.finishWaiters(id, p)
 
 	if shouldClose {
+		drainAnswered(answered)
 		_ = s.Close()
 	}
 }
 
-func (s *Server) removePaneLocked(id int) bool {
+// removePaneLocked takes pane id out of the session and closes it in the
+// background. last reports that no terminal panes remain; closed closes
+// once the pane is hung up and its waiters answered.
+func (s *Server) removePaneLocked(id int) (last bool, closed <-chan struct{}) {
 	p, ok := s.panes[id]
 	if !ok {
-		return false
+		return false, nil
 	}
 	if id == s.statusPaneID {
 		s.statusPaneID = 0
@@ -921,8 +1057,17 @@ func (s *Server) removePaneLocked(id int) bool {
 			break
 		}
 	}
-	go p.Close()
-	return !hasTerminalPanes
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = p.Close()
+		answered := s.finishWaiters(id, p)
+		if !hasTerminalPanes {
+			// The session closes behind this; see paneClosed.
+			drainAnswered(answered)
+		}
+	}()
+	return !hasTerminalPanes, done
 }
 
 func (s *Server) spawnDashboardPaneLocked(afterPaneID int) (*Pane, error) {
@@ -1248,10 +1393,13 @@ func (s *Server) sendPaneMetadataTo(ctx context.Context, tp transport.Transport)
 	s.mu.Lock()
 	var msgs []protocol.MsgPaneMetadata
 	for id, p := range s.panes {
+		code, exited := p.ExitStatus()
 		msgs = append(msgs, protocol.MsgPaneMetadata{
 			PaneID:   id,
 			CWD:      p.CWD(),
 			UserVars: p.UserVars(),
+			Exited:   exited,
+			ExitCode: code,
 		})
 	}
 	s.mu.Unlock()
@@ -1826,6 +1974,7 @@ func (s *Server) Close() error {
 		var wg sync.WaitGroup
 		var errMu sync.Mutex
 		var errs []error
+		var answered []transport.Transport
 
 		for _, p := range panesToClose {
 			wg.Add(1)
@@ -1836,9 +1985,16 @@ func (s *Server) Close() error {
 					errs = append(errs, fmt.Errorf("pane %d: %w", p.ID(), err))
 					errMu.Unlock()
 				}
+				// Before the transports close below, so `wideboi wait`
+				// hears the pane's end rather than a dropped connection.
+				tps := s.finishWaiters(p.ID(), p)
+				errMu.Lock()
+				answered = append(answered, tps...)
+				errMu.Unlock()
 			}(p)
 		}
 		wg.Wait()
+		drainAnswered(answered)
 
 		// Hang up on every client last. For a client waiting on a
 		// shutdown, the closed connection is the only acknowledgement

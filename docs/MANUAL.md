@@ -265,7 +265,7 @@ wideboi provides CLI subcommands to control sessions from external scripts, auto
 
 ### Subcommands
 
-All control commands support `-L <name>` or `-s <path>` to target a specific session. Commands exit with status code `0` on success and `1` on failure.
+All control commands support `-L <name>` or `-s <path>` to target a specific session. Commands exit with status code `0` on success and `1` on failure, except `wait` which exits with the pane process's exit code (or `124` on timeout). Running `split` will automatically start a background session server if one is not already running.
 
 #### `split`
 Creates a new pane and runs a command:
@@ -276,9 +276,26 @@ PANE_ID=$(wideboi split)
 
 # Open a pane running a specific command
 PANE_ID=$(wideboi split make test)
+
+# Open a command and keep the pane, screen, and exit code after it exits
+PANE_ID=$(wideboi split --keep make test)
+
+# Specify working directory or placement after an existing pane
+PANE_ID=$(wideboi split --cwd /path/to/repo --after 2 npm test)
 ```
 
 The command prints the new pane ID integer to stdout.
+
+#### `wait`
+Blocks until a pane's child process exits:
+
+```bash
+# Wait for the command to finish, exiting with the process's exit code
+wideboi wait $PANE_ID
+
+# Wait with a timeout (exits 124 if timed out)
+wideboi wait $PANE_ID --timeout 30s
+```
 
 #### `send`
 Sends keystrokes or text input to a pane:

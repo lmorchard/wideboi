@@ -44,13 +44,15 @@ func MarshalClient(msg any) ([]byte, error) {
 	case MsgTrafficRequest:
 		env.Msg = &wirepb.ClientMessage_TrafficRequest{TrafficRequest: &wirepb.MsgTrafficRequest{}}
 	case MsgSplitRequest:
-		env.Msg = &wirepb.ClientMessage_SplitRequest{SplitRequest: &wirepb.MsgSplitRequest{Command: validUTF8(m.Command), Cwd: validUTF8(m.Cwd), AfterPaneId: int32(m.AfterPaneID)}}
+		env.Msg = &wirepb.ClientMessage_SplitRequest{SplitRequest: &wirepb.MsgSplitRequest{Command: validUTF8(m.Command), Cwd: validUTF8(m.Cwd), AfterPaneId: int32(m.AfterPaneID), Keep: m.Keep}}
 	case MsgSendInputRequest:
 		env.Msg = &wirepb.ClientMessage_SendInputRequest{SendInputRequest: &wirepb.MsgSendInputRequest{PaneId: int32(m.PaneID), Data: m.Data}}
 	case MsgCaptureRequest:
 		env.Msg = &wirepb.ClientMessage_CaptureRequest{CaptureRequest: &wirepb.MsgCaptureRequest{PaneId: int32(m.PaneID), Scrollback: m.Scrollback, Lines: int32(m.Lines)}}
 	case MsgClosePaneRequest:
 		env.Msg = &wirepb.ClientMessage_ClosePaneRequest{ClosePaneRequest: &wirepb.MsgClosePaneRequest{PaneId: int32(m.PaneID)}}
+	case MsgWaitRequest:
+		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	default:
 		return nil, fmt.Errorf("unsupported client message %T", msg)
 	}
@@ -88,13 +90,15 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_TrafficRequest:
 		return MsgTrafficRequest{}, nil
 	case *wirepb.ClientMessage_SplitRequest:
-		return MsgSplitRequest{Command: m.SplitRequest.Command, Cwd: m.SplitRequest.Cwd, AfterPaneID: int(m.SplitRequest.AfterPaneId)}, nil
+		return MsgSplitRequest{Command: m.SplitRequest.Command, Cwd: m.SplitRequest.Cwd, AfterPaneID: int(m.SplitRequest.AfterPaneId), Keep: m.SplitRequest.Keep}, nil
 	case *wirepb.ClientMessage_SendInputRequest:
 		return MsgSendInputRequest{PaneID: int(m.SendInputRequest.PaneId), Data: m.SendInputRequest.Data}, nil
 	case *wirepb.ClientMessage_CaptureRequest:
 		return MsgCaptureRequest{PaneID: int(m.CaptureRequest.PaneId), Scrollback: m.CaptureRequest.Scrollback, Lines: int(m.CaptureRequest.Lines)}, nil
 	case *wirepb.ClientMessage_ClosePaneRequest:
 		return MsgClosePaneRequest{PaneID: int(m.ClosePaneRequest.PaneId)}, nil
+	case *wirepb.ClientMessage_WaitRequest:
+		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
 	default:
 		return nil, fmt.Errorf("unknown client message %T", env.Msg)
 	}
@@ -171,8 +175,10 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_PaneClosed{PaneClosed: &wirepb.MsgPaneClosed{PaneId: int32(m.PaneID), ExitCode: int32(m.ExitCode)}}
 	case MsgPaneMetadata:
 		meta := &wirepb.MsgPaneMetadata{
-			PaneId: int32(m.PaneID),
-			Cwd:    validUTF8(m.CWD),
+			PaneId:   int32(m.PaneID),
+			Cwd:      validUTF8(m.CWD),
+			Exited:   m.Exited,
+			ExitCode: int32(m.ExitCode),
 		}
 		if m.UserVars != nil {
 			meta.UserVars = make(map[string]string, len(m.UserVars))
@@ -197,6 +203,8 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_CaptureResponse{CaptureResponse: &wirepb.MsgCaptureResponse{PaneId: int32(m.PaneID), Text: validUTF8(m.Text), Error: validUTF8(m.Error)}}
 	case MsgClosePaneResponse:
 		env.Msg = &wirepb.ServerMessage_ClosePaneResponse{ClosePaneResponse: &wirepb.MsgClosePaneResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
+	case MsgWaitResponse:
+		env.Msg = &wirepb.ServerMessage_WaitResponse{WaitResponse: &wirepb.MsgWaitResponse{PaneId: int32(m.PaneID), ExitCode: int32(m.ExitCode), Error: validUTF8(m.Error)}}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -277,8 +285,10 @@ func UnmarshalServer(data []byte) (any, error) {
 	case *wirepb.ServerMessage_PaneMetadata:
 		src := m.PaneMetadata
 		meta := MsgPaneMetadata{
-			PaneID: int(src.PaneId),
-			CWD:    src.Cwd,
+			PaneID:   int(src.PaneId),
+			CWD:      src.Cwd,
+			Exited:   src.Exited,
+			ExitCode: int(src.ExitCode),
 		}
 		if src.UserVars != nil {
 			meta.UserVars = make(map[string]string, len(src.UserVars))
@@ -304,6 +314,8 @@ func UnmarshalServer(data []byte) (any, error) {
 		return MsgCaptureResponse{PaneID: int(m.CaptureResponse.PaneId), Text: m.CaptureResponse.Text, Error: m.CaptureResponse.Error}, nil
 	case *wirepb.ServerMessage_ClosePaneResponse:
 		return MsgClosePaneResponse{PaneID: int(m.ClosePaneResponse.PaneId), Error: m.ClosePaneResponse.Error}, nil
+	case *wirepb.ServerMessage_WaitResponse:
+		return MsgWaitResponse{PaneID: int(m.WaitResponse.PaneId), ExitCode: int(m.WaitResponse.ExitCode), Error: m.WaitResponse.Error}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}

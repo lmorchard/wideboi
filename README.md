@@ -86,8 +86,12 @@ Press `Ctrl+b` and then press `c` to toggle between modes. Each connected client
 You can control sessions directly from scripts and AI coding agents without attaching an interactive terminal:
 
 ```bash
-# Create a pane and capture its pane ID
-PANE_ID=$(wideboi split make test)
+# Run a command in a new pane (starting the session if none is running);
+# --keep holds the pane, screen, and exit code after the command exits
+PANE_ID=$(wideboi split --keep make test)
+
+# Block until the command exits, and exit with its exit code
+wideboi wait $PANE_ID
 
 # Send input text with Enter (-e)
 wideboi send $PANE_ID "git status" -e
@@ -99,7 +103,7 @@ wideboi capture $PANE_ID
 wideboi close $PANE_ID
 ```
 
-All control commands accept `-L <session-name>` and `-s <socket-path>` to target specific sessions.
+All control commands accept `-L <session-name>` and `-s <socket-path>` to target specific sessions. `wait` exits with the pane process's exit code; the others exit 0 on success and 1 on error. `status --json` reports pane statuses by name (`idle`, `working`, `needs_input`, `done`, `failed`) and, for kept panes, `exited` and `exit_code`. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.
 
 ---
 

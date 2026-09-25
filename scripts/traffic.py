@@ -695,7 +695,7 @@ def run_scenario(sc: Scenario, args, wssink: str) -> dict:
     sinks = [sink_delta(m, b) for m, b in zip(sink_mid, sink_base)]
     res = {
         "name": sc.name,
-        "pane": {"cols": pane["Width"], "rows": pane["Height"]},
+        "pane": {"cols": pane["width"], "rows": pane["height"]},
         "pty": {"cols": run.pty_cols, "rows": run.pty_rows},
         "workload_seconds": workload,
         "settled_seconds": settled,
@@ -704,8 +704,8 @@ def run_scenario(sc: Scenario, args, wssink: str) -> dict:
         "sink_baseline": sink_base, "sink_after": sink_mid, "sink_final": finals,
         "sinks": sinks,
     }
-    if (pane["Width"], pane["Height"]) != (sc.cols, sc.rows):
-        print(f"traffic: {sc.name}: pane is {pane['Width']}x{pane['Height']}, "
+    if (pane["width"], pane["height"]) != (sc.cols, sc.rows):
+        print(f"traffic: {sc.name}: pane is {pane['width']}x{pane['height']}, "
               f"wanted {sc.cols}x{sc.rows}", file=sys.stderr)
     if args.profile:
         prefix = run.overlay["WIDEBOI_CPUPROFILE"]

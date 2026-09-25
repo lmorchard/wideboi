@@ -971,7 +971,7 @@ def case_small_client_does_not_shrink_session_and_can_claim_size(fail):
             raw = subprocess.check_output([BIN, "--socket", socket_path(), "status", "--json"])
             data = json.loads(raw)
             cols = data.get("columns", [])
-            return cols[0]["Height"] if cols else None
+            return cols[0]["height"] if cols else None
 
         h0 = get_col_height()
         if h0 != 22:

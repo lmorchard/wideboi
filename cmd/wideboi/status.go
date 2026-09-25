@@ -104,7 +104,7 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 		if m, ok := metas[col.PaneID]; ok && m.CWD != "" {
 			cwd = m.CWD
 		}
-		fmt.Fprintf(tw, "%d\t%d\t%d\t%s\t%s\t%s\n", col.PaneID, col.Width, col.Height, statusName(status), title, cwd)
+		fmt.Fprintf(tw, "%d\t%d\t%d\t%s\t%s\t%s\n", col.PaneID, col.Width, col.Height, status.String(), title, cwd)
 	}
 	return tw.Flush()
 }
@@ -216,19 +216,4 @@ func formatTiming(t protocol.TimingStat) string {
 		avg = time.Duration(t.TotalNanos / t.Count)
 	}
 	return fmt.Sprintf("n=%d avg=%s max=%s", t.Count, avg, time.Duration(t.MaxNanos))
-}
-
-func statusName(status protocol.PaneStatus) string {
-	switch status {
-	case protocol.StatusWorking:
-		return "working"
-	case protocol.StatusNeedsInput:
-		return "needs input"
-	case protocol.StatusDone:
-		return "done"
-	case protocol.StatusFailed:
-		return "failed"
-	default:
-		return "idle"
-	}
 }

@@ -52,11 +52,14 @@ var (
 type cliOptions struct {
 	subcommand     string
 	subcommandArgs []string
-	flags          config.ConfigFlags
-	showVer        bool
-	showHelp       bool
-	jsonOut        bool
-	trafficOut     bool
+	// globalArgs are the flags before split/send/capture/close/wait: what
+	// split passes to a server it auto-spawns.
+	globalArgs []string
+	flags      config.ConfigFlags
+	showVer    bool
+	showHelp   bool
+	jsonOut    bool
+	trafficOut bool
 	// ownerFD is the inherited connection a spawning plain wideboi owns
 	// this server through, or -1. Internal: see spawnServer.
 	ownerFD int
@@ -74,9 +77,10 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
+			opts.globalArgs = append([]string(nil), flagArgs...)
 			break
 		}
 		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help") {
@@ -148,14 +152,19 @@ func printHelp(w io.Writer) {
                              Show the layout snapshot and pane statuses
   wideboi [flags] status --traffic [--json]
                              Show pane updates and bytes sent to each client
-  wideboi [flags] split [--cwd <dir>] [--after <pane-id>] [command...]
-                             Create a pane, optionally run command, and print its ID
+  wideboi [flags] split [--cwd <dir>] [--after <pane-id>] [--keep] [command...]
+                             Create a pane, optionally run command, and print its ID;
+                             --keep retains it, screen and exit code, after it exits
   wideboi [flags] send <pane-id> <text> [--enter|-e]
-                             Send input to a pane (literal by default; -e adds Enter)
+                             Send input to a pane (literal by default; -e adds Enter;
+                             quote text containing spaces)
   wideboi [flags] capture <pane-id> [--scrollback|-S] [--lines|-n <count>]
                              Read a pane's terminal text
   wideboi [flags] close <pane-id>
                              Close a pane using hangup semantics
+  wideboi [flags] wait [--timeout <duration>] <pane-id>
+                             Block until a pane's process exits; exit with its code
+                             (124 on timeout). Use split --keep to wait after exit
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi version            Display version information
@@ -243,13 +252,17 @@ func main() {
 	case "ls":
 		fatal(runList(os.Stdout))
 	case "split":
-		fatal(runSplit(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
+		fatal(runSplit(cfg, opts.globalArgs, opts.subcommandArgs, os.Stdout, os.Stderr))
 	case "send":
 		fatal(runSend(cfg, opts.subcommandArgs, os.Stderr))
 	case "capture":
 		fatal(runCapture(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
 	case "close":
 		fatal(runClose(cfg, opts.subcommandArgs, os.Stderr))
+	case "wait":
+		code, err := runWait(cfg, opts.subcommandArgs, os.Stderr)
+		fatal(err)
+		os.Exit(code)
 	default:
 		fatal(run(cfg, bindings))
 	}
