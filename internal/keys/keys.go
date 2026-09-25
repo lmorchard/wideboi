@@ -38,6 +38,7 @@ const (
 	ActionNameFocusLast    = "focus_last"
 	ActionNameToggleCards  = "toggle_cards"
 	ActionNameToggleStatus = "toggle_status"
+	ActionNameClaimSize    = "claim_size"
 	ActionNameHelp         = "help"
 	ActionNameSearch       = "search"
 	ActionNameDetach       = "detach"
@@ -151,6 +152,7 @@ const (
 	helpWidth     = "shrink / grow this column's width"
 	helpMove      = "move this column left / right"
 	helpAttention = "jump to attention / status dashboard"
+	helpView      = "toggle cards / claim session size"
 )
 
 // Bindings is the table, in status-bar display order.
@@ -203,7 +205,9 @@ var Bindings = slices.Concat([]Binding{
 	// NoRepeat because ctrl+c must stay an unknown key that leaves
 	// control mode; see the field's comment.
 	{ActionName: ActionNameToggleCards, Key: "c", Action: ActionToggleLayout,
-		NoRepeat: true, Long: "toggle the card layout"},
+		NoRepeat: true, Long: "toggle the card layout", HelpGroup: helpView},
+	{ActionName: ActionNameClaimSize, Key: "S", Action: ActionVerb, Verb: protocol.VerbClaimSize,
+		NoRepeat: true, Long: "claim session size for this window", HelpGroup: helpView},
 	{ActionName: ActionNameQuit, Key: "q", Action: ActionQuit, Essential: true,
 		BarGroup: "q quit", Long: "quit wideboi and close every pane"},
 	{ActionName: ActionNameExit, Key: "esc", Action: ActionExit, Essential: true,
@@ -310,6 +314,7 @@ var validActions = map[string]string{
 	"status":               ActionNameToggleStatus,
 	ActionNameFocusLast:    ActionNameFocusLast,
 	ActionNameToggleCards:  ActionNameToggleCards,
+	ActionNameClaimSize:    ActionNameClaimSize,
 	ActionNameHelp:         ActionNameHelp,
 	ActionNameSearch:       ActionNameSearch,
 	ActionNameDetach:       ActionNameDetach,

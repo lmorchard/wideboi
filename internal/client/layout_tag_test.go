@@ -19,7 +19,7 @@ func tagClient(mode protocol.LayoutMode) *Client {
 	return c
 }
 
-const plainStatus = "focus: [pane 1 ★]"
+const plainStatus = "[● 1  ]"
 
 func TestNormalStatusShowsLayoutMode(t *testing.T) {
 	for _, tc := range []struct {
@@ -52,7 +52,7 @@ func TestNormalStatusDropsLayoutTagWhenNothingFits(t *testing.T) {
 	if strings.Contains(got, "cards") || strings.Contains(got, "for commands") {
 		t.Errorf("at %d cells got %q; want neither tag nor hint", budget, got)
 	}
-	if !strings.Contains(got, "focus: [pane") {
+	if !strings.Contains(got, "[● 1") {
 		t.Errorf("at %d cells the focus readout is gone: %q", budget, got)
 	}
 }

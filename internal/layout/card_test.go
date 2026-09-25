@@ -255,3 +255,26 @@ func TestCardWindowPropertyInvariants(t *testing.T) {
 		}
 	})
 }
+
+func TestCardComputePlacementsAnchorsToBottomWhenTaller(t *testing.T) {
+	s := layout.NewStrip()
+	s.SetStrategy(layout.CardStrategy{})
+	s.AddColumn(1, 40, 50, 0)
+	s.AddColumn(2, 40, 50, 0)
+	// Viewport height 22 -> AvailHeight 20
+	ps := s.ComputePlacements(80, 22)
+	if len(ps) != 2 {
+		t.Fatalf("placements = %d, want 2", len(ps))
+	}
+	for _, p := range ps {
+		if got, want := p.Src.Min.Y, 30; got != want {
+			t.Errorf("pane %d Src.Min.Y = %d, want %d", p.PaneID, got, want)
+		}
+		if got, want := p.Src.Dy(), 20; got != want {
+			t.Errorf("pane %d Src.Dy() = %d, want %d", p.PaneID, got, want)
+		}
+		if got, want := p.Dst.Dy(), 20; got != want {
+			t.Errorf("pane %d Dst.Dy() = %d, want %d", p.PaneID, got, want)
+		}
+	}
+}

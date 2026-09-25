@@ -68,9 +68,10 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	if numCols == 1 {
 		col := s.columns[0]
 		w := min(col.Width, viewportWidth)
+		maxSrcY := max(0, col.Height-availHeight)
 		return []Placement{{
 			PaneID: col.PaneID,
-			Src:    image.Rect(0, 0, w, availHeight),
+			Src:    image.Rect(0, maxSrcY, w, maxSrcY+availHeight),
 			Dst:    image.Rect(0, 1, w, 1+availHeight),
 			Z:      1,
 			// A lone column is occluded by nothing.
@@ -121,9 +122,10 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		// It's the z-order and clipping that handles the "sliver" effect.
 		kind := protocol.PlacementFull
 
+		maxSrcY := max(0, col.Height-availHeight)
 		placements = append(placements, Placement{
 			PaneID: col.PaneID,
-			Src:    image.Rect(0, 0, dst.Dx(), availHeight),
+			Src:    image.Rect(0, maxSrcY, dst.Dx(), maxSrcY+availHeight),
 			Dst:    dst,
 			Z:      z,
 			Kind:   kind,

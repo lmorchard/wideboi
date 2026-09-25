@@ -8,7 +8,7 @@
 # Precedence order (highest to lowest):
 #   1. Command-line flags (-l, -p, -s, --shell)
 #   2. Environment variable overrides (WIDEBOI_LAYOUT, WIDEBOI_PREFIX, WIDEBOI_SOCK, WIDEBOI_SHELL,
-#      WIDEBOI_LOG_LEVEL)
+#      WIDEBOI_LOG_LEVEL, WIDEBOI_AUTO_CLEANUP)
 #   3. Configuration file (this file)
 #   4. Defaults (including $SHELL or /bin/sh)
 
@@ -62,11 +62,32 @@ prefix = "ctrl+b"
 # selection and scrollback wheel. Defaults to true.
 # mouse = true
 
+# Theme styling for TUI chrome (status bar, badges, dividers, and sliver spines).
+# Color names: "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+# "bright_black" (or "gray"), "bright_red", "bright_green", "bright_yellow",
+# "bright_blue", "bright_magenta", "bright_cyan", "bright_white", or ANSI numbers 0-255.
+# Attributes: "bold", "dim" (or "faint"), "reverse".
+# Respects the standard NO_COLOR environment variable (disabling colors while keeping glyphs/attributes).
+# [theme]
+# working       = "cyan"
+# needs_input   = "yellow bold"
+# done          = "green"
+# failed        = "red bold"
+# focus         = "bright_cyan bold"
+# dim           = "dim"
+# divider       = "dim"
+# focus_divider = "bright_cyan bold"
+
 # Log verbosity for $TMPDIR/wideboi-<uid>/{client,server}.log:
 # "trace", "debug", "info" (default), "warn" or "error". The logs are
 # appended to forever, and trace records every message a client receives,
 # so raise it only while chasing something.
 # log_level = "info"
+
+# Automatically clean up dead sockets, web tokens, and remove session logs
+# on clean exit. Preserves logs if terminated abnormally or by signal.
+# Set to false to retain logs for post-exit inspection. Defaults to true.
+# auto_cleanup = true
 
 # Key remapping for control mode
 #

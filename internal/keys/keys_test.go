@@ -145,7 +145,7 @@ func TestEveryPlainFormMatchesItself(t *testing.T) {
 			return []byte{0x2c}, true
 		default:
 			// Single letter or digit
-			if len(name) == 1 && (name[0] >= 'a' && name[0] <= 'z' || name[0] >= '0' && name[0] <= '9') {
+			if len(name) == 1 && ((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z') || (name[0] >= '0' && name[0] <= '9')) {
 				return []byte{name[0]}, true
 			}
 			return nil, false

@@ -127,6 +127,7 @@ func TestEnumsMatchWireSchema(t *testing.T) {
 		VerbMoveRight:    wirepb.VerbType_VERB_TYPE_MOVE_RIGHT,
 		VerbFocusLast:    wirepb.VerbType_VERB_TYPE_FOCUS_LAST,
 		VerbToggleStatus: wirepb.VerbType_VERB_TYPE_TOGGLE_STATUS,
+		VerbClaimSize:    wirepb.VerbType_VERB_TYPE_CLAIM_SIZE,
 	}
 	for goVal, wireVal := range verbs {
 		if int32(goVal) != int32(wireVal) {

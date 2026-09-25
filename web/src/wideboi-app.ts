@@ -94,6 +94,19 @@ export class WideboiApp extends LitElement {
       border-radius: 3px;
       outline: none;
     }
+    .claim-size-btn {
+      background: #3c3c3c;
+      color: #cccccc;
+      border: 1px solid #555;
+      padding: 0.3rem 0.6rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .claim-size-btn:hover {
+      background: #4c4c4c;
+      color: #ffffff;
+    }
     .toolbar label {
       color: #aaa;
       white-space: nowrap;
@@ -909,6 +922,15 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  claimSize() {
+    if (!this.client || !this.connected) return;
+    this.sendResizeIfChanged();
+    this.client.send({
+      case: 'verb',
+      value: { verb: VerbType.CLAIM_SIZE, paneId: this.focusedPaneId },
+    });
+  }
+
   private setLayoutMode(mode: 'cards' | 'scroll') {
     if (mode !== 'cards' && mode !== 'scroll') return;
     if (mode === this.layoutMode) return;
@@ -988,6 +1010,7 @@ export class WideboiApp extends LitElement {
             <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
             <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
           </select>
+          <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
           <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
           <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
         </div>

@@ -318,6 +318,80 @@ func TestLoadMouse(t *testing.T) {
 	}
 }
 
+func TestLoadAutoCleanup(t *testing.T) {
+	// 1. Defaults to true
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.AutoCleanupEnabled {
+		t.Error("AutoCleanupEnabled = false by default, want true")
+	}
+
+	// 2. TOML auto_cleanup = false disables it
+	tomlPathFalse := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlPathFalse, []byte("auto_cleanup = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPathFalse}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.AutoCleanupEnabled {
+		t.Error("AutoCleanupEnabled = true with auto_cleanup = false in TOML")
+	}
+
+	// 3. TOML auto_cleanup = true enables it explicitly
+	tomlPathTrue := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlPathTrue, []byte("auto_cleanup = true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPathTrue}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.AutoCleanupEnabled {
+		t.Error("AutoCleanupEnabled = false with auto_cleanup = true in TOML")
+	}
+
+	// 4. Environment variable false/0/no/off disables it
+	for _, val := range []string{"false", "0", "no", "off", "FALSE"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_AUTO_CLEANUP": val}))
+		if err != nil {
+			t.Fatalf("Load() with WIDEBOI_AUTO_CLEANUP=%q error: %v", val, err)
+		}
+		if cfg.AutoCleanupEnabled {
+			t.Errorf("AutoCleanupEnabled = true with WIDEBOI_AUTO_CLEANUP=%q", val)
+		}
+	}
+
+	// 5. Environment variable true/1/yes/on enables it
+	for _, val := range []string{"true", "1", "yes", "on", "TRUE"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_AUTO_CLEANUP": val}))
+		if err != nil {
+			t.Fatalf("Load() with WIDEBOI_AUTO_CLEANUP=%q error: %v", val, err)
+		}
+		if !cfg.AutoCleanupEnabled {
+			t.Errorf("AutoCleanupEnabled = false with WIDEBOI_AUTO_CLEANUP=%q", val)
+		}
+	}
+
+	// 6. Invalid environment variable returns an error
+	_, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_AUTO_CLEANUP": "maybe"}))
+	if err == nil {
+		t.Error("Load() want error for WIDEBOI_AUTO_CLEANUP='maybe', got nil")
+	}
+
+	// 7. Environment variable overrides TOML
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPathFalse}, mockEnv(map[string]string{"WIDEBOI_AUTO_CLEANUP": "true"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.AutoCleanupEnabled {
+		t.Error("AutoCleanupEnabled = false when env WIDEBOI_AUTO_CLEANUP='true' overrides TOML false")
+	}
+}
+
 func TestLoadLogLevel(t *testing.T) {
 	dir := t.TempDir()
 	env := func(m map[string]string) func(string) string {
@@ -595,5 +669,43 @@ func TestStartupPanesConfig(t *testing.T) {
 	}
 	if _, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil)); err != nil {
 		t.Errorf("maximum startup width should be valid: %v", err)
+	}
+}
+
+func TestConfigTheme(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[theme]
+working = "cyan"
+needs_input = "yellow"
+done = "green"
+failed = "red"
+focus = "bright_cyan"
+divider = "dim"
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme.Working != "cyan" {
+		t.Errorf("cfg.Theme.Working = %q, want 'cyan'", cfg.Theme.Working)
+	}
+	if cfg.Theme.NeedsInput != "yellow" {
+		t.Errorf("cfg.Theme.NeedsInput = %q, want 'yellow'", cfg.Theme.NeedsInput)
+	}
+	if cfg.Theme.Done != "green" {
+		t.Errorf("cfg.Theme.Done = %q, want 'green'", cfg.Theme.Done)
+	}
+	if cfg.Theme.Failed != "red" {
+		t.Errorf("cfg.Theme.Failed = %q, want 'red'", cfg.Theme.Failed)
+	}
+	if cfg.Theme.Focus != "bright_cyan" {
+		t.Errorf("cfg.Theme.Focus = %q, want 'bright_cyan'", cfg.Theme.Focus)
+	}
+	if cfg.Theme.Divider != "dim" {
+		t.Errorf("cfg.Theme.Divider = %q, want 'dim'", cfg.Theme.Divider)
 	}
 }

@@ -90,10 +90,14 @@ type Server struct {
 	// paneSbLens tracks the scrollback length when last updated to keep content pinned.
 	paneSbLens map[transport.Transport]map[int]int
 
-	// clientSizes records the last known window dimensions of each connected
-	// client. The server session size is the minimum among all clients,
-	// preventing a large client from cropping a smaller one.
+	// clientSizes records the last known window dimensions of each connected client.
 	clientSizes map[transport.Transport]protocol.MsgResize
+
+	// sizeOwner is the client whose viewport dimensions currently define
+	// the session PTY rows and columns. Initially set by the first client
+	// to attach. Viewers connect without altering session geometry. Any
+	// client can claim size ownership with VerbClaimSize (#184).
+	sizeOwner transport.Transport
 
 	// paneSendMu serializes broadcastPaneUpdates. The Run loop, every
 	// client's message loop (via broadcastLayout) and onPaneExit all
@@ -363,8 +367,9 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.pendingCreationSnapshot, tp)
 	delete(s.attachedTransports, tp)
 	s.forgetTrafficLocked(tp)
-	s.recomputeSessionSizeLocked()
-	s.resizePanesLocked()
+	if s.sizeOwner == tp {
+		s.sizeOwner = nil
+	}
 }
 
 // Run executes the main server event loop, processing client messages and polling descendants.
@@ -437,7 +442,11 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
 			}
 			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
-			s.recomputeSessionSizeLocked()
+			if s.sizeOwner == nil && s.rows == 0 {
+				s.sizeOwner = tp
+				s.cols = m.Cols
+				s.rows = m.Rows
+			}
 		}
 		if len(s.panes) == 0 {
 			if len(s.startup) == 0 {
@@ -472,11 +481,24 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
 			}
 			s.clientSizes[tp] = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
-			oldCols, oldRows := s.cols, s.rows
-			s.recomputeSessionSizeLocked()
-			if s.cols != oldCols || s.rows != oldRows {
+			if s.sizeOwner == nil && s.rows == 0 {
+				s.sizeOwner = tp
+				s.cols = m.Cols
+				s.rows = m.Rows
 				s.resizePanesLocked()
 				needBroadcast = true
+			} else {
+				if s.sizeOwner == nil && len(s.attachedTransports) == 0 && len(s.transports) <= 1 {
+					s.sizeOwner = tp
+				}
+				if s.sizeOwner == tp {
+					oldCols, oldRows := s.cols, s.rows
+					s.cols, s.rows = m.Cols, m.Rows
+					if s.cols != oldCols || s.rows != oldRows {
+						s.resizePanesLocked()
+						needBroadcast = true
+					}
+				}
 			}
 		}
 
@@ -518,6 +540,15 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				}
 				s.resizePanesLocked()
 				s.updateDashboardLocked()
+			}
+		case protocol.VerbClaimSize:
+			s.sizeOwner = tp
+			if sz, ok := s.clientSizes[tp]; ok && sz.Cols > 0 && sz.Rows > 0 {
+				oldCols, oldRows := s.cols, s.rows
+				s.cols, s.rows = sz.Cols, sz.Rows
+				if s.cols != oldCols || s.rows != oldRows {
+					s.resizePanesLocked()
+				}
 			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client
@@ -860,30 +891,6 @@ func (s *Server) updateDashboardLocked() {
 	_, _ = p.grid.Write(data)
 }
 
-// recomputeSessionSizeLocked updates s.cols and s.rows to the minimum dimensions
-// among all connected clients.
-func (s *Server) recomputeSessionSizeLocked() {
-	if len(s.clientSizes) == 0 {
-		return
-	}
-	minCols, minRows := 0, 0
-	first := true
-	for _, sz := range s.clientSizes {
-		if first {
-			minCols, minRows = sz.Cols, sz.Rows
-			first = false
-		} else {
-			if sz.Cols < minCols {
-				minCols = sz.Cols
-			}
-			if sz.Rows < minRows {
-				minRows = sz.Rows
-			}
-		}
-	}
-	s.cols, s.rows = minCols, minRows
-}
-
 // resizePanesLocked pushes each pane's current column width and available
 // height down to its emulator and child. Call it after anything that
 // changes geometry: an attach, a host resize, a new column, a width cycle,
@@ -954,6 +961,7 @@ func (s *Server) resizePanesLocked() {
 	}
 
 	h := layout.AvailHeight(s.rows)
+	s.strip.SetAllColumnHeights(h)
 	var jobs []resizeJob
 	for _, id := range s.strip.PaneIDs() {
 		p, ok := s.panes[id]

@@ -57,7 +57,7 @@ func TestHeaderShowsColumnPosition(t *testing.T) {
 	scr := newFakeHostScreen(100, 24)
 	cli.Draw(scr)
 
-	for id, want := range map[int]string{5: " 1 [5]", 2: " 2 [2]"} {
+	for id, want := range map[int]string{5: " 1 [● 5  ]", 2: " 2 [  2  ]"} {
 		p := placementFor(cli, id)
 		got := regionText(scr, image.Rect(p.Dst.Min.X, 0, p.Dst.Max.X, 1))
 		if !strings.HasPrefix(got, want) {
