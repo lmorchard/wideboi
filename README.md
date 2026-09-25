@@ -1,14 +1,21 @@
 # wideboi
 
-wideboi is a horizontal scrolling tiling terminal multiplexer for wide monitors.
+wideboi is a horizontal scrolling tiling overlapping terminal multiplexer for wide monitors.
 
 But, it's also got a web UI, because sometimes you need to check your wideboi from a smol phone or laptop.
 
-Your UI mileage will vary based on the current state of things, but these videos give the gist:
+Your UI mileage will vary based on the current state of things, here's the gist:
 
 <video src="https://github.com/user-attachments/assets/3c4cb3bf-7d33-4c35-9805-d44e74fc4fd7" width="100%" controls></video>
 
-<video src="https://github.com/user-attachments/assets/b4f2a2d3-4bbd-412f-831e-7f61cf0fa43a" width="100%" controls></video>
+<details>
+<summary>Moar screenshots...</summary>
+  
+<video src="https://github.com/user-attachments/assets/c27eb693-6dd6-48b7-99d6-49aecee42ea5" width="70%" controls></video>
+
+<img alt="mobile web ui" src="https://github.com/user-attachments/assets/81466233-110c-427d-8ac2-5cf4777f3d70" width="25%" /> 
+
+</details>
 
 ---
 
