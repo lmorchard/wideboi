@@ -32,6 +32,7 @@ type Config struct {
 	Shell        string              `toml:"shell"`
 	WidthPresets []int               `toml:"width_presets"`
 	Startup      []StartupPane       `toml:"startup"`
+	Theme        ThemeConfig         `toml:"theme"`
 	Keys         map[string]any      `toml:"keys"`
 	// Mouse is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read MouseEnabled, not this.
@@ -48,6 +49,19 @@ type Config struct {
 type StartupPane struct {
 	Command string `toml:"command"`
 	Width   int    `toml:"width"`
+}
+
+// ThemeConfig holds optional user-configured color and attribute overrides
+// for the terminal UI chrome.
+type ThemeConfig struct {
+	Working      string `toml:"working"`
+	NeedsInput   string `toml:"needs_input"`
+	Done         string `toml:"done"`
+	Failed       string `toml:"failed"`
+	Focus        string `toml:"focus"`
+	Dim          string `toml:"dim"`
+	Divider      string `toml:"divider"`
+	FocusDivider string `toml:"focus_divider"`
 }
 
 // Limit explicit startup widths before allocating a VT grid or converting
@@ -235,6 +249,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		}
 		if fileCfg.LogLevelName != "" {
 			cfg.LogLevelName = fileCfg.LogLevelName
+		}
+		if fileCfg.Theme != (ThemeConfig{}) {
+			cfg.Theme = fileCfg.Theme
 		}
 
 		if cfg.ConfigFile == "" {

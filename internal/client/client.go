@@ -71,6 +71,7 @@ type Client struct {
 	bindings           []keys.Binding
 	motion             *motion
 	sel                *selection
+	theme              Theme
 	// mouseTracking is which panes' children have asked for mouse
 	// events, from MsgPaneUpdate. grab is a drag being forwarded to one.
 	mouseTracking map[int]bool
@@ -119,7 +120,15 @@ func NewClient(tp transport.Transport, cols, rows int, prefixLabel string) *Clie
 		paneUpdates:  make(map[int]protocol.MsgPaneUpdate),
 		cursorInfos:  make(map[int]cursorPos),
 		paneMetadata: make(map[int]protocol.MsgPaneMetadata),
+		theme:        DefaultTheme(),
 	}
+}
+
+// SetTheme configures the client's visual theme.
+func (c *Client) SetTheme(t Theme) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.theme = t
 }
 
 func (c *Client) SetTransport(tp transport.Transport) {
@@ -574,27 +583,22 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 		frame := c.frameLocked(*p)
 		headerW := frame.Dx()
 		if headerW > 0 {
-			glyph := st.paneStatuses[p.PaneID].Glyph()
-			header := fmt.Sprintf(" [%d]", p.PaneID)
+			isFocus := p.PaneID == st.focusPaneID
+			badge := FormatBadge(p.PaneID, isFocus, st.paneStatuses[p.PaneID])
+			header := " " + badge
 			if pos := st.positions[p.PaneID]; pos > 0 {
-				header = fmt.Sprintf(" %d [%d]", pos, p.PaneID)
-			}
-			if glyph != "" && glyph != " " {
-				header += " " + glyph
+				header = fmt.Sprintf(" %d %s", pos, badge)
 			}
 			title := st.paneTitles[p.PaneID]
 			if title != "" {
 				header += " " + title
-			}
-			if p.PaneID == st.focusPaneID {
-				header += " ★"
 			}
 			header = compose.TruncateWidth(dst, header, headerW)
 			if used := compose.StringWidth(dst, header); used < headerW {
 				header += strings.Repeat(" ", headerW-used)
 			}
 
-			if p.PaneID == st.focusPaneID {
+			if isFocus {
 				compose.WriteStyled(dst, frame.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
 			} else {
 				compose.WriteString(dst, frame.Min.X, 0, header)
@@ -648,11 +652,13 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			}
 
 			divider := "│"
+			style := c.theme.Divider
 			if p.PaneID == st.focusPaneID || adjacentFocused {
 				divider = "┃"
+				style = c.theme.FocusDivider
 			}
 			for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-				compose.WriteString(dst, p.Dst.Max.X, y, divider)
+				compose.WriteStyled(dst, p.Dst.Max.X, y, divider, style)
 			}
 		}
 
@@ -662,17 +668,19 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			// cell layout leaves before Dst, not over the card's content.
 			if frame.Min.X < p.Dst.Min.X {
 				divider := "│"
+				style := c.theme.Divider
 				if p.PaneID == st.focusPaneID {
 					divider = "┃"
+					style = c.theme.FocusDivider
 				}
 				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-					compose.WriteString(dst, frame.Min.X, y, divider)
+					compose.WriteStyled(dst, frame.Min.X, y, divider, style)
 				}
 			}
 			// Additionally, the focused card is the top-most card, so its right edge is also fully visible.
 			if p.PaneID == st.focusPaneID && p.Dst.Max.X < c.cols {
 				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-					compose.WriteString(dst, p.Dst.Max.X, y, "┃")
+					compose.WriteStyled(dst, p.Dst.Max.X, y, "┃", c.theme.FocusDivider)
 				}
 			}
 		}
@@ -708,7 +716,8 @@ func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st f
 		return
 	}
 
-	glyph := st.paneStatuses[p.PaneID].Glyph()
+	stVal := st.paneStatuses[p.PaneID]
+	glyph := stVal.Glyph()
 	if glyph == " " {
 		glyph = ""
 	}
@@ -719,21 +728,24 @@ func (c *Client) drawSliverLocked(dst uv.Screen, p *protocol.PlacementData, st f
 	// row never looks like a rendering fault.
 	label := strings.TrimSpace(glyph + " " + title)
 	if label != "" {
-		compose.WriteStyled(dst, p.Dst.Min.X, p.Dst.Min.Y,
-			compose.TruncateWidth(dst, label, w), uv.Style{})
+		trunc := compose.TruncateWidth(dst, label, w)
+		if glyph != "" && strings.HasPrefix(trunc, glyph) {
+			glyphW := compose.StringWidth(dst, glyph)
+			compose.WriteStyled(dst, p.Dst.Min.X, p.Dst.Min.Y, glyph, c.theme.StatusStyle(stVal))
+			rest := trunc[len(glyph):]
+			if rest != "" {
+				compose.WriteString(dst, p.Dst.Min.X+glyphW, p.Dst.Min.Y, rest)
+			}
+		} else {
+			compose.WriteString(dst, p.Dst.Min.X, p.Dst.Min.Y, trunc)
+		}
 	}
 
-	// A spine below it, bright while the pane is producing output.
-	//
-	// The activity signal is the status glyph rather than a new wire
-	// field: PaneStatuses already carries exactly this. Write's
-	// heuristic sets StatusWorking on every write and lets it decay
-	// after three seconds of quiet, so "»" means "this pane is doing
-	// something right now" without anything further crossing the
-	// socket.
-	spine := uv.Style{}
+	// A spine below it, styled by activity.
+	spine := c.theme.Dim
 	if glyph == "»" {
-		spine = uv.Style{Attrs: uv.AttrBold}
+		spine = c.theme.Working
+		spine.Attrs |= uv.AttrBold
 	}
 	for y := p.Dst.Min.Y + 1; y < p.Dst.Max.Y; y++ {
 		compose.WriteStyled(dst, p.Dst.Min.X, y, "▌", spine)
@@ -819,8 +831,125 @@ func (c *Client) drawHiddenMarkersLocked(dst uv.Screen, st frameState) {
 // escape sequence on the wire. Budgeting one cell short of c.cols keeps
 // the whole line contiguous in the raw output.
 func (c *Client) drawStatusBarLocked(scr uv.Screen) {
-	statusText, statusStyle := c.statusLineLocked(c.cols - 1)
-	compose.WriteStyled(scr, 0, c.rows-1, statusText, statusStyle)
+	budget := c.cols - 1
+	if budget <= 0 {
+		return
+	}
+	y := c.rows - 1
+
+	if c.controlMode {
+		statusText, statusStyle := c.statusLineLocked(budget)
+		compose.WriteStyled(scr, 0, y, statusText, statusStyle)
+		return
+	}
+
+	c.drawNormalStatusBarLocked(scr, budget, y)
+}
+
+func (c *Client) openPaneIDsLocked() []int {
+	var ids []int
+	if c.strip != nil {
+		ids = c.strip.PaneIDs()
+	}
+	if len(ids) == 0 {
+		for _, p := range c.placements {
+			ids = append(ids, p.PaneID)
+		}
+	}
+	if len(ids) == 0 && c.focusPaneID > 0 {
+		ids = []int{c.focusPaneID}
+	}
+	return ids
+}
+
+func (c *Client) drawNormalStatusBarLocked(scr uv.Screen, budget, y int) {
+	// Clear the status row budget with blank spaces first.
+	compose.WriteString(scr, 0, y, strings.Repeat(" ", budget))
+
+	ids := c.openPaneIDsLocked()
+	x := 0
+	for i, id := range ids {
+		isFocus := id == c.focusPaneID
+		st := c.paneStatuses[id]
+		badge := FormatBadge(id, isFocus, st)
+		needed := runeLen(badge)
+		if i > 0 {
+			needed++
+		}
+		if x+needed > budget {
+			break
+		}
+		if i > 0 {
+			compose.WriteString(scr, x, y, " ")
+			x++
+		}
+		c.writeBadgeLocked(scr, x, y, id, isFocus, st)
+		x += runeLen(badge)
+	}
+
+	// Scroll indicator if focused pane is scrolled
+	if pu, ok := c.paneUpdates[c.focusPaneID]; ok && pu.ScrollOffset > 0 {
+		scrollTag := fmt.Sprintf(" [scroll +%d]", pu.ScrollOffset)
+		if pu.UnreadOutput {
+			scrollTag = fmt.Sprintf(" [scroll +%d ⤓]", pu.ScrollOffset)
+		}
+		if x+runeLen(scrollTag) <= budget {
+			compose.WriteString(scr, x, y, scrollTag)
+			x += runeLen(scrollTag)
+		}
+	}
+
+	// Right side: layout mode & key hint
+	mode := c.layoutMode.String()
+	fullRight := mode + " · " + c.prefixLabel + " for commands"
+	compactRight := mode
+
+	if pad := budget - x - runeLen(fullRight); pad >= 2 {
+		rightX := budget - runeLen(fullRight)
+		compose.WriteStyled(scr, rightX, y, fullRight, c.theme.Dim)
+	} else if pad := budget - x - runeLen(compactRight); pad >= 2 {
+		rightX := budget - runeLen(compactRight)
+		compose.WriteStyled(scr, rightX, y, compactRight, c.theme.Dim)
+	}
+}
+
+func (c *Client) writeBadgeLocked(scr uv.Screen, x, y int, id int, isFocus bool, status protocol.PaneStatus) {
+	focusStr, idStr, statusStr := BadgeComponents(id, isFocus, status)
+
+	// "["
+	compose.WriteStyled(scr, x, y, "[", c.theme.Dim)
+	x++
+
+	// focus slot ("●" or " ")
+	if isFocus {
+		compose.WriteStyled(scr, x, y, focusStr, c.theme.Focus)
+	} else {
+		compose.WriteString(scr, x, y, " ")
+	}
+	x += compose.StringWidth(scr, focusStr)
+
+	// " "
+	compose.WriteString(scr, x, y, " ")
+	x++
+
+	// idStr
+	compose.WriteString(scr, x, y, idStr)
+	x += compose.StringWidth(scr, idStr)
+
+	// " "
+	compose.WriteString(scr, x, y, " ")
+	x++
+
+	// status slot ("»", "!", "✓", "✗", or " ")
+	if status != protocol.StatusIdle {
+		compose.WriteStyled(scr, x, y, statusStr, c.theme.StatusStyle(status))
+	} else {
+		compose.WriteString(scr, x, y, " ")
+	}
+	x += compose.StringWidth(scr, statusStr)
+
+	// "]"
+	compose.WriteStyled(scr, x, y, "]", c.theme.Dim)
 }
 
 // currentPlacementsLocked is what is on screen right now: the
@@ -909,7 +1038,14 @@ func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 // which panes want attention, and how to reach the verbs. c.mu must be
 // held.
 func (c *Client) normalStatusLocked(budget int) string {
-	status := fmt.Sprintf("focus: [pane %d ★]", c.focusPaneID)
+	ids := c.openPaneIDsLocked()
+	var badges []string
+	for _, id := range ids {
+		isFocus := id == c.focusPaneID
+		st := c.paneStatuses[id]
+		badges = append(badges, FormatBadge(id, isFocus, st))
+	}
+	status := strings.Join(badges, " ")
 	if pu, ok := c.paneUpdates[c.focusPaneID]; ok && pu.ScrollOffset > 0 {
 		scrollTag := fmt.Sprintf(" [scroll +%d]", pu.ScrollOffset)
 		if pu.UnreadOutput {
@@ -917,17 +1053,11 @@ func (c *Client) normalStatusLocked(budget int) string {
 		}
 		status += scrollTag
 	}
-	for _, p := range c.placements {
-		if glyphStr, ok := c.paneStatuses[p.PaneID]; ok && glyphStr.Glyph() != " " {
-			status += fmt.Sprintf("  [%d %s]", p.PaneID, glyphStr.Glyph())
-		}
-	}
 	// The right-hand side is the layout tag and then the hint, and it
 	// degrades hint first: the pane statuses and the mode are live
 	// state -- an accidental C-b c changes the mode (#91) -- while the
 	// hint is a fixed string a user learns once. Right-aligned because
-	// the left edge is pinned: smoke.py finds the focused pane by its
-	// column in "focus: [pane N".
+	// the left edge is pinned.
 	mode := c.layoutMode.String()
 	for _, right := range []string{mode + " · " + c.prefixLabel + " for commands", mode} {
 		if pad := budget - runeLen(status) - runeLen(right); pad >= 2 {

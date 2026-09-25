@@ -597,3 +597,41 @@ func TestStartupPanesConfig(t *testing.T) {
 		t.Errorf("maximum startup width should be valid: %v", err)
 	}
 }
+
+func TestConfigTheme(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[theme]
+working = "cyan"
+needs_input = "yellow"
+done = "green"
+failed = "red"
+focus = "bright_cyan"
+divider = "dim"
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Theme.Working != "cyan" {
+		t.Errorf("cfg.Theme.Working = %q, want 'cyan'", cfg.Theme.Working)
+	}
+	if cfg.Theme.NeedsInput != "yellow" {
+		t.Errorf("cfg.Theme.NeedsInput = %q, want 'yellow'", cfg.Theme.NeedsInput)
+	}
+	if cfg.Theme.Done != "green" {
+		t.Errorf("cfg.Theme.Done = %q, want 'green'", cfg.Theme.Done)
+	}
+	if cfg.Theme.Failed != "red" {
+		t.Errorf("cfg.Theme.Failed = %q, want 'red'", cfg.Theme.Failed)
+	}
+	if cfg.Theme.Focus != "bright_cyan" {
+		t.Errorf("cfg.Theme.Focus = %q, want 'bright_cyan'", cfg.Theme.Focus)
+	}
+	if cfg.Theme.Divider != "dim" {
+		t.Errorf("cfg.Theme.Divider = %q, want 'dim'", cfg.Theme.Divider)
+	}
+}

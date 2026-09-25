@@ -141,7 +141,7 @@ func TestDrawRendersPaneContent(t *testing.T) {
 			t.Errorf("composited screen is missing %q:\n%s", want, got)
 		}
 	}
-	if !strings.Contains(got, "focus: [pane 1") {
+	if !strings.Contains(got, "[● 1") {
 		t.Errorf("composited screen is missing the status bar:\n%s", got)
 	}
 }

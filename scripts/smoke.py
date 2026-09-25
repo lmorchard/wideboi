@@ -48,18 +48,23 @@ DIVIDER_CUP = re.compile(rb"\x1b\[(\d+);(\d+)H(?:\x1b\[[0-9;]*m)*" + DIVIDER)
 # status row (len("focus: [pane ") == 13). Combine the one-time literal
 # with later positional updates, in stream order, to track the current
 # focused pane ID across a whole session.
-FOCUS_LITERAL = re.compile(rb"focus: (?:pane|\[pane) (\d+)")
+FOCUS_LITERAL = re.compile(
+    rb"\[(?:\x1b\[[0-9;]*m)*\xe2\x97\x8f(?:\x1b\[[0-9;]*m)*\s+(\d+)|focus: (?:pane|\[pane) (\d+)"
+)
 
 
 def _focus_digit_re(status_row: int) -> re.Pattern:
     return re.compile(
-        rb"\x1b\[" + str(status_row).encode() + rb";(?:13|14)H(?:\x1b\[[0-9;]*m)*(\d+)"
+        rb"\x1b\[" + str(status_row).encode() + rb";(?:4|5|13|14)H(?:\x1b\[[0-9;]*m)*(\d+)"
     )
 
 
 def focus_pane_id(out: bytes, status_row: int) -> int | None:
     """The most recently reported focused pane ID, or None if never seen."""
-    matches = [(m.start(), int(m.group(1))) for m in FOCUS_LITERAL.finditer(out)]
+    matches = []
+    for m in FOCUS_LITERAL.finditer(out):
+        d = m.group(1) or m.group(2)
+        matches.append((m.start(), int(d)))
     matches += [(m.start(), int(m.group(1))) for m in _focus_digit_re(status_row).finditer(out)]
     if not matches:
         return None
