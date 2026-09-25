@@ -751,3 +751,44 @@ func TestDragAcrossSoftWrappedRowJoinsLines(t *testing.T) {
 		t.Errorf("copied %q, want %q", got, want)
 	}
 }
+
+func TestClickOnStatusBarBadgeFocuses(t *testing.T) {
+	cli, ch := newMouseClient(t)
+	_ = ch
+	// cli has 24 rows, so status bar is row 23.
+	// Pane 1 badge is at x = 0..6, space at 7, Pane 2 badge is at x = 8..14.
+	if got := cli.FocusedPaneID(); got != 1 {
+		t.Fatalf("initial focus = %d, want 1", got)
+	}
+
+	// Click on pane 2's badge in the status bar (e.g. x = 9, y = 23).
+	click(cli, 9, 23)
+
+	if got := cli.FocusedPaneID(); got != 2 {
+		t.Errorf("focus after clicking pane 2 status badge = %d, want 2", got)
+	}
+}
+
+func TestStatusBarBadgeAt(t *testing.T) {
+	cli, _ := newMouseClient(t)
+	// Badges: pane 1 at x=0..6, space at x=7, pane 2 at x=8..14.
+	cli.mu.Lock()
+	defer cli.mu.Unlock()
+
+	for x := 0; x <= 6; x++ {
+		if got := cli.statusBarBadgeAtLocked(x); got != 1 {
+			t.Errorf("statusBarBadgeAtLocked(%d) = %d, want 1", x, got)
+		}
+	}
+	if got := cli.statusBarBadgeAtLocked(7); got != 0 {
+		t.Errorf("statusBarBadgeAtLocked(7) on separator space = %d, want 0", got)
+	}
+	for x := 8; x <= 14; x++ {
+		if got := cli.statusBarBadgeAtLocked(x); got != 2 {
+			t.Errorf("statusBarBadgeAtLocked(%d) = %d, want 2", x, got)
+		}
+	}
+	if got := cli.statusBarBadgeAtLocked(15); got != 0 {
+		t.Errorf("statusBarBadgeAtLocked(15) beyond badges = %d, want 0", got)
+	}
+}

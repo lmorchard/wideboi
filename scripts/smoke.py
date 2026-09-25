@@ -49,7 +49,7 @@ DIVIDER_CUP = re.compile(rb"\x1b\[(\d+);(\d+)H(?:\x1b\[[0-9;]*m)*" + DIVIDER)
 # with later positional updates, in stream order, to track the current
 # focused pane ID across a whole session.
 FOCUS_LITERAL = re.compile(
-    rb"\[(?:\x1b\[[0-9;]*m)*\xe2\x97\x8f(?:\x1b\[[0-9;]*m)*\s+(\d+)|focus: (?:pane|\[pane) (\d+)"
+    rb"(?:\[)?(?:\x1b\[[0-9;]*m)*\xe2\x97\x8f(?:\x1b\[[0-9;]*m)*\s+(\d+)|focus: (?:pane|\[pane) (\d+)"
 )
 
 
@@ -88,6 +88,14 @@ def cursor_visible(out: bytes) -> bool | None:
     """Whether the cursor was last shown or hidden, in stream order."""
     found = CURSOR_VIS.findall(out)
     return None if not found else found[-1] == b"h"
+
+
+ANSI_ESCAPE = re.compile(rb"\x1b\[[0-9;?]*[a-zA-Z]")
+
+
+def strip_ansi(b: bytes) -> bytes:
+    """Strips ANSI terminal control sequences, returning printable text."""
+    return ANSI_ESCAPE.sub(b"", b)
 
 
 # A plain wideboi probes its socket and *attaches* to whatever answers
@@ -438,9 +446,9 @@ def case_prefix_routes_verbs(fail):
 
 
 def case_control_mode_is_visible_and_escapable(fail):
-    # A mode you cannot tell you are in is worse than no mode. The bar
-    # inverts (SGR 7) and the cursor hides (DECTCEM), and both have to
-    # come back on the way out.
+    # A mode you cannot tell you are in is worse than no mode. The hints bar
+    # appears with charcoal background (48;5;236) and the cursor hides
+    # (DECTCEM), while the bottom status bar remains visible.
     s = Session()
     s.type("echo before-mode\r")
     if cursor_visible(s.output()) is not True:
@@ -449,12 +457,15 @@ def case_control_mode_is_visible_and_escapable(fail):
 
     s.type("\x02")  # C-b, and stay there
     entered = s.output()[before:]
-    if b"\x1b[7m" not in entered:
-        fail("entering control mode did not invert the status bar (no SGR 7 on the wire)")
+    if b"48;5;236" not in entered:
+        fail("entering control mode did not show charcoal hints bar (no 48;5;236 on the wire)")
     if cursor_visible(s.output()) is not False:
         fail("entering control mode did not hide the cursor")
-    if b"q quit" not in entered:
+    plain = strip_ansi(entered)
+    if b"q quit" not in plain:
         fail("control mode did not show the verb menu")
+    if b"for commands" not in plain and b"for commands" not in strip_ansi(s.output()):
+        fail("status bar not visible during control mode")
     mid = len(s.output())
 
     s.type("\x1b")  # escape
@@ -462,8 +473,8 @@ def case_control_mode_is_visible_and_escapable(fail):
         fail("no cursor state observed after leaving control mode")
     if cursor_visible(s.output()) is not True:
         fail("leaving control mode did not restore the cursor")
-    if b"for commands" not in s.output()[mid:]:
-        fail("leaving control mode did not restore the normal status line")
+    if b"for commands" not in s.output():
+        fail("leaving control mode did not retain the normal status line")
 
     s.type("echo after-mode\r")
     if b"after-mode" not in s.output():
@@ -609,7 +620,7 @@ def case_config_file_and_key_remapping(fail):
         if b"C-a for commands" not in out:
             fail("status line does not name the configured prefix from config file")
         s.type("\x01")  # ctrl+a enters control mode
-        out = s.output()
+        out = strip_ansi(s.output())
         if b"k kill" not in out:
             fail("status line does not show remapped 'k kill'")
         if b"hjel move" not in out:
@@ -825,7 +836,7 @@ def case_control_mode_names_every_entry_at_80_columns(fail):
     # descriptive form needs 81 cells against a budget of 79.
     s = Session(cols=80, rows=24)
     s.type("\x02")
-    out = s.output()
+    out = strip_ansi(s.output())
     for verb in (b"hjkl move", b"n new", b"w width", b"x kill",
                  b"a attn", b"? help", b"q quit", b"esc exit"):
         if verb not in out:

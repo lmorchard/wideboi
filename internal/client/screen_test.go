@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/client/compose"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -352,5 +353,103 @@ func TestScrollbackFooterAndStatusLine(t *testing.T) {
 	}
 	if !strings.Contains(got2, "[scroll +7 ⤓]") {
 		t.Errorf("expected status line '[scroll +7 ⤓]', got:\n%s", got2)
+	}
+}
+
+func TestTopHeaderStylingAndCapsule(t *testing.T) {
+	ch := transport.NewInProcChannel(64)
+	cli := NewClient(ch, 100, 24, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusWorking,
+		},
+	})
+
+	scr := newFakeHostScreen(100, 24)
+	cli.Draw(scr)
+
+	// Check row 0 (top header row).
+	// Pane 1 is focused: header should have charcoal gray background (236) and NO AttrReverse.
+	p1Cell := scr.CellAt(1, 0)
+	if p1Cell == nil {
+		t.Fatal("cell (1, 0) is nil")
+	}
+	if p1Cell.Style.Bg != ansi.IndexedColor(236) {
+		t.Errorf("focused header cell Bg = %v, want ansi.IndexedColor(236)", p1Cell.Style.Bg)
+	}
+	if p1Cell.Style.Attrs&uv.AttrReverse != 0 {
+		t.Errorf("focused header cell should not have AttrReverse")
+	}
+
+	// Focus dot '●' should be in the header row for pane 1 with theme.Focus foreground.
+	foundDot := false
+	for x := 0; x < 40; x++ {
+		c := scr.CellAt(x, 0)
+		if c != nil && c.Content == "●" {
+			foundDot = true
+			if c.Style.Bg != ansi.IndexedColor(236) {
+				t.Errorf("focus dot Bg = %v, want ansi.IndexedColor(236)", c.Style.Bg)
+			}
+			if c.Style.Fg != ansi.BasicColor(14) {
+				t.Errorf("focus dot Fg = %v, want ansi.BasicColor(14)", c.Style.Fg)
+			}
+			break
+		}
+	}
+	if !foundDot {
+		t.Error("focus dot '●' not found in pane 1 header")
+	}
+
+	// Status glyph '»' should be in the header row for pane 1 with theme.Working foreground.
+	foundGlyph := false
+	for x := 0; x < 40; x++ {
+		c := scr.CellAt(x, 0)
+		if c != nil && c.Content == "»" {
+			foundGlyph = true
+			if c.Style.Bg != ansi.IndexedColor(236) {
+				t.Errorf("working glyph Bg = %v, want ansi.IndexedColor(236)", c.Style.Bg)
+			}
+			if c.Style.Fg != ansi.BasicColor(6) {
+				t.Errorf("working glyph Fg = %v, want ansi.BasicColor(6)", c.Style.Fg)
+			}
+			break
+		}
+	}
+	if !foundGlyph {
+		t.Error("working glyph '»' not found in pane 1 header")
+	}
+
+	// Unfocused pane 2 header (around x = 45) should NOT have charcoal background.
+	p2Cell := scr.CellAt(45, 0)
+	if p2Cell != nil && p2Cell.Style.Bg == ansi.IndexedColor(236) {
+		t.Errorf("unfocused header cell has Bg = %v, want default/nil", p2Cell.Style.Bg)
+	}
+}
+
+func TestTopHeaderDoubleWidthTitleDoesNotOverrunFrame(t *testing.T) {
+	ch := transport.NewInProcChannel(64)
+	cli := NewClient(ch, 100, 24, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 15, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneTitles: map[int]string{
+			1: "日本語テスト世界",
+		},
+	})
+
+	scr := newFakeHostScreen(100, 24)
+	cli.Draw(scr)
+
+	// Pane 1 width is 15 (columns 0..14).
+	// Column 15 must NOT contain any wide glyph continuation or title characters from pane 1.
+	p2HeaderStart := scr.CellAt(15, 0)
+	if p2HeaderStart != nil && (p2HeaderStart.Content == "界" || p2HeaderStart.Content == "ト" || p2HeaderStart.Content == "テ") {
+		t.Errorf("wide character leaked past frame boundary into column 15: %q", p2HeaderStart.Content)
 	}
 }

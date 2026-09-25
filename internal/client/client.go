@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/client/compose"
 	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/layout"
@@ -590,26 +591,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 		frame := c.frameLocked(*p)
 		headerW := frame.Dx()
 		if headerW > 0 {
-			isFocus := p.PaneID == st.focusPaneID
-			badge := FormatBadge(p.PaneID, isFocus, st.paneStatuses[p.PaneID])
-			header := " " + badge
-			if pos := st.positions[p.PaneID]; pos > 0 {
-				header = fmt.Sprintf(" %d %s", pos, badge)
-			}
-			title := st.paneTitles[p.PaneID]
-			if title != "" {
-				header += " " + title
-			}
-			header = compose.TruncateWidth(dst, header, headerW)
-			if used := compose.StringWidth(dst, header); used < headerW {
-				header += strings.Repeat(" ", headerW-used)
-			}
-
-			if isFocus {
-				compose.WriteStyled(dst, frame.Min.X, 0, header, uv.Style{Attrs: uv.AttrReverse})
-			} else {
-				compose.WriteString(dst, frame.Min.X, 0, header)
-			}
+			c.drawPaneHeaderLocked(dst, frame.Min.X, 0, headerW, p.PaneID, p.PaneID == st.focusPaneID, st)
 		}
 
 		switch {
@@ -844,9 +826,19 @@ func (c *Client) drawStatusBarLocked(scr uv.Screen) {
 	}
 	y := c.rows - 1
 
-	if c.controlMode || c.search != nil {
+	if c.search != nil {
 		statusText, statusStyle := c.statusLineLocked(budget)
 		compose.WriteStyled(scr, 0, y, statusText, statusStyle)
+		return
+	}
+
+	if c.controlMode {
+		if c.rows >= 3 {
+			c.drawControlHintsLocked(scr, budget, c.rows-2)
+			c.drawNormalStatusBarLocked(scr, budget, y)
+		} else {
+			c.drawControlHintsLocked(scr, budget, y)
+		}
 		return
 	}
 
@@ -920,43 +912,162 @@ func (c *Client) drawNormalStatusBarLocked(scr uv.Screen, budget, y int) {
 	}
 }
 
+// statusBarBadgeAtLocked returns the pane ID of the badge at column clickX on
+// the status bar, or 0 if none was hit. c.mu must be held.
+func (c *Client) statusBarBadgeAtLocked(clickX int) int {
+	ids := c.openPaneIDsLocked()
+	budget := c.cols - 1
+	x := 0
+	for i, id := range ids {
+		isFocus := id == c.focusPaneID
+		st := c.paneStatuses[id]
+		badge := FormatBadge(id, isFocus, st)
+		needed := runeLen(badge)
+		if i > 0 {
+			needed++
+		}
+		if x+needed > budget {
+			break
+		}
+		if i > 0 {
+			x++
+		}
+		if clickX >= x && clickX < x+runeLen(badge) {
+			return id
+		}
+		x += runeLen(badge)
+	}
+	return 0
+}
+
+func (c *Client) drawPaneHeaderLocked(dst uv.Screen, x, y, width, id int, isFocus bool, st frameState) {
+	headerStyle := c.theme.Header
+	if isFocus {
+		headerStyle = c.theme.HeaderFocus
+	}
+	// Pre-fill the header row across width with the header background style.
+	compose.WriteStyled(dst, x, y, strings.Repeat(" ", width), headerStyle)
+
+	applyBg := func(s uv.Style) uv.Style {
+		if headerStyle.Bg != nil {
+			s.Bg = headerStyle.Bg
+		}
+		return s
+	}
+
+	curX := x
+	maxX := x + width
+
+	writeCell := func(r string, s uv.Style) {
+		w := compose.StringWidth(dst, r)
+		if curX+w <= maxX {
+			compose.WriteStyled(dst, curX, y, r, s)
+			curX += w
+		}
+	}
+
+	// Leading prefix (position or space).
+	if pos := st.positions[id]; pos > 0 {
+		for _, r := range fmt.Sprintf(" %d ", pos) {
+			writeCell(string(r), headerStyle)
+		}
+	} else {
+		writeCell(" ", headerStyle)
+	}
+
+	// Status capsule.
+	focusStr, idStr, statusStr := BadgeComponents(id, isFocus, st.paneStatuses[id])
+	writeCell("[", applyBg(c.theme.Dim))
+	if isFocus {
+		writeCell(focusStr, applyBg(c.theme.Focus))
+		writeCell(" ", applyBg(c.theme.Focus))
+		for _, r := range idStr {
+			writeCell(string(r), applyBg(c.theme.Focus))
+		}
+	} else {
+		writeCell(" ", headerStyle)
+		writeCell(" ", headerStyle)
+		for _, r := range idStr {
+			writeCell(string(r), headerStyle)
+		}
+	}
+	writeCell(" ", headerStyle)
+	if st.paneStatuses[id] != protocol.StatusIdle {
+		writeCell(statusStr, applyBg(c.theme.StatusStyle(st.paneStatuses[id])))
+	} else {
+		writeCell(" ", headerStyle)
+	}
+	writeCell("]", applyBg(c.theme.Dim))
+
+	// Title.
+	title := st.paneTitles[id]
+	if title != "" && curX < maxX {
+		writeCell(" ", headerStyle)
+		titleStyle := applyBg(uv.Style{})
+		if !isFocus {
+			titleStyle = applyBg(c.theme.Dim)
+		}
+		for _, r := range title {
+			writeCell(string(r), titleStyle)
+		}
+	}
+}
+
 func (c *Client) writeBadgeLocked(scr uv.Screen, x, y int, id int, isFocus bool, status protocol.PaneStatus) {
+	c.writeBadgeWithBgLocked(scr, x, y, id, isFocus, status, nil)
+}
+
+func (c *Client) writeBadgeWithBgLocked(scr uv.Screen, x, y int, id int, isFocus bool, status protocol.PaneStatus, bg ansi.Color) {
 	focusStr, idStr, statusStr := BadgeComponents(id, isFocus, status)
 
+	applyBg := func(s uv.Style) uv.Style {
+		if bg != nil {
+			s.Bg = bg
+		}
+		return s
+	}
+	baseStyle := applyBg(uv.Style{})
+
 	// "["
-	compose.WriteStyled(scr, x, y, "[", c.theme.Dim)
+	compose.WriteStyled(scr, x, y, "[", applyBg(c.theme.Dim))
 	x++
 
 	// focus slot ("●" or " ")
 	if isFocus {
-		compose.WriteStyled(scr, x, y, focusStr, c.theme.Focus)
+		compose.WriteStyled(scr, x, y, focusStr, applyBg(c.theme.Focus))
 	} else {
-		compose.WriteString(scr, x, y, " ")
+		compose.WriteStyled(scr, x, y, " ", baseStyle)
 	}
 	x += compose.StringWidth(scr, focusStr)
 
 	// " "
-	compose.WriteString(scr, x, y, " ")
+	spaceStyle := baseStyle
+	idStyle := baseStyle
+	if isFocus {
+		spaceStyle = applyBg(c.theme.Focus)
+		idStyle = applyBg(c.theme.Focus)
+	}
+	compose.WriteStyled(scr, x, y, " ", spaceStyle)
 	x++
 
 	// idStr
-	compose.WriteString(scr, x, y, idStr)
+	compose.WriteStyled(scr, x, y, idStr, idStyle)
 	x += compose.StringWidth(scr, idStr)
 
 	// " "
-	compose.WriteString(scr, x, y, " ")
+	compose.WriteStyled(scr, x, y, " ", baseStyle)
 	x++
 
 	// status slot ("»", "!", "✓", "✗", or " ")
 	if status != protocol.StatusIdle {
-		compose.WriteStyled(scr, x, y, statusStr, c.theme.StatusStyle(status))
+		compose.WriteStyled(scr, x, y, statusStr, applyBg(c.theme.StatusStyle(status)))
 	} else {
-		compose.WriteString(scr, x, y, " ")
+		compose.WriteStyled(scr, x, y, " ", baseStyle)
 	}
 	x += compose.StringWidth(scr, statusStr)
 
 	// "]"
-	compose.WriteStyled(scr, x, y, "]", c.theme.Dim)
+	compose.WriteStyled(scr, x, y, "]", applyBg(c.theme.Dim))
 }
 
 // currentPlacementsLocked is what is on screen right now: the
@@ -998,7 +1109,7 @@ func (c *Client) frameLocked(p protocol.PlacementData) image.Rectangle {
 // entries are never dropped: with no unprefixed escape hatch, a user who
 // cannot read "q quit" and "esc exit" out of the bar has no way forward
 // except a signal.
-func controlHelp(budget int, detachable bool, custom ...[]keys.Binding) string {
+func controlHelpItems(budget int, detachable bool, custom ...[]keys.Binding) []string {
 	bindings := keys.Bindings
 	if len(custom) > 0 && len(custom[0]) > 0 {
 		bindings = custom[0]
@@ -1017,29 +1128,64 @@ func controlHelp(budget int, detachable bool, custom ...[]keys.Binding) string {
 		taken = append(taken, v)
 	}
 
-	return strings.Join(append(taken, tail), "  ")
+	return append(taken, essential...)
+}
+
+func controlHelp(budget int, detachable bool, custom ...[]keys.Binding) string {
+	items := controlHelpItems(budget, detachable, custom...)
+	return strings.Join(items, "  ")
+}
+
+func (c *Client) drawControlHintsLocked(scr uv.Screen, budget, y int) {
+	// Fill row budget with the hints background.
+	compose.WriteStyled(scr, 0, y, strings.Repeat(" ", budget), c.theme.ControlHints)
+
+	items := controlHelpItems(budget, c.detachable, c.bindings)
+	x := 0
+	for i, item := range items {
+		if i > 0 {
+			if x+2 > budget {
+				break
+			}
+			compose.WriteStyled(scr, x, y, "  ", c.theme.ControlHints)
+			x += 2
+		}
+		itemLen := runeLen(item)
+		if x+itemLen > budget {
+			break
+		}
+		if idx := strings.Index(item, " "); idx > 0 {
+			key := item[:idx]
+			desc := item[idx:]
+			compose.WriteStyled(scr, x, y, key, c.theme.ControlKey)
+			x += runeLen(key)
+			compose.WriteStyled(scr, x, y, desc, c.theme.ControlDesc)
+			x += runeLen(desc)
+		} else {
+			compose.WriteStyled(scr, x, y, item, c.theme.ControlKey)
+			x += itemLen
+		}
+	}
+}
+
+// controlHintsLineLocked returns the control mode hints text and style. c.mu must be held.
+func (c *Client) controlHintsLineLocked(budget int) (string, uv.Style) {
+	if budget < 0 {
+		budget = 0
+	}
+	menu := truncateRunes(controlHelp(budget, c.detachable, c.bindings), budget)
+	menu += strings.Repeat(" ", budget-runeLen(menu))
+	return menu, c.theme.ControlHints
 }
 
 // statusLineLocked returns the bottom row's text and the style every one
 // of its cells carries. c.mu must be held.
-//
-// It returns the style rather than drawing, because Draw needs a
-// *uv.TerminalScreen that a unit test cannot cheaply build -- this is
-// what makes the control-mode inversion assertable at all. That the
-// style actually reaches the wire is proved by scripts/smoke.py.
 func (c *Client) statusLineLocked(budget int) (string, uv.Style) {
 	if budget < 0 {
 		budget = 0
 	}
 	if c.search != nil {
 		return truncateRunes(c.searchStatusLocked(), budget), uv.Style{Attrs: uv.AttrReverse}
-	}
-	if c.controlMode {
-		menu := truncateRunes(controlHelp(budget, c.detachable, c.bindings), budget)
-		// Pad to the full budget: a partly-inverted row reads as a
-		// rendering glitch, not as a mode.
-		menu += strings.Repeat(" ", budget-runeLen(menu))
-		return menu, uv.Style{Attrs: uv.AttrReverse}
 	}
 	return c.normalStatusLocked(budget), uv.Style{}
 }

@@ -66,6 +66,11 @@ type ThemeConfig struct {
 	Dim          string `toml:"dim"`
 	Divider      string `toml:"divider"`
 	FocusDivider string `toml:"focus_divider"`
+	HeaderFocus  string `toml:"header_focus"`
+	Header       string `toml:"header"`
+	ControlHints string `toml:"control_hints"`
+	ControlKey   string `toml:"control_key"`
+	ControlDesc  string `toml:"control_desc"`
 }
 
 // Limit explicit startup widths before allocating a VT grid or converting
