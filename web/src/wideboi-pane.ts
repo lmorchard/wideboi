@@ -10,6 +10,7 @@ export class WideboiPane extends LitElement {
   static styles = css`
     :host {
       display: block;
+      position: relative;
       flex: none;
       height: 100%;
       overflow: hidden;
@@ -18,14 +19,33 @@ export class WideboiPane extends LitElement {
       background: #1e1e1e;
       transition: border-color 160ms ease, box-shadow 160ms ease;
     }
+    :host::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      transition: box-shadow 160ms ease;
+    }
     :host([focused]) {
       border-right-color: #007fd4;
+      box-shadow: inset 0 2px #007fd4;
+    }
+    :host([focused])::after {
       box-shadow: inset 0 2px #007fd4;
     }
     :host([card-mode]) {
       box-shadow: inset 3px 0 #b8b8b8, inset 0 2px #b8b8b8;
     }
+    :host([card-mode])::after {
+      box-shadow: inset 3px 0 #b8b8b8, inset 0 2px #b8b8b8;
+    }
     :host([card-mode][focused]) {
+      box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
+    }
+    :host([card-mode][focused])::after {
       box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
     }
     .viewport {
@@ -59,7 +79,7 @@ export class WideboiPane extends LitElement {
       outline: none;
     }
     @media (prefers-reduced-motion: reduce) {
-      :host { transition: none; }
+      :host, :host::after { transition: none; }
     }
   `;
 
