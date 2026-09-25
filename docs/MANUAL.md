@@ -370,6 +370,23 @@ Open this URL in your web browser. The server serves the HTML/JS application and
 - **Card Width Selector:** In card layout, select 40, 60, 80, or Terminal columns. If a card is narrower than the terminal grid, horizontal scrolling or trackpad gestures pan across columns without resizing the underlying PTY.
 - **Fit to Window:** Click **Fit to Window** in the top bar to claim terminal geometry ownership for your browser dimensions.
 
+### Narrow browser view
+
+At 480 CSS pixels or less, the browser shows one pane at a time. Use the pane
+selector or the previous/next buttons to move between panes. Drag the terminal
+to pan through its existing columns and rows. A tap focuses the command field;
+touch gestures do not become mouse events in the terminal.
+
+Type or paste a command or response in the field, then use **Send** to transmit
+the text. **Enter** is separate, so you can review the text before submitting
+it. The key buttons provide Esc, Tab, arrows, Backspace, Enter, and a one-shot
+Ctrl modifier with C, D, and Z shortcuts. Hardware keyboards still work.
+
+Opening the on-screen keyboard reduces the visible pane area, which stays
+anchored to the latest output while you are at the bottom. It does not resize
+the session's terminal grid. The phone reports its initial size when it first
+attaches, but does not change an established session's size as a viewer.
+
 ### Remote HTTPS Reverse Proxy Setup
 
 To connect to wideboi securely from another computer, keep wideboi bound to `127.0.0.1:8080` and use an HTTPS reverse proxy (such as nginx) with TLS termination:

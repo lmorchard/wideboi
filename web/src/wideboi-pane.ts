@@ -79,12 +79,20 @@ export class WideboiPane extends LitElement {
   private painter?: PanePainter;
   private observer?: ResizeObserver;
   private followBottom = true;
+  private viewportHeight = 0;
 
   get hasVerticalOverflow(): boolean {
     return this.viewport.scrollHeight > this.viewport.clientHeight + 1;
   }
 
   private onViewportScroll() {
+    // A keyboard-driven viewport resize can fire scroll before ResizeObserver.
+    // Preserve the user's previous follow-bottom choice across that resize.
+    if (this.viewport.clientHeight !== this.viewportHeight) {
+      this.viewportHeight = this.viewport.clientHeight;
+      this.scrollLiveToBottom();
+      return;
+    }
     this.followBottom = this.viewport.scrollHeight - this.viewport.clientHeight - this.viewport.scrollTop < 2;
   }
 
@@ -101,6 +109,7 @@ export class WideboiPane extends LitElement {
         }
       }
       this.scrollLiveToBottom();
+      this.viewportHeight = this.viewport.clientHeight;
     });
     this.observer.observe(this.canvas);
     this.observer.observe(this.viewport);
@@ -108,6 +117,7 @@ export class WideboiPane extends LitElement {
     this.painter.resize(rect.width, rect.height);
     this.syncPainter();
     this.scrollLiveToBottom();
+    this.viewportHeight = this.viewport.clientHeight;
   }
 
   protected updated() {
