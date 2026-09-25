@@ -346,6 +346,16 @@ func runServer(cfg config.Config, ownerFD int) error {
 	}
 
 	srv := server.NewServer(ownerConn, cfg.Shell, cwd)
+	srv.SetMacros(cfg.ResolvedMacros())
+	var saveMacrosMu sync.Mutex
+	srv.SetOnSaveMacros(func(macros []protocol.Macro) {
+		saveMacrosMu.Lock()
+		defer saveMacrosMu.Unlock()
+		macrosPath := config.UserMacrosPath(os.Getenv)
+		if err := config.SaveMacrosFile(macrosPath, macros); err != nil {
+			slog.Error("saving macros to file", "path", macrosPath, "err", err)
+		}
+	})
 	if os.Getenv("WIDEBOI_TRAFFIC_TIMING") == "1" {
 		srv.SetTrafficTiming(true)
 	}

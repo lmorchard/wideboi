@@ -501,3 +501,29 @@ type MsgWaitResponse struct {
 	ExitCode int    `json:"exit_code"`
 	Error    string `json:"error,omitempty"`
 }
+
+// MacroStep defines a single text or key event in an input macro.
+type MacroStep struct {
+	Text  string `json:"text,omitempty"`
+	Key   string `json:"key,omitempty"`
+	Code  string `json:"code,omitempty"`
+	Ctrl  bool   `json:"ctrl,omitempty"`
+	Alt   bool   `json:"alt,omitempty"`
+	Shift bool   `json:"shift,omitempty"`
+}
+
+// Macro represents a named sequence of input steps.
+type Macro struct {
+	Name  string      `json:"name"`
+	Steps []MacroStep `json:"steps"`
+}
+
+// MsgMacrosSnapshot is sent by the server to inform clients of available macros.
+type MsgMacrosSnapshot struct {
+	Macros []Macro `json:"macros"`
+}
+
+// MsgSaveMacros is sent by a client to update and persist macro configurations.
+type MsgSaveMacros struct {
+	Macros []Macro `json:"macros"`
+}

@@ -62,6 +62,26 @@ func MarshalClient(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ClientMessage_ClosePaneRequest{ClosePaneRequest: &wirepb.MsgClosePaneRequest{PaneId: int32(m.PaneID)}}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
+	case MsgSaveMacros:
+		pbMacros := make([]*wirepb.Macro, len(m.Macros))
+		for i, macro := range m.Macros {
+			steps := make([]*wirepb.MacroStep, len(macro.Steps))
+			for j, step := range macro.Steps {
+				steps[j] = &wirepb.MacroStep{
+					Text:  validUTF8(step.Text),
+					Key:   validUTF8(step.Key),
+					Code:  validUTF8(step.Code),
+					Ctrl:  step.Ctrl,
+					Alt:   step.Alt,
+					Shift: step.Shift,
+				}
+			}
+			pbMacros[i] = &wirepb.Macro{
+				Name:  validUTF8(macro.Name),
+				Steps: steps,
+			}
+		}
+		env.Msg = &wirepb.ClientMessage_SaveMacros{SaveMacros: &wirepb.MsgSaveMacros{Macros: pbMacros}}
 	default:
 		return nil, fmt.Errorf("unsupported client message %T", msg)
 	}
@@ -117,6 +137,26 @@ func UnmarshalClient(data []byte) (any, error) {
 		return MsgClosePaneRequest{PaneID: int(m.ClosePaneRequest.PaneId)}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
+	case *wirepb.ClientMessage_SaveMacros:
+		macros := make([]Macro, len(m.SaveMacros.Macros))
+		for i, macro := range m.SaveMacros.Macros {
+			steps := make([]MacroStep, len(macro.Steps))
+			for j, step := range macro.Steps {
+				steps[j] = MacroStep{
+					Text:  step.Text,
+					Key:   step.Key,
+					Code:  step.Code,
+					Ctrl:  step.Ctrl,
+					Alt:   step.Alt,
+					Shift: step.Shift,
+				}
+			}
+			macros[i] = Macro{
+				Name:  macro.Name,
+				Steps: steps,
+			}
+		}
+		return MsgSaveMacros{Macros: macros}, nil
 	default:
 		return nil, fmt.Errorf("unknown client message %T", env.Msg)
 	}
@@ -223,6 +263,26 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_ClosePaneResponse{ClosePaneResponse: &wirepb.MsgClosePaneResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
 	case MsgWaitResponse:
 		env.Msg = &wirepb.ServerMessage_WaitResponse{WaitResponse: &wirepb.MsgWaitResponse{PaneId: int32(m.PaneID), ExitCode: int32(m.ExitCode), Error: validUTF8(m.Error)}}
+	case MsgMacrosSnapshot:
+		pbMacros := make([]*wirepb.Macro, len(m.Macros))
+		for i, macro := range m.Macros {
+			steps := make([]*wirepb.MacroStep, len(macro.Steps))
+			for j, step := range macro.Steps {
+				steps[j] = &wirepb.MacroStep{
+					Text:  validUTF8(step.Text),
+					Key:   validUTF8(step.Key),
+					Code:  validUTF8(step.Code),
+					Ctrl:  step.Ctrl,
+					Alt:   step.Alt,
+					Shift: step.Shift,
+				}
+			}
+			pbMacros[i] = &wirepb.Macro{
+				Name:  validUTF8(macro.Name),
+				Steps: steps,
+			}
+		}
+		env.Msg = &wirepb.ServerMessage_MacrosSnapshot{MacrosSnapshot: &wirepb.MsgMacrosSnapshot{Macros: pbMacros}}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -334,6 +394,26 @@ func UnmarshalServer(data []byte) (any, error) {
 		return MsgClosePaneResponse{PaneID: int(m.ClosePaneResponse.PaneId), Error: m.ClosePaneResponse.Error}, nil
 	case *wirepb.ServerMessage_WaitResponse:
 		return MsgWaitResponse{PaneID: int(m.WaitResponse.PaneId), ExitCode: int(m.WaitResponse.ExitCode), Error: m.WaitResponse.Error}, nil
+	case *wirepb.ServerMessage_MacrosSnapshot:
+		macros := make([]Macro, len(m.MacrosSnapshot.Macros))
+		for i, macro := range m.MacrosSnapshot.Macros {
+			steps := make([]MacroStep, len(macro.Steps))
+			for j, step := range macro.Steps {
+				steps[j] = MacroStep{
+					Text:  step.Text,
+					Key:   step.Key,
+					Code:  step.Code,
+					Ctrl:  step.Ctrl,
+					Alt:   step.Alt,
+					Shift: step.Shift,
+				}
+			}
+			macros[i] = Macro{
+				Name:  macro.Name,
+				Steps: steps,
+			}
+		}
+		return MsgMacrosSnapshot{Macros: macros}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}
