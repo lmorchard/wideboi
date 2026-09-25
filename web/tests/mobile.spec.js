@@ -115,6 +115,9 @@ test('touch pans without terminal mouse messages and keyboard-sized view does no
 test('terminal key buttons work and composing draft text stays in the draft', async ({ page }) => {
   await connect(page);
   const draft = page.getByRole('textbox', { name: 'Command or response' });
+  await expect(draft).toHaveAttribute('autocapitalize', 'off');
+  await expect(draft).toHaveAttribute('autocorrect', 'off');
+  await expect(draft).toHaveAttribute('spellcheck', 'false');
   await draft.focus();
   await draft.press('a');
   await draft.evaluate(el => {

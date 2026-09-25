@@ -1199,6 +1199,7 @@ export class WideboiApp extends LitElement {
         <div class="mobile-dock">
           <div class="mobile-compose">
             <textarea aria-label="Command or response" rows="1" placeholder="Command or response"
+              autocapitalize="off" autocorrect="off" spellcheck="false"
               @input=${(e: Event) => { this.mobileDraft = (e.target as HTMLTextAreaElement).value; }}
               @keydown=${this.handleMobileDraftKey}></textarea>
             <button aria-label="Send text" ?disabled=${!this.mobileDraft} @click=${this.sendMobileDraft}>Send</button>
