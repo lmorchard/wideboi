@@ -389,3 +389,53 @@ type MsgTrafficStats struct {
 	Render        TimingStat      `json:"render"`
 	BuildPatch    TimingStat      `json:"build_patch"`
 }
+
+// MsgSplitRequest asks the server to create a new pane and column.
+type MsgSplitRequest struct {
+	Command     string `json:"command"`
+	Cwd         string `json:"cwd"`
+	AfterPaneID int    `json:"after_pane_id"`
+}
+
+// MsgSplitResponse returns the ID of the created pane or an error.
+type MsgSplitResponse struct {
+	PaneID int    `json:"pane_id"`
+	Error  string `json:"error,omitempty"`
+}
+
+// MsgSendInputRequest delivers input data to a specific pane.
+type MsgSendInputRequest struct {
+	PaneID int    `json:"pane_id"`
+	Data   []byte `json:"data"`
+}
+
+// MsgSendInputResponse acknowledges MsgSendInputRequest or reports an error.
+type MsgSendInputResponse struct {
+	PaneID int    `json:"pane_id"`
+	Error  string `json:"error,omitempty"`
+}
+
+// MsgCaptureRequest requests terminal text output from a specific pane.
+type MsgCaptureRequest struct {
+	PaneID     int  `json:"pane_id"`
+	Scrollback bool `json:"scrollback"`
+	Lines      int  `json:"lines"`
+}
+
+// MsgCaptureResponse returns the captured text or an error.
+type MsgCaptureResponse struct {
+	PaneID int    `json:"pane_id"`
+	Text   string `json:"text"`
+	Error  string `json:"error,omitempty"`
+}
+
+// MsgClosePaneRequest asks the server to close a specific pane.
+type MsgClosePaneRequest struct {
+	PaneID int `json:"pane_id"`
+}
+
+// MsgClosePaneResponse acknowledges MsgClosePaneRequest or reports an error.
+type MsgClosePaneResponse struct {
+	PaneID int    `json:"pane_id"`
+	Error  string `json:"error,omitempty"`
+}

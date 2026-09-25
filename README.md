@@ -58,6 +58,24 @@ it refuses the old server and says so, with the server's pid. Attach to
 that session with a build that matches it, or start a new one alongside with
 `-L <name>`.
 
+### Scripting and agent control
+
+Sessions can be controlled headlessly by scripts and agents using pane IDs without attaching an interactive client:
+
+    # Create a pane running a command and capture its assigned pane ID
+    PANE_ID=$(./bin/wideboi split make test)
+
+    # Send input text (use -e or --enter to append Enter)
+    ./bin/wideboi send $PANE_ID "git status" -e
+
+    # Read current visible terminal text (-S includes scrollback, -n limits lines)
+    ./bin/wideboi capture $PANE_ID
+
+    # Close the pane using hangup semantics
+    ./bin/wideboi close $PANE_ID
+
+All control subcommands accept `-L <name>` and `-s <path>` to target a specific session, return deterministic exit codes (0 on success, 1 on error), and report errors on stderr if a pane ID does not exist or the server is unreachable. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.
+
 ## Keys
 
 wideboi uses a prefix key, like tmux. Press `ctrl+b` to enter control
@@ -283,7 +301,7 @@ form. Treat the token and any token-bearing link as terminal access credentials.
 
 wideboi reads configuration with the following precedence (highest to lowest):
 
-1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`, `--websocket-token`)
+1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`, `--websocket-token`, `--disable-auto-cleanup`)
 2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`, `WIDEBOI_AUTO_CLEANUP`, `WIDEBOI_WEBSOCKET`, `WIDEBOI_WEBSOCKET_TOKEN`)
 3. **Configuration file** (TOML, including `websocket` and `websocket_token`)
 4. **Defaults** (including `$SHELL` or `/bin/sh`)

@@ -5,8 +5,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/lmorchard/wideboi/internal/logger"
 )
 
 // spawnServer starts `wideboi server` in the background as the session
@@ -27,7 +30,7 @@ import (
 // a signal killed it). An owner whose server quits before saying
 // anything reads it to tell "another server already had the session"
 // from a real failure.
-func spawnServer(args []string) (conn net.Conn, exited <-chan int, err error) {
+func spawnServer(socket string, args []string) (conn net.Conn, exited <-chan int, err error) {
 	syscall.ForkLock.RLock()
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err == nil {
@@ -52,8 +55,16 @@ func spawnServer(args []string) (conn net.Conn, exited <-chan int, err error) {
 	// Its own session: the host terminal's SIGHUP and ^C belong to the
 	// client, which decides what they mean for the session.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	// Stdin, Stdout and Stderr are left nil, which is /dev/null. The
-	// server logs to its file.
+	// Direct child stderr to the server log so startup panics and fatal errors
+	// are captured rather than dropped into /dev/null.
+	if socket != "" {
+		logPath := logger.Path(socket, "server")
+		_ = os.MkdirAll(filepath.Dir(logPath), 0700)
+		if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+			defer logFile.Close()
+			cmd.Stderr = logFile
+		}
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, nil, fmt.Errorf("starting wideboi server: %w", err)
 	}

@@ -335,4 +335,114 @@ func TestServerAutoCleanup(t *testing.T) {
 			t.Errorf("err.client.log should be kept on error exit: %v", err)
 		}
 	}
+
+	// Case 5: Exit during startup (owner drops before MsgAttach) preserves logs
+	{
+		dir := t.TempDir()
+		sockPath := filepath.Join(dir, "startup_exit.sock")
+		clientLog := filepath.Join(dir, "startup_exit.client.log")
+		if err := os.WriteFile(clientLog, []byte("client log bytes\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		syscall.ForkLock.RLock()
+		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+		syscall.ForkLock.RUnlock()
+		if err != nil {
+			t.Fatalf("socketpair: %v", err)
+		}
+
+		ours := os.NewFile(uintptr(fds[0]), "owner-client")
+		clientConn, err := net.FileConn(ours)
+		ours.Close()
+		if err != nil {
+			t.Fatalf("FileConn: %v", err)
+		}
+
+		cfg := config.Config{
+			Socket:             sockPath,
+			AutoCleanupEnabled: true,
+			LogLevel:           slog.LevelInfo,
+			Shell:              "/bin/sh",
+		}
+
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- runServer(cfg, fds[1])
+		}()
+
+		// Perform handshake, but drop connection immediately without MsgAttach
+		if _, err := transport.Handshake(clientConn); err != nil {
+			t.Fatalf("handshake: %v", err)
+		}
+		clientConn.Close()
+
+		select {
+		case srvErr := <-errCh:
+			if srvErr != nil {
+				t.Fatalf("runServer returned error: %v", srvErr)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for runServer to exit")
+		}
+
+		serverLog := filepath.Join(dir, "startup_exit.server.log")
+		if _, err := os.Stat(serverLog); err != nil {
+			t.Errorf("startup_exit.server.log should be kept when owner drops before MsgAttach: %v", err)
+		}
+		if _, err := os.Stat(clientLog); err != nil {
+			t.Errorf("startup_exit.client.log should be kept when owner drops before MsgAttach: %v", err)
+		}
+	}
+}
+
+func TestAutoCleanupSweepPreservesDeadLogs(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create dead artifacts
+	deadSock := filepath.Join(dir, "dead.sock")
+	deadToken := filepath.Join(dir, "dead.web-token")
+	deadServerLog := filepath.Join(dir, "dead.server.log")
+	deadClientLog := filepath.Join(dir, "dead.client.log")
+	legacyServerLog := filepath.Join(dir, "server.log")
+
+	_ = os.WriteFile(deadSock, []byte{}, 0600)
+	_ = os.WriteFile(deadToken, []byte("tok\n"), 0600)
+	_ = os.WriteFile(deadServerLog, []byte("server log\n"), 0600)
+	_ = os.WriteFile(deadClientLog, []byte("client log\n"), 0600)
+	_ = os.WriteFile(legacyServerLog, []byte("legacy\n"), 0600)
+
+	// runAutoCleanupSweep should remove dead socket, token, and legacy log, but KEEP dead logs
+	if err := runAutoCleanupSweep(dir); err != nil {
+		t.Fatalf("runAutoCleanupSweep failed: %v", err)
+	}
+
+	if _, err := os.Stat(deadSock); !os.IsNotExist(err) {
+		t.Errorf("dead.sock should be removed by sweep")
+	}
+	if _, err := os.Stat(deadToken); !os.IsNotExist(err) {
+		t.Errorf("dead.web-token should be removed by sweep")
+	}
+	if _, err := os.Stat(legacyServerLog); !os.IsNotExist(err) {
+		t.Errorf("legacy server.log should be removed by sweep")
+	}
+	if _, err := os.Stat(deadServerLog); err != nil {
+		t.Errorf("dead.server.log should be preserved by auto-cleanup sweep: %v", err)
+	}
+	if _, err := os.Stat(deadClientLog); err != nil {
+		t.Errorf("dead.client.log should be preserved by auto-cleanup sweep: %v", err)
+	}
+
+	// Now run explicit runCleanup, which SHOULD remove dead session logs
+	var buf bytes.Buffer
+	if err := runCleanup(&buf, dir); err != nil {
+		t.Fatalf("runCleanup failed: %v", err)
+	}
+
+	if _, err := os.Stat(deadServerLog); !os.IsNotExist(err) {
+		t.Errorf("dead.server.log should be removed by explicit runCleanup")
+	}
+	if _, err := os.Stat(deadClientLog); !os.IsNotExist(err) {
+		t.Errorf("dead.client.log should be removed by explicit runCleanup")
+	}
 }

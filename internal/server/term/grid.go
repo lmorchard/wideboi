@@ -130,6 +130,7 @@ type Grid interface {
 	Draw(dst uv.Screen, area image.Rectangle)
 	DrawAt(dst uv.Screen, area image.Rectangle, offset int)
 	CellAt(x, y int) *uv.Cell
+	CaptureText(scrollback bool, maxLines int) string
 	Size() (cols, rows int)
 	Close() error
 }
@@ -764,6 +765,73 @@ func (g *vtGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
 			}
 		}
 	}
+}
+
+// CaptureText extracts lines of text from the emulator. If scrollback is
+// true, lines from the scrollback history are included before the visible screen.
+// Trailing whitespace is trimmed from each line, and trailing empty lines at
+// the bottom of the viewport are trimmed. If maxLines > 0, at most maxLines
+// recent lines are returned.
+func (g *vtGrid) CaptureText(scrollback bool, maxLines int) string {
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
+
+	cols, rows := g.em.Width(), g.em.Height()
+	sbLen := g.em.ScrollbackLen()
+
+	totalLines := rows
+	if scrollback {
+		totalLines += sbLen
+	}
+
+	startLine := 0
+	if maxLines > 0 && totalLines > rows+maxLines {
+		startLine = totalLines - (rows + maxLines)
+	}
+
+	var lines []string
+	for idx := startLine; idx < totalLines; idx++ {
+		var sb strings.Builder
+		inScrollback := scrollback && idx < sbLen
+		row := idx
+		if scrollback && !inScrollback {
+			row = idx - sbLen
+		}
+		for x := 0; x < cols; {
+			var cell *uv.Cell
+			if inScrollback {
+				cell = g.em.ScrollbackCellAt(x, row)
+			} else {
+				cell = g.em.CellAt(x, row)
+			}
+			if cell == nil || cell.Content == "" {
+				sb.WriteByte(' ')
+				x++
+				continue
+			}
+			sb.WriteString(cell.Content)
+			w := cell.Width
+			if w <= 0 {
+				w = 1
+			}
+			x += w
+		}
+		lines = append(lines, strings.TrimRight(sb.String(), " "))
+	}
+
+	// Trim trailing empty lines at the bottom of the viewport
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+
+	if maxLines > 0 && len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // Close closes the underlying emulator, which unblocks any goroutine

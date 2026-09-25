@@ -155,7 +155,11 @@ message ServerMessage {
     MsgPaneMetadata pane_metadata = 6;
     MsgTrafficStats traffic_stats = 7;
     MsgFocusPane focus_pane = 8;
-    MsgHistorySnapshot history_snapshot = 9;
+    MsgSplitResponse split_response = 9;
+    MsgSendInputResponse send_input_response = 10;
+    MsgCaptureResponse capture_response = 11;
+    MsgClosePaneResponse close_pane_response = 12;
+    MsgHistorySnapshot history_snapshot = 13;
   }
 }
 
@@ -245,8 +249,54 @@ message ClientMessage {
     MsgShutdown shutdown = 9;
     MsgStatusRequest status_request = 10;
     MsgTrafficRequest traffic_request = 11;
-    MsgHistoryRequest history_request = 12;
+    MsgSplitRequest split_request = 12;
+    MsgSendInputRequest send_input_request = 13;
+    MsgCaptureRequest capture_request = 14;
+    MsgClosePaneRequest close_pane_request = 15;
+    MsgHistoryRequest history_request = 16;
   }
+}
+
+message MsgSplitRequest {
+  string command = 1;
+  string cwd = 2;
+  int32 after_pane_id = 3;
+}
+
+message MsgSplitResponse {
+  int32 pane_id = 1;
+  string error = 2;
+}
+
+message MsgSendInputRequest {
+  int32 pane_id = 1;
+  bytes data = 2;
+}
+
+message MsgSendInputResponse {
+  int32 pane_id = 1;
+  string error = 2;
+}
+
+message MsgCaptureRequest {
+  int32 pane_id = 1;
+  bool scrollback = 2;
+  int32 lines = 3;
+}
+
+message MsgCaptureResponse {
+  int32 pane_id = 1;
+  string text = 2;
+  string error = 3;
+}
+
+message MsgClosePaneRequest {
+  int32 pane_id = 1;
+}
+
+message MsgClosePaneResponse {
+  int32 pane_id = 1;
+  string error = 2;
 }
 
 // Traffic counters for `wideboi status --traffic` (#179). Counts and

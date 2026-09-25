@@ -12,10 +12,10 @@ test('a short browser pane can reach the bottom of a taller terminal without res
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v8';
+        this.protocol = 'wideboi.v9';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v8')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v9')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }

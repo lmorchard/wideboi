@@ -20,8 +20,9 @@ func isSessionActive(sock string) bool {
 	return false
 }
 
-// runCleanup removes legacy logs and artifacts of dead sessions in dir.
-func runCleanup(w io.Writer, dir string) error {
+// cleanupDeadArtifacts removes artifacts of dead sessions in dir. If includeLogs is true,
+// it also removes dead session logs (*.server.log and *.client.log).
+func cleanupDeadArtifacts(w io.Writer, dir string, includeLogs bool) error {
 	// 1. Unconditionally remove legacy shared logs.
 	legacy := []string{"server.log", "client.log"}
 	for _, l := range legacy {
@@ -55,23 +56,26 @@ func runCleanup(w io.Writer, dir string) error {
 		}
 	}
 
-	// 3. Clean up dead logs.
-	logs, err := filepath.Glob(filepath.Join(dir, "*.log"))
-	if err == nil {
-		for _, log := range logs {
-			base := filepath.Base(log)
-			// e.g. default.server.log -> default
-			name := strings.TrimSuffix(base, ".server.log")
-			name = strings.TrimSuffix(name, ".client.log")
+	// 3. Clean up dead logs only when requested (e.g. manual 'wideboi cleanup').
+	// Automatic exit cleanup preserves other dead sessions' logs for post-mortem analysis.
+	if includeLogs {
+		logs, err := filepath.Glob(filepath.Join(dir, "*.log"))
+		if err == nil {
+			for _, log := range logs {
+				base := filepath.Base(log)
+				// e.g. default.server.log -> default
+				name := strings.TrimSuffix(base, ".server.log")
+				name = strings.TrimSuffix(name, ".client.log")
 
-			// If trim didn't change anything, it's not a session log (or was legacy, already gone)
-			if name == base {
-				continue
-			}
+				// If trim didn't change anything, it's not a session log (or was legacy, already gone)
+				if name == base {
+					continue
+				}
 
-			if !isActive(name) {
-				if err := os.Remove(log); err == nil {
-					fmt.Fprintf(w, "removed dead log %s\n", base)
+				if !isActive(name) {
+					if err := os.Remove(log); err == nil {
+						fmt.Fprintf(w, "removed dead log %s\n", base)
+					}
 				}
 			}
 		}
@@ -91,4 +95,14 @@ func runCleanup(w io.Writer, dir string) error {
 	}
 
 	return nil
+}
+
+// runCleanup removes legacy logs and artifacts of dead sessions in dir, including logs.
+func runCleanup(w io.Writer, dir string) error {
+	return cleanupDeadArtifacts(w, dir, true)
+}
+
+// runAutoCleanupSweep removes dead sockets and tokens in dir, leaving logs intact.
+func runAutoCleanupSweep(dir string) error {
+	return cleanupDeadArtifacts(io.Discard, dir, false)
 }
