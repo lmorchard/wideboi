@@ -60,11 +60,11 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
 
   const geometry = await panes.evaluateAll(elements => elements.slice(0, 3).map(element => {
     const rect = element.getBoundingClientRect();
-    return { left: rect.left, right: rect.right, width: rect.width, z: Number(getComputedStyle(element).zIndex) };
+    return { left: rect.left, right: rect.right, top: rect.top, width: rect.width, z: Number(getComputedStyle(element).zIndex) };
   }));
   expect(geometry[1].right).toBeGreaterThan(geometry[2].left);
   expect(geometry[2].z).toBeGreaterThan(geometry[1].z);
-  await page.mouse.click(geometry[1].left + 10, 120);
+  await page.mouse.click(geometry[1].left + 10, geometry[1].top + 20);
   await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('2');
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');

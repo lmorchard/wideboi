@@ -78,11 +78,10 @@ export class WideboiApp extends LitElement {
       border-bottom: 1px solid #3c3c3c;
       padding: 0.4rem 1rem;
       display: flex;
-      gap: 0.8rem;
+      flex-wrap: wrap;
+      gap: 0.4rem 0.8rem;
       align-items: center;
-      flex-wrap: nowrap;
       white-space: nowrap;
-      overflow: hidden;
       flex: none;
       z-index: 5;
       font-size: 13px;
@@ -97,6 +96,7 @@ export class WideboiApp extends LitElement {
     }
     .toolbar label {
       color: #aaa;
+      white-space: nowrap;
     }
     .toolbar .tip {
       color: #666;
@@ -327,6 +327,7 @@ export class WideboiApp extends LitElement {
   private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
   @state() private layoutMode: 'scroll' | 'cards' = 'cards';
+  @state() private cardWidth: number | null = null;
   private cardFirst = 0;
   private cardViewportWidth = 0;
   private stripScrollLeft = 0;
@@ -794,7 +795,7 @@ export class WideboiApp extends LitElement {
 
     this.paneStrip.addEventListener('wheel', (e) => {
       if (!this.connected || !this.client) return;
-      // Leave horizontal wheel and trackpad gestures to the native strip.
+      // Leave horizontal gestures to the pane viewport or outer strip.
       if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
       const pane = this.eventPane(e);
       if (pane) {
@@ -926,6 +927,16 @@ export class WideboiApp extends LitElement {
     });
   }
 
+  private handleCardWidthSelect(e: Event) {
+    const value = (e.target as HTMLSelectElement).value;
+    if (value === 'terminal') {
+      this.cardWidth = null;
+      return;
+    }
+    const width = Number(value);
+    if ([40, 60, 80].includes(width)) this.cardWidth = width;
+  }
+
   private handleLayoutSelect(e: Event) {
     const mode = (e.target as HTMLSelectElement).value;
     if (mode === 'cards' || mode === 'scroll') {
@@ -935,9 +946,12 @@ export class WideboiApp extends LitElement {
 
   render() {
     const cards = this.layoutMode === 'cards';
+    const displayWidth = (column: ColumnData) =>
+      cards && this.cardWidth !== null ? Math.min(column.width, this.cardWidth) : column.width;
+    const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column) }));
     const stackFocusId = this.stackFocusId === null ? null :
       (this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId);
-    const layout = cards ? cardLayout(this.columns, this.focusedPaneId,
+    const layout = cards ? cardLayout(displayColumns, this.focusedPaneId,
       Math.floor(this.cardViewportWidth / this.cellWidth), this.cardFirst, stackFocusId) : undefined;
     if (layout) this.cardFirst = layout.first;
     const placements = new Map(layout?.placements.map(p => [p.paneId, p]));
@@ -955,6 +969,15 @@ export class WideboiApp extends LitElement {
             <option value="scroll" .selected=${!cards}>Scroll</option>
             <option value="cards" .selected=${cards}>Cards</option>
           </select>
+          ${cards ? html`
+            <label for="card-width">Card width:</label>
+            <select id="card-width" aria-label="Card width" @change=${this.handleCardWidthSelect}>
+              <option value="terminal" .selected=${this.cardWidth === null}>Terminal</option>
+              <option value="40" .selected=${this.cardWidth === 40}>40 cols</option>
+              <option value="60" .selected=${this.cardWidth === 60}>60 cols</option>
+              <option value="80" .selected=${this.cardWidth === 80}>80 cols</option>
+            </select>
+          ` : ''}
           <label for="prefix-key">Prefix:</label>
           <select id="prefix-key" aria-label="Prefix key" @change=${this.handlePrefixChange}>
             <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
@@ -973,7 +996,7 @@ export class WideboiApp extends LitElement {
             const placement = placements.get(column.paneId);
             return html`
             <wideboi-pane
-              style=${`width: ${column.width * this.cellWidth}px; --divider-width: ${cards ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
+              style=${`width: ${displayWidth(column) * this.cellWidth}px; --divider-width: ${cards ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
               .paneId=${column.paneId}
               .pane=${this.panes.get(column.paneId)}
               .focused=${column.paneId === this.focusedPaneId}
@@ -981,6 +1004,7 @@ export class WideboiApp extends LitElement {
               .cardLabel=${`[${column.paneId}] ${this.paneTitles[column.paneId] || 'Terminal'}`}
               .running=${this.connected}
               .cellWidth=${this.cellWidth}
+              .displayCols=${displayWidth(column)}
               .stats=${this.stats}
               aria-label=${`Pane ${column.paneId}`}
             ></wideboi-pane>

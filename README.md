@@ -165,6 +165,12 @@ Alt+wheel navigates terminal scrollback. When the whole live screen fits, the
 wheel navigates scrollback as before. Panning the live screen does not resize
 the terminal or change another client's view.
 
+In card layout, the **Card width** selector can show a pane in 40, 60, or 80
+columns, capped at its terminal width. Choose **Terminal** to show its full
+width. A narrower card scrolls horizontally within the live terminal grid;
+its scrollbar or a horizontal trackpad gesture reaches the hidden columns.
+This is a local viewing choice and does not resize the PTY.
+
 The listener is disabled unless you set `--websocket`,
 `WIDEBOI_WEBSOCKET`, or `websocket` in the config file. All three accept an
 address such as `127.0.0.1:8080`. Binding to `:8080` listens on network
