@@ -63,7 +63,7 @@ web-test: web/dist
 	cd web && npm test
 
 # Exercise the actual web app in Chromium with a controlled WebSocket peer.
-web-accept: web/dist
+web-accept: build
 	cd web && npm run test:browser
 
 # The race detector belongs in the gate: a data race that only appears

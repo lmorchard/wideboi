@@ -7,6 +7,7 @@ import { reconcileFocus } from './focus';
 import { WideboiPane } from './wideboi-pane';
 import { cardLayout } from './card-layout';
 import { sendKeyboardInput, sendTextInput } from './input';
+import { KeyRouter } from './key-router';
 import { consumeLinkToken } from './token';
 import { RenderStats, formatSummary, statsEnabled } from './stats';
 import { MouseKind, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
@@ -75,10 +76,14 @@ export class WideboiApp extends LitElement {
     .toolbar {
       background: #252526;
       border-bottom: 1px solid #3c3c3c;
-      padding: 0.5rem 1rem;
+      padding: 0.4rem 1rem;
       display: flex;
-      gap: 1rem;
+      gap: 0.8rem;
       align-items: center;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+      overflow: hidden;
+      flex: none;
       z-index: 5;
       font-size: 13px;
     }
@@ -86,12 +91,22 @@ export class WideboiApp extends LitElement {
       background: #3c3c3c;
       color: #cccccc;
       border: 1px solid #555;
-      padding: 0.3rem;
+      padding: 0.25rem;
       border-radius: 3px;
       outline: none;
     }
     .toolbar label {
       color: #aaa;
+    }
+    .toolbar .tip {
+      color: #666;
+      margin-left: auto;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    @media (max-width: 650px) {
+      .toolbar .tip { display: none; }
     }
     .overlay {
       position: absolute;
@@ -162,6 +177,85 @@ export class WideboiApp extends LitElement {
       z-index: 30;
       pointer-events: none;
     }
+    .help-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 25;
+      color: #cccccc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    }
+    .help-dialog {
+      background: #252526;
+      border: 1px solid #454545;
+      border-radius: 6px;
+      padding: 1.5rem;
+      max-width: 580px;
+      width: 90%;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    }
+    .help-dialog h3 {
+      margin: 0 0 1rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #3c3c3c;
+      padding-bottom: 0.5rem;
+    }
+    .help-dialog .close-btn {
+      background: transparent;
+      border: none;
+      color: #999;
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 0 0.5rem;
+    }
+    .help-dialog .close-btn:hover {
+      color: #fff;
+    }
+    .help-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-bottom: 1rem;
+    }
+    .help-table th, .help-table td {
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .help-table th {
+      color: #888;
+      font-weight: normal;
+      border-bottom: 1px solid #3c3c3c;
+    }
+    .help-table kbd {
+      background: #333;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: monospace;
+      color: #eee;
+    }
+    .toolbar .help-btn {
+      background: #333;
+      color: #ccc;
+      border: 1px solid #555;
+      padding: 0.25rem 0.6rem;
+      font-size: 12px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .toolbar .help-btn:hover {
+      background: #444;
+      color: #fff;
+    }
     .error {
       color: #f14c4c;
       font-size: 0.9rem;
@@ -210,7 +304,19 @@ export class WideboiApp extends LitElement {
   @state()
   private errorMsg = '';
 
-  private inPrefixMode = false;
+  @state()
+  private showHelp = false;
+
+  @state()
+  private prefixSetting = (() => {
+    try {
+      return localStorage.getItem('wideboi.prefix') || 'ctrl+b';
+    } catch {
+      return 'ctrl+b';
+    }
+  })();
+
+  private keyRouter = new KeyRouter(this.prefixSetting);
   private previousFocusId = 0;
   private pendingFocusId = 0;
   @state()
@@ -355,7 +461,7 @@ export class WideboiApp extends LitElement {
     this.listeners?.abort();
     this.listeners = undefined;
     this.pointer = undefined;
-    this.inPrefixMode = false;
+    this.keyRouter.reset();
     for (const animation of this.movement.values()) animation.cancel();
     this.movement.clear();
     this.resizeObserver.disconnect();
@@ -399,7 +505,7 @@ export class WideboiApp extends LitElement {
     this.stopStatsReport();
     this.connected = false;
     this.lastSentSize = undefined;
-    this.inPrefixMode = false;
+    this.keyRouter.reset();
     this.pendingFocusId = 0;
     this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
@@ -444,7 +550,7 @@ export class WideboiApp extends LitElement {
     client.onDisconnect = () => {
       if (this.client !== client) return;
       this.connected = false;
-      this.inPrefixMode = false;
+      this.keyRouter.reset();
       this.stopStatsReport();
       this.errorMsg = 'Disconnected from server.';
     }
@@ -555,43 +661,44 @@ export class WideboiApp extends LitElement {
   private setupKeyboard() {
     document.addEventListener('keydown', (e) => {
       if (!this.connected || !this.client) return;
+      if (this.showHelp) {
+        if (e.key === 'Escape' || e.key === '?' || (e.ctrlKey && e.key === 'c')) {
+          this.closeHelp();
+          e.preventDefault();
+        }
+        return;
+      }
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement ||
           e.target instanceof HTMLButtonElement) return;
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
-      // Intercept the default prefix (ctrl+b) locally to drive verbs.
-      if (e.ctrlKey && e.key === 'b') {
-        this.inPrefixMode = true;
-        e.preventDefault();
-        return;
-      }
-      if (this.inPrefixMode) {
-        let verb = VerbType.UNSPECIFIED;
-        // Handle normal key presses and also handle if Ctrl is held down while pressing the key
-        const key = e.key.toLowerCase();
-        
-        // Escape or Ctrl+C immediately drops out of prefix mode
-        if (key === 'escape' || (e.ctrlKey && key === 'c')) {
-           this.inPrefixMode = false;
-           e.preventDefault();
-           return;
-        }
-
-        switch (key) {
-          case 'h': case 'arrowleft': verb = VerbType.FOCUS_LEFT; break;
-          case 'l': case 'arrowright': verb = VerbType.FOCUS_RIGHT; break;
-          case 'n': verb = VerbType.NEW_COLUMN; break;
-          case 'w': verb = VerbType.CYCLE_WIDTH; break;
-          case 'x': verb = VerbType.KILL_PANE; break;
-          case 'a': verb = VerbType.SMART_JUMP; break;
-          case 'p': verb = VerbType.GROW_WIDTH; break;
-          case 'o': verb = VerbType.SHRINK_WIDTH; break;
-          case 'y': verb = VerbType.MOVE_LEFT; break;
-          case 'u': verb = VerbType.MOVE_RIGHT; break;
-          case 'tab': verb = VerbType.FOCUS_LAST; break;
-        }
-        
-        if (verb !== VerbType.UNSPECIFIED) {
+      const action = this.keyRouter.handle(e);
+      switch (action.type) {
+        case 'ignore':
+          e.preventDefault();
+          return;
+        case 'send_literal_key':
+        case 'forward':
+          if (sendKeyboardInput(this.client, this.focusedPaneId, e)) e.preventDefault();
+          return;
+        case 'scroll':
+          this.client.send({ case: 'scroll', value: { paneId: this.focusedPaneId, delta: action.delta } });
+          e.preventDefault();
+          return;
+        case 'toggle_cards':
+          this.setLayoutMode(this.layoutMode === 'cards' ? 'scroll' : 'cards');
+          e.preventDefault();
+          return;
+        case 'focus_column':
+          this.focusColumnByIndex(action.column);
+          e.preventDefault();
+          return;
+        case 'toggle_help':
+          this.toggleHelp();
+          e.preventDefault();
+          return;
+        case 'verb': {
+          const verb = action.verb;
           const index = this.activePanes.indexOf(this.focusedPaneId);
           if (verb === VerbType.FOCUS_LEFT && index > 0) this.focusPane(this.activePanes[index - 1]);
           else if (verb === VerbType.FOCUS_RIGHT && index >= 0 && index < this.activePanes.length - 1) this.focusPane(this.activePanes[index + 1]);
@@ -608,30 +715,10 @@ export class WideboiApp extends LitElement {
           } else if (![VerbType.FOCUS_LEFT, VerbType.FOCUS_RIGHT, VerbType.SMART_JUMP, VerbType.FOCUS_LAST].includes(verb)) {
             this.client.send({ case: 'verb', value: { verb, paneId: this.focusedPaneId } });
           }
-          
-          // If they held Ctrl while pressing the key (e.g. Ctrl-b, then held Ctrl and pressed 'l'),
-          // stay in prefix mode so they can repeat it.
-          // Note: KillPane ('x') does not repeat in the CLI.
-          const isRepeatable = [VerbType.FOCUS_LEFT, VerbType.FOCUS_RIGHT, VerbType.GROW_WIDTH,
-            VerbType.SHRINK_WIDTH, VerbType.MOVE_LEFT, VerbType.MOVE_RIGHT].includes(verb);
-          if (!(e.ctrlKey && isRepeatable)) {
-             this.inPrefixMode = false;
-          }
-          
-        } else if (key === 'j') {
-          this.client.send({ case: 'scroll', value: { paneId: this.focusedPaneId, delta: -10 } });
-        } else if (key === 'k') {
-          this.client.send({ case: 'scroll', value: { paneId: this.focusedPaneId, delta: 10 } });
-        } else {
-           // Unknown key breaks out of prefix mode
-           this.inPrefixMode = false;
+          e.preventDefault();
+          return;
         }
-        e.preventDefault();
-        return;
       }
-
-      
-      if (sendKeyboardInput(this.client, this.focusedPaneId, e)) e.preventDefault();
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('paste', (e) => {
@@ -771,9 +858,55 @@ export class WideboiApp extends LitElement {
     }
   }
 
-  private handleLayoutSelect(e: Event) {
-    const mode = (e.target as HTMLSelectElement).value;
+  private openHelp() {
+    this.showHelp = true;
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector<HTMLButtonElement>('.help-dialog .close-btn')?.focus();
+    });
+  }
+
+  private closeHelp() {
+    this.showHelp = false;
+    void this.updateComplete.then(() => {
+      this.focusedPane()?.focusInput();
+    });
+  }
+
+  private toggleHelp() {
+    if (this.showHelp) {
+      this.closeHelp();
+    } else {
+      this.openHelp();
+    }
+  }
+
+  private handlePrefixChange(e: Event) {
+    const val = (e.target as HTMLSelectElement).value;
+    this.prefixSetting = val;
+    try {
+      localStorage.setItem('wideboi.prefix', val);
+    } catch {
+      // ignore localStorage quota/disabled errors
+    }
+    this.keyRouter.setPrefix(val);
+  }
+
+  private focusColumnByIndex(colIndex: number) {
+    if (this.columns.length === 0) return;
+    let targetPaneId: number | undefined;
+    if (colIndex === 0) {
+      targetPaneId = this.columns[this.columns.length - 1]?.paneId;
+    } else if (colIndex >= 1 && colIndex <= this.columns.length) {
+      targetPaneId = this.columns[colIndex - 1]?.paneId;
+    }
+    if (targetPaneId !== undefined) {
+      this.focusPane(targetPaneId);
+    }
+  }
+
+  private setLayoutMode(mode: 'cards' | 'scroll') {
     if (mode !== 'cards' && mode !== 'scroll') return;
+    if (mode === this.layoutMode) return;
     const previous = this.panePositions();
     if (mode === 'cards') {
       this.stackFocusId = this.focusedPaneId;
@@ -791,6 +924,13 @@ export class WideboiApp extends LitElement {
         if (this.layoutMode === mode) this.revealFocus();
       });
     });
+  }
+
+  private handleLayoutSelect(e: Event) {
+    const mode = (e.target as HTMLSelectElement).value;
+    if (mode === 'cards' || mode === 'scroll') {
+      this.setLayoutMode(mode);
+    }
   }
 
   render() {
@@ -815,7 +955,14 @@ export class WideboiApp extends LitElement {
             <option value="scroll" .selected=${!cards}>Scroll</option>
             <option value="cards" .selected=${cards}>Cards</option>
           </select>
-          <span style="color: #666; margin-left: auto;">(Tip: Ctrl+B then left/right arrow to switch)</span>
+          <label for="prefix-key">Prefix:</label>
+          <select id="prefix-key" aria-label="Prefix key" @change=${this.handlePrefixChange}>
+            <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
+            <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
+            <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
+          </select>
+          <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
+          <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
         </div>
       ` : ''}
       <div class="terminal-shell">
@@ -851,6 +998,36 @@ export class WideboiApp extends LitElement {
         })()}</div>
       </div>
       ${this.stats ? html`<pre class="stats-overlay">${this.statsText || 'stats: collecting…'}</pre>` : ''}
+      ${this.showHelp ? html`
+        <div class="help-overlay" @click=${this.closeHelp}>
+          <div class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" @click=${(e: Event) => e.stopPropagation()}>
+            <h3 id="help-title">
+              <span>wideboi Shortcuts</span>
+              <button class="close-btn" @click=${this.closeHelp} aria-label="Close help">×</button>
+            </h3>
+            <p style="margin-top: 0; color: #aaa;">Prefix: <kbd>${this.keyRouter.prefixLabel}</kbd> (press twice to send literal key)</p>
+            <table class="help-table">
+              <thead><tr><th>Key after prefix</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td><kbd>h</kbd> / <kbd>←</kbd></td><td>Focus left</td></tr>
+                <tr><td><kbd>l</kbd> / <kbd>→</kbd></td><td>Focus right</td></tr>
+                <tr><td><kbd>Tab</kbd></td><td>Focus previous pane</td></tr>
+                <tr><td><kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd></td><td>Focus column by position (0 is last)</td></tr>
+                <tr><td><kbd>a</kbd></td><td>Smart jump (needs input / failed / done)</td></tr>
+                <tr><td><kbd>c</kbd></td><td>Toggle cards / scroll layout</td></tr>
+                <tr><td><kbd>n</kbd></td><td>New column</td></tr>
+                <tr><td><kbd>w</kbd></td><td>Cycle column width</td></tr>
+                <tr><td><kbd>o</kbd> / <kbd>p</kbd></td><td>Shrink / grow column width</td></tr>
+                <tr><td><kbd>y</kbd> / <kbd>u</kbd></td><td>Move column left / right</td></tr>
+                <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Scroll history down / up</td></tr>
+                <tr><td><kbd>x</kbd></td><td>Kill focused pane</td></tr>
+                <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
+                <tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd></td><td>Cancel prefix mode</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
       ${!this.connected ? html`
         <div class="overlay">
           <div class="connection-box">
