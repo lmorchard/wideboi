@@ -208,6 +208,24 @@ for the next snapshot. For the pane selector, bind each option's `selected`
 property: setting the select's value before Lit removes an option can leave
 the browser displaying a different selection than client focus state.
 
+When a pane moves between absolute card positions and the flex strip, a FLIP
+animation temporarily transforms its bounding rectangle back to the old
+position. Calling `scrollIntoView` during that animation can decide the pane
+is already visible and leave it offscreen when the animation ends. Reveal the
+focused pane after the move animations settle, including when reduced motion
+skips them.
+
+In overlapping cards, use natural left-to-right stacking while focus slides.
+The card to the right must cover the card to its left in either focus direction.
+Raising the new focus immediately covers its right neighbor; keeping the old
+focus on top instead covers its right neighbor. Raise the new focus only after
+the movement finishes.
+
+Browser tests that replace `window.WebSocket` also intercept Vite's development
+socket. Identify the app connection by its offered version subprotocol,
+not a URL suffix: on Linux CI, Vite's socket matched `/ws`, closed, and the test
+mistook it for the app socket.
+
 ## Change-only pane updates require complete bookkeeping
 
 Before #85, every 33 ms frame resent every pane and repaired missed updates.

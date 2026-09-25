@@ -17,7 +17,7 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
         this.protocol = 'wideboi.v5';
         this.readyState = 0;
         this.sent = [];
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -83,11 +83,11 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
-      constructor(url) {
+      constructor(url, protocols) {
         this.protocol = 'wideboi.v5';
         this.readyState = 0;
         this.sent = [];
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -100,6 +100,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
   await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length)).toBeGreaterThan(0);
+  await page.getByRole('combobox', { name: 'Layout' }).selectOption('scroll');
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
@@ -116,7 +117,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   const before = await panes.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
   expect(before.every(width => width === before[0])).toBe(true);
   expect(before[0]).toBeGreaterThan(250);
-  await page.getByRole('combobox').selectOption('4');
+  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('4');
   await expect.poll(() => page.locator('.pane-strip').evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
   const after = await panes.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
   expect(after).toEqual(before);
@@ -136,7 +137,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     .toMatchObject({ paneId: 4, x: 2, y: 1 });
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(resizeCount);
   await page.locator('wideboi-pane canvas').first().click({ position: { x: 20, y: 26 } });
-  await expect(page.getByRole('combobox')).toHaveValue('1');
+  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
   expect(await page.evaluate(() => {
     const app = document.querySelector('wideboi-app');
     const pane = app.shadowRoot.querySelector('wideboi-pane');
@@ -155,12 +156,12 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   expect(await page.evaluate(() => window.paneCanvas === document.querySelector('wideboi-app').shadowRoot
     .querySelectorAll('wideboi-pane')[3].shadowRoot.querySelector('canvas'))).toBe(true);
 
-  await page.getByRole('combobox').selectOption('4');
+  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('4');
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'paneClosed', value: { paneId: 4 } }));
   });
-  await expect(page.getByRole('combobox')).toHaveValue('3');
+  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('3');
   expect(await page.evaluate(() => document.querySelector('wideboi-app').focusedPaneId)).toBe(3);
   expect(await page.evaluate(() => {
     const app = document.querySelector('wideboi-app');
@@ -181,11 +182,11 @@ test('?stats=1 shows the stats overlay and reports periodically', async ({ page 
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
-      constructor(url) {
+      constructor(url, protocols) {
         this.protocol = 'wideboi.v5';
         this.readyState = 0;
         this.sent = [];
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
@@ -227,10 +228,10 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
-      constructor(url) {
+      constructor(url, protocols) {
         this.protocol = 'wideboi.v5';
         this.readyState = 0;
-        if (url.endsWith('/ws')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v5')) window.testSockets.push(this);
       }
       send() {}
       close() { this.readyState = 3; this.onclose?.(); }
