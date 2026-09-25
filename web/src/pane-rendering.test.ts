@@ -89,6 +89,7 @@ describe('pane mirrors', () => {
 describe('per-pane painting', () => {
   const frames = new Map<number, FrameRequestCallback>();
   const listeners = new Map<string, () => void>();
+  const clearRect = vi.fn();
   const fillRect = vi.fn();
   const fillText = vi.fn();
   let nextFrame = 1;
@@ -105,6 +106,7 @@ describe('per-pane painting', () => {
     hidden = false;
     frames.clear();
     listeners.clear();
+    clearRect.mockClear();
     fillRect.mockClear();
     fillText.mockClear();
     vi.stubGlobal('document', {
@@ -123,7 +125,7 @@ describe('per-pane painting', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   const painter = (stats?: RenderStats) => {
-    const ctx = { setTransform: vi.fn(), fillRect, fillText };
+    const ctx = { setTransform: vi.fn(), clearRect, fillRect, fillText };
     const canvas = { width: 0, height: 0, style: { width: '', height: '' },
       getContext: () => ctx } as unknown as HTMLCanvasElement;
     return { painter: new PanePainter(canvas, 8, stats), canvas };
@@ -134,6 +136,7 @@ describe('per-pane painting', () => {
     // draw sample proves the timing wraps draw() itself.
     let clock = 0;
     const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    clearRect.mockImplementation(() => { clock += 7; });
     fillRect.mockImplementation(() => { clock += 7; });
     const full = create(MsgPaneUpdateSchema, { paneId: 1, cols: 1, rows: 1, generation: 1n,
       lines: [row(' ')] });
@@ -168,6 +171,7 @@ describe('per-pane painting', () => {
     expect(s.apply.full.max).toBe(0);
     expect(s.draw.count).toBe(1);
     expect(s.draw.max).toBeGreaterThan(0);
+    clearRect.mockReset();
     fillRect.mockReset();
     now.mockRestore();
   });
