@@ -265,3 +265,60 @@ func TestIdleSessionStopsSendingPaneUpdates(t *testing.T) {
 		t.Fatal("a layout snapshot preceded the second keystroke's update, so this run cannot show the generation delivered it")
 	}
 }
+
+func TestParseCLIPaneControl(t *testing.T) {
+	tests := []struct {
+		args        []string
+		wantSub     string
+		wantSubArgs []string
+		wantSession string
+	}{
+		{
+			args:        []string{"split", "echo", "hello"},
+			wantSub:     "split",
+			wantSubArgs: []string{"echo", "hello"},
+		},
+		{
+			args:        []string{"-L", "mysess", "split", "--cwd", "/tmp", "cat"},
+			wantSub:     "split",
+			wantSubArgs: []string{"--cwd", "/tmp", "cat"},
+			wantSession: "mysess",
+		},
+		{
+			args:        []string{"send", "2", "uptime", "--enter"},
+			wantSub:     "send",
+			wantSubArgs: []string{"2", "uptime", "--enter"},
+		},
+		{
+			args:        []string{"capture", "3", "--scrollback", "-n", "10"},
+			wantSub:     "capture",
+			wantSubArgs: []string{"3", "--scrollback", "-n", "10"},
+		},
+		{
+			args:        []string{"close", "4"},
+			wantSub:     "close",
+			wantSubArgs: []string{"4"},
+		},
+	}
+
+	for _, tt := range tests {
+		opts, err := parseCLI(tt.args)
+		if err != nil {
+			t.Fatalf("parseCLI(%v) returned error: %v", tt.args, err)
+		}
+		if opts.subcommand != tt.wantSub {
+			t.Errorf("parseCLI(%v).subcommand = %q, want %q", tt.args, opts.subcommand, tt.wantSub)
+		}
+		if len(opts.subcommandArgs) != len(tt.wantSubArgs) {
+			t.Fatalf("parseCLI(%v).subcommandArgs = %v, want %v", tt.args, opts.subcommandArgs, tt.wantSubArgs)
+		}
+		for i, a := range opts.subcommandArgs {
+			if a != tt.wantSubArgs[i] {
+				t.Errorf("parseCLI(%v).subcommandArgs[%d] = %q, want %q", tt.args, i, a, tt.wantSubArgs[i])
+			}
+		}
+		if tt.wantSession != "" && opts.flags.Session != tt.wantSession {
+			t.Errorf("parseCLI(%v).flags.Session = %q, want %q", tt.args, opts.flags.Session, tt.wantSession)
+		}
+	}
+}

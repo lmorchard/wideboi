@@ -41,6 +41,14 @@ func MarshalClient(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ClientMessage_StatusRequest{StatusRequest: &wirepb.MsgStatusRequest{}}
 	case MsgTrafficRequest:
 		env.Msg = &wirepb.ClientMessage_TrafficRequest{TrafficRequest: &wirepb.MsgTrafficRequest{}}
+	case MsgSplitRequest:
+		env.Msg = &wirepb.ClientMessage_SplitRequest{SplitRequest: &wirepb.MsgSplitRequest{Command: validUTF8(m.Command), Cwd: validUTF8(m.Cwd), AfterPaneId: int32(m.AfterPaneID)}}
+	case MsgSendInputRequest:
+		env.Msg = &wirepb.ClientMessage_SendInputRequest{SendInputRequest: &wirepb.MsgSendInputRequest{PaneId: int32(m.PaneID), Data: m.Data}}
+	case MsgCaptureRequest:
+		env.Msg = &wirepb.ClientMessage_CaptureRequest{CaptureRequest: &wirepb.MsgCaptureRequest{PaneId: int32(m.PaneID), Scrollback: m.Scrollback, Lines: int32(m.Lines)}}
+	case MsgClosePaneRequest:
+		env.Msg = &wirepb.ClientMessage_ClosePaneRequest{ClosePaneRequest: &wirepb.MsgClosePaneRequest{PaneId: int32(m.PaneID)}}
 	default:
 		return nil, fmt.Errorf("unsupported client message %T", msg)
 	}
@@ -75,6 +83,14 @@ func UnmarshalClient(data []byte) (any, error) {
 		return MsgStatusRequest{}, nil
 	case *wirepb.ClientMessage_TrafficRequest:
 		return MsgTrafficRequest{}, nil
+	case *wirepb.ClientMessage_SplitRequest:
+		return MsgSplitRequest{Command: m.SplitRequest.Command, Cwd: m.SplitRequest.Cwd, AfterPaneID: int(m.SplitRequest.AfterPaneId)}, nil
+	case *wirepb.ClientMessage_SendInputRequest:
+		return MsgSendInputRequest{PaneID: int(m.SendInputRequest.PaneId), Data: m.SendInputRequest.Data}, nil
+	case *wirepb.ClientMessage_CaptureRequest:
+		return MsgCaptureRequest{PaneID: int(m.CaptureRequest.PaneId), Scrollback: m.CaptureRequest.Scrollback, Lines: int(m.CaptureRequest.Lines)}, nil
+	case *wirepb.ClientMessage_ClosePaneRequest:
+		return MsgClosePaneRequest{PaneID: int(m.ClosePaneRequest.PaneId)}, nil
 	default:
 		return nil, fmt.Errorf("unknown client message %T", env.Msg)
 	}
@@ -163,6 +179,14 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_TrafficStats{TrafficStats: stats}
 	case MsgFocusPane:
 		env.Msg = &wirepb.ServerMessage_FocusPane{FocusPane: &wirepb.MsgFocusPane{PaneId: int32(m.PaneID)}}
+	case MsgSplitResponse:
+		env.Msg = &wirepb.ServerMessage_SplitResponse{SplitResponse: &wirepb.MsgSplitResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
+	case MsgSendInputResponse:
+		env.Msg = &wirepb.ServerMessage_SendInputResponse{SendInputResponse: &wirepb.MsgSendInputResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
+	case MsgCaptureResponse:
+		env.Msg = &wirepb.ServerMessage_CaptureResponse{CaptureResponse: &wirepb.MsgCaptureResponse{PaneId: int32(m.PaneID), Text: validUTF8(m.Text), Error: validUTF8(m.Error)}}
+	case MsgClosePaneResponse:
+		env.Msg = &wirepb.ServerMessage_ClosePaneResponse{ClosePaneResponse: &wirepb.MsgClosePaneResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -260,6 +284,14 @@ func UnmarshalServer(data []byte) (any, error) {
 		return stats, nil
 	case *wirepb.ServerMessage_FocusPane:
 		return MsgFocusPane{PaneID: int(m.FocusPane.PaneId)}, nil
+	case *wirepb.ServerMessage_SplitResponse:
+		return MsgSplitResponse{PaneID: int(m.SplitResponse.PaneId), Error: m.SplitResponse.Error}, nil
+	case *wirepb.ServerMessage_SendInputResponse:
+		return MsgSendInputResponse{PaneID: int(m.SendInputResponse.PaneId), Error: m.SendInputResponse.Error}, nil
+	case *wirepb.ServerMessage_CaptureResponse:
+		return MsgCaptureResponse{PaneID: int(m.CaptureResponse.PaneId), Text: m.CaptureResponse.Text, Error: m.CaptureResponse.Error}, nil
+	case *wirepb.ServerMessage_ClosePaneResponse:
+		return MsgClosePaneResponse{PaneID: int(m.ClosePaneResponse.PaneId), Error: m.ClosePaneResponse.Error}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}

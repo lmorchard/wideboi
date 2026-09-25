@@ -401,6 +401,19 @@ func (p *Pane) ScrollbackLen() int         { return p.grid.ScrollbackLen() }
 func (p *Pane) ScrollOffset() int          { return p.grid.ScrollOffset() }
 func (p *Pane) SetScrollOffset(offset int) { p.grid.SetScrollOffset(offset) }
 
+// CaptureText extracts the text of the pane's terminal buffer.
+func (p *Pane) CaptureText(scrollback bool, maxLines int) string {
+	p.renderMu.RLock()
+	defer p.renderMu.RUnlock()
+
+	select {
+	case <-p.closed:
+		return ""
+	default:
+	}
+	return p.grid.CaptureText(scrollback, maxLines)
+}
+
 // Close hangs up the pane's pty and closes its emulator.
 //
 // pty.Hangup and grid.Close run BEFORE resizeMu is taken, not after. They
