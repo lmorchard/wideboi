@@ -125,6 +125,12 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		}
 		return ""
 	}
+	// Search owns the focused pane's view until it is dismissed. Ignore
+	// clicks and wheels so they cannot change focus or scroll behind it.
+	if c.search != nil {
+		c.mu.Unlock()
+		return ""
+	}
 
 	switch ev.(type) {
 	case uv.MouseClickEvent:

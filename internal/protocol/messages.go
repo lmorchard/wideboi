@@ -219,6 +219,10 @@ type MsgScroll struct {
 	// uses this because new output may pin a scrolled view between requests.
 	SetAbsolute bool
 	Offset      int
+	// AnchorHistory adjusts an absolute offset for rows appended since
+	// HistoryLen was copied. Search uses it to keep a match in view.
+	AnchorHistory bool
+	HistoryLen    int
 }
 
 // MsgHistoryRequest asks for the focused pane's current physical text rows.

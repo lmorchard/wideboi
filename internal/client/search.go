@@ -100,14 +100,9 @@ func (c *Client) SearchEnd(ctx context.Context, restore, live bool) {
 		return
 	}
 	if restore {
-		pu := c.paneUpdates[s.paneID]
-		target := s.priorOffset
-		if target > 0 {
-			target += pu.ScrollbackLen - s.priorHistoryLen
-		}
-		c.scrollSearchToLocked(ctx, s, max(0, min(target, pu.ScrollbackLen)))
+		c.scrollSearchToLocked(ctx, s, s.priorOffset, s.priorHistoryLen, s.priorOffset > 0)
 	} else if live {
-		c.scrollSearchToLocked(ctx, s, 0)
+		c.scrollSearchToLocked(ctx, s, 0, 0, false)
 	}
 	c.search = nil
 }
@@ -133,11 +128,12 @@ func (c *Client) applyHistoryLocked(snapshot protocol.MsgHistorySnapshot) {
 	target = max(0, min(target, snapshot.ScrollbackLen))
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	c.scrollSearchToLocked(ctx, s, target)
+	c.scrollSearchToLocked(ctx, s, target, snapshot.ScrollbackLen, true)
 }
 
-func (c *Client) scrollSearchToLocked(ctx context.Context, s *searchState, target int) {
-	c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: s.paneID, SetAbsolute: true, Offset: target})
+func (c *Client) scrollSearchToLocked(ctx context.Context, s *searchState, target, historyLen int, anchor bool) {
+	c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: s.paneID, SetAbsolute: true, Offset: target,
+		AnchorHistory: anchor, HistoryLen: historyLen})
 }
 
 func (c *Client) searchStatusLocked() string {

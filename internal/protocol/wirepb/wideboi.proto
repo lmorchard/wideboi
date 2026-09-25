@@ -210,6 +210,8 @@ message MsgScroll {
   int32 delta = 2;
   bool set_absolute = 3;
   int32 offset = 4;
+  bool anchor_history = 5;
+  int32 history_len = 6;
 }
 
 // Plain physical rows, oldest first. Search is performed by the client.

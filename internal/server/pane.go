@@ -399,6 +399,8 @@ func (p *Pane) OutputGen() uint64 { return p.grid.OutputGen() }
 
 func (p *Pane) ScrollbackLen() int { return p.grid.ScrollbackLen() }
 func (p *Pane) HistoryRows() protocol.MsgHistorySnapshot {
+	p.renderMu.RLock()
+	defer p.renderMu.RUnlock()
 	length, rows := p.grid.HistoryRows()
 	return protocol.MsgHistorySnapshot{PaneID: p.id, ScrollbackLen: length, Rows: rows}
 }

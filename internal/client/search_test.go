@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -38,7 +39,7 @@ func TestSearchScreenScrollbackNavigationAndRestore(t *testing.T) {
 	_ = takeSearchMessage(t, tp)
 	c.HandleServerMsg(protocol.MsgHistorySnapshot{PaneID: 1, ScrollbackLen: 4,
 		Rows: []string{"needle old", "other", "needle middle", "other", "needle screen", "other", ""}})
-	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 0 {
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 0 || !got.AnchorHistory || got.HistoryLen != 4 {
 		t.Fatalf("screen match scroll = %+v, want absolute 0", got)
 	}
 	if c.search.selected != 2 || len(c.search.matches) != 3 {
@@ -51,12 +52,43 @@ func TestSearchScreenScrollbackNavigationAndRestore(t *testing.T) {
 	_ = takeSearchMessage(t, tp)
 	c.HandleServerMsg(protocol.MsgHistorySnapshot{PaneID: 1, ScrollbackLen: 4,
 		Rows: []string{"needle old", "other", "needle middle", "other", "needle screen", "other", ""}})
-	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 {
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 || !got.AnchorHistory || got.HistoryLen != 4 {
 		t.Fatalf("previous scroll = %+v, want absolute 2", got)
 	}
 	c.SearchEnd(ctx, true, false)
-	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 || c.search != nil {
+	if got := takeSearchMessage(t, tp).(protocol.MsgScroll); !got.SetAbsolute || got.Offset != 2 || !got.AnchorHistory || got.HistoryLen != 4 || c.search != nil {
 		t.Fatalf("restore = %+v, want original offset 2 and closed search", got)
+	}
+}
+
+func TestSearchStatusUsesRenderedStatusBar(t *testing.T) {
+	c, _ := searchClient(t, 0, 0)
+	c.StartSearch()
+	c.SearchEdit("needle", false)
+	scr := uv.NewScreenBuffer(80, 24)
+	c.mu.Lock()
+	c.drawStatusBarLocked(scr)
+	c.mu.Unlock()
+	var row strings.Builder
+	for x := 0; x < 79; x++ {
+		if cell := scr.CellAt(x, 23); cell != nil {
+			row.WriteString(cell.Content)
+		}
+	}
+	if got := row.String(); !strings.Contains(got, "search /needle_") {
+		t.Fatalf("rendered status bar = %q", got)
+	}
+}
+
+func TestSearchIgnoresMouseFocusAndScroll(t *testing.T) {
+	c, tp := newMouseClient(t)
+	c.StartSearch()
+	p := c.placements[1]
+	ctx := context.Background()
+	c.HandleMouse(ctx, press(p.Dst.Min.X+2, p.Dst.Min.Y))
+	c.HandleMouse(ctx, wheel(p.Dst.Min.X+2, p.Dst.Min.Y+2, uv.MouseWheelUp))
+	if c.FocusedPaneID() != 1 || c.search.paneID != 1 || len(tp.ClientSend) != 0 {
+		t.Fatal("mouse changed pane focus or scroll during search")
 	}
 }
 

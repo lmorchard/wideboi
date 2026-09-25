@@ -844,7 +844,7 @@ func (c *Client) drawStatusBarLocked(scr uv.Screen) {
 	}
 	y := c.rows - 1
 
-	if c.controlMode {
+	if c.controlMode || c.search != nil {
 		statusText, statusStyle := c.statusLineLocked(budget)
 		compose.WriteStyled(scr, 0, y, statusText, statusStyle)
 		return
