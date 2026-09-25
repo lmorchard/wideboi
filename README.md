@@ -1,12 +1,14 @@
 # wideboi
 
-wideboi is a scrolling tiling terminal multiplexer for command-line coding agents.
+wideboi is a horizontal scrolling tiling terminal multiplexer for wide monitors.
 
-Panes keep their configured width. When you open new panes, the screen viewport scrolls horizontally across them instead of squeezing existing panes.
+But, it's also got a web UI, because sometimes you need to check your wideboi from a smol phone or laptop.
 
-Status: v1. See the [open issues](https://github.com/lmorchard/wideboi/issues) for known issues and ongoing work.
+Your UI mileage will vary based on the current state of things, but these videos give the gist:
 
-<video src="https://github.com/lmorchard/wideboi/raw/refs/heads/main/docs/wideboi-2.mp4" width="100%" controls></video>
+<video src="https://github.com/user-attachments/assets/3c4cb3bf-7d33-4c35-9805-d44e74fc4fd7" width="100%" controls></video>
+
+<video src="https://github.com/user-attachments/assets/b4f2a2d3-4bbd-412f-831e-7f61cf0fa43a" width="100%" controls></video>
 
 ---
 
