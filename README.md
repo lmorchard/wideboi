@@ -250,7 +250,7 @@ form. Treat the token and any token-bearing link as terminal access credentials.
 
 wideboi reads configuration with the following precedence (highest to lowest):
 
-1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`, `--websocket-token`)
+1. **Command-line flags** (`-l`, `-p`, `-L`, `-s`, `--shell`, `--websocket`, `--websocket-token`, `--disable-auto-cleanup`)
 2. **Environment variable overrides** (`WIDEBOI_LAYOUT`, `WIDEBOI_PREFIX`, `WIDEBOI_SESSION`, `WIDEBOI_SOCK`, `WIDEBOI_SHELL`, `WIDEBOI_LOG_LEVEL`, `WIDEBOI_AUTO_CLEANUP`, `WIDEBOI_WEBSOCKET`, `WIDEBOI_WEBSOCKET_TOKEN`)
 3. **Configuration file** (TOML, including `websocket` and `websocket_token`)
 4. **Defaults** (including `$SHELL` or `/bin/sh`)

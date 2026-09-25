@@ -174,6 +174,7 @@ func TestPrintHelp(t *testing.T) {
 		"-s, --socket",
 		"-L, --session",
 		"--shell",
+		"--disable-auto-cleanup",
 		"WIDEBOI_LAYOUT",
 		"WIDEBOI_PREFIX",
 		"WIDEBOI_SOCK",
@@ -273,5 +274,25 @@ func TestServerArgsAlwaysNameOurOwnerFD(t *testing.T) {
 			t.Errorf("serverArgs(%q) = %q: subcommand %q ownerFD %d, want server and 3",
 				user, serverArgs(user), opts.subcommand, opts.ownerFD)
 		}
+	}
+}
+
+func TestParseCLIDisableAutoCleanup(t *testing.T) {
+	opts, err := parseCLI([]string{"--disable-auto-cleanup", "-L", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if !opts.flags.DisableAutoCleanup {
+		t.Errorf("DisableAutoCleanup = false, want true")
+	}
+
+	// Also verify it passes through serverArgs
+	args := serverArgs([]string{"--disable-auto-cleanup", "-L", "test"})
+	serverOpts, err := parseCLI(args)
+	if err != nil {
+		t.Fatalf("parseCLI(serverArgs) error: %v", err)
+	}
+	if !serverOpts.flags.DisableAutoCleanup {
+		t.Errorf("serverOpts.flags.DisableAutoCleanup = false, want true")
 	}
 }

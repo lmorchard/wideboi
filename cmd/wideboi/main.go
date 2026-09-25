@@ -109,6 +109,7 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \"127.0.0.1:8080\")")
 	fs.StringVar(&opts.flags.WebsocketToken, "websocket-token", "", "token required for websocket connections")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
+	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
 	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
@@ -160,6 +161,7 @@ Flags:
       --websocket-token <token> Token required for WebSocket connections
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
+      --disable-auto-cleanup Disable automatic cleanup of logs and artifacts on clean exit
   -v, --version          Print version and exit
   -h, --help             Show this help text and exit
 
@@ -412,7 +414,8 @@ func runServer(cfg config.Config, ownerFD int) error {
 		time.Sleep(signalExitMargin)
 	}
 
-	if cfg.AutoCleanupEnabled && !signalled.Load() && err == nil {
+	startupOK := srv.StartupComplete()
+	if cfg.AutoCleanupEnabled && !signalled.Load() && err == nil && startupOK {
 		// Remove this session's own logs and token before closing the listener
 		// (which releases the flock), preventing a successor from racing.
 		_ = os.Remove(logger.Path(cfg.Socket, "server"))
@@ -421,9 +424,9 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 		_ = sl.Close()
 
-		// Only sweep the dedicated, wideboi-owned session directory. Never sweep
-		// an arbitrary parent directory when a custom socket path was configured.
-		_ = runCleanup(io.Discard, config.SessionDir())
+		// Only sweep dead sockets and tokens in the dedicated, wideboi-owned session directory.
+		// Dead logs of other sessions are preserved for forensic post-mortem analysis.
+		_ = runAutoCleanupSweep(config.SessionDir())
 	}
 	return err
 }
@@ -507,7 +510,7 @@ func run(cfg config.Config, bindings []keys.Binding) error {
 	if conn, err := net.Dial("unix", cfg.Socket); err == nil {
 		return runClient(cfg, bindings, conn, nil)
 	}
-	conn, exited, err := spawnServer(os.Args[1:])
+	conn, exited, err := spawnServer(cfg.Socket, os.Args[1:])
 	if err != nil {
 		return err
 	}
@@ -590,7 +593,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				return errSessionTaken
 			case -1:
 			default:
-				return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path(cfg.Socket, "server"))
+				return startupExitError(cfg.Socket)
 			}
 		}
 		return describeHandshakeErr(cfg.Socket, err, "")
@@ -724,7 +727,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					if serverExitCode(serverExit, reapCeiling) == exitSessionTaken {
 						return errSessionTaken
 					}
-					return fmt.Errorf("wideboi server exited during startup; see %s", logger.Path(cfg.Socket, "server"))
+					return startupExitError(cfg.Socket)
 				}
 				if owner {
 					slog.Info("server closed the connection")
