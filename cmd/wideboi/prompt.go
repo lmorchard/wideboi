@@ -24,10 +24,7 @@ func runPrompt(cfg config.Config, args []string, stdin io.Reader, stdout, stderr
 	var session, socket string
 
 	fs.IntVar(&callerPane, "caller-pane", 0, "pane ID that invoked the prompt")
-	fs.StringVar(&session, "L", "", "session name")
-	fs.StringVar(&session, "session", "", "session name")
-	fs.StringVar(&socket, "s", "", "unix domain socket path")
-	fs.StringVar(&socket, "socket", "", "unix domain socket path")
+	addTargetFlags(fs, &session, &socket)
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

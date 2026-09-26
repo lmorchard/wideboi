@@ -11,63 +11,27 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/commands"
 	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
 // errRPCTimeout is rpcQuery giving up on a response.
-var errRPCTimeout = errors.New("timeout waiting for server response")
+var errRPCTimeout = commands.ErrRPCTimeout
 
 // rpcQuery connects to the running session server, sends a client message, and waits
 // for a matching server response type within the timeout. A timeout of zero or
 // less waits indefinitely.
 func rpcQuery[Resp any](cfg config.Config, req transport.ClientMessage, timeout time.Duration) (Resp, error) {
-	var zero Resp
-	conn, err := net.Dial("unix", cfg.Socket)
-	if err != nil {
-		return zero, fmt.Errorf("no wideboi server running at %s: %w", cfg.Socket, err)
-	}
-	if err := handshakeServer(conn, cfg.Socket); err != nil {
-		return zero, err
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	cc := transport.NewClientSocketConn(conn, 256)
-	cc.RunPumps(ctx)
-	return rpcOn[Resp](ctx, cc, req, timeout)
+	return commands.RPCQuery[Resp](context.Background(), commands.Invocation{Cfg: cfg}, req, timeout)
 }
 
 // rpcOn sends req on an already-handshaken connection and waits for a
 // response of type Resp, skipping broadcasts. A timeout of zero or less
 // waits indefinitely.
 func rpcOn[Resp any](ctx context.Context, cc *transport.ClientSocketConn, req transport.ClientMessage, timeout time.Duration) (Resp, error) {
-	var zero Resp
-	if !cc.SendClient(ctx, req) {
-		return zero, fmt.Errorf("failed to send request to server")
-	}
-
-	var timeoutC <-chan time.Time
-	if timeout > 0 {
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-		timeoutC = timer.C
-	}
-
-	for {
-		select {
-		case msg, ok := <-cc.ServerSendChan():
-			if !ok {
-				return zero, fmt.Errorf("server closed connection before sending response")
-			}
-			if resp, ok := msg.(Resp); ok {
-				return resp, nil
-			}
-		case <-timeoutC:
-			return zero, errRPCTimeout
-		}
-	}
+	return commands.RPCOn[Resp](ctx, cc, req, timeout)
 }
 
 // connectOrSpawn returns a handshaken connection to the session's server,
@@ -115,6 +79,14 @@ func applySessionFlags(cfg *config.Config, session, socket string) {
 		cfg.Socket = socket
 		cfg.Session = ""
 	}
+}
+
+// addTargetFlags registers the standard -L/--session and -s/--socket flags on fs.
+func addTargetFlags(fs *flag.FlagSet, session, socket *string) {
+	fs.StringVar(session, "L", "", "session name")
+	fs.StringVar(session, "session", "", "session name")
+	fs.StringVar(socket, "s", "", "unix domain socket path")
+	fs.StringVar(socket, "socket", "", "unix domain socket path")
 }
 
 // reorderFlags separates flags and positional operands so flags placed after operands
@@ -168,10 +140,7 @@ func runSplit(cfg config.Config, globalArgs []string, args []string, stdout, std
 	fs.StringVar(&cwd, "cwd", "", "working directory for new pane")
 	fs.BoolVar(&keep, "keep", false, "keep the pane, screen and exit code, after its process exits")
 	fs.IntVar(&after, "after", 0, "insert pane after specified pane ID")
-	fs.StringVar(&session, "L", "", "session name")
-	fs.StringVar(&session, "session", "", "session name")
-	fs.StringVar(&socket, "s", "", "unix domain socket path")
-	fs.StringVar(&socket, "socket", "", "unix domain socket path")
+	addTargetFlags(fs, &session, &socket)
 
 	// Not reorderFlags: split's flags end where the command begins, so
 	// `split --keep make -j4 test` keeps its -j4 for make. (Go's flag
@@ -268,10 +237,7 @@ func runSend(cfg config.Config, args []string, stderr io.Writer) error {
 
 	fs.BoolVar(&enter, "enter", false, "append Enter (carriage return)")
 	fs.BoolVar(&enter, "e", false, "append Enter (carriage return)")
-	fs.StringVar(&session, "L", "", "session name")
-	fs.StringVar(&session, "session", "", "session name")
-	fs.StringVar(&socket, "s", "", "unix domain socket path")
-	fs.StringVar(&socket, "socket", "", "unix domain socket path")
+	addTargetFlags(fs, &session, &socket)
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -325,10 +291,7 @@ func runCapture(cfg config.Config, args []string, stdout, stderr io.Writer) erro
 	fs.BoolVar(&scrollback, "S", false, "include scrollback history")
 	fs.IntVar(&lines, "lines", 0, "limit output to last N lines")
 	fs.IntVar(&lines, "n", 0, "limit output to last N lines")
-	fs.StringVar(&session, "L", "", "session name")
-	fs.StringVar(&session, "session", "", "session name")
-	fs.StringVar(&socket, "s", "", "unix domain socket path")
-	fs.StringVar(&socket, "socket", "", "unix domain socket path")
+	addTargetFlags(fs, &session, &socket)
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -373,10 +336,7 @@ func runClose(cfg config.Config, args []string, stderr io.Writer) error {
 
 	var session, socket string
 
-	fs.StringVar(&session, "L", "", "session name")
-	fs.StringVar(&session, "session", "", "session name")
-	fs.StringVar(&socket, "s", "", "unix domain socket path")
-	fs.StringVar(&socket, "socket", "", "unix domain socket path")
+	addTargetFlags(fs, &session, &socket)
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -424,10 +384,7 @@ func runWait(cfg config.Config, args []string, stderr io.Writer) (int, error) {
 	var session, socket string
 
 	fs.DurationVar(&timeout, "timeout", 0, "give up after this long (exit 124); default waits forever")
-	fs.StringVar(&session, "L", "", "session name")
-	fs.StringVar(&session, "session", "", "session name")
-	fs.StringVar(&socket, "s", "", "unix domain socket path")
-	fs.StringVar(&socket, "socket", "", "unix domain socket path")
+	addTargetFlags(fs, &session, &socket)
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
