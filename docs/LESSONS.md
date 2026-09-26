@@ -468,3 +468,12 @@ differs.
 Under Linux's race detector, a shell printing thousands of lines can still
 be draining after one second. Keep the drain ceiling above that measured
 case, and repeat the kept-pane ordering test under load when changing it.
+
+## Match a macOS desktop bundle's deployment target during CGO builds
+
+The Wails desktop binary linked for macOS 11 by default while its objects
+were built with a newer SDK. The linker emitted a warning for each object.
+Set `MACOSX_DEPLOYMENT_TARGET`, `CGO_CFLAGS`, and `CGO_LDFLAGS` to the bundle's
+minimum macOS version for desktop builds. Check the result with `otool -l`;
+the `LC_BUILD_VERSION` minimum should match `LSMinimumSystemVersion` in the
+bundle plist.

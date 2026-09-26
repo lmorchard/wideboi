@@ -20,4 +20,8 @@
   dialog's stop action while unrelated CLI sessions remained running.
 - A Linux desktop binary built in a Debian 13 container with GTK4 and
   WebKitGTK 6.0 development packages. Native Linux window behavior still
-  needs verification on a graphical Linux desktop before a release artifact.
+  needs verification on a graphical Linux desktop.
+- Both release workflows call a shared, native-architecture desktop build:
+  zipped macOS `.app` and Linux executable tarballs for AMD64 and ARM64.
+  The macOS desktop build sets its CGO deployment target to match the bundle's
+  macOS 13 minimum, eliminating linker version warnings with the local SDK.

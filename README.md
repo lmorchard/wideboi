@@ -148,7 +148,9 @@ open bin/wideboi.app
 On Linux, install the GTK4 and WebKitGTK 6.0 development packages required by
 Wails v3, then run `make desktop` and `./bin/wideboi-desktop`. The desktop
 build still supports the regular CLI commands, including `server`, `attach`,
-and `kill-session`. The macOS bundle is a local, unsigned build.
+and `kill-session`. Tagged and rolling GitHub releases include desktop archives
+for macOS and Linux on both Intel/AMD64 and ARM64. The macOS bundle is unsigned
+and unnotarized; macOS 13 or later is required.
 
 ---
 

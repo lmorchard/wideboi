@@ -1,0 +1,100 @@
+name: Desktop artifacts
+
+on:
+  workflow_call:
+    inputs:
+      archive_version:
+        description: Version segment in the release asset names (tag or rolling)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Desktop ${{ matrix.goos }} ${{ matrix.goarch }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install Linux desktop libraries
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
+
+    - name: Set version variables
+      shell: bash
+      env:
+        ARCHIVE_VERSION: ${{ inputs.archive_version }}
+      run: |
+        if [[ "$ARCHIVE_VERSION" == rolling ]]; then
+          echo "VERSION=rolling-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+        else
+          echo "VERSION=$ARCHIVE_VERSION" >> "$GITHUB_ENV"
+        fi
+        echo "COMMIT=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+        echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+    - name: Build desktop app
+      shell: bash
+      run: |
+        test "$(go env GOOS)" = '${{ matrix.goos }}'
+        test "$(go env GOARCH)" = '${{ matrix.goarch }}'
+        if [[ '${{ matrix.goos }}' == darwin ]]; then
+          make desktop-app
+        else
+          make desktop
+        fi
+
+    - name: Package desktop app
+      shell: bash
+      env:
+        ARCHIVE_VERSION: ${{ inputs.archive_version }}
+      run: |
+        archive="wideboi-desktop_${ARCHIVE_VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+        if [[ '${{ matrix.goos }}' == darwin ]]; then
+          ditto -c -k --sequesterRsrc --keepParent bin/wideboi.app "${archive}.zip"
+          echo "ARCHIVE=${archive}.zip" >> "$GITHUB_ENV"
+        else
+          tar -czf "${archive}.tar.gz" -C bin wideboi-desktop
+          echo "ARCHIVE=${archive}.tar.gz" >> "$GITHUB_ENV"
+        fi
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.ARCHIVE }}
+        path: ${{ env.ARCHIVE }}
+        if-no-files-found: error

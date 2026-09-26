@@ -110,11 +110,16 @@ build: web/dist
 
 # The desktop executable also supports the regular CLI/server commands, so
 # sessions it starts use the same artifact and need no second bundled binary.
+# Match the .app's minimum macOS version. Without these CGO flags, the linker
+# targets macOS 11 even when the current SDK compiled Wails objects for 13+.
+ifeq ($(shell uname -s),Darwin)
+DESKTOP_CGO_ENV := MACOSX_DEPLOYMENT_TARGET=13.0 CGO_CFLAGS="-O2 -g -mmacosx-version-min=13.0" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=13.0"
+endif
 desktop: web/dist
-	go build -tags desktop,production -ldflags "$(LDFLAGS)" -o bin/wideboi-desktop ./cmd/wideboi
+	$(DESKTOP_CGO_ENV) go build -tags desktop,production -ldflags "$(LDFLAGS)" -o bin/wideboi-desktop ./cmd/wideboi
 
-# A local macOS bundle for opening from Finder. Signing and notarization
-# belong to the release pipeline, not this developer build.
+# A macOS bundle for Finder and release archives. Signing and notarization
+# are not configured yet.
 desktop-app: desktop
 	./scripts/package-desktop-macos.sh bin/wideboi-desktop bin/wideboi.app
 
