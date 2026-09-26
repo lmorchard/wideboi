@@ -13,8 +13,9 @@ import { RenderStats, formatSummary, statsEnabled } from './stats';
 import { MouseKind, MsgHistorySnapshot, MsgPaneMetadata, PaneStatus, VerbType, type ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { createSearchSession, applySnapshot, cancelSearch, liveSearch, formatSearchStatus, type SearchState } from './search';
 import { executeMacro, macroEndsWithEnter, DEFAULT_MACROS, type Macro, type MacroStep } from './macros';
+import { AVAILABLE_FONTS } from './fonts';
 
-const linkToken = consumeLinkToken(window.location, window.history);
+const linkToken = typeof window !== 'undefined' ? consumeLinkToken(window.location, window.history) : '';
 const STATS_REPORT_MS = 5000;
 const NARROW_VIEW = '(max-width: 480px)';
 
@@ -701,6 +702,149 @@ export class WideboiApp extends LitElement {
       background: #444;
       color: #fff;
     }
+    .toolbar .settings-btn {
+      background: #333;
+      color: #ccc;
+      border: 1px solid #555;
+      padding: 0.25rem 0.6rem;
+      font-size: 12px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .toolbar .settings-btn:hover {
+      background: #444;
+      color: #fff;
+    }
+    .mobile-settings-btn {
+      background: #252526;
+      border: 1px solid #3c3c3c;
+      color: #ccc;
+      border-radius: 4px;
+      padding: 0.25rem 0.6rem;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .mobile-settings-btn:hover {
+      background: #333;
+      color: #fff;
+    }
+    .settings-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 25;
+      color: #cccccc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    }
+    .settings-dialog {
+      background: #252526;
+      border: 1px solid #454545;
+      border-radius: 6px;
+      padding: 1.5rem;
+      max-width: 580px;
+      width: 90%;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    }
+    .settings-dialog h3 {
+      margin: 0 0 1rem;
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #3c3c3c;
+      padding-bottom: 0.5rem;
+    }
+    .settings-dialog .close-btn {
+      background: transparent;
+      border: none;
+      color: #999;
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 0 0.5rem;
+    }
+    .settings-dialog .close-btn:hover {
+      color: #fff;
+    }
+    .settings-section {
+      margin-bottom: 1.25rem;
+      padding: 0.75rem 1rem;
+      background: #202020;
+      border-radius: 4px;
+      border: 1px solid #383838;
+    }
+    .settings-section h4 {
+      margin: 0 0 0.75rem 0;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #aaa;
+    }
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      font-size: 13px;
+    }
+    .settings-row:last-child {
+      margin-bottom: 0;
+    }
+    .settings-row label {
+      color: #bbb;
+    }
+    .settings-row select, .settings-row input[type="number"] {
+      background: #1e1e1e;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 0.25rem 0.5rem;
+      font-size: 13px;
+    }
+    .font-size-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .font-size-controls button {
+      background: #333;
+      color: #eee;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 0.2rem 0.5rem;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .font-size-controls button:hover {
+      background: #444;
+    }
+    .font-size-controls input {
+      width: 50px;
+      text-align: center;
+    }
+    .settings-preview {
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      background: #141414;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      color: #4ec9b0;
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.4;
+    }
+    .settings-preview .symbols {
+      color: #ce9178;
+      margin-top: 0.25rem;
+    }
     .error {
       color: #f14c4c;
       font-size: 0.9rem;
@@ -713,10 +857,10 @@ export class WideboiApp extends LitElement {
 
   private client: WideboiClient | null = null;
   // Present only with ?stats=1; everything downstream treats undefined as off.
-  private readonly stats = statsEnabled(window.location.search) ? new RenderStats() : undefined;
+  private readonly stats = (typeof window !== 'undefined' && statsEnabled(window.location.search)) ? new RenderStats() : undefined;
   private panes = new PaneStore(this.stats);
   private resizeObserver: ResizeObserver;
-  private readonly narrowMedia = window.matchMedia(NARROW_VIEW);
+  private readonly narrowMedia = (typeof window !== 'undefined' && window.matchMedia) ? window.matchMedia(NARROW_VIEW) : { matches: false } as MediaQueryList;
   private cellWidth = 1;
   private statsTimer?: ReturnType<typeof setInterval>;
 
@@ -742,7 +886,7 @@ export class WideboiApp extends LitElement {
   private focusedPaneId = 0;
 
   @state()
-  private wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+  private wsUrl = typeof window !== 'undefined' ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws` : '';
 
   @state()
   private token = linkToken;
@@ -752,6 +896,9 @@ export class WideboiApp extends LitElement {
 
   @state()
   private showHelp = false;
+
+  @state()
+  private showSettings = false;
 
   @state()
   private prefixSetting = (() => {
@@ -1343,6 +1490,13 @@ export class WideboiApp extends LitElement {
         }
         return;
       }
+      if (this.showSettings) {
+        if (e.key === 'Escape' || e.key === ',' || (e.ctrlKey && e.key === 'c')) {
+          this.closeSettings();
+          e.preventDefault();
+        }
+        return;
+      }
       if (fromFormControl(e)) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
         e.preventDefault();
@@ -1419,6 +1573,10 @@ export class WideboiApp extends LitElement {
           return;
         case 'toggle_help':
           this.toggleHelp();
+          e.preventDefault();
+          return;
+        case 'toggle_settings':
+          this.toggleSettings();
           e.preventDefault();
           return;
         case 'verb': {
@@ -1815,6 +1973,7 @@ export class WideboiApp extends LitElement {
 
   private openHelp() {
     this.showHelp = true;
+    this.showSettings = false;
     void this.updateComplete.then(() => {
       this.renderRoot.querySelector<HTMLButtonElement>('.help-dialog .close-btn')?.focus();
     });
@@ -1827,6 +1986,37 @@ export class WideboiApp extends LitElement {
     });
   }
 
+  private toggleHelp() {
+    if (this.showHelp) {
+      this.closeHelp();
+    } else {
+      this.openHelp();
+    }
+  }
+
+  private openSettings() {
+    this.showSettings = true;
+    this.showHelp = false;
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector<HTMLButtonElement>('.settings-dialog .close-btn')?.focus();
+    });
+  }
+
+  private closeSettings() {
+    this.showSettings = false;
+    void this.updateComplete.then(() => {
+      if (!this.mobile) this.focusedPane()?.focusInput();
+    });
+  }
+
+  private toggleSettings() {
+    if (this.showSettings) {
+      this.closeSettings();
+    } else {
+      this.openSettings();
+    }
+  }
+
   private async handleFontChange(e: Event) {
     const select = e.target as HTMLSelectElement;
     termSettings.fontFamily = select.value;
@@ -1837,21 +2027,27 @@ export class WideboiApp extends LitElement {
     this.sendResizeIfChanged();
   }
 
-  private handleFontSizeChange(e: Event) {
-    const input = e.target as HTMLInputElement;
-    termSettings.fontSize = parseInt(input.value, 10) || 14;
+  private applyFontSize(size: number) {
+    const clamped = Math.max(8, Math.min(48, size));
+    termSettings.fontSize = clamped;
     termSettings.save();
     this.cellWidth = measureCellWidth();
     this.requestUpdate();
     this.sendResizeIfChanged();
   }
 
-  private toggleHelp() {
-    if (this.showHelp) {
-      this.closeHelp();
-    } else {
-      this.openHelp();
-    }
+  private handleFontSizeChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const size = parseInt(input.value, 10) || 14;
+    this.applyFontSize(size);
+  }
+
+  private stepFontSize(delta: number) {
+    this.applyFontSize(termSettings.fontSize + delta);
+  }
+
+  private resetFontSize() {
+    this.applyFontSize(14);
   }
 
   private handlePrefixChange(e: Event) {
@@ -2048,8 +2244,9 @@ export class WideboiApp extends LitElement {
           </select>
           <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
           <button class="claim-size-btn search-btn" @click=${this.startSearch} title="Search pane history (/ or Ctrl+F)">Search</button>
+          <button class="settings-btn" @click=${this.toggleSettings} aria-label="Settings" title="Settings (${this.keyRouter.prefixLabel} ,)">⚙ Settings</button>
           <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
-          <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
+          <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help, , for settings)</span>
         </div>
         <div class="mobile-bar">
           <button aria-label="Previous pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) <= 0}
@@ -2069,6 +2266,7 @@ export class WideboiApp extends LitElement {
           </div>
           <button aria-label="Next pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) >= this.activePanes.length - 1}
             @click=${() => this.moveMobilePane(1)}>›</button>
+          <button class="mobile-settings-btn" aria-label="Settings" title="Settings" @click=${this.toggleSettings}>⚙</button>
         </div>
         <div class="mobile-dock">
           <div class="mobile-input-bar">
@@ -2282,24 +2480,6 @@ export class WideboiApp extends LitElement {
               <button class="close-btn" @click=${this.closeHelp} aria-label="Close help">×</button>
             </h3>
             <p style="margin-top: 0; color: #aaa;">Prefix: <kbd>${this.keyRouter.prefixLabel}</kbd> (press twice to send literal key)</p>
-            
-            <div style="margin-bottom: 1rem; padding: 1rem; background: #2a2a2a; border-radius: 4px; border: 1px solid #444;">
-              <h4 style="margin: 0 0 0.5rem 0; color: #ddd;">Font Settings</h4>
-              <div style="display: flex; gap: 1rem; align-items: center;">
-                <label style="display: flex; flex-direction: column; font-size: 12px; color: #aaa;">
-                  Family
-                  <select @change=${this.handleFontChange} style="margin-top: 0.25rem; padding: 0.25rem; background: #1e1e1e; color: #eee; border: 1px solid #555; border-radius: 3px;">
-                    <option value="monospace" ?selected=${termSettings.fontFamily === 'monospace'}>System Default</option>
-                    <option value="JetBrainsMono Nerd Font Mono" ?selected=${termSettings.fontFamily === 'JetBrainsMono Nerd Font Mono'}>JetBrainsMono Nerd Font</option>
-                    <option value="FiraCode Nerd Font Mono" ?selected=${termSettings.fontFamily === 'FiraCode Nerd Font Mono'}>FiraCode Nerd Font</option>
-                  </select>
-                </label>
-                <label style="display: flex; flex-direction: column; font-size: 12px; color: #aaa;">
-                  Size (px)
-                  <input type="number" min="8" max="48" .value=${termSettings.fontSize.toString()} @change=${this.handleFontSizeChange} style="margin-top: 0.25rem; padding: 0.25rem; background: #1e1e1e; color: #eee; border: 1px solid #555; border-radius: 3px; width: 60px;" />
-                </label>
-              </div>
-            </div>
 
             <table class="help-table">
               <thead><tr><th>Key after prefix</th><th>Action</th></tr></thead>
@@ -2318,11 +2498,68 @@ export class WideboiApp extends LitElement {
                 <tr><td><kbd>y</kbd> / <kbd>u</kbd></td><td>Move column left / right</td></tr>
                 <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Scroll history down / up</td></tr>
                 <tr><td><kbd>/</kbd></td><td>Search focused pane history (Ctrl+F)</td></tr>
+                <tr><td><kbd>,</kbd></td><td>Toggle settings dialog</td></tr>
                 <tr><td><kbd>x</kbd></td><td>Kill focused pane</td></tr>
                 <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
                 <tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd></td><td>Cancel prefix mode</td></tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      ` : ''}
+      ${this.showSettings ? html`
+        <div class="settings-overlay" @click=${this.closeSettings}>
+          <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" @click=${(e: Event) => e.stopPropagation()}>
+            <h3 id="settings-title">
+              <span>wideboi Settings</span>
+              <button class="close-btn" @click=${this.closeSettings} aria-label="Close settings">×</button>
+            </h3>
+
+            <div class="settings-section">
+              <h4>Terminal Font</h4>
+              <div class="settings-row">
+                <label for="settings-font-family">Family</label>
+                <select id="settings-font-family" @change=${this.handleFontChange}>
+                  ${AVAILABLE_FONTS.map(f => html`
+                    <option value=${f.id} .selected=${termSettings.fontFamily === f.id}>${f.name}</option>
+                  `)}
+                </select>
+              </div>
+              <div class="settings-row">
+                <label for="settings-font-size">Size (px)</label>
+                <div class="font-size-controls">
+                  <button type="button" aria-label="Decrease font size" @click=${() => this.stepFontSize(-1)}>−</button>
+                  <input id="settings-font-size" type="number" min="8" max="48"
+                    .value=${termSettings.fontSize.toString()}
+                    @change=${this.handleFontSizeChange} />
+                  <button type="button" aria-label="Increase font size" @click=${() => this.stepFontSize(1)}>+</button>
+                  <button type="button" @click=${() => this.resetFontSize()}>Reset</button>
+                </div>
+              </div>
+              <div class="settings-preview" style="font: ${termSettings.font};">
+                <div class="preview-line">0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz</div>
+                <div class="preview-line symbols">⚡    󰘧  󰊤      󰌠  (Nerd Font Icons)</div>
+              </div>
+            </div>
+
+            <div class="settings-section">
+              <h4>Preferences</h4>
+              <div class="settings-row">
+                <label for="settings-prefix-key">Prefix Key</label>
+                <select id="settings-prefix-key" @change=${this.handlePrefixChange}>
+                  <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
+                  <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
+                  <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label for="settings-layout-mode">Layout Mode</label>
+                <select id="settings-layout-mode" @change=${this.handleLayoutSelect}>
+                  <option value="cards" .selected=${cards}>Cards</option>
+                  <option value="scroll" .selected=${!cards}>Scroll</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
       ` : ''}

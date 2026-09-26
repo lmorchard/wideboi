@@ -1,4 +1,5 @@
 import { create } from '@bufbuild/protobuf';
+import { formatFontSpec } from './fonts';
 import {
   LineDataSchema, type MsgPanePatch, type MsgPaneUpdate,
 } from './gen/internal/protocol/wirepb/wideboi_pb';
@@ -8,9 +9,7 @@ export const termSettings = {
   fontSize: parseInt(typeof localStorage !== 'undefined' ? localStorage.getItem('wideboi:fontSize') || '14' : '14', 10),
   fontFamily: (typeof localStorage !== 'undefined' ? localStorage.getItem('wideboi:fontFamily') : null) || 'monospace',
   get font() {
-    // Add quotes around Nerd Fonts to handle spaces
-    const family = this.fontFamily.includes(' ') ? `"${this.fontFamily}"` : this.fontFamily;
-    return `${this.fontSize}px ${family}, monospace`;
+    return formatFontSpec(this.fontFamily, this.fontSize);
   },
   get cellHeight() {
     return this.fontSize * 1.2;
