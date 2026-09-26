@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, query, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { WideboiClient } from './client';
-import { CELL_HEIGHT, measureCellWidth, PaneStore, selectionText, type CellPoint } from './pane-state';
+import { termSettings, measureCellWidth, PaneStore, selectionText, type CellPoint } from './pane-state';
 import { reconcileFocus } from './focus';
 import { WideboiPane } from './wideboi-pane';
 import { cardLayout } from './card-layout';
@@ -1005,7 +1005,7 @@ export class WideboiApp extends LitElement {
   private getGridSize() {
     return {
       cols: Math.floor(this.paneStrip.clientWidth / this.cellWidth),
-      rows: Math.floor(this.paneStrip.clientHeight / CELL_HEIGHT) + 2,
+      rows: Math.floor(this.paneStrip.clientHeight / termSettings.cellHeight) + 2,
     };
   }
 
@@ -1031,9 +1031,10 @@ export class WideboiApp extends LitElement {
     });
   }
 
-  firstUpdated() {
+  async firstUpdated() {
     this.listeners = new AbortController();
     this.setupViewport();
+    try { await document.fonts.load(termSettings.font); } catch (e) {}
     this.cellWidth = measureCellWidth();
     this.resizeObserver.observe(this.paneStrip);
     this.requestUpdate();
@@ -1619,7 +1620,7 @@ export class WideboiApp extends LitElement {
     const pane = this.panes.get(paneId);
     if (!pane || !this.paneStrip) return 0.5;
     const termWidth = pane.cols * this.cellWidth;
-    const termHeight = pane.rows * CELL_HEIGHT;
+    const termHeight = pane.rows * termSettings.cellHeight;
     const viewWidth = Math.max(1, (this.paneStrip.clientWidth || window.innerWidth) - 2);
     const viewHeight = Math.max(1, (this.paneStrip.clientHeight || (window.innerHeight - 100)) - 2);
     if (termWidth <= 0 || termHeight <= 0) return 0.5;
@@ -1824,6 +1825,25 @@ export class WideboiApp extends LitElement {
     void this.updateComplete.then(() => {
       if (!this.mobile) this.focusedPane()?.focusInput();
     });
+  }
+
+  private async handleFontChange(e: Event) {
+    const select = e.target as HTMLSelectElement;
+    termSettings.fontFamily = select.value;
+    termSettings.save();
+    try { await document.fonts.load(termSettings.font); } catch (e) {}
+    this.cellWidth = measureCellWidth();
+    this.requestUpdate();
+    this.sendResizeIfChanged();
+  }
+
+  private handleFontSizeChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    termSettings.fontSize = parseInt(input.value, 10) || 14;
+    termSettings.save();
+    this.cellWidth = measureCellWidth();
+    this.requestUpdate();
+    this.sendResizeIfChanged();
   }
 
   private toggleHelp() {
@@ -2262,6 +2282,25 @@ export class WideboiApp extends LitElement {
               <button class="close-btn" @click=${this.closeHelp} aria-label="Close help">×</button>
             </h3>
             <p style="margin-top: 0; color: #aaa;">Prefix: <kbd>${this.keyRouter.prefixLabel}</kbd> (press twice to send literal key)</p>
+            
+            <div style="margin-bottom: 1rem; padding: 1rem; background: #2a2a2a; border-radius: 4px; border: 1px solid #444;">
+              <h4 style="margin: 0 0 0.5rem 0; color: #ddd;">Font Settings</h4>
+              <div style="display: flex; gap: 1rem; align-items: center;">
+                <label style="display: flex; flex-direction: column; font-size: 12px; color: #aaa;">
+                  Family
+                  <select @change=${this.handleFontChange} style="margin-top: 0.25rem; padding: 0.25rem; background: #1e1e1e; color: #eee; border: 1px solid #555; border-radius: 3px;">
+                    <option value="monospace" ?selected=${termSettings.fontFamily === 'monospace'}>System Default</option>
+                    <option value="JetBrainsMono Nerd Font Mono" ?selected=${termSettings.fontFamily === 'JetBrainsMono Nerd Font Mono'}>JetBrainsMono Nerd Font</option>
+                    <option value="FiraCode Nerd Font Mono" ?selected=${termSettings.fontFamily === 'FiraCode Nerd Font Mono'}>FiraCode Nerd Font</option>
+                  </select>
+                </label>
+                <label style="display: flex; flex-direction: column; font-size: 12px; color: #aaa;">
+                  Size (px)
+                  <input type="number" min="8" max="48" .value=${termSettings.fontSize.toString()} @change=${this.handleFontSizeChange} style="margin-top: 0.25rem; padding: 0.25rem; background: #1e1e1e; color: #eee; border: 1px solid #555; border-radius: 3px; width: 60px;" />
+                </label>
+              </div>
+            </div>
+
             <table class="help-table">
               <thead><tr><th>Key after prefix</th><th>Action</th></tr></thead>
               <tbody>

@@ -1,6 +1,6 @@
 import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { decodeColor } from './colors';
-import { CELL_HEIGHT, FONT, type CellPoint } from './pane-state';
+import { termSettings, type CellPoint } from './pane-state';
 import type { RenderStats } from './stats';
 
 // A pane paints only its own cells. CSS positions and clips its canvas.
@@ -132,9 +132,9 @@ export class PanePainter {
     ctx.clearRect(0, 0, logicalWidth, logicalHeight);
     const pane = this.pane;
     if (!pane) return;
-    ctx.font = FONT;
+    ctx.font = termSettings.font;
     ctx.textBaseline = 'top';
-    for (let y = 0; y < pane.lines.length && y * CELL_HEIGHT < logicalHeight; y++) {
+    for (let y = 0; y < pane.lines.length && y * termSettings.cellHeight < logicalHeight; y++) {
       const line = pane.lines[y]?.cells;
       if (!line) continue;
       // LineData has one entry per terminal column. A wide glyph's
@@ -149,25 +149,25 @@ export class PanePainter {
         const bg = reverse ? normalFg : normalBg;
         const fg = reverse ? normalBg : normalFg;
         const px = x * this.cellWidth;
-        const py = y * CELL_HEIGHT;
+        const py = y * termSettings.cellHeight;
         if (bg !== '#1e1e1e') {
           ctx.fillStyle = bg;
-          ctx.fillRect(px, py, this.cellWidth * (cell.width || 1), CELL_HEIGHT);
+          ctx.fillRect(px, py, this.cellWidth * (cell.width || 1), termSettings.cellHeight);
         }
         if (cell.content && cell.content !== ' ' && !(attrs & 64)) {
           ctx.fillStyle = fg;
           ctx.globalAlpha = attrs & 2 ? 0.5 : 1;
-          ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}${FONT}`;
+          ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}${termSettings.font}`;
           ctx.fillText(cell.content, px, py + 1);
           ctx.globalAlpha = 1;
         }
         if (cell.style?.underline) {
           ctx.fillStyle = cell.style.underlineColor?.kind ? decodeColor(cell.style.underlineColor, false) : fg;
-          ctx.fillRect(px, py + CELL_HEIGHT - 2, this.cellWidth, 1);
+          ctx.fillRect(px, py + termSettings.cellHeight - 2, this.cellWidth, 1);
         }
         if (attrs & 128) {
           ctx.fillStyle = fg;
-          ctx.fillRect(px, py + CELL_HEIGHT / 2, this.cellWidth, 1);
+          ctx.fillRect(px, py + termSettings.cellHeight / 2, this.cellWidth, 1);
         }
         if (this.selection) {
           let { start: a, end: b } = this.selection;
@@ -175,29 +175,29 @@ export class PanePainter {
           if ((y > a.y || (y === a.y && x >= a.x)) &&
               (y < b.y || (y === b.y && x <= b.x))) {
             ctx.fillStyle = 'rgba(100, 160, 220, 0.45)';
-            ctx.fillRect(px, py, this.cellWidth * Math.max(cell.width || 1, 1), CELL_HEIGHT);
+            ctx.fillRect(px, py, this.cellWidth * Math.max(cell.width || 1, 1), termSettings.cellHeight);
           }
         }
       }
     }
     if (pane.cursorVisible && this.focused) {
       const px = pane.cursorX * this.cellWidth;
-      const py = pane.cursorY * CELL_HEIGHT;
+      const py = pane.cursorY * termSettings.cellHeight;
       if (px < logicalWidth && py < logicalHeight) {
         ctx.fillStyle = '#d4d4d4';
-        ctx.fillRect(px, py, this.cellWidth, CELL_HEIGHT);
+        ctx.fillRect(px, py, this.cellWidth, termSettings.cellHeight);
         const cell = pane.lines[pane.cursorY]?.cells[pane.cursorX];
         if (cell?.content && cell.content !== ' ') {
           ctx.fillStyle = '#1e1e1e';
-          ctx.font = FONT;
+          ctx.font = termSettings.font;
           ctx.fillText(cell.content, px, py + 1);
         }
       }
     }
-    if (pane.scrollOffset > 0 && logicalHeight > CELL_HEIGHT) {
-      const footerY = Math.floor(logicalHeight / CELL_HEIGHT) * CELL_HEIGHT - CELL_HEIGHT;
+    if (pane.scrollOffset > 0 && logicalHeight > termSettings.cellHeight) {
+      const footerY = Math.floor(logicalHeight / termSettings.cellHeight) * termSettings.cellHeight - termSettings.cellHeight;
       ctx.fillStyle = '#333333';
-      ctx.fillRect(0, footerY, logicalWidth, CELL_HEIGHT);
+      ctx.fillRect(0, footerY, logicalWidth, termSettings.cellHeight);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px monospace';
       let footerText = ` [▲ scroll +${pane.scrollOffset}/${pane.scrollbackLen}`;
@@ -207,7 +207,7 @@ export class PanePainter {
         footerText += ']';
       }
       ctx.fillText(footerText, 0, footerY);
-      ctx.font = FONT;
+      ctx.font = termSettings.font;
     }
   }
 }

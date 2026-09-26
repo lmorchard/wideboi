@@ -1,7 +1,7 @@
 import { LitElement, html, css, type PropertyValues } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
 import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
-import { CELL_HEIGHT, type CellPoint } from './pane-state';
+import { termSettings, type CellPoint } from './pane-state';
 import { PanePainter } from './pane-painter';
 import type { RenderStats } from './stats';
 
@@ -249,7 +249,7 @@ export class WideboiPane extends LitElement {
 
   protected updated(changedProperties: PropertyValues<this>) {
     if (changedProperties.has('zoom') && this.viewport) {
-      const canvasHeight = (this.pane?.rows ?? 0) * CELL_HEIGHT * this.zoom;
+      const canvasHeight = (this.pane?.rows ?? 0) * termSettings.cellHeight * this.zoom;
       const canvasWidth = (this.pane?.cols ?? 0) * this.cellWidth * this.zoom;
 
       if (this.pendingScrollAfterZoom) {
@@ -312,7 +312,7 @@ export class WideboiPane extends LitElement {
   cellAt(clientX: number, clientY: number): CellPoint {
     const rect = this.canvas.getBoundingClientRect();
     const effectiveCellWidth = this.cellWidth * this.zoom;
-    const effectiveCellHeight = CELL_HEIGHT * this.zoom;
+    const effectiveCellHeight = termSettings.cellHeight * this.zoom;
     const cols = this.pane?.cols ?? Math.max(Math.floor(rect.width / effectiveCellWidth), 1);
     const rows = this.pane?.rows ?? Math.max(Math.floor(rect.height / effectiveCellHeight), 1);
     return {
@@ -329,7 +329,7 @@ export class WideboiPane extends LitElement {
     <div class="viewport" style=${`overflow-x: ${this.pane && this.pane.cols * this.zoom > this.displayCols ? 'auto' : 'hidden'}`}
       @scroll=${this.onViewportScroll}>
       <canvas tabindex=${this.focused ? 0 : -1}
-        style=${`width: ${this.pane ? `${this.pane.cols * this.cellWidth * this.zoom}px` : '100%'}; height: ${this.pane ? `${this.pane.rows * CELL_HEIGHT * this.zoom}px` : '100%'}`}></canvas>
+        style=${`width: ${this.pane ? `${this.pane.cols * this.cellWidth * this.zoom}px` : '100%'}; height: ${this.pane ? `${this.pane.rows * termSettings.cellHeight * this.zoom}px` : '100%'}`}></canvas>
     </div>
     <span class="card-label">${this.cardLabel}</span>`; }
 }

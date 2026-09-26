@@ -4,15 +4,32 @@ import {
 } from './gen/internal/protocol/wirepb/wideboi_pb';
 import type { RenderStats } from './stats';
 
-export const CELL_HEIGHT = 14 * 1.2;
-export const FONT = '14px monospace';
+export const termSettings = {
+  fontSize: parseInt(typeof localStorage !== 'undefined' ? localStorage.getItem('wideboi:fontSize') || '14' : '14', 10),
+  fontFamily: (typeof localStorage !== 'undefined' ? localStorage.getItem('wideboi:fontFamily') : null) || 'monospace',
+  get font() {
+    // Add quotes around Nerd Fonts to handle spaces
+    const family = this.fontFamily.includes(' ') ? `"${this.fontFamily}"` : this.fontFamily;
+    return `${this.fontSize}px ${family}, monospace`;
+  },
+  get cellHeight() {
+    return this.fontSize * 1.2;
+  },
+  save() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('wideboi:fontSize', this.fontSize.toString());
+      localStorage.setItem('wideboi:fontFamily', this.fontFamily);
+    }
+  }
+};
+
 export type CellPoint = { x: number; y: number };
 
 export function measureCellWidth(): number {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) throw new Error('Could not measure terminal font');
-  context.font = FONT;
+  context.font = termSettings.font;
   return Math.max(context.measureText('W').width, 1);
 }
 
