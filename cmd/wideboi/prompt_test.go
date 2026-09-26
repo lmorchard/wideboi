@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/lmorchard/wideboi/internal/config"
 )
 
 func TestPromptCancelEsc(t *testing.T) {
@@ -13,7 +11,7 @@ func TestPromptCancelEsc(t *testing.T) {
 	var out, errOut bytes.Buffer
 
 	in.WriteString("\x1b") // Esc key
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	err := runPrompt(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	if err != nil {
@@ -26,7 +24,7 @@ func TestPromptCancelCtrlC(t *testing.T) {
 	var out, errOut bytes.Buffer
 
 	in.WriteString("\x03") // Ctrl+C
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	err := runPrompt(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	if err != nil {
@@ -39,7 +37,7 @@ func TestPromptHelpExecution(t *testing.T) {
 	var out, errOut bytes.Buffer
 
 	in.WriteString("help\n")
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	err := runPrompt(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	if err != nil {

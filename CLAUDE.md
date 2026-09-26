@@ -80,6 +80,14 @@ Use the `dev-session` skill for anything beyond a small fix; artifacts land in
   assertion depends on it and each with a comment saying which. If a test seems
   to care about the environment, that is why — do not relax the assertion, pin
   the thing.
+- **The Go suite is isolated from real sessions on purpose.** Agents run it
+  from a wideboi pane, so a test that resolves the default session reaches the
+  live one; a palette test that typed `quit` ended its own host (#277).
+  `internal/testenv.Run`, as a package's `TestMain`, gives the binary a private
+  `TMPDIR` and clears `WIDEBOI_SOCK`/`WIDEBOI_SESSION`;
+  `TestSuiteIsIsolatedFromRealSessions` fails if it goes missing. New packages
+  whose tests dispatch commands or touch the session directory need it too, and
+  tests should still pass an explicit socket rather than lean on it.
 - **Waits are ceilings, not durations.** Everything waits for observed state and
   uses the old fixed value as a timeout. Raising a ceiling costs nothing when
   things are fast; adding a `sleep` costs everyone, every run.
