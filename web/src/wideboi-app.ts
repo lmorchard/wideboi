@@ -45,32 +45,26 @@ export class WideboiApp extends LitElement {
       color: var(--wb-fg-primary, #ccc);
       position: relative;
     }
-    .title, .status {
-      height: 16.8px;
-      line-height: 16.8px;
-      flex: none;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      color: var(--wb-fg-primary, #ccc);
-    }
     .status.search-bar {
       position: absolute;
+      top: 0;
       bottom: 0;
       left: 0;
       right: 0;
-      height: 22px;
-      line-height: 22px;
       display: flex;
       align-items: center;
       gap: 0.4rem;
       padding: 0 0.5rem;
       background: var(--wb-bg-toolbar, #252526);
-      border-top: 1px solid var(--wb-border, #3c3c3c);
-      overflow: hidden;
+      overflow-x: auto;
+      scrollbar-width: none;
       font: 12px monospace;
       color: var(--wb-fg-primary, #ccc);
-      z-index: 15;
+      z-index: 10;
+      white-space: nowrap;
+    }
+    .status.search-bar::-webkit-scrollbar {
+      display: none;
     }
     .status.search-bar input.search-input {
       background: var(--wb-bg-input, #1e1e1e);
@@ -142,6 +136,7 @@ export class WideboiApp extends LitElement {
     .card-count.right { right: 0; }
 
     .toolbar {
+      position: relative;
       background: var(--wb-bg-toolbar, #252526);
       border-top: 1px solid var(--wb-border, #3c3c3c);
       padding: 0.4rem 0.6rem;
@@ -153,6 +148,83 @@ export class WideboiApp extends LitElement {
       flex: none;
       z-index: 5;
       font-size: 13px;
+    }
+    .pane-tabs-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      max-width: 100%;
+      flex: 0 1 auto;
+      min-height: 26px;
+    }
+    .pane-tabs-wrapper.searching {
+      flex: 1 1 auto;
+      min-width: min(100%, 460px);
+    }
+    .pane-tabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      max-width: 100%;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .pane-tabs::-webkit-scrollbar {
+      display: none;
+    }
+    .pane-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #ccc);
+      border: 1px solid var(--wb-border-divider, #555);
+      border-radius: 3px;
+      padding: 0.2rem 0.5rem;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+      user-select: none;
+      flex: 0 0 auto;
+    }
+    .pane-tab:hover {
+      background: var(--wb-bg-btn-hover, #4c4c4c);
+      color: #fff;
+    }
+    .pane-tab[aria-selected="true"] {
+      background: var(--wb-bg-app, #1e1e1e);
+      border-color: var(--wb-focus, #007fd4);
+      color: #fff;
+      font-weight: 600;
+    }
+    .pane-tab .tab-focus-dot {
+      font-size: 10px;
+      line-height: 1;
+      color: var(--wb-fg-muted, #888);
+    }
+    .pane-tab[aria-selected="true"] .tab-focus-dot {
+      color: var(--wb-focus, #007fd4);
+    }
+    .pane-tab .tab-title {
+      max-width: 140px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pane-tab .tab-status {
+      font-weight: bold;
+    }
+    .pane-tab .tab-status.working { color: #58a6ff; }
+    .pane-tab .tab-status.needs-input { color: #d29922; }
+    .pane-tab .tab-status.done { color: #3fb950; }
+    .pane-tab .tab-status.failed { color: #f85149; }
+    .pane-tab .tab-scroll {
+      color: var(--wb-fg-muted, #aaa);
+      font-size: 11px;
     }
     .toolbar select {
       background: var(--wb-bg-btn, #3c3c3c);
@@ -570,9 +642,23 @@ export class WideboiApp extends LitElement {
     .pane-strip.mobile wideboi-pane:not([focused]) { display: none; }
     @media (max-width: 480px) {
       .toolbar { display: none; }
+      .toolbar.searching {
+        display: flex;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 25;
+      }
+      .toolbar.searching > :not(.pane-tabs-wrapper) {
+        display: none;
+      }
+      .toolbar.searching .pane-tabs-wrapper {
+        width: 100%;
+        height: 36px;
+      }
       .mobile-bar { display: flex; }
       .mobile-dock { display: flex; }
-      .title { display: none; }
     }
     .overlay {
       position: absolute;
@@ -2164,6 +2250,35 @@ export class WideboiApp extends LitElement {
     this.keyRouter.setPrefix(val);
   }
 
+  private handleTabKeydown(e: KeyboardEvent, currentId: number) {
+    const panes = this.activePanes;
+    const currentIndex = panes.indexOf(currentId);
+    if (currentIndex === -1) return;
+
+    let targetId: number | null = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      targetId = panes[(currentIndex + 1) % panes.length];
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      targetId = panes[(currentIndex - 1 + panes.length) % panes.length];
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      targetId = panes[0];
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      targetId = panes[panes.length - 1];
+    }
+
+    if (targetId !== null) {
+      this.focusPane(targetId);
+      void this.updateComplete.then(() => {
+        const nextButton = this.shadowRoot?.querySelector<HTMLButtonElement>(`.pane-tab[data-pane-id="${targetId}"]`);
+        nextButton?.focus();
+      });
+    }
+  }
+
   private focusColumnByIndex(colIndex: number) {
     if (this.columns.length === 0) return;
     let targetPaneId: number | undefined;
@@ -2256,80 +2371,109 @@ export class WideboiApp extends LitElement {
           ${cards && layout?.hiddenLeft ? html`<span class="card-count left">+${layout.hiddenLeft}</span>` : ''}
           ${cards && layout?.hiddenRight ? html`<span class="card-count right">+${layout.hiddenRight}</span>` : ''}
         </div>
-        <div class="title">${this.paneTitles[this.focusedPaneId] ||
-          (this.focusedPaneId ? `Pane ${this.focusedPaneId}` : '')}</div>
-        ${this.searchState ? html`
-          <div class="status search-bar">
-            <span>search /</span>
-            <input
-              class="search-input"
-              type="text"
-              .value=${this.searchState.query}
-              @input=${(e: InputEvent) => {
-                if (this.searchState) {
-                  this.searchState = {
-                    ...this.searchState,
-                    query: (e.target as HTMLInputElement).value,
-                    status: 'input',
-                  };
-                }
-              }}
-              @keydown=${(e: KeyboardEvent) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  if (this.searchState?.status === 'input') {
-                    this.commitSearch();
-                  } else if (this.searchState?.matches.length) {
-                    this.navigateSearch(e.shiftKey ? -1 : 1);
-                  }
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  this.cancelSearch();
-                } else if (e.ctrlKey && (e.key === 'g' || e.code === 'KeyG')) {
-                  e.preventDefault();
-                  this.liveSearch();
-                }
-              }}
-              placeholder="find in history..."
-            />
-            <button
-              class="search-btn prev-btn"
-              ?disabled=${!this.searchState.matches.length}
-              @click=${() => this.navigateSearch(-1)}
-              title="Previous match (Shift+Enter or N)"
-            >▲ Prev</button>
-            <button
-              class="search-btn next-btn"
-              ?disabled=${!this.searchState.matches.length}
-              @click=${() => this.navigateSearch(1)}
-              title="Next match (Enter or n)"
-            >▼ Next</button>
-            <button class="search-btn keep-btn" @click=${() => this.acceptSearch()} title="Keep current scroll (Enter)">Keep</button>
-            <button class="search-btn restore-btn" @click=${() => this.cancelSearch()} title="Restore previous view (Esc)">Restore</button>
-            <button class="search-btn live-btn" @click=${() => this.liveSearch()} title="Jump to bottom (Ctrl+G)">Live</button>
-            <span class="search-msg">
-              ${formatSearchStatus(this.searchState)}
-            </span>
-          </div>
-        ` : html`
-          <div class="status">${(() => {
-            const fp = this.panes.get(this.focusedPaneId);
-            const focusScroll = (fp && fp.scrollOffset > 0) ? `focus: [${this.focusedPaneId} ★] [scroll +${fp.scrollOffset}${fp.unreadOutput ? ' ⤓' : ''}]  ` : '';
-            const items = this.columns.map(column =>
-              `[${column.paneId}] ${PaneStatus[this.paneStatuses[column.paneId] ?? PaneStatus.IDLE] || ''}`
-            ).join('  ');
-            return `${focusScroll}${items}`;
-          })()}</div>
-        `}
       </div>
       ${this.connected ? html`
-        <div class="toolbar">
-          <label for="focus-pane">Focus Pane:</label>
-          <select id="focus-pane" @change=${this.handlePaneSelect}>
-            ${repeat(this.activePanes, id => id, id => html`
-              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
-            `)}
-          </select>
+        <div class="toolbar ${this.searchState ? 'searching' : ''}">
+          <div class="pane-tabs-wrapper ${this.searchState ? 'searching' : ''}">
+            <div class="pane-tabs" role="tablist" aria-label="Terminal Panes">
+              ${repeat(this.activePanes, id => id, id => {
+                const isFocused = id === this.focusedPaneId;
+                const status = this.paneStatuses[id] ?? PaneStatus.IDLE;
+                const pane = this.panes.get(id);
+                const scrollInfo = (pane && pane.scrollOffset > 0)
+                  ? `+${pane.scrollOffset}${pane.unreadOutput ? ' ⤓' : ''}`
+                  : '';
+                const glyph = status === PaneStatus.WORKING ? '»'
+                  : status === PaneStatus.NEEDS_INPUT ? '!'
+                  : status === PaneStatus.DONE ? '✓'
+                  : status === PaneStatus.FAILED ? '✗' : '';
+                const statusClass = status === PaneStatus.WORKING ? 'working'
+                  : status === PaneStatus.NEEDS_INPUT ? 'needs-input'
+                  : status === PaneStatus.DONE ? 'done'
+                  : status === PaneStatus.FAILED ? 'failed' : '';
+                const title = this.paneTitles[id] || 'Terminal';
+                const statusLabel = status === PaneStatus.WORKING ? ', working'
+                  : status === PaneStatus.NEEDS_INPUT ? ', needs input'
+                  : status === PaneStatus.DONE ? ', done'
+                  : status === PaneStatus.FAILED ? ', failed' : '';
+                const scrollLabel = scrollInfo ? `, scroll ${scrollInfo}` : '';
+                const ariaLabel = `Pane ${id}: ${title}${statusLabel}${scrollLabel}`;
+                return html`
+                  <button
+                    type="button"
+                    class="pane-tab"
+                    role="tab"
+                    data-pane-id=${id}
+                    aria-selected=${isFocused ? 'true' : 'false'}
+                    aria-label=${ariaLabel}
+                    tabindex=${isFocused ? 0 : -1}
+                    @click=${() => this.focusPane(id)}
+                    @keydown=${(e: KeyboardEvent) => this.handleTabKeydown(e, id)}
+                  >
+                    <span class="tab-focus-dot">${isFocused ? '●' : '○'}</span>
+                    <span class="tab-id">[${id}]</span>
+                    <span class="tab-title">${title}</span>
+                    ${glyph ? html`<span class="tab-status ${statusClass}">${glyph}</span>` : ''}
+                    ${scrollInfo ? html`<span class="tab-scroll">[${scrollInfo}]</span>` : ''}
+                  </button>
+                `;
+              })}
+            </div>
+            ${this.searchState ? html`
+              <div class="status search-bar">
+                <span>search /</span>
+                <input
+                  class="search-input"
+                  type="text"
+                  .value=${this.searchState.query}
+                  @input=${(e: InputEvent) => {
+                    if (this.searchState) {
+                      this.searchState = {
+                        ...this.searchState,
+                        query: (e.target as HTMLInputElement).value,
+                        status: 'input',
+                      };
+                    }
+                  }}
+                  @keydown=${(e: KeyboardEvent) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      if (this.searchState?.status === 'input') {
+                        this.commitSearch();
+                      } else if (this.searchState?.matches.length) {
+                        this.navigateSearch(e.shiftKey ? -1 : 1);
+                      }
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      this.cancelSearch();
+                    } else if (e.ctrlKey && (e.key === 'g' || e.code === 'KeyG')) {
+                      e.preventDefault();
+                      this.liveSearch();
+                    }
+                  }}
+                  placeholder="find in history..."
+                />
+                <button
+                  class="search-btn prev-btn"
+                  ?disabled=${!this.searchState.matches.length}
+                  @click=${() => this.navigateSearch(-1)}
+                  title="Previous match (Shift+Enter or N)"
+                >▲ Prev</button>
+                <button
+                  class="search-btn next-btn"
+                  ?disabled=${!this.searchState.matches.length}
+                  @click=${() => this.navigateSearch(1)}
+                  title="Next match (Enter or n)"
+                >▼ Next</button>
+                <button class="search-btn keep-btn" @click=${() => this.acceptSearch()} title="Keep current scroll (Enter)">Keep</button>
+                <button class="search-btn restore-btn" @click=${() => this.cancelSearch()} title="Restore previous view (Esc)">Restore</button>
+                <button class="search-btn live-btn" @click=${() => this.liveSearch()} title="Jump to bottom (Ctrl+G)">Live</button>
+                <span class="search-msg">
+                  ${formatSearchStatus(this.searchState)}
+                </span>
+              </div>
+            ` : ''}
+          </div>
           <label for="pane-width">Pane width:</label>
           <input id="pane-width" aria-label="Pane width" type="number" min="20" max="4096"
             .value=${String(this.displayWidths[this.focusedPaneId] ?? '')} @change=${this.handleWidthInput}>

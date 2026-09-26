@@ -20,7 +20,7 @@ test('settings modal opens via toolbar, mobile button, and shortcut, and updates
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect(page.getByText('Focus Pane:')).toBeVisible();
+  await expect(page.locator('.toolbar')).toBeVisible();
 
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');

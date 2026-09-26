@@ -117,7 +117,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
     await page.getByRole('button', { name: 'Connect' }).click();
 
     // Verify connection and panes
-    await expect(page.getByText('Focus Pane:')).toBeVisible();
+    await expect(page.locator('.toolbar')).toBeVisible();
     const panes = page.locator('wideboi-pane');
     await expect(panes).toHaveCount(2);
 
@@ -148,15 +148,15 @@ test.describe('Live Server Terminal & Input Parity', () => {
 
     // 3. Test Prefix Action: Column Jump
     // Currently focused on Pane 1
-    await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
+    await expect(page.locator('.pane-tab[data-pane-id="1"]')).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Control+b');
     await page.keyboard.press('2');
-    await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('2');
+    await expect(page.locator('.pane-tab[data-pane-id="2"]')).toHaveAttribute('aria-selected', 'true');
 
     // Focus back to Pane 1
     await page.keyboard.press('Control+b');
     await page.keyboard.press('1');
-    await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
+    await expect(page.locator('.pane-tab[data-pane-id="1"]')).toHaveAttribute('aria-selected', 'true');
 
     // 4. Test Prefix Action: Layout Toggle
     await expect(page.locator('.pane-strip')).toHaveClass(/cards/);

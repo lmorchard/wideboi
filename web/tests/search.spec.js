@@ -26,7 +26,7 @@ async function connectPage(page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect(page.getByText('Focus Pane:')).toBeVisible();
+  await expect(page.locator('.toolbar')).toBeVisible();
 
   // Send layout snapshot with pane 1
   await page.evaluate(async () => {
