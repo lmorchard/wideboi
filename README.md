@@ -96,6 +96,28 @@ Each client also keeps its own width and horizontal pan for each pane, in either
 
 ---
 
+## Web Client
+
+**BE VERY CAREFUL WITH USING THIS FEATURE FOR REMOTE ACCESS - USE A VPN OR TAILNET.** 
+
+wideboi is not secure and **will** let strangers into your shell. The access token mechanism is just a speed bump.
+
+wideboi includes an embedded browser client:
+
+```bash
+wideboi server --websocket 127.0.0.1:8080
+```
+
+Open the link printed on startup (which contains the security token) in your web browser:
+
+```
+http://127.0.0.1:8080/#token=<generated-token>
+```
+
+You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
+
+---
+
 ## Scripting and Agent Control
 
 You can control sessions directly from scripts and AI coding agents without attaching an interactive terminal:
@@ -119,24 +141,6 @@ wideboi close $PANE_ID
 ```
 
 All control commands accept `-L <session-name>` and `-s <socket-path>` to target specific sessions. `wait` exits with the pane process's exit code; the others exit 0 on success and 1 on error. `status --json` reports pane statuses by name (`idle`, `working`, `needs_input`, `done`, `failed`) and, for kept panes, `exited` and `exit_code`. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.
-
----
-
-## Web Client
-
-wideboi includes an embedded browser client:
-
-```bash
-wideboi server --websocket 127.0.0.1:8080
-```
-
-Open the link printed on startup (which contains the security token) in your web browser:
-
-```
-http://127.0.0.1:8080/#token=<generated-token>
-```
-
-You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
 
 ---
 
