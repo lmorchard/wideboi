@@ -88,7 +88,7 @@ test('terminal canvas does not paint over pane borders in cards and scroll layou
   };
 
   // 1. Cards layout (default)
-  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+  await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
   await expect.poll(async () => {
     const p = await samplePixels();
     return {
@@ -105,7 +105,9 @@ test('terminal canvas does not paint over pane borders in cards and scroll layou
   });
 
   // 2. Scroll layout
-  await page.getByRole('combobox', { name: 'Layout' }).selectOption('scroll');
+  await page.locator('.toolbar .settings-btn').click();
+  await page.locator('#settings-layout-mode').selectOption('scroll');
+  await page.locator('.settings-dialog .close-btn').click();
   await expect.poll(async () => {
     const p = await samplePixels();
     return {

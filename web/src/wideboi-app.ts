@@ -2297,28 +2297,11 @@ export class WideboiApp extends LitElement {
               <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
             `)}
           </select>
-          <label for="layout-mode">Layout:</label>
-          <select id="layout-mode" aria-label="Layout" @change=${this.handleLayoutSelect}>
-            <option value="scroll" .selected=${!cards}>Scroll</option>
-            <option value="cards" .selected=${cards}>Cards</option>
-          </select>
           <label for="pane-width">Pane width:</label>
           <input id="pane-width" aria-label="Pane width" type="number" min="20" max="4096"
             .value=${String(this.displayWidths[this.focusedPaneId] ?? '')} @change=${this.handleWidthInput}>
           <label><input type="checkbox" aria-label="Follow PTY widths" .checked=${this.followPTY}
             @change=${() => { this.followPTY = !this.followPTY; if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width])); }}>Follow PTY</label>
-          <label for="prefix-key">Prefix:</label>
-          <select id="prefix-key" aria-label="Prefix key" @change=${this.handlePrefixChange}>
-            <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
-            <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
-            <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
-          </select>
-          <label for="theme-select">Theme:</label>
-          <select id="theme-select" aria-label="Color theme" @change=${this.handleThemeSelect}>
-            ${listThemes().map(t => html`
-              <option value=${t.id} .selected=${t.id === this.themeId}>${t.name}</option>
-            `)}
-          </select>
           <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
           <button class="claim-size-btn search-btn" @click=${this.startSearch} title="Search pane history (/ or Ctrl+F)">Search</button>
           <button class="settings-btn" @click=${this.toggleSettings} aria-label="Settings" title="Settings (${this.keyRouter.prefixLabel} ,)">⚙ Settings</button>

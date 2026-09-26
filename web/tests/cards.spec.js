@@ -40,7 +40,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
   const beforeResize = (await messages()).filter(msg => msg.case === 'resize').length;
-  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+  await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
   const panes = page.locator('wideboi-pane');
   await expect(panes).toHaveCount(7);
   await expect(panes.first()).toHaveAttribute('card-mode', '');
@@ -113,13 +113,17 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   }
   await page.evaluate(() => { Element.prototype.animate = window.originalAnimate; });
 
-  await page.getByRole('combobox', { name: 'Layout' }).selectOption('scroll');
+  await page.locator('.toolbar .settings-btn').click();
+  await page.locator('#settings-layout-mode').selectOption('scroll');
+  await page.locator('.settings-dialog .close-btn').click();
   await expect(panes.first()).not.toHaveAttribute('card-mode', '');
   expect(await page.evaluate(() => window.paneOne === document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane'))).toBe(true);
   await settleLayout();
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(beforeResize);
   await expect.poll(() => page.locator('.pane-strip').evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
-  await page.getByRole('combobox', { name: 'Layout' }).selectOption('cards');
+  await page.locator('.toolbar .settings-btn').click();
+  await page.locator('#settings-layout-mode').selectOption('cards');
+  await page.locator('.settings-dialog .close-btn').click();
   await expect.poll(() => page.locator('.pane-strip').evaluate(element => element.scrollLeft)).toBe(0);
   await expect.poll(() => panes.nth(6).evaluate(element => element.getAnimations().length)).toBe(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });

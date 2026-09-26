@@ -36,24 +36,17 @@ test('settings modal opens via toolbar, mobile button, and shortcut, and updates
   // 1. Initial state: settings dialog is not visible
   await expect(page.locator('.settings-dialog')).toHaveCount(0);
 
-  // Verify theme selector in toolbar and default dark styling
-  const toolbarTheme = page.locator('#theme-select');
-  await expect(toolbarTheme).toBeVisible();
-  await expect(toolbarTheme).toHaveValue('dark');
+  // Redundant controls (theme, layout mode, prefix key) are not in the bottom toolbar
+  await expect(page.locator('.toolbar #theme-select')).toHaveCount(0);
+  await expect(page.locator('.toolbar #layout-mode')).toHaveCount(0);
+  await expect(page.locator('.toolbar #prefix-key')).toHaveCount(0);
+
+  // Default theme styling
   const initialBg = await page.evaluate(() => {
     const app = document.querySelector('wideboi-app');
     return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
   });
   expect(initialBg).toBe('#1e1e1e');
-
-  // Select "Nord" theme via toolbar
-  await toolbarTheme.selectOption('nord');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.theme'))).toBe('nord');
-  const nordBg = await page.evaluate(() => {
-    const app = document.querySelector('wideboi-app');
-    return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
-  });
-  expect(nordBg).toBe('#2e3440');
 
   // 2. Open via toolbar button
   await page.locator('.toolbar .settings-btn').click();
@@ -63,7 +56,16 @@ test('settings modal opens via toolbar, mobile button, and shortcut, and updates
   // Verify theme selector in settings dialog reflects active theme
   const settingsTheme = page.locator('#settings-theme');
   await expect(settingsTheme).toBeVisible();
-  await expect(settingsTheme).toHaveValue('nord');
+  await expect(settingsTheme).toHaveValue('dark');
+
+  // Select "Nord" theme inside settings dialog
+  await settingsTheme.selectOption('nord');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.theme'))).toBe('nord');
+  const nordBg = await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
+  });
+  expect(nordBg).toBe('#2e3440');
 
   // Change theme to Solarized Light inside settings dialog
   await settingsTheme.selectOption('solarized-light');
@@ -73,6 +75,22 @@ test('settings modal opens via toolbar, mobile button, and shortcut, and updates
     return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
   });
   expect(lightBg).toBe('#fdf6e3');
+
+  // Verify prefix key selector in settings dialog
+  const settingsPrefix = page.locator('#settings-prefix-key');
+  await expect(settingsPrefix).toBeVisible();
+  await expect(settingsPrefix).toHaveValue('ctrl+b');
+  await settingsPrefix.selectOption('ctrl+a');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.prefix'))).toBe('ctrl+a');
+
+  // Verify layout mode selector in settings dialog
+  const settingsLayout = page.locator('#settings-layout-mode');
+  await expect(settingsLayout).toBeVisible();
+  await expect(settingsLayout).toHaveValue('cards');
+  await settingsLayout.selectOption('scroll');
+  await expect(page.locator('.pane-strip')).not.toHaveClass(/cards/);
+  await settingsLayout.selectOption('cards');
+  await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
 
   // Verify font options exist in dropdown
   const fontSelect = page.locator('#settings-font-family');
@@ -94,9 +112,9 @@ test('settings modal opens via toolbar, mobile button, and shortcut, and updates
   await page.keyboard.press('Escape');
   await expect(page.locator('.settings-dialog')).toHaveCount(0);
 
-  // 4. Open via shortcut: Ctrl+B then ','
+  // 4. Open via shortcut: prefix is now Ctrl+A then ','
   await page.locator('wideboi-pane canvas').first().focus();
-  await page.keyboard.press('Control+b');
+  await page.keyboard.press('Control+a');
   await page.keyboard.press(',');
   await expect(page.locator('.settings-dialog')).toBeVisible();
 
