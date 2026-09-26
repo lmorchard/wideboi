@@ -11,6 +11,7 @@ export type KeyRouterAction =
   | { type: 'toggle_follow_pty' }
   | { type: 'focus_column'; column: number }
   | { type: 'toggle_help' }
+  | { type: 'toggle_settings' }
   | { type: 'search' };
 
 export interface ParsedPrefix {
@@ -125,10 +126,14 @@ export class KeyRouter {
       return { type: 'toggle_cards' };
     }
 
-    // 4. Help overlay toggle & search
+    // 4. Help & settings overlay toggle, and search
     if (key === '?' || (e.shiftKey && key === '/')) {
       this.prefixActive = false;
       return { type: 'toggle_help' };
+    }
+    if (key === ',') {
+      this.prefixActive = false;
+      return { type: 'toggle_settings' };
     }
     if (key === '/') {
       this.prefixActive = false;
