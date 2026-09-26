@@ -750,10 +750,57 @@ def case_kill_session_ends_the_session(fail):
             fail("attached client kept running after the session ended")
         elif not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
             fail(f"attached client exited badly after kill-session: status {status}")
+        else:
+            c.drainer.stop()
+            check_end_notice(fail, c.output(), b"server gone")
     finally:
         if c is not None:
             c.kill()
         srv.stop()
+
+
+def check_end_notice(fail, out: bytes, why: bytes) -> None:
+    """A session that ends under the client must say so once the terminal
+    is back, and point at exits.log -- a silent exit 0 is what made three
+    lost sessions undiagnosable."""
+    exit_at = out.rfind(ALT_SCREEN_EXIT)
+    tail = out[exit_at:] if exit_at >= 0 else b""
+    if b"the session at" not in tail or b"exits.log" not in tail:
+        fail(f"the client printed no end notice naming exits.log after the "
+             f"terminal was restored; tail {strip_ansi(tail)[-300:]!r}")
+    elif why not in tail:
+        fail(f"the end notice does not say {why!r}; tail {strip_ansi(tail)[-300:]!r}")
+
+
+def case_owner_reports_a_signalled_server(fail):
+    """An owned session whose server is killed by a signal ends the
+    client, still with status 0, but the client says how the server died
+    and every step lands in exits.log."""
+    c, srv = owned_session(fail)
+    if srv is None:
+        c.kill()
+        return
+    try:
+        os.kill(srv, signal.SIGTERM)
+        status = wait_for_exit(c.pid, 6.0)
+        if status is None:
+            fail("the owner kept running after its server was killed")
+            return
+        if not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+            fail(f"the owner exited badly after its server was killed: status {status}")
+        c.drainer.stop()
+        check_end_notice(fail, c.output(), b"signal: terminated")
+        try:
+            with open(os.path.join(runtime_dir(), "exits.log")) as f:
+                exits = f.read()
+        except OSError as exc:
+            fail(f"no exits.log in the runtime dir: {exc}")
+            return
+        for want in ('msg="server signalled"', 'status="signal: terminated"', 'msg="client exit"'):
+            if want not in exits:
+                fail(f"exits.log lacks {want!r}:\n{exits}")
+    finally:
+        c.kill()
 
 
 def case_kill_session_without_a_server_says_so(fail):
@@ -1048,6 +1095,7 @@ CASES = [
     ("server reaps its panes on signal", case_server_reaps_its_panes_on_signal),
     ("kill-session ends the session", case_kill_session_ends_the_session),
     ("kill-session without a server says so", case_kill_session_without_a_server_says_so),
+    ("owner reports a signalled server", case_owner_reports_a_signalled_server),
     ("plain wideboi offers detach", case_plain_wideboi_offers_detach),
     ("plain wideboi detaches and the session survives", case_plain_wideboi_detaches_and_the_session_survives),
     ("SIGKILLed owner takes the session with it", case_sigkilled_owner_takes_the_session_with_it),

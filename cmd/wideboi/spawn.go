@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -26,17 +27,16 @@ import (
 // that tells it its owner died would never come. ExtraFiles clears the
 // flag on fd 3 in the child, which is the one copy it should have.
 //
-// exited delivers the server's exit code once it has been reaped (-1 if
-// a signal killed it). An owner whose server quits before saying
-// anything reads it to tell "another server already had the session"
-// from a real failure.
-func spawnServer(socket string, args []string) (conn net.Conn, exited <-chan int, err error) {
+// exited delivers the server's status once it has been reaped. An owner
+// whose server quits before saying anything reads it to tell "another
+// server already had the session" from a real failure.
+func spawnServer(socket string, args []string) (conn net.Conn, exited <-chan serverExitStatus, err error) {
 	return spawnServerInDir(socket, args, "")
 }
 
 // spawnServerInDir is the desktop app's variant of spawnServer: its chosen
 // project directory becomes the server's initial cwd and config search root.
-func spawnServerInDir(socket string, args []string, dir string) (conn net.Conn, exited <-chan int, err error) {
+func spawnServerInDir(socket string, args []string, dir string) (conn net.Conn, exited <-chan serverExitStatus, err error) {
 	syscall.ForkLock.RLock()
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err == nil {
@@ -76,14 +76,21 @@ func spawnServerInDir(socket string, args []string, dir string) (conn net.Conn, 
 		return nil, nil, fmt.Errorf("starting wideboi server: %w", err)
 	}
 	// Reap it if it exits while we are alive; if we die first, init does.
-	code := make(chan int, 1)
+	// Recorded here, whichever path the client is on: the reaped status
+	// is the one account of a server's death that no in-server code has
+	// to survive to give, SIGKILL included.
+	code := make(chan serverExitStatus, 1)
 	go func() {
-		_ = cmd.Wait()
-		c := -1
+		err := cmd.Wait()
+		st := serverExitStatus{Code: -1, Desc: fmt.Sprint("wait failed: ", err)}
 		if cmd.ProcessState != nil {
-			c = cmd.ProcessState.ExitCode()
+			st = serverExitStatus{Code: cmd.ProcessState.ExitCode(), Desc: cmd.ProcessState.String()}
 		}
-		code <- c
+		slog.Info("server reaped", "serverPID", cmd.Process.Pid, "status", st.Desc)
+		if socket != "" {
+			_ = logger.AppendExit(socket, "client", "server reaped", "serverPID", cmd.Process.Pid, "status", st.Desc)
+		}
+		code <- st
 	}()
 
 	conn, err = net.FileConn(ours)
@@ -92,6 +99,15 @@ func spawnServerInDir(socket string, args []string, dir string) (conn net.Conn, 
 	}
 	return conn, code, nil
 }
+
+// serverExitStatus is a spawned server's reaped status.
+type serverExitStatus struct {
+	Code int    // ProcessState.ExitCode(): -1 for a death by signal
+	Desc string // ProcessState.String(): "exit status 0", "signal: terminated"
+}
+
+// clean reports an ordinary exit, the kind that needs no explaining.
+func (st serverExitStatus) clean() bool { return st.Desc == "exit status 0" }
 
 // serverArgs is the argument list for the server spawnServer starts:
 // the user's own flags, so it resolves exactly the config this process

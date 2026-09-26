@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/lmorchard/wideboi/internal/logger"
 )
 
 // isSessionActive checks if the socket answers a dial.
@@ -102,7 +104,26 @@ func runCleanup(w io.Writer, dir string) error {
 	return cleanupDeadArtifacts(w, dir, true)
 }
 
-// runAutoCleanupSweep removes dead sockets and tokens in dir, leaving logs intact.
-func runAutoCleanupSweep(dir string) error {
-	return cleanupDeadArtifacts(io.Discard, dir, false)
+// runAutoCleanupSweep removes dead sockets and tokens in dir, leaving
+// logs intact, and records each removal in dir's exits log on behalf of
+// the session at bySocket.
+func runAutoCleanupSweep(dir, bySocket string) error {
+	return cleanupDeadArtifacts(exitsWriter{dir: dir, by: logger.SessionOf(bySocket)}, dir, false)
+}
+
+// exitsWriter turns cleanup's "removed dead socket x.sock" lines into
+// exits records. The sweep dials each socket with a short timeout and
+// removes what does not answer, so one that removes a socket someone
+// still wanted must leave a trace.
+type exitsWriter struct{ dir, by string }
+
+func (w exitsWriter) Write(p []byte) (int, error) {
+	// AppendExit locates exits.log from a socket path's directory.
+	anchor := filepath.Join(w.dir, "sweep.sock")
+	for _, line := range strings.Split(strings.TrimSpace(string(p)), "\n") {
+		if line != "" {
+			_ = logger.AppendExit(anchor, "sweep", "sweep removed", "what", line, "by", w.by)
+		}
+	}
+	return len(p), nil
 }

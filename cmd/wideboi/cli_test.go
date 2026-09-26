@@ -344,3 +344,16 @@ func TestParseCLIWebSubcommand(t *testing.T) {
 		}
 	}
 }
+
+// A session that ended under the user says so: which session, why as
+// far as the client knows, and where the record is.
+func TestPrintEndNotice(t *testing.T) {
+	var buf bytes.Buffer
+	printEndNotice(&buf, "/tmp/wb/work.sock", "server signal: terminated")
+	got := buf.String()
+	for _, want := range []string{"/tmp/wb/work.sock", "server signal: terminated", "/tmp/wb/exits.log"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("notice %q lacks %q", got, want)
+		}
+	}
+}

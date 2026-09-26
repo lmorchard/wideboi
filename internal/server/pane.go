@@ -377,6 +377,20 @@ func (p *Pane) ExitStatus() (code int, exited bool) {
 	return p.exitCode, p.exited
 }
 
+// ExitSummary is the pane's process and how it ended, for logs: the
+// reaped status in words, "not reaped" while it runs (or outlived the
+// hangup grace), "no process" for a pane with no pty behind it.
+func (p *Pane) ExitSummary() (pid int, status string) {
+	if p.pty == nil {
+		return 0, "no process"
+	}
+	desc, reaped := p.pty.ExitDescription()
+	if !reaped {
+		return p.pty.PID(), "not reaped"
+	}
+	return p.pty.PID(), desc
+}
+
 func (p *Pane) markExited(code int) {
 	p.exitMu.Lock()
 	p.exited, p.exitCode = true, code

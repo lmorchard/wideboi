@@ -177,6 +177,19 @@ func TestServerAutoCleanup(t *testing.T) {
 			t.Fatal("timed out waiting for runServer to exit")
 		}
 
+		// The session's own logs go, but the exits log records the
+		// start and why it ended, and survives the cleanup.
+		exits, err := os.ReadFile(filepath.Join(dir, "exits.log"))
+		if err != nil {
+			t.Fatalf("exits.log missing after a clean exit: %v", err)
+		}
+		for _, want := range []string{`msg="server started"`, `msg="server exit"`,
+			"reason=shutdown-request", "autoCleanup=true", "session=clean"} {
+			if !strings.Contains(string(exits), want) {
+				t.Errorf("exits.log lacks %q:\n%s", want, exits)
+			}
+		}
+
 		// Verify server.log and client.log are removed
 		serverLog := filepath.Join(dir, "clean.server.log")
 		if _, err := os.Stat(serverLog); !os.IsNotExist(err) {
@@ -294,6 +307,22 @@ func TestServerAutoCleanup(t *testing.T) {
 		}
 
 		_ = cmd.Wait()
+
+		// The signal is named before teardown, and the exit after it.
+		exits, err := os.ReadFile(filepath.Join(dir, "exits.log"))
+		if err != nil {
+			t.Fatalf("exits.log missing after a signalled exit: %v", err)
+		}
+		signalledAt := strings.Index(string(exits), `msg="server signalled" session=sig`)
+		exitAt := strings.Index(string(exits), `msg="server exit" session=sig`)
+		if signalledAt < 0 || exitAt < signalledAt {
+			t.Errorf("exits.log lacks a signalled record followed by an exit record:\n%s", exits)
+		}
+		for _, want := range []string{"signal=terminated", "reason=signal"} {
+			if !strings.Contains(string(exits), want) {
+				t.Errorf("exits.log lacks %q:\n%s", want, exits)
+			}
+		}
 
 		serverLog := filepath.Join(dir, "sig.server.log")
 		if _, err := os.Stat(serverLog); err != nil {
@@ -413,7 +442,7 @@ func TestAutoCleanupSweepPreservesDeadLogs(t *testing.T) {
 	_ = os.WriteFile(legacyServerLog, []byte("legacy\n"), 0600)
 
 	// runAutoCleanupSweep should remove dead socket, token, and legacy log, but KEEP dead logs
-	if err := runAutoCleanupSweep(dir); err != nil {
+	if err := runAutoCleanupSweep(dir, filepath.Join(dir, "me.sock")); err != nil {
 		t.Fatalf("runAutoCleanupSweep failed: %v", err)
 	}
 
@@ -444,5 +473,75 @@ func TestAutoCleanupSweepPreservesDeadLogs(t *testing.T) {
 	}
 	if _, err := os.Stat(deadClientLog); !os.IsNotExist(err) {
 		t.Errorf("dead.client.log should be removed by explicit runCleanup")
+	}
+	// The exits log is the record that outlives sessions; no cleanup
+	// removes it.
+	if _, err := os.Stat(filepath.Join(dir, "exits.log")); err != nil {
+		t.Errorf("exits.log should survive both cleanups: %v", err)
+	}
+}
+
+// The automatic sweep records what it removed and which session swept,
+// so a socket that vanished from under a live server leaves a trace.
+func TestAutoCleanupSweepRecordsRemovals(t *testing.T) {
+	dir := t.TempDir()
+	// A regular file named .sock answers no dial, so it reads as dead.
+	if err := os.WriteFile(filepath.Join(dir, "ghost.sock"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ghost.web-token"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAutoCleanupSweep(dir, filepath.Join(dir, "me.sock")); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "exits.log"))
+	if err != nil {
+		t.Fatalf("no exits.log after a sweep that removed things: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d records, want 2:\n%s", len(lines), data)
+	}
+	for i, name := range []string{"ghost.sock", "ghost.web-token"} {
+		for _, want := range []string{`msg="sweep removed"`, "by=me", name} {
+			if !strings.Contains(lines[i], want) {
+				t.Errorf("record %q lacks %q", lines[i], want)
+			}
+		}
+	}
+}
+
+// A server that fails to start after recording "server started" must
+// record its exit too: a start with no exit is how exits.log marks a
+// death no code survived to record, and a routine startup failure must
+// not look like one.
+func TestStartupFailureRecordsExit(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	dir := shortTempDir(t)
+	cfg := config.Config{
+		Socket:             filepath.Join(dir, "busy.sock"),
+		Websocket:          ln.Addr().String(),
+		WebsocketToken:     "t",
+		AutoCleanupEnabled: true,
+		LogLevel:           slog.LevelInfo,
+		Shell:              "/bin/sh",
+	}
+	if err := runServer(cfg, -1); err == nil {
+		t.Fatal("runServer succeeded on an occupied websocket port")
+	}
+	exits, err := os.ReadFile(filepath.Join(dir, "exits.log"))
+	if err != nil {
+		t.Fatalf("no exits.log: %v", err)
+	}
+	for _, want := range []string{`msg="server started"`, `msg="server exit"`, "reason=startup-failed", "address already in use"} {
+		if !strings.Contains(string(exits), want) {
+			t.Errorf("exits.log lacks %q:\n%s", want, exits)
+		}
 	}
 }

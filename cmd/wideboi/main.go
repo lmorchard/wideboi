@@ -323,7 +323,7 @@ func fatal(err error) {
 // runServer serves the session on cfg.Socket. ownerFD, when not -1, is
 // the inherited connection of the plain wideboi that spawned this
 // server and owns the session; see spawnServer.
-func runServer(cfg config.Config, ownerFD int) error {
+func runServer(cfg config.Config, ownerFD int) (retErr error) {
 	f, _ := logger.Init(logger.Path(cfg.Socket, "server"), cfg.LogLevel, true)
 	if f != nil {
 		defer f.Close()
@@ -350,6 +350,7 @@ func runServer(cfg config.Config, ownerFD int) error {
 	// *ServerSocketConn stored in it would not compare equal to nil,
 	// and NewServer would register it as a client.
 	var ownerConn transport.Transport
+	var ownerPID uint32
 	if ownerFD >= 0 {
 		of := os.NewFile(uintptr(ownerFD), "wideboi-owner")
 		conn, err := net.FileConn(of)
@@ -366,17 +367,21 @@ func runServer(cfg config.Config, ownerFD int) error {
 		// builds on the pair. No pane exists yet, so there is no work
 		// to protect: leaving instead of serving no-one keeps an
 		// unreachable session from lingering (#174).
-		if peer, err := transport.Handshake(conn); err != nil {
+		peer, err := transport.Handshake(conn)
+		if err != nil {
 			conn.Close()
 			slog.Error("owner failed the protocol handshake; exiting", "ownerPID", peer.PID, "err", err)
 			return fmt.Errorf("owner connection: %w", err)
 		}
+		ownerPID = peer.PID
 		sc := transport.NewServerSocketConn(conn, 256)
 		sc.RunPumps(ctx)
 		ownerConn = sc
 	}
 
 	srv := server.NewServer(ownerConn, cfg.Shell, cwd)
+	// Sampled first: RestoreState unsets it.
+	restored := os.Getenv("WIDEBOI_RESTORE_STATE") != ""
 	if err := server.RestoreState(srv); err != nil {
 		slog.Error("failed to restore state after upgrade", "err", err)
 		return fmt.Errorf("failed to restore state after upgrade: %w", err)
@@ -397,6 +402,7 @@ func runServer(cfg config.Config, ownerFD int) error {
 	}
 	if ownerConn != nil {
 		srv.SetOwner(ownerConn)
+		srv.SetPeerPID(ownerConn, ownerPID)
 	}
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
@@ -414,9 +420,27 @@ func runServer(cfg config.Config, ownerFD int) error {
 	// SIGTERM took Go's default disposition and srv.Close never ran,
 	// which left the socket file behind.
 	var signalled atomic.Bool
-	guard := hostterm.NewGuard(func() error {
+	// exitRecorded makes the "server exit" record happen exactly once,
+	// whichever path gets there: the signal guard, the end of Run, or a
+	// startup failure.
+	var exitRecorded atomic.Bool
+	var guard *hostterm.Guard
+	guard = hostterm.NewGuard(func() error {
 		signalled.Store(true)
-		err := srv.Close()
+		var err error
+		if sig := guard.Signal(); sig != nil {
+			// Written before teardown: if it wedges, this is the record.
+			_ = logger.AppendExit(cfg.Socket, "server", "server signalled", "signal", sig.String())
+			err = srv.CloseFor(server.ReasonSignal, "signal", sig.String())
+			// Nothing after Run executes on this path -- the re-raise
+			// ends the process first -- so the exit is recorded here.
+			if exitRecorded.CompareAndSwap(false, true) {
+				_ = logger.AppendExit(cfg.Socket, "server", "server exit",
+					"reason", server.ReasonSignal, "signal", sig.String(), "err", errString(err))
+			}
+		} else {
+			err = srv.Close()
+		}
 		// The re-raise skips defers, and a socket nobody answers is
 		// litter the next server has to step over.
 		_ = sl.Close()
@@ -425,6 +449,26 @@ func runServer(cfg config.Config, ownerFD int) error {
 	defer guard.Stop()
 	guard.Arm(syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 
+	// Paired with a "server exit" record below. A start with no exit for
+	// its pid is a death no code in this process got to record: SIGKILL,
+	// a crash, the OOM killer.
+	//
+	// Before ListenSocket, not after: a client admitted between it and
+	// Run gets a second reader loop from Run's snapshot of s.transports,
+	// and anything that lingers in that window widens the race -- this
+	// record there broke TestUpgradeServerWithAttachedClientE2E 5 runs
+	// in 8, by reordering the reconnected client's keystrokes.
+	_ = logger.AppendExit(cfg.Socket, "server", "server started",
+		"ownerFD", ownerFD, "restored", restored)
+	// Any return from here on that has not recorded its exit is a
+	// startup failure (the web server, say). Left unrecorded, it would
+	// read as a death nothing survived to record.
+	defer func() {
+		if exitRecorded.CompareAndSwap(false, true) {
+			_ = logger.AppendExit(cfg.Socket, "server", "server exit",
+				"reason", "startup-failed", "err", errString(retErr))
+		}
+	}()
 	srv.ListenSocket(ctx, sl)
 
 	distFS, err := web.DistFS()
@@ -480,7 +524,14 @@ func runServer(cfg config.Config, ownerFD int) error {
 	}
 
 	startupOK := srv.StartupComplete()
-	if cfg.AutoCleanupEnabled && !signalled.Load() && err == nil && startupOK {
+	cleanup := cfg.AutoCleanupEnabled && !signalled.Load() && err == nil && startupOK
+	reason, reasonAttrs := srv.CloseReason()
+	record := append([]any{"reason", reason}, reasonAttrs...)
+	record = append(record, "err", errString(err), "startupComplete", startupOK, "autoCleanup", cleanup)
+	if exitRecorded.CompareAndSwap(false, true) {
+		_ = logger.AppendExit(cfg.Socket, "server", "server exit", record...)
+	}
+	if cleanup {
 		// Remove this session's own logs and token before closing the listener
 		// (which releases the flock), preventing a successor from racing.
 		_ = os.Remove(logger.Path(cfg.Socket, "server"))
@@ -491,9 +542,17 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 		// Only sweep dead sockets and tokens in the dedicated, wideboi-owned session directory.
 		// Dead logs of other sessions are preserved for forensic post-mortem analysis.
-		_ = runAutoCleanupSweep(config.SessionDir())
+		_ = runAutoCleanupSweep(config.SessionDir(), cfg.Socket)
 	}
 	return err
+}
+
+// errString is err's message for a log record, empty for nil.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func webTokenPath(socket string) string {
@@ -639,12 +698,21 @@ func dialWithin(socket string, ceiling time.Duration) (net.Conn, error) {
 
 // serverExitCode waits up to ceiling for a spawned server's exit code;
 // -1 if it does not arrive.
-func serverExitCode(exited <-chan int, ceiling time.Duration) int {
+func serverExitCode(exited <-chan serverExitStatus, ceiling time.Duration) int {
+	if st, ok := awaitServerStatus(exited, ceiling); ok {
+		return st.Code
+	}
+	return -1
+}
+
+// awaitServerStatus waits up to ceiling for a spawned server's reaped
+// status, reporting whether it arrived.
+func awaitServerStatus(exited <-chan serverExitStatus, ceiling time.Duration) (serverExitStatus, bool) {
 	select {
-	case code := <-exited:
-		return code
+	case st := <-exited:
+		return st, true
 	case <-time.After(ceiling):
-		return -1
+		return serverExitStatus{}, false
 	}
 }
 
@@ -654,7 +722,7 @@ func serverExitCode(exited <-chan int, ceiling time.Duration) int {
 // and delivers that server's exit code (see spawnServer). This process
 // then owns the session, which ends with it -- on a quit, a signal, or
 // a death that runs no code at all -- unless it detached first.
-func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, serverExit <-chan int) error {
+func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, serverExit <-chan serverExitStatus) (retErr error) {
 	owner := serverExit != nil
 	f, _ := logger.Init(logger.Path(cfg.Socket, "client"), cfg.LogLevel, false)
 	if f != nil {
@@ -663,9 +731,20 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	defer startProfiles("client")()
 	slog.Info("wideboi client starting", "socketPath", cfg.Socket, "owner", owner)
 
+	// endReason says why this client is leaving, for its exits record.
+	// Each exit path sets it; a signal records itself from the guard,
+	// since the re-raise ends the process before this defer could run.
+	endReason := "returned"
+	defer func() {
+		slog.Info("client exiting", "reason", endReason, "err", errString(retErr))
+		_ = logger.AppendExit(cfg.Socket, "client", "client exit",
+			"reason", endReason, "owner", owner, "err", errString(retErr))
+	}()
+
 	// Before the terminal is touched, so a refusal prints plainly.
 	if _, err := transport.Handshake(conn); err != nil {
 		conn.Close()
+		endReason = "handshake failed"
 		// A server we spawned that quit during startup hung up without
 		// a hello; that is its startup failure, not a mismatch. One that
 		// did say hello in another version exits too, and its exit
@@ -708,8 +787,13 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	// included; before this, SIGTERM to an attached client left the
 	// host terminal in the alt screen. Deferred after cancel so it
 	// runs first, while ctx is still live.
-	guard := hostterm.NewGuard(func() error {
+	var guard *hostterm.Guard
+	guard = hostterm.NewGuard(func() error {
 		stopped.Store(true)
+		if sig := guard.Signal(); sig != nil {
+			_ = logger.AppendExit(cfg.Socket, "client", "client exit",
+				"reason", "signal", "signal", sig.String(), "owner", owner)
+		}
 		// An owner's session dies with it, unless the connection has
 		// already ended -- a detach, a quit, or the server hanging up.
 		// Shut it down *before* restoring the terminal, and wait: the
@@ -806,18 +890,28 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				// defect that killed every session on the first
 				// coloured cell a child printed.
 				if err := currentConn.Err(); err != nil {
+					endReason = "connection failed"
 					return fmt.Errorf("connection to wideboi server failed: %w", err)
 				}
 				if owner && !gotMsg {
+					endReason = "server startup failed"
 					if serverExitCode(serverExit, reapCeiling) == exitSessionTaken {
+						endReason = "session taken"
 						return errSessionTaken
 					}
 					return startupExitError(cfg.Socket)
 				}
 				if owner {
 					select {
-					case <-serverExit:
-						slog.Info("server closed the connection")
+					case st := <-serverExit:
+						slog.Info("server closed the connection", "status", st.Desc)
+						endReason = "server closed the connection; server " + st.Desc
+						// An ordinary end -- the last pane exited, or a
+						// kill-session -- needs no word. Anything else
+						// the user must hear about, not just a log.
+						if !st.clean() {
+							endSessionNotice(guard, &stopped, cfg.Socket, "server "+st.Desc)
+						}
 						return nil
 					default:
 						// The server process is still alive (e.g. an in-place upgrade via syscall.Exec).
@@ -833,12 +927,31 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				reconnectConn, err := dialWithin(cfg.Socket, 2*time.Second)
 				if err != nil {
 					slog.Info("reconnect failed", "err", err)
-					return nil // Just exit cleanly if the server is truly gone
+					why := "server gone"
+					if owner {
+						// Only on this give-up path: the server we
+						// spawned is dead or about to be reaped, and how
+						// it died is the one thing worth waiting for.
+						if st, ok := awaitServerStatus(serverExit, reapCeiling); ok {
+							why += "; server " + st.Desc
+						} else {
+							why += fmt.Sprintf("; server not reaped within %s", reapCeiling)
+						}
+					}
+					endReason = why + "; reconnect failed: " + err.Error()
+					// Over for good this time, so the teardown must not
+					// try to tell the dead server anything.
+					hungUp.Store(true)
+					// Still exit 0: a kill-session ends every attached
+					// client this way, and that is not a failure.
+					endSessionNotice(guard, &stopped, cfg.Socket, why)
+					return nil
 				}
 
 				// A server restarted from another build is not one to
 				// rejoin.
 				if err := handshakeServer(reconnectConn, cfg.Socket); err != nil {
+					endReason = "reconnected to an incompatible server"
 					return err
 				}
 				slog.Info("reconnected successfully")
@@ -917,6 +1030,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					if !signalled {
 						printDetachNotice(os.Stdout, cfg.Socket)
 					}
+					endReason = "detached"
 					return nil
 				case routeQuit:
 					slog.Info("client ending the session")
@@ -927,6 +1041,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					// detach before it, ends an owned session anyway.
 					hungUp.Store(true)
 					awaitReRaise()
+					endReason = "quit"
 					if !acked {
 						return fmt.Errorf("wideboi server did not shut down within %s", shutdownCeiling)
 					}
@@ -1013,6 +1128,26 @@ func printDetachNotice(w io.Writer, socket string) {
 	}
 	fmt.Fprintf(w, "[wideboi detached; the session is still running at %s]\n", socket)
 	fmt.Fprintf(w, "[reattach: wideboi%s   end it: wideboi%s kill-session]\n", target, target)
+}
+
+// endSessionNotice restores the terminal and, unless a signal's teardown
+// is what restored it, says the session ended under the user. Restored
+// first, so the notice lands in the scrollback rather than in the alt
+// screen the restore wipes; the deferred Stop is then a no-op.
+func endSessionNotice(guard *hostterm.Guard, stopped *atomic.Bool, socket, why string) {
+	signalled := stopped.Load()
+	_ = guard.Stop()
+	if !signalled {
+		printEndNotice(os.Stderr, socket, why)
+	}
+}
+
+// printEndNotice tells a user whose session ended without their asking
+// that it did, why as far as this side knows, and where the record is.
+// Before it, a lost session exited 0 with the terminal restored and not
+// a word -- indistinguishable from nothing having happened.
+func printEndNotice(w io.Writer, socket, why string) {
+	fmt.Fprintf(w, "[wideboi: the session at %s ended (%s); see %s]\n", socket, why, logger.ExitsPath(socket))
 }
 
 // enableMouse asks the host terminal to report presses, releases and

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
@@ -16,6 +17,9 @@ type Guard struct {
 	once sync.Once
 	stop func() error
 	err  error
+	// sig is the os.Signal that ran stop, stored by the once winner
+	// before it runs stop -- only when that winner is the signal path.
+	sig atomic.Value
 }
 
 // NewGuard returns a Guard that will call stop at most once.
@@ -26,15 +30,35 @@ func NewGuard(stop func() error) *Guard {
 // Stop runs the shutdown function if it has not run already. The first
 // caller receives the shutdown function's error; later callers get nil.
 func (g *Guard) Stop() error {
+	return g.stopFor(nil)
+}
+
+// stopFor runs the shutdown function on behalf of sig (nil for an
+// ordinary Stop) if nothing has yet. The signal is recorded inside the
+// once, so a signal that arrives while another caller is already
+// shutting down is not reported as the cause.
+func (g *Guard) stopFor(sig os.Signal) error {
 	var ran bool
 	g.once.Do(func() {
 		ran = true
+		if sig != nil {
+			g.sig.Store(sig)
+		}
 		g.err = g.stop()
 	})
 	if ran {
 		return g.err
 	}
 	return nil
+}
+
+// Signal reports the signal whose arrival ran the shutdown function, or
+// nil if it ran for any other reason. Meant for the shutdown function
+// itself, so a process torn down by a signal can say which one before
+// the re-raise ends it.
+func (g *Guard) Signal() os.Signal {
+	s, _ := g.sig.Load().(os.Signal)
+	return s
 }
 
 // Arm installs a handler for the given signals. On receipt it runs the
@@ -67,7 +91,7 @@ func (g *Guard) Arm(sigs ...os.Signal) {
 
 	go func() {
 		s := <-ch
-		_ = g.Stop()
+		_ = g.stopFor(s)
 
 		signal.Stop(ch)
 		signal.Reset(s)

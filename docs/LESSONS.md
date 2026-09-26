@@ -477,3 +477,32 @@ Set `MACOSX_DEPLOYMENT_TARGET`, `CGO_CFLAGS`, and `CGO_LDFLAGS` to the bundle's
 minimum macOS version for desktop builds. Check the result with `otool -l`;
 the `LC_BUILD_VERSION` minimum should match `LSMinimumSystemVersion` in the
 bundle plist.
+
+## Read `exits.log` when a session vanished
+
+A clean exit deletes the session's own `*.server.log` and `*.client.log`, so
+they cannot explain the exits that matter most. Every session start, exit,
+signal, reaped server status, client exit and auto-cleanup removal is recorded
+in `exits.log` beside the sockets (`$TMPDIR/wideboi-<uid>/exits.log`), which no
+cleanup removes. A `server started` with no `server exit` for the same pid is a
+death nothing in the process could record: SIGKILL, a crash, the OOM killer.
+The owner client's `server reaped` line still says how it died. Watch it from a
+terminal outside wideboi: `tail -f "$TMPDIR/wideboi-$(id -u)/exits.log"`.
+
+## Keep scratch `TMPDIR`s short on macOS
+
+A unix socket path has to fit in 104 bytes on darwin. `mktemp -d` returns a long
+`/var/folders/...` path, and a test's `t.TempDir()` under it adds more, so the
+socket e2e tests fail with `bind: invalid argument` rather than running. Nothing
+says they were skipped. For a private `TMPDIR`, use something like
+`mktemp -d /tmp/wbr.XXXX`.
+
+## Nothing may run between `ListenSocket` and `Run`
+
+A socket client admitted after `srv.ListenSocket` but before `srv.Run` starts
+gets two reader loops: one from `admitSocketConn` and another from `Run`'s
+snapshot of `s.transports`. Its messages then split between goroutines, and its
+keystrokes can arrive out of order. Adding a single log-file write in that
+window made `TestUpgradeServerWithAttachedClientE2E` fail 5 runs in 8, because
+the client reconnecting after an upgrade lands exactly there. The race itself is
+still open, so add no work to that window until it is fixed.
