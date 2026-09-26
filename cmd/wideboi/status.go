@@ -19,6 +19,7 @@ type statusOutput struct {
 	PaneStatuses map[int]protocol.PaneStatus      `json:"pane_statuses"`
 	PaneTitles   map[int]string                   `json:"pane_titles"`
 	PaneMetadata map[int]protocol.MsgPaneMetadata `json:"pane_metadata"`
+	SessionCWD   string                           `json:"session_cwd"`
 }
 
 // runStatus connects to the server and outputs the current layout snapshot.
@@ -89,6 +90,7 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 			PaneStatuses: snap.PaneStatuses,
 			PaneTitles:   snap.PaneTitles,
 			PaneMetadata: metas,
+			SessionCWD:   snap.SessionCWD,
 		}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")

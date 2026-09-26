@@ -47,7 +47,7 @@ Each envelope is a protobuf `oneof`. It holds exactly one message.
 
 | Message | Purpose |
 |---|---|
-| `MsgLayoutSnapshot` | Gives the columns, the pane statuses, and the pane titles. |
+| `MsgLayoutSnapshot` | Gives the columns, pane statuses, pane titles, and the directory where the session started. |
 | `MsgPaneCreated` | Tells one client that its `MsgVerb` made a new pane. |
 | `MsgPaneUpdate` | Gives the full contents of one pane. |
 | `MsgPanePatch` | Gives the changed rows of one pane. |

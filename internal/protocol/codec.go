@@ -166,7 +166,7 @@ func MarshalServer(msg any) ([]byte, error) {
 	env := &wirepb.ServerMessage{}
 	switch m := msg.(type) {
 	case MsgLayoutSnapshot:
-		snap := &wirepb.MsgLayoutSnapshot{}
+		snap := &wirepb.MsgLayoutSnapshot{SessionCwd: validUTF8(m.SessionCWD)}
 		for _, c := range m.Columns {
 			snap.Columns = append(snap.Columns, &wirepb.ColumnData{PaneId: int32(c.PaneID), Width: int32(c.Width), Height: int32(c.Height)})
 		}
@@ -297,7 +297,7 @@ func UnmarshalServer(data []byte) (any, error) {
 	switch m := env.Msg.(type) {
 	case *wirepb.ServerMessage_LayoutSnapshot:
 		src := m.LayoutSnapshot
-		var snap MsgLayoutSnapshot
+		snap := MsgLayoutSnapshot{SessionCWD: src.SessionCwd}
 		for _, c := range src.Columns {
 			snap.Columns = append(snap.Columns, ColumnData{PaneID: int(c.PaneId), Width: int(c.Width), Height: int(c.Height)})
 		}

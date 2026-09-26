@@ -16,6 +16,7 @@ import { executeMacro, macroEndsWithEnter, DEFAULT_MACROS, type Macro, type Macr
 import { AVAILABLE_FONTS } from './fonts';
 
 const linkToken = typeof window !== 'undefined' ? consumeLinkToken(window.location, window.history) : '';
+const desktopSession = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('session') : null;
 const STATS_REPORT_MS = 5000;
 const NARROW_VIEW = '(max-width: 480px)';
 
@@ -886,7 +887,12 @@ export class WideboiApp extends LitElement {
   private focusedPaneId = 0;
 
   @state()
-  private wsUrl = typeof window !== 'undefined' ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws` : '';
+  private wsUrl = (() => {
+    if (typeof window === 'undefined') return '';
+    const url = new URL(`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`);
+    if (desktopSession) url.searchParams.set('session', desktopSession);
+    return url.toString();
+  })();
 
   @state()
   private token = linkToken;
@@ -1188,6 +1194,7 @@ export class WideboiApp extends LitElement {
     
     this.setupKeyboard();
     this.setupMouse();
+    if (desktopSession) this.connectClient();
   }
 
   connectedCallback() {
@@ -2566,8 +2573,8 @@ export class WideboiApp extends LitElement {
       ${!this.connected ? html`
         <div class="overlay">
           <div class="connection-box">
-            <h2>Connect to wideboi</h2>
-            <input 
+            <h2>${desktopSession ? 'Session disconnected' : 'Connect to wideboi'}</h2>
+            ${!desktopSession ? html`<input 
               type="text" 
               .value=${this.wsUrl} 
               @input=${this.handleUrlChange}
@@ -2580,8 +2587,8 @@ export class WideboiApp extends LitElement {
               @input=${this.handleTokenChange}
               @keydown=${this.handleKeydown}
               placeholder="Token (optional)"
-            />
-            <button @click=${this.connectClient}>Connect</button>
+            />` : ''}
+            <button @click=${this.connectClient}>${desktopSession ? 'Reconnect' : 'Connect'}</button>
             ${this.errorMsg ? html`<div class="error">${this.errorMsg}</div>` : ''}
           </div>
         </div>

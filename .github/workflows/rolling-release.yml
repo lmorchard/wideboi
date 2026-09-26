@@ -48,9 +48,11 @@ jobs:
     - name: Set version variables
       shell: bash
       run: |
-        echo "VERSION=rolling-${GITHUB_SHA::7}" >> $GITHUB_ENV
-        echo "COMMIT=${GITHUB_SHA::7}" >> $GITHUB_ENV
-        echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+        {
+          echo "VERSION=rolling-${GITHUB_SHA::7}"
+          echo "COMMIT=${GITHUB_SHA::7}"
+          echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        } >> "$GITHUB_ENV"
 
     - name: Build binary
       env:
@@ -64,7 +66,7 @@ jobs:
       run: |
         archive="wideboi_rolling_${{ matrix.goos }}_${{ matrix.goarch }}"
         tar -czf "${archive}.tar.gz" -C bin wideboi
-        echo "ARCHIVE=${archive}.tar.gz" >> $GITHUB_ENV
+        echo "ARCHIVE=${archive}.tar.gz" >> "$GITHUB_ENV"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -72,9 +74,16 @@ jobs:
         name: ${{ env.ARCHIVE }}
         path: ${{ env.ARCHIVE }}
 
+  desktop:
+    name: Build desktop artifacts
+    needs: ci
+    uses: ./.github/workflows/desktop-artifacts.yml
+    with:
+      archive_version: rolling
+
   release:
     name: Publish rolling release
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     steps:
     - name: Download all artifacts
@@ -84,7 +93,7 @@ jobs:
         merge-multiple: true
 
     - name: Generate checksums
-      run: cd dist && sha256sum * > checksums.txt
+      run: cd dist && sha256sum ./* > checksums.txt
 
     # A single moving tag rather than one release per merge, so the
     # releases page does not fill up with every commit to main.

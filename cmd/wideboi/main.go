@@ -84,7 +84,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			opts.globalArgs = append([]string(nil), flagArgs...)
 			break
 		}
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help") {
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help" || arg == "desktop") {
 			opts.subcommand = arg
 			continue
 		}
@@ -172,6 +172,7 @@ func printHelp(w io.Writer) {
                              (124 on timeout). Use split --keep to wait after exit
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
+  wideboi desktop            Open the local desktop session manager (desktop build)
   wideboi version            Display version information
   wideboi help               Show this help text
 
@@ -234,6 +235,10 @@ func main() {
 	}
 	if opts.showHelp {
 		printHelp(os.Stdout)
+		return
+	}
+	if opts.subcommand == "desktop" || opts.subcommand == "" && desktopBuild {
+		fatal(runDesktop())
 		return
 	}
 

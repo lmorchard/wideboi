@@ -31,6 +31,12 @@ import (
 // anything reads it to tell "another server already had the session"
 // from a real failure.
 func spawnServer(socket string, args []string) (conn net.Conn, exited <-chan int, err error) {
+	return spawnServerInDir(socket, args, "")
+}
+
+// spawnServerInDir is the desktop app's variant of spawnServer: its chosen
+// project directory becomes the server's initial cwd and config search root.
+func spawnServerInDir(socket string, args []string, dir string) (conn net.Conn, exited <-chan int, err error) {
 	syscall.ForkLock.RLock()
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err == nil {
@@ -51,6 +57,7 @@ func spawnServer(socket string, args []string) (conn net.Conn, exited <-chan int
 		return nil, nil, fmt.Errorf("locating the wideboi binary: %w", err)
 	}
 	cmd := exec.Command(exe, serverArgs(args)...)
+	cmd.Dir = dir
 	cmd.ExtraFiles = []*os.File{theirs}
 	// Its own session: the host terminal's SIGHUP and ^C belong to the
 	// client, which decides what they mean for the session.

@@ -52,9 +52,11 @@ jobs:
     - name: Set version variables
       shell: bash
       run: |
-        echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-        echo "COMMIT=${GITHUB_SHA::7}" >> $GITHUB_ENV
-        echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_ENV
+        {
+          echo "VERSION=${GITHUB_REF#refs/tags/}"
+          echo "COMMIT=${GITHUB_SHA::7}"
+          echo "DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        } >> "$GITHUB_ENV"
 
     # VERSION/COMMIT/DATE are ?= in the Makefile, so passing them here
     # overrides the `git describe` fallback with the tag being built.
@@ -70,7 +72,7 @@ jobs:
       run: |
         archive="wideboi_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
         tar -czf "${archive}.tar.gz" -C bin wideboi
-        echo "ARCHIVE=${archive}.tar.gz" >> $GITHUB_ENV
+        echo "ARCHIVE=${archive}.tar.gz" >> "$GITHUB_ENV"
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -78,9 +80,15 @@ jobs:
         name: ${{ env.ARCHIVE }}
         path: ${{ env.ARCHIVE }}
 
+  desktop:
+    name: Build desktop artifacts
+    uses: ./.github/workflows/desktop-artifacts.yml
+    with:
+      archive_version: ${{ github.ref_name }}
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     steps:
     - name: Download all artifacts
@@ -90,7 +98,7 @@ jobs:
         merge-multiple: true
 
     - name: Generate checksums
-      run: cd dist && sha256sum * > checksums.txt
+      run: cd dist && sha256sum ./* > checksums.txt
 
     - name: Create Release
       uses: softprops/action-gh-release@v2

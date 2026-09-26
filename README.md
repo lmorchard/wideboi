@@ -146,6 +146,29 @@ All control commands accept `-L <session-name>` and `-s <socket-path>` to target
 
 ---
 
+## Desktop Client (preview)
+
+The Wails desktop app manages local sessions and opens each session in its own
+window. It can attach to sessions started from the CLI. Sessions started from
+the desktop app belong to it: closing a client window leaves them running,
+while quitting offers to stop them or keep them running for later reattachment.
+
+Build and run on macOS:
+
+```bash
+make desktop-app
+open bin/wideboi.app
+```
+
+On Linux, install the GTK4 and WebKitGTK 6.0 development packages required by
+Wails v3, then run `make desktop` and `./bin/wideboi-desktop`. The desktop
+build still supports the regular CLI commands, including `server`, `attach`,
+and `kill-session`. Tagged and rolling GitHub releases include desktop archives
+for macOS and Linux on both Intel/AMD64 and ARM64. The macOS bundle is unsigned
+and unnotarized; macOS 13 or later is required.
+
+---
+
 ## Complete Manual
 
 For complete details on configuration, architecture, key remapping, multi-client sizing, and remote access, read the full manual:

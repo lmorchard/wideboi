@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build run tidy verify-exit smoke golden attach-check traffic print-go-version
+.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-test desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -107,6 +107,26 @@ seam-check:
 
 build: web/dist
 	go build -ldflags "$(LDFLAGS)" -o bin/wideboi ./cmd/wideboi
+
+# The desktop executable also supports the regular CLI/server commands, so
+# sessions it starts use the same artifact and need no second bundled binary.
+# Match the .app's minimum macOS version. Without these CGO flags, the linker
+# targets macOS 11 even when the current SDK compiled Wails objects for 13+.
+ifeq ($(shell uname -s),Darwin)
+DESKTOP_CGO_ENV := MACOSX_DEPLOYMENT_TARGET=13.0 CGO_CFLAGS="-O2 -g -mmacosx-version-min=13.0" CGO_LDFLAGS="-O2 -g -mmacosx-version-min=13.0"
+endif
+desktop: web/dist
+	$(DESKTOP_CGO_ENV) go build -tags desktop,production -ldflags "$(LDFLAGS)" -o bin/wideboi-desktop ./cmd/wideboi
+
+# Desktop-only lifecycle tests also need the native Wails libraries, so CI
+# runs them in a separate job after installing the Linux GUI build packages.
+desktop-test: web/dist
+	$(DESKTOP_CGO_ENV) go test -tags desktop -count=1 ./cmd/wideboi ./internal/desktop
+
+# A macOS bundle for Finder and release archives. Signing and notarization
+# are not configured yet.
+desktop-app: desktop
+	./scripts/package-desktop-macos.sh bin/wideboi-desktop bin/wideboi.app
 
 run: build
 	./bin/wideboi

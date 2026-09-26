@@ -16,10 +16,10 @@ jobs:
         HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
       run: |
         if [[ "$HEAD_COMMIT_MESSAGE" == "[noci]"* ]]; then
-          echo "skip=true" >> $GITHUB_OUTPUT
+          echo "skip=true" >> "$GITHUB_OUTPUT"
           echo "CI skipped due to [noci] in commit message"
         else
-          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Checkout
@@ -83,3 +83,30 @@ jobs:
     - name: Run make check
       if: steps.skip_check.outputs.skip != 'true'
       run: make check
+
+  desktop:
+    name: Desktop lifecycle (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install Linux desktop libraries
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
+
+    - name: Test desktop lifecycle
+      run: make desktop-test

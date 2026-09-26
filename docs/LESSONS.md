@@ -190,6 +190,17 @@ all exit cases report the same PID, compare its start time with the run. End
 an older session and rerun; keep the PID 1 check because it catches real
 orphans.
 
+## Keep desktop manager controls stable between polls
+
+The desktop manager polls the local session list. Replacing the whole list on
+every poll invalidates accessibility targets and can discard a user's focused
+control just as they click it. Only rebuild the list when its data changes.
+Give repeated actions accessible names that include the session name: a row of
+generic “Stop” buttons is ambiguous when other sessions belong to the user.
+The Wails webview did not surface JavaScript `confirm()` reliably in the
+macOS smoke test; use an inline confirmation that names the session before
+sending the stop request.
+
 ## Skip canvas resets when its size has not changed
 
 Assigning `canvas.width` or `canvas.height` clears the bitmap even when the
@@ -457,3 +468,12 @@ differs.
 Under Linux's race detector, a shell printing thousands of lines can still
 be draining after one second. Keep the drain ceiling above that measured
 case, and repeat the kept-pane ordering test under load when changing it.
+
+## Match a macOS desktop bundle's deployment target during CGO builds
+
+The Wails desktop binary linked for macOS 11 by default while its objects
+were built with a newer SDK. The linker emitted a warning for each object.
+Set `MACOSX_DEPLOYMENT_TARGET`, `CGO_CFLAGS`, and `CGO_LDFLAGS` to the bundle's
+minimum macOS version for desktop builds. Check the result with `otool -l`;
+the `LC_BUILD_VERSION` minimum should match `LSMinimumSystemVersion` in the
+bundle plist.
