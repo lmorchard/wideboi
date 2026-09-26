@@ -138,7 +138,7 @@ export class WideboiApp extends LitElement {
 
     .toolbar {
       background: #252526;
-      border-bottom: 1px solid #3c3c3c;
+      border-top: 1px solid #3c3c3c;
       padding: 0.4rem 0.6rem;
       display: flex;
       flex-wrap: wrap;
@@ -192,6 +192,7 @@ export class WideboiApp extends LitElement {
       background: #252526;
       color: #ccc;
       font: 13px sans-serif;
+      border-top: 1px solid #3c3c3c;
     }
     .mobile-bar select { flex: 1; min-width: 0; }
     .mobile-bar button {
@@ -209,6 +210,19 @@ export class WideboiApp extends LitElement {
       font-size: 14px;
     }
     .mobile-bar button:disabled, .mobile-dock button:disabled { opacity: 0.4; }
+    .mobile-zoom {
+      display: flex;
+      align-items: center;
+      gap: 0.2rem;
+    }
+    .mobile-zoom button {
+      min-width: 32px;
+      padding: 0 0.35rem;
+    }
+    .mobile-zoom .zoom-reset {
+      min-width: 48px;
+      font-size: 12px;
+    }
     .mobile-dock {
       flex-direction: column;
       gap: 0.3rem;
@@ -317,10 +331,17 @@ export class WideboiApp extends LitElement {
       z-index: 30;
       display: flex;
       flex-direction: column;
-      max-height: 50vh;
+      max-height: 70vh;
       overflow-y: auto;
       padding: 0.5rem;
-      gap: 0.4rem;
+      gap: 0.5rem;
+    }
+    .mobile-keys-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid #3c3c3c;
     }
     .mobile-macros-header {
       display: flex;
@@ -336,17 +357,30 @@ export class WideboiApp extends LitElement {
     }
     .mobile-macros-header .sheet-actions {
       display: flex;
-      gap: 0.4rem;
+      gap: 0.5rem;
       align-items: center;
     }
     .mobile-macros-header button {
-      padding: 0.2rem 0.5rem;
-      font-size: 12px;
+      min-height: 40px;
+      min-width: 44px;
+      padding: 0 0.8rem;
+      font-size: 14px;
+      font-weight: 500;
       background: #3c3c3c;
       color: #eee;
       border: 1px solid #555;
-      border-radius: 3px;
+      border-radius: 4px;
       cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .mobile-macros-header button:active {
+      background: #4c4c4c;
+    }
+    .mobile-macros-header button.close-btn {
+      font-size: 16px;
+      padding: 0 0.9rem;
     }
     .mobile-macros-grid {
       display: grid;
@@ -510,7 +544,8 @@ export class WideboiApp extends LitElement {
       color: #79c0ff;
     }
     .pane-strip.mobile { overflow: hidden; }
-    .pane-strip.mobile wideboi-pane { width: 100% !important; border: 0; }
+    .pane-strip.mobile wideboi-pane { width: 100% !important; border: 0; box-shadow: none !important; }
+    .pane-strip.mobile wideboi-pane::after { box-shadow: none !important; }
     .pane-strip.mobile wideboi-pane:not([focused]) { display: none; }
     @media (max-width: 480px) {
       .toolbar { display: none; }
@@ -760,6 +795,7 @@ export class WideboiApp extends LitElement {
     }
     return DEFAULT_MACROS;
   })();
+  @state() private paneZooms = new Map<number, number>();
   @state() private searchState: SearchState | null = null;
   private pendingNav: 0 | 1 | -1 = 0;
   private cardFirst = 0;
@@ -1092,6 +1128,7 @@ export class WideboiApp extends LitElement {
     this.mobileInputMode = 'draft';
     this.showMacros = false;
     this.showMacroEditor = false;
+    this.paneZooms.clear();
     this.pendingFocusId = 0;
     this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
@@ -1209,6 +1246,7 @@ export class WideboiApp extends LitElement {
           break;
         case 'paneClosed': {
           const closedId = message.msg.value.paneId;
+          this.paneZooms.delete(closedId);
           const previous = this.panePositions();
           this.panes.close(closedId);
           const previousColumns = this.columns;
@@ -1564,6 +1602,65 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  get currentZoom(): number {
+    return this.zoomForPane(this.focusedPaneId);
+  }
+
+  zoomForPane(paneId: number): number {
+    const zoom = this.paneZooms.get(paneId);
+    if (zoom !== undefined) return zoom;
+    if (this.mobile) {
+      return this.minZoomForPane(paneId);
+    }
+    return 1.0;
+  }
+
+  minZoomForPane(paneId: number): number {
+    const pane = this.panes.get(paneId);
+    if (!pane || !this.paneStrip) return 0.5;
+    const termWidth = pane.cols * this.cellWidth;
+    const termHeight = pane.rows * CELL_HEIGHT;
+    const viewWidth = Math.max(1, (this.paneStrip.clientWidth || window.innerWidth) - 2);
+    const viewHeight = Math.max(1, (this.paneStrip.clientHeight || (window.innerHeight - 100)) - 2);
+    if (termWidth <= 0 || termHeight <= 0) return 0.5;
+    const fitX = viewWidth / termWidth;
+    const fitY = viewHeight / termHeight;
+    const fitZoom = Math.min(fitX, fitY);
+    return Math.max(0.25, Math.min(1.0, Math.floor(fitZoom * 100) / 100));
+  }
+
+  get currentMinZoom(): number {
+    return this.minZoomForPane(this.focusedPaneId);
+  }
+
+  private stepZoom(delta: number) {
+    if (!this.focusedPaneId) return;
+    const current = this.currentZoom;
+    const minZoom = this.currentMinZoom;
+    const next = Math.max(minZoom, Math.min(2.0, Math.round((current + delta) * 100) / 100));
+    if (next !== current) {
+      this.paneZooms.set(this.focusedPaneId, next);
+      this.requestUpdate();
+    }
+  }
+
+  private resetZoom() {
+    if (!this.focusedPaneId) return;
+    const minZoom = this.currentMinZoom;
+    const current = this.currentZoom;
+    const target = current !== minZoom ? minZoom : 1.0;
+    this.paneZooms.set(this.focusedPaneId, target);
+    this.requestUpdate();
+  }
+
+  private handleZoomChange(e: CustomEvent<{ paneId: number; zoom: number }>) {
+    const { paneId, zoom } = e.detail;
+    if (paneId && zoom) {
+      this.paneZooms.set(paneId, zoom);
+      this.requestUpdate();
+    }
+  }
+
   private moveMobilePane(delta: number) {
     const index = this.activePanes.indexOf(this.focusedPaneId);
     const next = this.activePanes[index + delta];
@@ -1814,50 +1911,7 @@ export class WideboiApp extends LitElement {
     if (layout) this.cardFirst = layout.first;
     const placements = new Map(layout?.placements.map(p => [p.paneId, p]));
     return html`
-      ${this.connected ? html`
-        <div class="toolbar">
-          <label for="focus-pane">Focus Pane:</label>
-          <select id="focus-pane" @change=${this.handlePaneSelect}>
-            ${repeat(this.activePanes, id => id, id => html`
-              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
-            `)}
-          </select>
-          <label for="layout-mode">Layout:</label>
-          <select id="layout-mode" aria-label="Layout" @change=${this.handleLayoutSelect}>
-            <option value="scroll" .selected=${!cards}>Scroll</option>
-            <option value="cards" .selected=${cards}>Cards</option>
-          </select>
-          <label for="pane-width">Pane width:</label>
-          <input id="pane-width" aria-label="Pane width" type="number" min="20" max="4096"
-            .value=${String(this.displayWidths[this.focusedPaneId] ?? '')} @change=${this.handleWidthInput}>
-          <label><input type="checkbox" aria-label="Follow PTY widths" .checked=${this.followPTY}
-            @change=${() => { this.followPTY = !this.followPTY; if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width])); }}>Follow PTY</label>
-          <label for="prefix-key">Prefix:</label>
-          <select id="prefix-key" aria-label="Prefix key" @change=${this.handlePrefixChange}>
-            <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
-            <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
-            <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
-          </select>
-          <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
-          <button class="claim-size-btn search-btn" @click=${this.startSearch} title="Search pane history (/ or Ctrl+F)">Search</button>
-          <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
-          <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
-        </div>
-        <div class="mobile-bar">
-          <button aria-label="Previous pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) <= 0}
-            @click=${() => this.moveMobilePane(-1)}>‹</button>
-          <select aria-label="Mobile pane" @change=${this.handlePaneSelect}>
-            ${repeat(this.activePanes, id => id, id => html`
-              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
-            `)}
-          </select>
-          <button aria-label="Next pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) >= this.activePanes.length - 1}
-            @click=${() => this.moveMobilePane(1)}>›</button>
-        </div>
-      ` : ''}
       <div class="terminal-shell">
-        <div class="title">${this.paneTitles[this.focusedPaneId] ||
-          (this.focusedPaneId ? `Pane ${this.focusedPaneId}` : '')}</div>
         <div class=${this.mobile ? 'pane-strip mobile' : cards ? 'pane-strip cards' : 'pane-strip'}>
           ${repeat(this.columns, column => column.paneId, column => {
             const placement = placements.get(column.paneId);
@@ -1872,13 +1926,18 @@ export class WideboiApp extends LitElement {
               .running=${this.connected}
               .cellWidth=${this.cellWidth}
               .displayCols=${displayWidth(column)}
+              .zoom=${this.zoomForPane(column.paneId)}
+              .minZoom=${this.minZoomForPane(column.paneId)}
               .stats=${this.stats}
+              @zoom-change=${this.handleZoomChange}
               aria-label=${`Pane ${column.paneId}`}
             ></wideboi-pane>
           `; })}
           ${cards && layout?.hiddenLeft ? html`<span class="card-count left">+${layout.hiddenLeft}</span>` : ''}
           ${cards && layout?.hiddenRight ? html`<span class="card-count right">+${layout.hiddenRight}</span>` : ''}
         </div>
+        <div class="title">${this.paneTitles[this.focusedPaneId] ||
+          (this.focusedPaneId ? `Pane ${this.focusedPaneId}` : '')}</div>
         ${this.searchState ? html`
           <div class="status search-bar">
             <span>search /</span>
@@ -1944,6 +2003,53 @@ export class WideboiApp extends LitElement {
         `}
       </div>
       ${this.connected ? html`
+        <div class="toolbar">
+          <label for="focus-pane">Focus Pane:</label>
+          <select id="focus-pane" @change=${this.handlePaneSelect}>
+            ${repeat(this.activePanes, id => id, id => html`
+              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
+            `)}
+          </select>
+          <label for="layout-mode">Layout:</label>
+          <select id="layout-mode" aria-label="Layout" @change=${this.handleLayoutSelect}>
+            <option value="scroll" .selected=${!cards}>Scroll</option>
+            <option value="cards" .selected=${cards}>Cards</option>
+          </select>
+          <label for="pane-width">Pane width:</label>
+          <input id="pane-width" aria-label="Pane width" type="number" min="20" max="4096"
+            .value=${String(this.displayWidths[this.focusedPaneId] ?? '')} @change=${this.handleWidthInput}>
+          <label><input type="checkbox" aria-label="Follow PTY widths" .checked=${this.followPTY}
+            @change=${() => { this.followPTY = !this.followPTY; if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width])); }}>Follow PTY</label>
+          <label for="prefix-key">Prefix:</label>
+          <select id="prefix-key" aria-label="Prefix key" @change=${this.handlePrefixChange}>
+            <option value="ctrl+b" .selected=${this.prefixSetting === 'ctrl+b'}>Ctrl+B</option>
+            <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
+            <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
+          </select>
+          <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
+          <button class="claim-size-btn search-btn" @click=${this.startSearch} title="Search pane history (/ or Ctrl+F)">Search</button>
+          <button class="help-btn" @click=${this.toggleHelp} aria-label="Help">Help (?)</button>
+          <span class="tip">(Tip: ${this.keyRouter.prefixLabel} then arrows or h/l to switch, ? for help)</span>
+        </div>
+        <div class="mobile-bar">
+          <button aria-label="Previous pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) <= 0}
+            @click=${() => this.moveMobilePane(-1)}>‹</button>
+          <select aria-label="Mobile pane" @change=${this.handlePaneSelect}>
+            ${repeat(this.activePanes, id => id, id => html`
+              <option value=${id} .selected=${id === this.focusedPaneId}>[${id}] ${this.paneTitles[id] || 'Terminal'}</option>
+            `)}
+          </select>
+          <div class="mobile-zoom">
+            <button aria-label="Zoom out" ?disabled=${this.currentZoom <= this.currentMinZoom}
+              @click=${() => this.stepZoom(-0.25)}>−</button>
+            <button class="zoom-reset" aria-label="Reset zoom"
+              @click=${() => this.resetZoom()}>${Math.round(this.currentZoom * 100)}%</button>
+            <button aria-label="Zoom in" ?disabled=${this.currentZoom >= 2.0}
+              @click=${() => this.stepZoom(0.25)}>+</button>
+          </div>
+          <button aria-label="Next pane" ?disabled=${this.activePanes.indexOf(this.focusedPaneId) >= this.activePanes.length - 1}
+            @click=${() => this.moveMobilePane(1)}>›</button>
+        </div>
         <div class="mobile-dock">
           <div class="mobile-input-bar">
             <div class="mobile-mode-toggle" role="radiogroup" aria-label="Input mode">
@@ -1994,41 +2100,43 @@ export class WideboiApp extends LitElement {
               aria-expanded=${this.showMacros}
               @click=${() => { this.showMacros = !this.showMacros; }}>Macros</button>
           </div>
-          <div class="mobile-keys" aria-label="Terminal keys">
-            <button aria-label="Escape key" @click=${() => this.sendMobileKey('Escape', 'Escape')}>Esc</button>
-            <button aria-label="Tab key" @click=${() => this.sendMobileKey('Tab', 'Tab')}>Tab</button>
-            <button aria-label="Control modifier" aria-pressed=${this.mobileCtrl}
-              @click=${() => { this.mobileCtrl = !this.mobileCtrl; }}>Ctrl</button>
-            <button aria-label="Left arrow key" @click=${() => this.sendMobileKey('ArrowLeft', 'ArrowLeft')}>←</button>
-            <button aria-label="Down arrow key" @click=${() => this.sendMobileKey('ArrowDown', 'ArrowDown')}>↓</button>
-            <button aria-label="Up arrow key" @click=${() => this.sendMobileKey('ArrowUp', 'ArrowUp')}>↑</button>
-            <button aria-label="Right arrow key" @click=${() => this.sendMobileKey('ArrowRight', 'ArrowRight')}>→</button>
-            <button aria-label="Backspace key" @click=${() => this.sendMobileKey('Backspace', 'Backspace')}>⌫</button>
-            <button aria-label="Enter key" @click=${() => this.sendMobileKey('Enter', 'Enter')}>↵</button>
-          </div>
-          ${this.mobileCtrl ? html`
-            <div class="mobile-ctrl-palette" aria-label="Ctrl shortcuts">
-              <button aria-label="C key" @click=${() => this.sendMobileKey('c', 'KeyC')}>^C</button>
-              <button aria-label="D key" @click=${() => this.sendMobileKey('d', 'KeyD')}>^D</button>
-              <button aria-label="Z key" @click=${() => this.sendMobileKey('z', 'KeyZ')}>^Z</button>
-              <button aria-label="R key" @click=${() => this.sendMobileKey('r', 'KeyR')}>^R</button>
-              <button aria-label="L key" @click=${() => this.sendMobileKey('l', 'KeyL')}>^L</button>
-              <button aria-label="A key" @click=${() => this.sendMobileKey('a', 'KeyA')}>^A</button>
-              <button aria-label="E key" @click=${() => this.sendMobileKey('e', 'KeyE')}>^E</button>
-              <button aria-label="W key" @click=${() => this.sendMobileKey('w', 'KeyW')}>^W</button>
-              <button aria-label="K key" @click=${() => this.sendMobileKey('k', 'KeyK')}>^K</button>
-              <button aria-label="U key" @click=${() => this.sendMobileKey('u', 'KeyU')}>^U</button>
-            </div>
-          ` : ''}
         </div>
         ${this.showMacros ? html`
           <div class="mobile-macros-sheet" role="region" aria-label="Macros list">
             <div class="mobile-macros-header">
-              <span>Input Macros</span>
+              <span>Keys & Macros</span>
               <div class="sheet-actions">
                 <button aria-label="Edit macros" @click=${() => { this.showMacroEditor = true; this.showMacros = false; }}>Edit</button>
-                <button aria-label="Close macros" @click=${() => { this.showMacros = false; }}>✕</button>
+                <button class="close-btn" aria-label="Close macros" @click=${() => { this.showMacros = false; }}>✕</button>
               </div>
+            </div>
+            <div class="mobile-keys-section">
+              <div class="mobile-keys" aria-label="Terminal keys">
+                <button aria-label="Escape key" @click=${() => this.sendMobileKey('Escape', 'Escape')}>Esc</button>
+                <button aria-label="Tab key" @click=${() => this.sendMobileKey('Tab', 'Tab')}>Tab</button>
+                <button aria-label="Control modifier" aria-pressed=${this.mobileCtrl}
+                  @click=${() => { this.mobileCtrl = !this.mobileCtrl; }}>Ctrl</button>
+                <button aria-label="Left arrow key" @click=${() => this.sendMobileKey('ArrowLeft', 'ArrowLeft')}>←</button>
+                <button aria-label="Down arrow key" @click=${() => this.sendMobileKey('ArrowDown', 'ArrowDown')}>↓</button>
+                <button aria-label="Up arrow key" @click=${() => this.sendMobileKey('ArrowUp', 'ArrowUp')}>↑</button>
+                <button aria-label="Right arrow key" @click=${() => this.sendMobileKey('ArrowRight', 'ArrowRight')}>→</button>
+                <button aria-label="Backspace key" @click=${() => this.sendMobileKey('Backspace', 'Backspace')}>⌫</button>
+                <button aria-label="Enter key" @click=${() => this.sendMobileKey('Enter', 'Enter')}>↵</button>
+              </div>
+              ${this.mobileCtrl ? html`
+                <div class="mobile-ctrl-palette" aria-label="Ctrl shortcuts">
+                  <button aria-label="C key" @click=${() => this.sendMobileKey('c', 'KeyC')}>^C</button>
+                  <button aria-label="D key" @click=${() => this.sendMobileKey('d', 'KeyD')}>^D</button>
+                  <button aria-label="Z key" @click=${() => this.sendMobileKey('z', 'KeyZ')}>^Z</button>
+                  <button aria-label="R key" @click=${() => this.sendMobileKey('r', 'KeyR')}>^R</button>
+                  <button aria-label="L key" @click=${() => this.sendMobileKey('l', 'KeyL')}>^L</button>
+                  <button aria-label="A key" @click=${() => this.sendMobileKey('a', 'KeyA')}>^A</button>
+                  <button aria-label="E key" @click=${() => this.sendMobileKey('e', 'KeyE')}>^E</button>
+                  <button aria-label="W key" @click=${() => this.sendMobileKey('w', 'KeyW')}>^W</button>
+                  <button aria-label="K key" @click=${() => this.sendMobileKey('k', 'KeyK')}>^K</button>
+                  <button aria-label="U key" @click=${() => this.sendMobileKey('u', 'KeyU')}>^U</button>
+                </div>
+              ` : ''}
             </div>
             <div class="mobile-macros-grid">
               ${this.macros.map(macro => html`
@@ -2046,7 +2154,7 @@ export class WideboiApp extends LitElement {
           <div class="macro-editor-dialog" @click=${(e: Event) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="macro-editor-title">
             <div class="mobile-macros-header">
               <span id="macro-editor-title">Configure Macros</span>
-              <button aria-label="Close editor" @click=${() => { this.showMacroEditor = false; }}>✕</button>
+              <button class="close-btn" aria-label="Close editor" @click=${() => { this.showMacroEditor = false; }}>✕</button>
             </div>
             <div class="macro-editor-list" aria-label="Configured macros">
               ${this.macros.map((m, idx) => html`
