@@ -3,6 +3,7 @@ import { create, toBinary } from '@bufbuild/protobuf';
 import { WideboiClient } from './client';
 import { RenderStats } from './stats';
 import { MsgPaneUpdateSchema, ServerMessageSchema } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { VERSION_PROTOCOL } from './version';
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -19,7 +20,7 @@ it('keeps the credential out of the browser WebSocket URL', () => {
 
   expect(opened).toEqual([{
     url: 'ws://localhost:8080/ws',
-    protocols: ['wideboi.v14', 'wideboi-token.c2VjcmV0MTIz'],
+    protocols: [VERSION_PROTOCOL, 'wideboi-token.c2VjcmV0MTIz'],
   }]);
   expect(JSON.stringify(opened[0].url)).not.toContain('secret123');
 });
@@ -31,7 +32,7 @@ it('always offers the wire version, even without a token', () => {
   }
   vi.stubGlobal('WebSocket', FakeWebSocket);
   new WideboiClient('ws://localhost:8080/ws').connect();
-  expect(offered).toEqual(['wideboi.v14']);
+  expect(offered).toEqual([VERSION_PROTOCOL]);
 });
 
 it('refuses an opened connection that selected another protocol', () => {
@@ -60,7 +61,7 @@ it('refuses an opened connection that selected another protocol', () => {
 it('times protobuf decode per message only when given stats', () => {
   class FakeWebSocket {
     onmessage?: (event: { data: ArrayBuffer }) => void;
-    protocol = 'wideboi.v14';
+    protocol = VERSION_PROTOCOL;
     binaryType = 'blob';
     close = vi.fn();
   }

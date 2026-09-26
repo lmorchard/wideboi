@@ -286,19 +286,20 @@ func TestServerAutoCleanup(t *testing.T) {
 		}
 
 		deadline := time.Now().Add(3 * time.Second)
-		var conn net.Conn
-		var err error
+		var ready bool
 		for time.Now().Before(deadline) {
-			conn, err = net.Dial("unix", sockPath)
-			if err == nil {
-				conn.Close()
-				break
+			if data, err := os.ReadFile(filepath.Join(dir, "exits.log")); err == nil && strings.Contains(string(data), `msg="server started"`) {
+				if conn, err := net.Dial("unix", sockPath); err == nil {
+					conn.Close()
+					ready = true
+					break
+				}
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-		if err != nil {
+		if !ready {
 			_ = cmd.Process.Kill()
-			t.Fatalf("failed to dial child server: %v", err)
+			t.Fatal("child server not ready")
 		}
 
 		// Send SIGTERM to the child process

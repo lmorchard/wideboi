@@ -135,6 +135,10 @@ func AdoptPane(id int, pty *ptyx.Pane, grid term.Grid, cols, rows int, keep bool
 // ID returns the pane's unique identifier.
 func (p *Pane) ID() int { return p.id }
 
+// RawBytes represents unencoded bytes (such as pasted text) destined for
+// the child process, queued alongside key and mouse events.
+type RawBytes []byte
+
 // Start begins pumping bytes between the child and the emulator.
 func (p *Pane) Start(onExit func()) {
 	if p.pty == nil {
@@ -206,6 +210,8 @@ func (p *Pane) Start(onExit func()) {
 					p.grid.SendKey(ev)
 				case uv.MouseEvent:
 					p.grid.SendMouse(ev)
+				case RawBytes:
+					_, _ = p.Write(ev)
 				}
 			case <-p.closed:
 				return
@@ -220,6 +226,20 @@ func (p *Pane) SendKey(k uv.KeyEvent) {
 	case p.input <- k:
 	default:
 		p.dropped.Add(1)
+	}
+}
+
+// SendBytes queues raw input bytes (e.g. paste) for the pane's child.
+// Like SendKey, it queues into p.input so calling it never blocks under s.mu.
+func (p *Pane) SendBytes(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	cp := append([]byte(nil), b...)
+	select {
+	case p.input <- RawBytes(cp):
+	default:
+		p.dropped.Add(uint64(len(b)))
 	}
 }
 

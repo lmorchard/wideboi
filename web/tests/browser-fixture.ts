@@ -3,6 +3,8 @@ import {
   ClientMessageSchema, ServerMessageSchema, type ServerMessage,
 } from '../src/gen/internal/protocol/wirepb/wideboi_pb';
 
+export { VERSION_PROTOCOL } from '../src/version';
+
 export function serverBytes(msg: NonNullable<ServerMessage['msg']>): Uint8Array {
   return toBinary(ServerMessageSchema, create(ServerMessageSchema, { msg }));
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
@@ -69,54 +68,87 @@ func (c *Client) SearchEdit(text string, backspace bool) {
 
 func (c *Client) SearchCommit(ctx context.Context) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var paneID int
 	if s := c.search; s != nil && s.input {
 		s.input = false
 		s.pending = 0
 		s.waiting = true
-		if !c.transport.SendClient(ctx, protocol.MsgHistoryRequest{PaneID: s.paneID}) {
-			s.waiting = false
+		paneID = s.paneID
+	}
+	c.mu.Unlock()
+	if paneID > 0 {
+		if !c.transport.SendClient(ctx, protocol.MsgHistoryRequest{PaneID: paneID}) {
+			c.mu.Lock()
+			if s := c.search; s != nil && s.paneID == paneID {
+				s.waiting = false
+			}
+			c.mu.Unlock()
 		}
 	}
 }
 
 func (c *Client) SearchNavigate(ctx context.Context, direction int) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	var paneID int
 	if s := c.search; s != nil && !s.input && !s.waiting {
 		s.pending = direction
 		s.waiting = true
-		if !c.transport.SendClient(ctx, protocol.MsgHistoryRequest{PaneID: s.paneID}) {
-			s.waiting = false
+		paneID = s.paneID
+	}
+	c.mu.Unlock()
+	if paneID > 0 {
+		if !c.transport.SendClient(ctx, protocol.MsgHistoryRequest{PaneID: paneID}) {
+			c.mu.Lock()
+			if s := c.search; s != nil && s.paneID == paneID {
+				s.waiting = false
+			}
+			c.mu.Unlock()
 		}
 	}
 }
 
 func (c *Client) SearchEnd(ctx context.Context, restore, live bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	s := c.search
 	if s == nil {
+		c.mu.Unlock()
 		return
 	}
+	var msg *protocol.MsgScroll
 	if restore {
-		c.scrollSearchToLocked(ctx, s, s.priorOffset, s.priorHistoryLen, s.priorOffset > 0)
+		msg = &protocol.MsgScroll{
+			PaneID:        s.paneID,
+			SetAbsolute:   true,
+			Offset:        s.priorOffset,
+			AnchorHistory: s.priorOffset > 0,
+			HistoryLen:    s.priorHistoryLen,
+		}
 	} else if live {
-		c.scrollSearchToLocked(ctx, s, 0, 0, false)
+		msg = &protocol.MsgScroll{
+			PaneID:        s.paneID,
+			SetAbsolute:   true,
+			Offset:        0,
+			AnchorHistory: false,
+			HistoryLen:    0,
+		}
 	}
 	c.search = nil
+	c.mu.Unlock()
+	if msg != nil {
+		c.transport.SendClient(ctx, *msg)
+	}
 }
 
-func (c *Client) applyHistoryLocked(snapshot protocol.MsgHistorySnapshot) {
+func (c *Client) applyHistoryLocked(snapshot protocol.MsgHistorySnapshot) *protocol.MsgScroll {
 	s := c.search
 	if s == nil || s.paneID != snapshot.PaneID || s.input || !s.waiting {
-		return
+		return nil
 	}
 	s.waiting = false
 	s.matches = findHistoryMatches(snapshot.Rows, s.query)
 	if len(s.matches) == 0 {
 		s.selected = -1
-		return
+		return nil
 	}
 	if s.selected < 0 || s.pending == 0 {
 		s.selected = len(s.matches) - 1
@@ -126,14 +158,13 @@ func (c *Client) applyHistoryLocked(snapshot protocol.MsgHistorySnapshot) {
 	match := s.matches[s.selected]
 	target := snapshot.ScrollbackLen - match.row
 	target = max(0, min(target, snapshot.ScrollbackLen))
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	c.scrollSearchToLocked(ctx, s, target, snapshot.ScrollbackLen, true)
-}
-
-func (c *Client) scrollSearchToLocked(ctx context.Context, s *searchState, target, historyLen int, anchor bool) {
-	c.transport.SendClient(ctx, protocol.MsgScroll{PaneID: s.paneID, SetAbsolute: true, Offset: target,
-		AnchorHistory: anchor, HistoryLen: historyLen})
+	return &protocol.MsgScroll{
+		PaneID:        s.paneID,
+		SetAbsolute:   true,
+		Offset:        target,
+		AnchorHistory: true,
+		HistoryLen:    snapshot.ScrollbackLen,
+	}
 }
 
 func (c *Client) searchStatusLocked() string {

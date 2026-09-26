@@ -1,23 +1,24 @@
 import { test, expect } from '@playwright/test';
+import { VERSION_PROTOCOL } from './browser-fixture';
 
 test('desktop session window connects to its named local session automatically', async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
     };
-  });
+  }, VERSION_PROTOCOL);
   await page.goto('/?session=project#token=local-secret');
   await expect.poll(() => page.evaluate(() => window.testSockets.length)).toBe(1);
   const connection = await page.evaluate(() => ({
@@ -25,7 +26,7 @@ test('desktop session window connects to its named local session automatically',
     protocols: window.testSockets[0].protocols,
   }));
   expect(connection.url).toBe('ws://127.0.0.1:4179/ws?session=project');
-  expect(connection.protocols).toEqual(['wideboi.v14', 'wideboi-token.bG9jYWwtc2VjcmV0']);
+  expect(connection.protocols).toEqual([VERSION_PROTOCOL, 'wideboi-token.bG9jYWwtc2VjcmV0']);
   await expect(page.getByRole('button', { name: 'Reconnect' })).toBeVisible();
   await expect(page.getByPlaceholder('Token (optional)')).toHaveCount(0);
   await page.evaluate(() => window.testSockets[0].open());
@@ -36,7 +37,7 @@ test('desktop session window connects to its named local session automatically',
 });
 
 test('browser connects, renders, types, resizes, reconnects, and closes a pane', async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.drawnText = [];
     const original = CanvasRenderingContext2D.prototype.fillText;
@@ -49,17 +50,17 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -115,22 +116,22 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
 });
 
 test('pane elements keep their widths and browser scrolling reveals focus', async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
   await page.setViewportSize({ width: 500, height: 420 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -216,22 +217,22 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
 // interval (STATS_REPORT_MS), so the test does not wait it out.
 test('?stats=1 shows the stats overlay and reports periodically', async ({ page }) => {
   await page.clock.install();
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
   const reports = [];
   page.on('console', msg => {
     if (msg.type() === 'info' && msg.text().startsWith('[wideboi stats]')) reports.push(msg.text());
@@ -262,20 +263,20 @@ test('?stats=1 shows the stats overlay and reports periodically', async ({ page 
 });
 
 test('without ?stats=1 there is no stats overlay', async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send() {}
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
     };
-  });
+  }, VERSION_PROTOCOL);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
@@ -284,22 +285,22 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
 });
 
 test('client handles prefix, double prefix, column focus, layout switch, and help overlay', async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
