@@ -102,7 +102,7 @@ fmt-check:
 # seam-check enforces the spec's "internal/client must not import
 # internal/server" invariant in both directions, with Plan 1's existing
 # crossings allowlisted in the script so it catches the next one.
-seam-check:
+seam-check: web/dist
 	./scripts/seam-check.sh
 
 build: web/dist

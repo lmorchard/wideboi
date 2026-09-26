@@ -116,6 +116,8 @@ https://127.0.0.1:8080/#token=<generated-token>
 
 By default, wideboi generates an in-memory ephemeral self-signed TLS certificate. You can provide custom certificates with `--tls-cert <path> --tls-key <path>`, or disable TLS with `--disable-tls` if running behind a reverse proxy.
 
+You can also start, stop, or query the web server on a running session at any time with `wideboi web start`, `wideboi web stop`, and `wideboi web status`.
+
 You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
 
 ---
@@ -140,6 +142,10 @@ wideboi capture $PANE_ID
 
 # Close the pane
 wideboi close $PANE_ID
+
+# Start or stop web access on a running session
+wideboi web start
+wideboi web stop
 ```
 
 All control commands accept `-L <session-name>` and `-s <socket-path>` to target specific sessions. `wait` exits with the pane process's exit code; the others exit 0 on success and 1 on error. `status --json` reports pane statuses by name (`idle`, `working`, `needs_input`, `done`, `failed`) and, for kept panes, `exited` and `exit_code`. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.

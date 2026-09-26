@@ -3,15 +3,12 @@ package main
 
 import (
 	"context"
-	crypto_rand "crypto/rand"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,7 +75,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -173,6 +170,8 @@ func printHelp(w io.Writer) {
   wideboi [flags] upgrade-server <binary-path>
                              Upgrade the running server in-place using a new binary
                              without closing panes or dropping processes
+  wideboi [flags] web [status|start|stop]
+                             Manage session web server (query status, start, or stop)
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi desktop            Open the local desktop session manager (desktop build)
@@ -289,6 +288,8 @@ func main() {
 		code, err := runWait(cfg, opts.subcommandArgs, os.Stderr)
 		fatal(err)
 		os.Exit(code)
+	case "web":
+		fatal(runWeb(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
 	default:
 		fatal(run(cfg, bindings))
 	}
@@ -422,73 +423,48 @@ func runServer(cfg config.Config, ownerFD int) error {
 
 	srv.ListenSocket(ctx, sl)
 
-	var httpSrv *http.Server
+	distFS, err := web.DistFS()
+	if err != nil {
+		return fmt.Errorf("failed to load web dist: %w", err)
+	}
+
+	srv.InitWebServer(server.WebServerConfig{
+		SocketPath: cfg.Socket,
+		ListenAddr: cfg.Websocket,
+		Token:      cfg.WebsocketToken,
+		TLSEnabled: cfg.TLSEnabled,
+		TLSCert:    cfg.TLSCert,
+		TLSKey:     cfg.TLSKey,
+		AssetFS:    distFS,
+	})
+
 	if cfg.Websocket != "" {
-		generatedToken := false
-		if cfg.WebsocketToken == "" {
-			b := make([]byte, 16)
-			if _, err := crypto_rand.Read(b); err != nil {
-				return fmt.Errorf("generate websocket token: %w", err)
-			}
-			cfg.WebsocketToken = fmt.Sprintf("%x", b)
-			generatedToken = true
-		}
-
-		mux := http.NewServeMux()
-		srv.ListenWebSocket(ctx, mux, cfg.WebsocketToken)
-
-		distFS, err := web.DistFS()
-		if err != nil {
-			return fmt.Errorf("failed to load web dist: %w", err)
-		}
-		mux.Handle("/", http.FileServer(distFS))
-
-		httpSrv = &http.Server{
-			Handler: mux,
-		}
-
-		wsListener, err := net.Listen("tcp", cfg.Websocket)
+		resp, err := srv.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+			Action:     protocol.WebServerActionStart,
+			Addr:       cfg.Websocket,
+			Token:      cfg.WebsocketToken,
+			DisableTLS: !cfg.TLSEnabled,
+		})
 		if err != nil {
 			slog.Error("cannot listen on websocket address", "err", err)
 			return err
 		}
-		if cfg.TLSEnabled {
-			tlsConfig, err := transport.LoadOrGenerateTLSConfig(cfg.TLSCert, cfg.TLSKey, cfg.Websocket)
-			if err != nil {
-				_ = wsListener.Close()
-				slog.Error("configure tls failed", "err", err)
-				return fmt.Errorf("configure tls: %w", err)
+		if cfg.WebsocketToken != "" {
+			host := resp.Addr
+			if tcpAddr, err := net.ResolveTCPAddr("tcp", resp.Addr); err == nil && (tcpAddr.IP.IsLoopback() || tcpAddr.IP.IsUnspecified()) {
+				host = fmt.Sprintf("127.0.0.1:%d", tcpAddr.Port)
 			}
-			wsListener = tls.NewListener(wsListener, tlsConfig)
-		}
-		warnIfWebClientExposed(os.Stderr, slog.Default(), wsListener.Addr(), cfg.TLSEnabled)
-		if generatedToken {
-			if err := writeWebToken(cfg.Socket, cfg.WebsocketToken); err != nil {
-				_ = wsListener.Close()
-				return fmt.Errorf("save generated web token: %w", err)
+			scheme := "https"
+			if !resp.TLSEnabled {
+				scheme = "http"
 			}
-			defer os.Remove(webTokenPath(cfg.Socket))
+			fmt.Fprintf(os.Stderr, "wideboi: web client listening at %s://%s/ (token configured)\n", scheme, host)
 		} else {
-			// A prior server may have died without removing its generated token.
-			_ = os.Remove(webTokenPath(cfg.Socket))
+			fmt.Fprintf(os.Stderr, "wideboi: web client listening at %s\n", resp.URL)
 		}
-
-		go func() {
-			host := cfg.Websocket
-			if host != "" && host[0] == ':' {
-				host = "localhost" + host
-			}
-			announceWebClient(os.Stderr, slog.Default(), host, cfg.Websocket, cfg.WebsocketToken, generatedToken, cfg.TLSEnabled)
-			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("websocket server failed", "err", err)
-			}
-		}()
 	}
 
 	err = srv.Run(ctx)
-	if httpSrv != nil {
-		_ = httpSrv.Shutdown(context.Background())
-	}
 
 	// Run returns as soon as Close begins, and the guard's Close is
 	// one way that happens. Let it finish and re-raise rather than

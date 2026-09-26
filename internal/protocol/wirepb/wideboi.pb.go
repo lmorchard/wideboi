@@ -265,6 +265,58 @@ func (MouseKind) EnumDescriptor() ([]byte, []int) {
 	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{3}
 }
 
+type WebServerAction int32
+
+const (
+	WebServerAction_WEB_SERVER_ACTION_UNSPECIFIED WebServerAction = 0
+	WebServerAction_WEB_SERVER_ACTION_STATUS      WebServerAction = 1
+	WebServerAction_WEB_SERVER_ACTION_START       WebServerAction = 2
+	WebServerAction_WEB_SERVER_ACTION_STOP        WebServerAction = 3
+)
+
+// Enum value maps for WebServerAction.
+var (
+	WebServerAction_name = map[int32]string{
+		0: "WEB_SERVER_ACTION_UNSPECIFIED",
+		1: "WEB_SERVER_ACTION_STATUS",
+		2: "WEB_SERVER_ACTION_START",
+		3: "WEB_SERVER_ACTION_STOP",
+	}
+	WebServerAction_value = map[string]int32{
+		"WEB_SERVER_ACTION_UNSPECIFIED": 0,
+		"WEB_SERVER_ACTION_STATUS":      1,
+		"WEB_SERVER_ACTION_START":       2,
+		"WEB_SERVER_ACTION_STOP":        3,
+	}
+)
+
+func (x WebServerAction) Enum() *WebServerAction {
+	p := new(WebServerAction)
+	*p = x
+	return p
+}
+
+func (x WebServerAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (WebServerAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_protocol_wirepb_wideboi_proto_enumTypes[4].Descriptor()
+}
+
+func (WebServerAction) Type() protoreflect.EnumType {
+	return &file_internal_protocol_wirepb_wideboi_proto_enumTypes[4]
+}
+
+func (x WebServerAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use WebServerAction.Descriptor instead.
+func (WebServerAction) EnumDescriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{4}
+}
+
 type ColorData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          ColorKind              `protobuf:"varint,1,opt,name=kind,proto3,enum=wideboi.protocol.ColorKind" json:"kind,omitempty"`
@@ -1231,6 +1283,7 @@ type ServerMessage struct {
 	//	*ServerMessage_WaitResponse
 	//	*ServerMessage_MacrosSnapshot
 	//	*ServerMessage_UpgradeResponse
+	//	*ServerMessage_WebServerControlResponse
 	Msg           isServerMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1417,6 +1470,15 @@ func (x *ServerMessage) GetUpgradeResponse() *MsgUpgradeResponse {
 	return nil
 }
 
+func (x *ServerMessage) GetWebServerControlResponse() *MsgWebServerControlResponse {
+	if x != nil {
+		if x, ok := x.Msg.(*ServerMessage_WebServerControlResponse); ok {
+			return x.WebServerControlResponse
+		}
+	}
+	return nil
+}
+
 type isServerMessage_Msg interface {
 	isServerMessage_Msg()
 }
@@ -1485,6 +1547,10 @@ type ServerMessage_UpgradeResponse struct {
 	UpgradeResponse *MsgUpgradeResponse `protobuf:"bytes,16,opt,name=upgrade_response,json=upgradeResponse,proto3,oneof"`
 }
 
+type ServerMessage_WebServerControlResponse struct {
+	WebServerControlResponse *MsgWebServerControlResponse `protobuf:"bytes,17,opt,name=web_server_control_response,json=webServerControlResponse,proto3,oneof"`
+}
+
 func (*ServerMessage_PaneUpdate) isServerMessage_Msg() {}
 
 func (*ServerMessage_PanePatch) isServerMessage_Msg() {}
@@ -1516,6 +1582,8 @@ func (*ServerMessage_WaitResponse) isServerMessage_Msg() {}
 func (*ServerMessage_MacrosSnapshot) isServerMessage_Msg() {}
 
 func (*ServerMessage_UpgradeResponse) isServerMessage_Msg() {}
+
+func (*ServerMessage_WebServerControlResponse) isServerMessage_Msg() {}
 
 type MsgAttach struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2326,6 +2394,7 @@ type ClientMessage struct {
 	//	*ClientMessage_SetPaneWidth
 	//	*ClientMessage_SaveMacros
 	//	*ClientMessage_UpgradeRequest
+	//	*ClientMessage_WebServerControlRequest
 	Msg           isClientMessage_Msg `protobuf_oneof:"msg"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2548,6 +2617,15 @@ func (x *ClientMessage) GetUpgradeRequest() *MsgUpgradeRequest {
 	return nil
 }
 
+func (x *ClientMessage) GetWebServerControlRequest() *MsgWebServerControlRequest {
+	if x != nil {
+		if x, ok := x.Msg.(*ClientMessage_WebServerControlRequest); ok {
+			return x.WebServerControlRequest
+		}
+	}
+	return nil
+}
+
 type isClientMessage_Msg interface {
 	isClientMessage_Msg()
 }
@@ -2632,6 +2710,10 @@ type ClientMessage_UpgradeRequest struct {
 	UpgradeRequest *MsgUpgradeRequest `protobuf:"bytes,20,opt,name=upgrade_request,json=upgradeRequest,proto3,oneof"`
 }
 
+type ClientMessage_WebServerControlRequest struct {
+	WebServerControlRequest *MsgWebServerControlRequest `protobuf:"bytes,21,opt,name=web_server_control_request,json=webServerControlRequest,proto3,oneof"`
+}
+
 func (*ClientMessage_Attach) isClientMessage_Msg() {}
 
 func (*ClientMessage_Verb) isClientMessage_Msg() {}
@@ -2671,6 +2753,8 @@ func (*ClientMessage_SetPaneWidth) isClientMessage_Msg() {}
 func (*ClientMessage_SaveMacros) isClientMessage_Msg() {}
 
 func (*ClientMessage_UpgradeRequest) isClientMessage_Msg() {}
+
+func (*ClientMessage_WebServerControlRequest) isClientMessage_Msg() {}
 
 type MsgUpgradeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -3858,6 +3942,166 @@ func (x *MsgSaveMacros) GetMacros() []*Macro {
 	return nil
 }
 
+type MsgWebServerControlRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Action        WebServerAction        `protobuf:"varint,1,opt,name=action,proto3,enum=wideboi.protocol.WebServerAction" json:"action,omitempty"`
+	Addr          string                 `protobuf:"bytes,2,opt,name=addr,proto3" json:"addr,omitempty"`
+	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	RotateToken   bool                   `protobuf:"varint,4,opt,name=rotate_token,json=rotateToken,proto3" json:"rotate_token,omitempty"`
+	DisableTls    bool                   `protobuf:"varint,5,opt,name=disable_tls,json=disableTls,proto3" json:"disable_tls,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgWebServerControlRequest) Reset() {
+	*x = MsgWebServerControlRequest{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgWebServerControlRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgWebServerControlRequest) ProtoMessage() {}
+
+func (x *MsgWebServerControlRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgWebServerControlRequest.ProtoReflect.Descriptor instead.
+func (*MsgWebServerControlRequest) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *MsgWebServerControlRequest) GetAction() WebServerAction {
+	if x != nil {
+		return x.Action
+	}
+	return WebServerAction_WEB_SERVER_ACTION_UNSPECIFIED
+}
+
+func (x *MsgWebServerControlRequest) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *MsgWebServerControlRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *MsgWebServerControlRequest) GetRotateToken() bool {
+	if x != nil {
+		return x.RotateToken
+	}
+	return false
+}
+
+func (x *MsgWebServerControlRequest) GetDisableTls() bool {
+	if x != nil {
+		return x.DisableTls
+	}
+	return false
+}
+
+type MsgWebServerControlResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Running       bool                   `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"`
+	Addr          string                 `protobuf:"bytes,2,opt,name=addr,proto3" json:"addr,omitempty"`
+	Url           string                 `protobuf:"bytes,3,opt,name=url,proto3" json:"url,omitempty"`
+	TlsEnabled    bool                   `protobuf:"varint,4,opt,name=tls_enabled,json=tlsEnabled,proto3" json:"tls_enabled,omitempty"`
+	Token         string                 `protobuf:"bytes,5,opt,name=token,proto3" json:"token,omitempty"`
+	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MsgWebServerControlResponse) Reset() {
+	*x = MsgWebServerControlResponse{}
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MsgWebServerControlResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MsgWebServerControlResponse) ProtoMessage() {}
+
+func (x *MsgWebServerControlResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_protocol_wirepb_wideboi_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MsgWebServerControlResponse.ProtoReflect.Descriptor instead.
+func (*MsgWebServerControlResponse) Descriptor() ([]byte, []int) {
+	return file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *MsgWebServerControlResponse) GetRunning() bool {
+	if x != nil {
+		return x.Running
+	}
+	return false
+}
+
+func (x *MsgWebServerControlResponse) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *MsgWebServerControlResponse) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *MsgWebServerControlResponse) GetTlsEnabled() bool {
+	if x != nil {
+		return x.TlsEnabled
+	}
+	return false
+}
+
+func (x *MsgWebServerControlResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *MsgWebServerControlResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_internal_protocol_wirepb_wideboi_proto protoreflect.FileDescriptor
 
 const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
@@ -3953,7 +4197,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +
 	"\fMsgFocusPane\x12\x17\n" +
-	"\apane_id\x18\x01 \x01(\x05R\x06paneId\"\xdf\t\n" +
+	"\apane_id\x18\x01 \x01(\x05R\x06paneId\"\xcf\n" +
+	"\n" +
 	"\rServerMessage\x12B\n" +
 	"\vpane_update\x18\x01 \x01(\v2\x1f.wideboi.protocol.MsgPaneUpdateH\x00R\n" +
 	"paneUpdate\x12?\n" +
@@ -3975,7 +4220,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x10history_snapshot\x18\r \x01(\v2$.wideboi.protocol.MsgHistorySnapshotH\x00R\x0fhistorySnapshot\x12H\n" +
 	"\rwait_response\x18\x0e \x01(\v2!.wideboi.protocol.MsgWaitResponseH\x00R\fwaitResponse\x12N\n" +
 	"\x0fmacros_snapshot\x18\x0f \x01(\v2#.wideboi.protocol.MsgMacrosSnapshotH\x00R\x0emacrosSnapshot\x12Q\n" +
-	"\x10upgrade_response\x18\x10 \x01(\v2$.wideboi.protocol.MsgUpgradeResponseH\x00R\x0fupgradeResponseB\x05\n" +
+	"\x10upgrade_response\x18\x10 \x01(\v2$.wideboi.protocol.MsgUpgradeResponseH\x00R\x0fupgradeResponse\x12n\n" +
+	"\x1bweb_server_control_response\x18\x11 \x01(\v2-.wideboi.protocol.MsgWebServerControlResponseH\x00R\x18webServerControlResponseB\x05\n" +
 	"\x03msg\"3\n" +
 	"\tMsgAttach\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\x05R\x04cols\x12\x12\n" +
@@ -4029,8 +4275,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\"\v\n" +
 	"\tMsgDetach\"\r\n" +
 	"\vMsgShutdown\"\x12\n" +
-	"\x10MsgStatusRequest\"\xe7\n" +
-	"\n" +
+	"\x10MsgStatusRequest\"\xd4\v\n" +
 	"\rClientMessage\x125\n" +
 	"\x06attach\x18\x01 \x01(\v2\x1b.wideboi.protocol.MsgAttachH\x00R\x06attach\x12/\n" +
 	"\x04verb\x18\x02 \x01(\v2\x19.wideboi.protocol.MsgVerbH\x00R\x04verb\x122\n" +
@@ -4054,7 +4299,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x0eset_pane_width\x18\x12 \x01(\v2!.wideboi.protocol.MsgSetPaneWidthH\x00R\fsetPaneWidth\x12B\n" +
 	"\vsave_macros\x18\x13 \x01(\v2\x1f.wideboi.protocol.MsgSaveMacrosH\x00R\n" +
 	"saveMacros\x12N\n" +
-	"\x0fupgrade_request\x18\x14 \x01(\v2#.wideboi.protocol.MsgUpgradeRequestH\x00R\x0eupgradeRequestB\x05\n" +
+	"\x0fupgrade_request\x18\x14 \x01(\v2#.wideboi.protocol.MsgUpgradeRequestH\x00R\x0eupgradeRequest\x12k\n" +
+	"\x1aweb_server_control_request\x18\x15 \x01(\v2,.wideboi.protocol.MsgWebServerControlRequestH\x00R\x17webServerControlRequestB\x05\n" +
 	"\x03msg\".\n" +
 	"\x11MsgUpgradeRequest\x12\x19\n" +
 	"\bbin_path\x18\x01 \x01(\tR\abinPath\"*\n" +
@@ -4141,7 +4387,22 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x11MsgMacrosSnapshot\x12/\n" +
 	"\x06macros\x18\x01 \x03(\v2\x17.wideboi.protocol.MacroR\x06macros\"@\n" +
 	"\rMsgSaveMacros\x12/\n" +
-	"\x06macros\x18\x01 \x03(\v2\x17.wideboi.protocol.MacroR\x06macros*\x98\x03\n" +
+	"\x06macros\x18\x01 \x03(\v2\x17.wideboi.protocol.MacroR\x06macros\"\xc5\x01\n" +
+	"\x1aMsgWebServerControlRequest\x129\n" +
+	"\x06action\x18\x01 \x01(\x0e2!.wideboi.protocol.WebServerActionR\x06action\x12\x12\n" +
+	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x14\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\x12!\n" +
+	"\frotate_token\x18\x04 \x01(\bR\vrotateToken\x12\x1f\n" +
+	"\vdisable_tls\x18\x05 \x01(\bR\n" +
+	"disableTls\"\xaa\x01\n" +
+	"\x1bMsgWebServerControlResponse\x12\x18\n" +
+	"\arunning\x18\x01 \x01(\bR\arunning\x12\x12\n" +
+	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x10\n" +
+	"\x03url\x18\x03 \x01(\tR\x03url\x12\x1f\n" +
+	"\vtls_enabled\x18\x04 \x01(\bR\n" +
+	"tlsEnabled\x12\x14\n" +
+	"\x05token\x18\x05 \x01(\tR\x05token\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error*\x98\x03\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +
@@ -4175,7 +4436,12 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x10MOUSE_KIND_PRESS\x10\x00\x12\x16\n" +
 	"\x12MOUSE_KIND_RELEASE\x10\x01\x12\x15\n" +
 	"\x11MOUSE_KIND_MOTION\x10\x02\x12\x14\n" +
-	"\x10MOUSE_KIND_WHEEL\x10\x03B7Z5github.com/lmorchard/wideboi/internal/protocol/wirepbb\x06proto3"
+	"\x10MOUSE_KIND_WHEEL\x10\x03*\x8b\x01\n" +
+	"\x0fWebServerAction\x12!\n" +
+	"\x1dWEB_SERVER_ACTION_UNSPECIFIED\x10\x00\x12\x1c\n" +
+	"\x18WEB_SERVER_ACTION_STATUS\x10\x01\x12\x1b\n" +
+	"\x17WEB_SERVER_ACTION_START\x10\x02\x12\x1a\n" +
+	"\x16WEB_SERVER_ACTION_STOP\x10\x03B7Z5github.com/lmorchard/wideboi/internal/protocol/wirepbb\x06proto3"
 
 var (
 	file_internal_protocol_wirepb_wideboi_proto_rawDescOnce sync.Once
@@ -4189,135 +4455,141 @@ func file_internal_protocol_wirepb_wideboi_proto_rawDescGZIP() []byte {
 	return file_internal_protocol_wirepb_wideboi_proto_rawDescData
 }
 
-var file_internal_protocol_wirepb_wideboi_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_internal_protocol_wirepb_wideboi_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
+var file_internal_protocol_wirepb_wideboi_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_internal_protocol_wirepb_wideboi_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
 var file_internal_protocol_wirepb_wideboi_proto_goTypes = []any{
-	(VerbType)(0),                // 0: wideboi.protocol.VerbType
-	(PaneStatus)(0),              // 1: wideboi.protocol.PaneStatus
-	(ColorKind)(0),               // 2: wideboi.protocol.ColorKind
-	(MouseKind)(0),               // 3: wideboi.protocol.MouseKind
-	(*ColorData)(nil),            // 4: wideboi.protocol.ColorData
-	(*StyleData)(nil),            // 5: wideboi.protocol.StyleData
-	(*CellData)(nil),             // 6: wideboi.protocol.CellData
-	(*LineData)(nil),             // 7: wideboi.protocol.LineData
-	(*MsgPaneUpdate)(nil),        // 8: wideboi.protocol.MsgPaneUpdate
-	(*PaneRow)(nil),              // 9: wideboi.protocol.PaneRow
-	(*MsgPanePatch)(nil),         // 10: wideboi.protocol.MsgPanePatch
-	(*ColumnData)(nil),           // 11: wideboi.protocol.ColumnData
-	(*MsgLayoutSnapshot)(nil),    // 12: wideboi.protocol.MsgLayoutSnapshot
-	(*MsgPaneCreated)(nil),       // 13: wideboi.protocol.MsgPaneCreated
-	(*MsgPaneClosed)(nil),        // 14: wideboi.protocol.MsgPaneClosed
-	(*MsgPaneMetadata)(nil),      // 15: wideboi.protocol.MsgPaneMetadata
-	(*MsgFocusPane)(nil),         // 16: wideboi.protocol.MsgFocusPane
-	(*ServerMessage)(nil),        // 17: wideboi.protocol.ServerMessage
-	(*MsgAttach)(nil),            // 18: wideboi.protocol.MsgAttach
-	(*MsgVerb)(nil),              // 19: wideboi.protocol.MsgVerb
-	(*MsgSetPaneWidth)(nil),      // 20: wideboi.protocol.MsgSetPaneWidth
-	(*MsgMouse)(nil),             // 21: wideboi.protocol.MsgMouse
-	(*KeyData)(nil),              // 22: wideboi.protocol.KeyData
-	(*MsgInput)(nil),             // 23: wideboi.protocol.MsgInput
-	(*MsgResize)(nil),            // 24: wideboi.protocol.MsgResize
-	(*MsgScroll)(nil),            // 25: wideboi.protocol.MsgScroll
-	(*MsgHistoryRequest)(nil),    // 26: wideboi.protocol.MsgHistoryRequest
-	(*MsgHistorySnapshot)(nil),   // 27: wideboi.protocol.MsgHistorySnapshot
-	(*MsgPaneResync)(nil),        // 28: wideboi.protocol.MsgPaneResync
-	(*MsgDetach)(nil),            // 29: wideboi.protocol.MsgDetach
-	(*MsgShutdown)(nil),          // 30: wideboi.protocol.MsgShutdown
-	(*MsgStatusRequest)(nil),     // 31: wideboi.protocol.MsgStatusRequest
-	(*ClientMessage)(nil),        // 32: wideboi.protocol.ClientMessage
-	(*MsgUpgradeRequest)(nil),    // 33: wideboi.protocol.MsgUpgradeRequest
-	(*MsgUpgradeResponse)(nil),   // 34: wideboi.protocol.MsgUpgradeResponse
-	(*MsgWaitRequest)(nil),       // 35: wideboi.protocol.MsgWaitRequest
-	(*MsgWaitResponse)(nil),      // 36: wideboi.protocol.MsgWaitResponse
-	(*MsgSplitRequest)(nil),      // 37: wideboi.protocol.MsgSplitRequest
-	(*MsgSplitResponse)(nil),     // 38: wideboi.protocol.MsgSplitResponse
-	(*MsgSendInputRequest)(nil),  // 39: wideboi.protocol.MsgSendInputRequest
-	(*MsgSendInputResponse)(nil), // 40: wideboi.protocol.MsgSendInputResponse
-	(*MsgCaptureRequest)(nil),    // 41: wideboi.protocol.MsgCaptureRequest
-	(*MsgCaptureResponse)(nil),   // 42: wideboi.protocol.MsgCaptureResponse
-	(*MsgClosePaneRequest)(nil),  // 43: wideboi.protocol.MsgClosePaneRequest
-	(*MsgClosePaneResponse)(nil), // 44: wideboi.protocol.MsgClosePaneResponse
-	(*MsgTrafficRequest)(nil),    // 45: wideboi.protocol.MsgTrafficRequest
-	(*TimingStat)(nil),           // 46: wideboi.protocol.TimingStat
-	(*ClientTraffic)(nil),        // 47: wideboi.protocol.ClientTraffic
-	(*MsgTrafficStats)(nil),      // 48: wideboi.protocol.MsgTrafficStats
-	(*MacroStep)(nil),            // 49: wideboi.protocol.MacroStep
-	(*Macro)(nil),                // 50: wideboi.protocol.Macro
-	(*MsgMacrosSnapshot)(nil),    // 51: wideboi.protocol.MsgMacrosSnapshot
-	(*MsgSaveMacros)(nil),        // 52: wideboi.protocol.MsgSaveMacros
-	nil,                          // 53: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
-	nil,                          // 54: wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
-	nil,                          // 55: wideboi.protocol.MsgPaneMetadata.UserVarsEntry
-	nil,                          // 56: wideboi.protocol.MsgVerb.WidthsEntry
+	(VerbType)(0),                       // 0: wideboi.protocol.VerbType
+	(PaneStatus)(0),                     // 1: wideboi.protocol.PaneStatus
+	(ColorKind)(0),                      // 2: wideboi.protocol.ColorKind
+	(MouseKind)(0),                      // 3: wideboi.protocol.MouseKind
+	(WebServerAction)(0),                // 4: wideboi.protocol.WebServerAction
+	(*ColorData)(nil),                   // 5: wideboi.protocol.ColorData
+	(*StyleData)(nil),                   // 6: wideboi.protocol.StyleData
+	(*CellData)(nil),                    // 7: wideboi.protocol.CellData
+	(*LineData)(nil),                    // 8: wideboi.protocol.LineData
+	(*MsgPaneUpdate)(nil),               // 9: wideboi.protocol.MsgPaneUpdate
+	(*PaneRow)(nil),                     // 10: wideboi.protocol.PaneRow
+	(*MsgPanePatch)(nil),                // 11: wideboi.protocol.MsgPanePatch
+	(*ColumnData)(nil),                  // 12: wideboi.protocol.ColumnData
+	(*MsgLayoutSnapshot)(nil),           // 13: wideboi.protocol.MsgLayoutSnapshot
+	(*MsgPaneCreated)(nil),              // 14: wideboi.protocol.MsgPaneCreated
+	(*MsgPaneClosed)(nil),               // 15: wideboi.protocol.MsgPaneClosed
+	(*MsgPaneMetadata)(nil),             // 16: wideboi.protocol.MsgPaneMetadata
+	(*MsgFocusPane)(nil),                // 17: wideboi.protocol.MsgFocusPane
+	(*ServerMessage)(nil),               // 18: wideboi.protocol.ServerMessage
+	(*MsgAttach)(nil),                   // 19: wideboi.protocol.MsgAttach
+	(*MsgVerb)(nil),                     // 20: wideboi.protocol.MsgVerb
+	(*MsgSetPaneWidth)(nil),             // 21: wideboi.protocol.MsgSetPaneWidth
+	(*MsgMouse)(nil),                    // 22: wideboi.protocol.MsgMouse
+	(*KeyData)(nil),                     // 23: wideboi.protocol.KeyData
+	(*MsgInput)(nil),                    // 24: wideboi.protocol.MsgInput
+	(*MsgResize)(nil),                   // 25: wideboi.protocol.MsgResize
+	(*MsgScroll)(nil),                   // 26: wideboi.protocol.MsgScroll
+	(*MsgHistoryRequest)(nil),           // 27: wideboi.protocol.MsgHistoryRequest
+	(*MsgHistorySnapshot)(nil),          // 28: wideboi.protocol.MsgHistorySnapshot
+	(*MsgPaneResync)(nil),               // 29: wideboi.protocol.MsgPaneResync
+	(*MsgDetach)(nil),                   // 30: wideboi.protocol.MsgDetach
+	(*MsgShutdown)(nil),                 // 31: wideboi.protocol.MsgShutdown
+	(*MsgStatusRequest)(nil),            // 32: wideboi.protocol.MsgStatusRequest
+	(*ClientMessage)(nil),               // 33: wideboi.protocol.ClientMessage
+	(*MsgUpgradeRequest)(nil),           // 34: wideboi.protocol.MsgUpgradeRequest
+	(*MsgUpgradeResponse)(nil),          // 35: wideboi.protocol.MsgUpgradeResponse
+	(*MsgWaitRequest)(nil),              // 36: wideboi.protocol.MsgWaitRequest
+	(*MsgWaitResponse)(nil),             // 37: wideboi.protocol.MsgWaitResponse
+	(*MsgSplitRequest)(nil),             // 38: wideboi.protocol.MsgSplitRequest
+	(*MsgSplitResponse)(nil),            // 39: wideboi.protocol.MsgSplitResponse
+	(*MsgSendInputRequest)(nil),         // 40: wideboi.protocol.MsgSendInputRequest
+	(*MsgSendInputResponse)(nil),        // 41: wideboi.protocol.MsgSendInputResponse
+	(*MsgCaptureRequest)(nil),           // 42: wideboi.protocol.MsgCaptureRequest
+	(*MsgCaptureResponse)(nil),          // 43: wideboi.protocol.MsgCaptureResponse
+	(*MsgClosePaneRequest)(nil),         // 44: wideboi.protocol.MsgClosePaneRequest
+	(*MsgClosePaneResponse)(nil),        // 45: wideboi.protocol.MsgClosePaneResponse
+	(*MsgTrafficRequest)(nil),           // 46: wideboi.protocol.MsgTrafficRequest
+	(*TimingStat)(nil),                  // 47: wideboi.protocol.TimingStat
+	(*ClientTraffic)(nil),               // 48: wideboi.protocol.ClientTraffic
+	(*MsgTrafficStats)(nil),             // 49: wideboi.protocol.MsgTrafficStats
+	(*MacroStep)(nil),                   // 50: wideboi.protocol.MacroStep
+	(*Macro)(nil),                       // 51: wideboi.protocol.Macro
+	(*MsgMacrosSnapshot)(nil),           // 52: wideboi.protocol.MsgMacrosSnapshot
+	(*MsgSaveMacros)(nil),               // 53: wideboi.protocol.MsgSaveMacros
+	(*MsgWebServerControlRequest)(nil),  // 54: wideboi.protocol.MsgWebServerControlRequest
+	(*MsgWebServerControlResponse)(nil), // 55: wideboi.protocol.MsgWebServerControlResponse
+	nil,                                 // 56: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
+	nil,                                 // 57: wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
+	nil,                                 // 58: wideboi.protocol.MsgPaneMetadata.UserVarsEntry
+	nil,                                 // 59: wideboi.protocol.MsgVerb.WidthsEntry
 }
 var file_internal_protocol_wirepb_wideboi_proto_depIdxs = []int32{
 	2,  // 0: wideboi.protocol.ColorData.kind:type_name -> wideboi.protocol.ColorKind
-	4,  // 1: wideboi.protocol.StyleData.fg:type_name -> wideboi.protocol.ColorData
-	4,  // 2: wideboi.protocol.StyleData.bg:type_name -> wideboi.protocol.ColorData
-	4,  // 3: wideboi.protocol.StyleData.underline_color:type_name -> wideboi.protocol.ColorData
-	5,  // 4: wideboi.protocol.CellData.style:type_name -> wideboi.protocol.StyleData
-	6,  // 5: wideboi.protocol.LineData.cells:type_name -> wideboi.protocol.CellData
-	7,  // 6: wideboi.protocol.MsgPaneUpdate.lines:type_name -> wideboi.protocol.LineData
-	6,  // 7: wideboi.protocol.PaneRow.cells:type_name -> wideboi.protocol.CellData
-	9,  // 8: wideboi.protocol.MsgPanePatch.changed_rows:type_name -> wideboi.protocol.PaneRow
-	11, // 9: wideboi.protocol.MsgLayoutSnapshot.columns:type_name -> wideboi.protocol.ColumnData
-	53, // 10: wideboi.protocol.MsgLayoutSnapshot.pane_statuses:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
-	54, // 11: wideboi.protocol.MsgLayoutSnapshot.pane_titles:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
-	55, // 12: wideboi.protocol.MsgPaneMetadata.user_vars:type_name -> wideboi.protocol.MsgPaneMetadata.UserVarsEntry
-	8,  // 13: wideboi.protocol.ServerMessage.pane_update:type_name -> wideboi.protocol.MsgPaneUpdate
-	10, // 14: wideboi.protocol.ServerMessage.pane_patch:type_name -> wideboi.protocol.MsgPanePatch
-	12, // 15: wideboi.protocol.ServerMessage.layout_snapshot:type_name -> wideboi.protocol.MsgLayoutSnapshot
-	13, // 16: wideboi.protocol.ServerMessage.pane_created:type_name -> wideboi.protocol.MsgPaneCreated
-	14, // 17: wideboi.protocol.ServerMessage.pane_closed:type_name -> wideboi.protocol.MsgPaneClosed
-	15, // 18: wideboi.protocol.ServerMessage.pane_metadata:type_name -> wideboi.protocol.MsgPaneMetadata
-	48, // 19: wideboi.protocol.ServerMessage.traffic_stats:type_name -> wideboi.protocol.MsgTrafficStats
-	16, // 20: wideboi.protocol.ServerMessage.focus_pane:type_name -> wideboi.protocol.MsgFocusPane
-	38, // 21: wideboi.protocol.ServerMessage.split_response:type_name -> wideboi.protocol.MsgSplitResponse
-	40, // 22: wideboi.protocol.ServerMessage.send_input_response:type_name -> wideboi.protocol.MsgSendInputResponse
-	42, // 23: wideboi.protocol.ServerMessage.capture_response:type_name -> wideboi.protocol.MsgCaptureResponse
-	44, // 24: wideboi.protocol.ServerMessage.close_pane_response:type_name -> wideboi.protocol.MsgClosePaneResponse
-	27, // 25: wideboi.protocol.ServerMessage.history_snapshot:type_name -> wideboi.protocol.MsgHistorySnapshot
-	36, // 26: wideboi.protocol.ServerMessage.wait_response:type_name -> wideboi.protocol.MsgWaitResponse
-	51, // 27: wideboi.protocol.ServerMessage.macros_snapshot:type_name -> wideboi.protocol.MsgMacrosSnapshot
-	34, // 28: wideboi.protocol.ServerMessage.upgrade_response:type_name -> wideboi.protocol.MsgUpgradeResponse
-	0,  // 29: wideboi.protocol.MsgVerb.verb:type_name -> wideboi.protocol.VerbType
-	56, // 30: wideboi.protocol.MsgVerb.widths:type_name -> wideboi.protocol.MsgVerb.WidthsEntry
-	3,  // 31: wideboi.protocol.MsgMouse.kind:type_name -> wideboi.protocol.MouseKind
-	22, // 32: wideboi.protocol.MsgInput.key:type_name -> wideboi.protocol.KeyData
-	18, // 33: wideboi.protocol.ClientMessage.attach:type_name -> wideboi.protocol.MsgAttach
-	19, // 34: wideboi.protocol.ClientMessage.verb:type_name -> wideboi.protocol.MsgVerb
-	21, // 35: wideboi.protocol.ClientMessage.mouse:type_name -> wideboi.protocol.MsgMouse
-	23, // 36: wideboi.protocol.ClientMessage.input:type_name -> wideboi.protocol.MsgInput
-	24, // 37: wideboi.protocol.ClientMessage.resize:type_name -> wideboi.protocol.MsgResize
-	25, // 38: wideboi.protocol.ClientMessage.scroll:type_name -> wideboi.protocol.MsgScroll
-	28, // 39: wideboi.protocol.ClientMessage.pane_resync:type_name -> wideboi.protocol.MsgPaneResync
-	29, // 40: wideboi.protocol.ClientMessage.detach:type_name -> wideboi.protocol.MsgDetach
-	30, // 41: wideboi.protocol.ClientMessage.shutdown:type_name -> wideboi.protocol.MsgShutdown
-	31, // 42: wideboi.protocol.ClientMessage.status_request:type_name -> wideboi.protocol.MsgStatusRequest
-	45, // 43: wideboi.protocol.ClientMessage.traffic_request:type_name -> wideboi.protocol.MsgTrafficRequest
-	37, // 44: wideboi.protocol.ClientMessage.split_request:type_name -> wideboi.protocol.MsgSplitRequest
-	39, // 45: wideboi.protocol.ClientMessage.send_input_request:type_name -> wideboi.protocol.MsgSendInputRequest
-	41, // 46: wideboi.protocol.ClientMessage.capture_request:type_name -> wideboi.protocol.MsgCaptureRequest
-	43, // 47: wideboi.protocol.ClientMessage.close_pane_request:type_name -> wideboi.protocol.MsgClosePaneRequest
-	26, // 48: wideboi.protocol.ClientMessage.history_request:type_name -> wideboi.protocol.MsgHistoryRequest
-	35, // 49: wideboi.protocol.ClientMessage.wait_request:type_name -> wideboi.protocol.MsgWaitRequest
-	20, // 50: wideboi.protocol.ClientMessage.set_pane_width:type_name -> wideboi.protocol.MsgSetPaneWidth
-	52, // 51: wideboi.protocol.ClientMessage.save_macros:type_name -> wideboi.protocol.MsgSaveMacros
-	33, // 52: wideboi.protocol.ClientMessage.upgrade_request:type_name -> wideboi.protocol.MsgUpgradeRequest
-	46, // 53: wideboi.protocol.ClientTraffic.encode:type_name -> wideboi.protocol.TimingStat
-	47, // 54: wideboi.protocol.MsgTrafficStats.clients:type_name -> wideboi.protocol.ClientTraffic
-	47, // 55: wideboi.protocol.MsgTrafficStats.departed:type_name -> wideboi.protocol.ClientTraffic
-	46, // 56: wideboi.protocol.MsgTrafficStats.render:type_name -> wideboi.protocol.TimingStat
-	46, // 57: wideboi.protocol.MsgTrafficStats.build_patch:type_name -> wideboi.protocol.TimingStat
-	49, // 58: wideboi.protocol.Macro.steps:type_name -> wideboi.protocol.MacroStep
-	50, // 59: wideboi.protocol.MsgMacrosSnapshot.macros:type_name -> wideboi.protocol.Macro
-	50, // 60: wideboi.protocol.MsgSaveMacros.macros:type_name -> wideboi.protocol.Macro
-	1,  // 61: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry.value:type_name -> wideboi.protocol.PaneStatus
-	62, // [62:62] is the sub-list for method output_type
-	62, // [62:62] is the sub-list for method input_type
-	62, // [62:62] is the sub-list for extension type_name
-	62, // [62:62] is the sub-list for extension extendee
-	0,  // [0:62] is the sub-list for field type_name
+	5,  // 1: wideboi.protocol.StyleData.fg:type_name -> wideboi.protocol.ColorData
+	5,  // 2: wideboi.protocol.StyleData.bg:type_name -> wideboi.protocol.ColorData
+	5,  // 3: wideboi.protocol.StyleData.underline_color:type_name -> wideboi.protocol.ColorData
+	6,  // 4: wideboi.protocol.CellData.style:type_name -> wideboi.protocol.StyleData
+	7,  // 5: wideboi.protocol.LineData.cells:type_name -> wideboi.protocol.CellData
+	8,  // 6: wideboi.protocol.MsgPaneUpdate.lines:type_name -> wideboi.protocol.LineData
+	7,  // 7: wideboi.protocol.PaneRow.cells:type_name -> wideboi.protocol.CellData
+	10, // 8: wideboi.protocol.MsgPanePatch.changed_rows:type_name -> wideboi.protocol.PaneRow
+	12, // 9: wideboi.protocol.MsgLayoutSnapshot.columns:type_name -> wideboi.protocol.ColumnData
+	56, // 10: wideboi.protocol.MsgLayoutSnapshot.pane_statuses:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry
+	57, // 11: wideboi.protocol.MsgLayoutSnapshot.pane_titles:type_name -> wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntry
+	58, // 12: wideboi.protocol.MsgPaneMetadata.user_vars:type_name -> wideboi.protocol.MsgPaneMetadata.UserVarsEntry
+	9,  // 13: wideboi.protocol.ServerMessage.pane_update:type_name -> wideboi.protocol.MsgPaneUpdate
+	11, // 14: wideboi.protocol.ServerMessage.pane_patch:type_name -> wideboi.protocol.MsgPanePatch
+	13, // 15: wideboi.protocol.ServerMessage.layout_snapshot:type_name -> wideboi.protocol.MsgLayoutSnapshot
+	14, // 16: wideboi.protocol.ServerMessage.pane_created:type_name -> wideboi.protocol.MsgPaneCreated
+	15, // 17: wideboi.protocol.ServerMessage.pane_closed:type_name -> wideboi.protocol.MsgPaneClosed
+	16, // 18: wideboi.protocol.ServerMessage.pane_metadata:type_name -> wideboi.protocol.MsgPaneMetadata
+	49, // 19: wideboi.protocol.ServerMessage.traffic_stats:type_name -> wideboi.protocol.MsgTrafficStats
+	17, // 20: wideboi.protocol.ServerMessage.focus_pane:type_name -> wideboi.protocol.MsgFocusPane
+	39, // 21: wideboi.protocol.ServerMessage.split_response:type_name -> wideboi.protocol.MsgSplitResponse
+	41, // 22: wideboi.protocol.ServerMessage.send_input_response:type_name -> wideboi.protocol.MsgSendInputResponse
+	43, // 23: wideboi.protocol.ServerMessage.capture_response:type_name -> wideboi.protocol.MsgCaptureResponse
+	45, // 24: wideboi.protocol.ServerMessage.close_pane_response:type_name -> wideboi.protocol.MsgClosePaneResponse
+	28, // 25: wideboi.protocol.ServerMessage.history_snapshot:type_name -> wideboi.protocol.MsgHistorySnapshot
+	37, // 26: wideboi.protocol.ServerMessage.wait_response:type_name -> wideboi.protocol.MsgWaitResponse
+	52, // 27: wideboi.protocol.ServerMessage.macros_snapshot:type_name -> wideboi.protocol.MsgMacrosSnapshot
+	35, // 28: wideboi.protocol.ServerMessage.upgrade_response:type_name -> wideboi.protocol.MsgUpgradeResponse
+	55, // 29: wideboi.protocol.ServerMessage.web_server_control_response:type_name -> wideboi.protocol.MsgWebServerControlResponse
+	0,  // 30: wideboi.protocol.MsgVerb.verb:type_name -> wideboi.protocol.VerbType
+	59, // 31: wideboi.protocol.MsgVerb.widths:type_name -> wideboi.protocol.MsgVerb.WidthsEntry
+	3,  // 32: wideboi.protocol.MsgMouse.kind:type_name -> wideboi.protocol.MouseKind
+	23, // 33: wideboi.protocol.MsgInput.key:type_name -> wideboi.protocol.KeyData
+	19, // 34: wideboi.protocol.ClientMessage.attach:type_name -> wideboi.protocol.MsgAttach
+	20, // 35: wideboi.protocol.ClientMessage.verb:type_name -> wideboi.protocol.MsgVerb
+	22, // 36: wideboi.protocol.ClientMessage.mouse:type_name -> wideboi.protocol.MsgMouse
+	24, // 37: wideboi.protocol.ClientMessage.input:type_name -> wideboi.protocol.MsgInput
+	25, // 38: wideboi.protocol.ClientMessage.resize:type_name -> wideboi.protocol.MsgResize
+	26, // 39: wideboi.protocol.ClientMessage.scroll:type_name -> wideboi.protocol.MsgScroll
+	29, // 40: wideboi.protocol.ClientMessage.pane_resync:type_name -> wideboi.protocol.MsgPaneResync
+	30, // 41: wideboi.protocol.ClientMessage.detach:type_name -> wideboi.protocol.MsgDetach
+	31, // 42: wideboi.protocol.ClientMessage.shutdown:type_name -> wideboi.protocol.MsgShutdown
+	32, // 43: wideboi.protocol.ClientMessage.status_request:type_name -> wideboi.protocol.MsgStatusRequest
+	46, // 44: wideboi.protocol.ClientMessage.traffic_request:type_name -> wideboi.protocol.MsgTrafficRequest
+	38, // 45: wideboi.protocol.ClientMessage.split_request:type_name -> wideboi.protocol.MsgSplitRequest
+	40, // 46: wideboi.protocol.ClientMessage.send_input_request:type_name -> wideboi.protocol.MsgSendInputRequest
+	42, // 47: wideboi.protocol.ClientMessage.capture_request:type_name -> wideboi.protocol.MsgCaptureRequest
+	44, // 48: wideboi.protocol.ClientMessage.close_pane_request:type_name -> wideboi.protocol.MsgClosePaneRequest
+	27, // 49: wideboi.protocol.ClientMessage.history_request:type_name -> wideboi.protocol.MsgHistoryRequest
+	36, // 50: wideboi.protocol.ClientMessage.wait_request:type_name -> wideboi.protocol.MsgWaitRequest
+	21, // 51: wideboi.protocol.ClientMessage.set_pane_width:type_name -> wideboi.protocol.MsgSetPaneWidth
+	53, // 52: wideboi.protocol.ClientMessage.save_macros:type_name -> wideboi.protocol.MsgSaveMacros
+	34, // 53: wideboi.protocol.ClientMessage.upgrade_request:type_name -> wideboi.protocol.MsgUpgradeRequest
+	54, // 54: wideboi.protocol.ClientMessage.web_server_control_request:type_name -> wideboi.protocol.MsgWebServerControlRequest
+	47, // 55: wideboi.protocol.ClientTraffic.encode:type_name -> wideboi.protocol.TimingStat
+	48, // 56: wideboi.protocol.MsgTrafficStats.clients:type_name -> wideboi.protocol.ClientTraffic
+	48, // 57: wideboi.protocol.MsgTrafficStats.departed:type_name -> wideboi.protocol.ClientTraffic
+	47, // 58: wideboi.protocol.MsgTrafficStats.render:type_name -> wideboi.protocol.TimingStat
+	47, // 59: wideboi.protocol.MsgTrafficStats.build_patch:type_name -> wideboi.protocol.TimingStat
+	50, // 60: wideboi.protocol.Macro.steps:type_name -> wideboi.protocol.MacroStep
+	51, // 61: wideboi.protocol.MsgMacrosSnapshot.macros:type_name -> wideboi.protocol.Macro
+	51, // 62: wideboi.protocol.MsgSaveMacros.macros:type_name -> wideboi.protocol.Macro
+	4,  // 63: wideboi.protocol.MsgWebServerControlRequest.action:type_name -> wideboi.protocol.WebServerAction
+	1,  // 64: wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntry.value:type_name -> wideboi.protocol.PaneStatus
+	65, // [65:65] is the sub-list for method output_type
+	65, // [65:65] is the sub-list for method input_type
+	65, // [65:65] is the sub-list for extension type_name
+	65, // [65:65] is the sub-list for extension extendee
+	0,  // [0:65] is the sub-list for field type_name
 }
 
 func init() { file_internal_protocol_wirepb_wideboi_proto_init() }
@@ -4342,6 +4614,7 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 		(*ServerMessage_WaitResponse)(nil),
 		(*ServerMessage_MacrosSnapshot)(nil),
 		(*ServerMessage_UpgradeResponse)(nil),
+		(*ServerMessage_WebServerControlResponse)(nil),
 	}
 	file_internal_protocol_wirepb_wideboi_proto_msgTypes[28].OneofWrappers = []any{
 		(*ClientMessage_Attach)(nil),
@@ -4364,14 +4637,15 @@ func file_internal_protocol_wirepb_wideboi_proto_init() {
 		(*ClientMessage_SetPaneWidth)(nil),
 		(*ClientMessage_SaveMacros)(nil),
 		(*ClientMessage_UpgradeRequest)(nil),
+		(*ClientMessage_WebServerControlRequest)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_protocol_wirepb_wideboi_proto_rawDesc), len(file_internal_protocol_wirepb_wideboi_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   53,
+			NumEnums:      5,
+			NumMessages:   55,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

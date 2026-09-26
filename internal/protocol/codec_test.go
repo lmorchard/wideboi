@@ -184,6 +184,20 @@ func TestEnumsMatchWireSchema(t *testing.T) {
 	if got, want := len(wirepb.PaneStatus_name), len(statuses); got != want {
 		t.Errorf("wire schema has %d pane statuses, table maps %d", got, want)
 	}
+
+	actions := map[WebServerAction]wirepb.WebServerAction{
+		WebServerActionStatus: wirepb.WebServerAction_WEB_SERVER_ACTION_STATUS,
+		WebServerActionStart:  wirepb.WebServerAction_WEB_SERVER_ACTION_START,
+		WebServerActionStop:   wirepb.WebServerAction_WEB_SERVER_ACTION_STOP,
+	}
+	for goVal, wireVal := range actions {
+		if int32(goVal) != int32(wireVal) {
+			t.Errorf("web server action %v: Go %d, wire %d", wireVal, goVal, wireVal)
+		}
+	}
+	if got, want := len(wirepb.WebServerAction_name), len(actions)+1; got != want {
+		t.Errorf("wire schema has %d web server actions, table maps %d", got, want)
+	}
 }
 
 // Proto3 omits a false bool entirely, so a patch that hides the cursor

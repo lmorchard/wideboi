@@ -84,6 +84,16 @@ func MarshalClient(msg any) ([]byte, error) {
 			}
 		}
 		env.Msg = &wirepb.ClientMessage_SaveMacros{SaveMacros: &wirepb.MsgSaveMacros{Macros: pbMacros}}
+	case MsgWebServerControlRequest:
+		env.Msg = &wirepb.ClientMessage_WebServerControlRequest{
+			WebServerControlRequest: &wirepb.MsgWebServerControlRequest{
+				Action:      wirepb.WebServerAction(m.Action),
+				Addr:        validUTF8(m.Addr),
+				Token:       validUTF8(m.Token),
+				RotateToken: m.RotateToken,
+				DisableTls:  m.DisableTLS,
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported client message %T", msg)
 	}
@@ -161,6 +171,14 @@ func UnmarshalClient(data []byte) (any, error) {
 			}
 		}
 		return MsgSaveMacros{Macros: macros}, nil
+	case *wirepb.ClientMessage_WebServerControlRequest:
+		return MsgWebServerControlRequest{
+			Action:      WebServerAction(m.WebServerControlRequest.Action),
+			Addr:        m.WebServerControlRequest.Addr,
+			Token:       m.WebServerControlRequest.Token,
+			RotateToken: m.WebServerControlRequest.RotateToken,
+			DisableTLS:  m.WebServerControlRequest.DisableTls,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown client message %T", env.Msg)
 	}
@@ -289,6 +307,17 @@ func MarshalServer(msg any) ([]byte, error) {
 			}
 		}
 		env.Msg = &wirepb.ServerMessage_MacrosSnapshot{MacrosSnapshot: &wirepb.MsgMacrosSnapshot{Macros: pbMacros}}
+	case MsgWebServerControlResponse:
+		env.Msg = &wirepb.ServerMessage_WebServerControlResponse{
+			WebServerControlResponse: &wirepb.MsgWebServerControlResponse{
+				Running:    m.Running,
+				Addr:       validUTF8(m.Addr),
+				Url:        validUTF8(m.URL),
+				TlsEnabled: m.TLSEnabled,
+				Token:      validUTF8(m.Token),
+				Error:      validUTF8(m.Error),
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -422,6 +451,15 @@ func UnmarshalServer(data []byte) (any, error) {
 			}
 		}
 		return MsgMacrosSnapshot{Macros: macros}, nil
+	case *wirepb.ServerMessage_WebServerControlResponse:
+		return MsgWebServerControlResponse{
+			Running:    m.WebServerControlResponse.Running,
+			Addr:       m.WebServerControlResponse.Addr,
+			URL:        m.WebServerControlResponse.Url,
+			TLSEnabled: m.WebServerControlResponse.TlsEnabled,
+			Token:      m.WebServerControlResponse.Token,
+			Error:      m.WebServerControlResponse.Error,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}

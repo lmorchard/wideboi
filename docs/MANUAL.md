@@ -341,6 +341,22 @@ wideboi upgrade-server /path/to/new/wideboi
 
 The running server process replaces itself in-place via `execve`, preserving its Process ID (PID), child processes, PTY file descriptors, scrollback history, and layout. Connected clients automatically reconnect and resume.
 
+#### `web`
+Enables, disables, or inspects the session's embedded HTTP and WebSocket server dynamically:
+
+```bash
+# Check current web server state (address, URL, and TLS status)
+wideboi web status
+wideboi web status --json
+
+# Start or update the web server (defaults to 127.0.0.1:0 if no address previously configured)
+wideboi web start
+wideboi web start --addr 127.0.0.1:8080
+wideboi web start --rotate-token
+
+# Stop the web server and disconnect web clients (session and terminal clients remain running)
+wideboi web stop
+```
 For agent skill specifications, refer to [`docs/skills/wideboi-control/SKILL.md`](skills/wideboi-control/SKILL.md).
 
 ---
@@ -364,6 +380,20 @@ https://127.0.0.1:8080/#token=<generated-token>
 ```
 
 Open this URL in your web browser. The server serves the HTML/JS application and establishes a WebSocket connection over TLS (`wss://`).
+
+### Dynamic Control After Launch
+
+A session can also start or stop its web server after launch using `wideboi web`:
+
+```bash
+# Start or enable the web server on a running session
+wideboi web start
+
+# Disable the web server without stopping the session
+wideboi web stop
+```
+
+Stopping the web server disconnects connected browser clients and unlinks the `.web-token` file, while terminal attach and CLI clients keep running. Starting the web server again reuses the previous session access token by default; pass `--rotate-token` (or `-r`) to generate a new token.
 
 ### Security and Authentication
 

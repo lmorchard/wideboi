@@ -15,11 +15,12 @@ import (
 )
 
 type statusOutput struct {
-	Columns      []protocol.ColumnData            `json:"columns"`
-	PaneStatuses map[int]protocol.PaneStatus      `json:"pane_statuses"`
-	PaneTitles   map[int]string                   `json:"pane_titles"`
-	PaneMetadata map[int]protocol.MsgPaneMetadata `json:"pane_metadata"`
-	SessionCWD   string                           `json:"session_cwd"`
+	Columns      []protocol.ColumnData                 `json:"columns"`
+	PaneStatuses map[int]protocol.PaneStatus           `json:"pane_statuses"`
+	PaneTitles   map[int]string                        `json:"pane_titles"`
+	PaneMetadata map[int]protocol.MsgPaneMetadata      `json:"pane_metadata"`
+	SessionCWD   string                                `json:"session_cwd"`
+	WebServer    *protocol.MsgWebServerControlResponse `json:"web_server,omitempty"`
 }
 
 // runStatus connects to the server and outputs the current layout snapshot.
@@ -39,8 +40,12 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 
 	// Ask the server for the current layout state
 	cc.SendClient(ctx, protocol.MsgStatusRequest{})
+	if jsonOut {
+		cc.SendClient(ctx, protocol.MsgWebServerControlRequest{Action: protocol.WebServerActionStatus})
+	}
 
 	var snap *protocol.MsgLayoutSnapshot
+	var webStatus *protocol.MsgWebServerControlResponse
 	metas := make(map[int]protocol.MsgPaneMetadata)
 	deadline := time.After(2 * time.Second)
 
@@ -55,6 +60,8 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 				snap = &m
 			case protocol.MsgPaneMetadata:
 				metas[m.PaneID] = m
+			case protocol.MsgWebServerControlResponse:
+				webStatus = &m
 			}
 		case <-deadline:
 			return fmt.Errorf("timeout waiting for server state")
@@ -75,12 +82,32 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 			if !ok {
 				return fmt.Errorf("server closed connection before sending metadata")
 			}
-			if m, ok := msg.(protocol.MsgPaneMetadata); ok {
+			switch m := msg.(type) {
+			case protocol.MsgPaneMetadata:
 				metas[m.PaneID] = m
 				delete(needed, m.PaneID)
+			case protocol.MsgWebServerControlResponse:
+				webStatus = &m
 			}
 		case <-deadline:
 			return fmt.Errorf("timeout waiting for server state")
+		}
+	}
+
+	for jsonOut && webStatus == nil {
+		select {
+		case msg, ok := <-cc.ServerSendChan():
+			if !ok {
+				return fmt.Errorf("server closed connection before sending web server status")
+			}
+			switch m := msg.(type) {
+			case protocol.MsgPaneMetadata:
+				metas[m.PaneID] = m
+			case protocol.MsgWebServerControlResponse:
+				webStatus = &m
+			}
+		case <-deadline:
+			return fmt.Errorf("timeout waiting for web server status")
 		}
 	}
 
@@ -91,6 +118,7 @@ func runStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 			PaneTitles:   snap.PaneTitles,
 			PaneMetadata: metas,
 			SessionCWD:   snap.SessionCWD,
+			WebServer:    webStatus,
 		}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
