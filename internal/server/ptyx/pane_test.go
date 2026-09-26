@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -209,5 +211,115 @@ func TestExitDescription(t *testing.T) {
 			t.Errorf("%q: ExitDescription() = (%q, %v), want (%q, true)", c.script, got, reaped, c.want)
 		}
 		p.Hangup(testGrace)
+	}
+}
+
+func TestPaneResize(t *testing.T) {
+	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { p.Hangup(testGrace) })
+
+	if err := p.Resize(85, 23); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+
+	if _, err := io.WriteString(p.Master, "stty size\n"); err != nil {
+		t.Fatalf("write to pty: %v", err)
+	}
+
+	if !readUntil(t, p.Master, "23 85", 5*time.Second) {
+		t.Fatal("child did not see resized window size 23 85")
+	}
+}
+
+func TestPaneClose(t *testing.T) {
+	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { p.Hangup(testGrace) })
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if err := p.Resize(50, 15); err == nil {
+		t.Error("Resize on closed pane master succeeded, want error")
+	}
+}
+
+func TestPanePID(t *testing.T) {
+	p, err := ptyx.Spawn([]string{"/bin/sh"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { p.Hangup(testGrace) })
+
+	if p.PID() <= 0 {
+		t.Errorf("PID() = %d, want > 0", p.PID())
+	}
+}
+
+func TestAdoptAlreadyExited(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	p, err := ptyx.Adopt(os.Getpid(), int(w.Fd()), "test-pty", true, 42)
+	if err != nil {
+		w.Close()
+		t.Fatalf("Adopt: %v", err)
+	}
+	defer p.Close()
+
+	select {
+	case <-p.Done():
+	default:
+		t.Fatal("Done() not closed for alreadyExited pane")
+	}
+
+	code, reaped := p.ExitCode()
+	if !reaped || code != 42 {
+		t.Errorf("ExitCode() = (%d, %v), want (42, true)", code, reaped)
+	}
+
+	desc, reaped := p.ExitDescription()
+	if !reaped || !strings.Contains(desc, "42") {
+		t.Errorf("ExitDescription() = (%q, %v), want contains 42", desc, reaped)
+	}
+}
+
+func TestAdoptRunning(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "sleep 0.05; exit 9")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	pAdopted, err := ptyx.Adopt(cmd.Process.Pid, int(w.Fd()), "adopted-pty", false, 0)
+	if err != nil {
+		w.Close()
+		t.Fatalf("Adopt running: %v", err)
+	}
+	defer pAdopted.Close()
+
+	select {
+	case <-pAdopted.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for adopted process exit")
+	}
+
+	code, reaped := pAdopted.ExitCode()
+	if !reaped || code != 9 {
+		t.Errorf("ExitCode() = (%d, %v), want (9, true)", code, reaped)
 	}
 }

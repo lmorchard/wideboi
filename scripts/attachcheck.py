@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty, wait_for_exit, force_cleanup,
     descendants, server_child, settle_output, still_alive,
-    private_run_dir, run_main, harness_args,
+    private_run_dir, run_main, harness_args, pinned_env,
 )
 # focus_pane_id reads the status line the way the diffing renderer
 # actually writes it: the "focus: [pane N" literal appears only in the
@@ -93,16 +93,7 @@ def socket_path() -> str:
 def bin_env() -> dict:
     """Environment for every wideboi this suite starts, so server,
     attach and the plain-binary probe all agree on one private path."""
-    # SHELL and PS1 are pinned for the reason ptylib.spawn_in_pty pins
-    # them, which only covers processes started on a pty. Server() is a
-    # plain Popen, so without this its panes ran the developer's own
-    # login shell: a themed zsh prints no "$", so waiting for prompts
-    # timed out, and its line editor sometimes discarded text typed
-    # while it was starting -- an intermittent "planted job never
-    # appeared" that had nothing to do with wideboi.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("WIDEBOI_")}
-    return {**env, "WIDEBOI_SOCK": socket_path(),
-            "SHELL": "/bin/sh", "PS1": "$ "}
+    return pinned_env({"WIDEBOI_SOCK": socket_path()})
 
 
 class Server:

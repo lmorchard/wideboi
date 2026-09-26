@@ -39,6 +39,38 @@ def harness_args(binary: str, *args: str) -> list[str]:
     return [binary, "-c", os.devnull, *args]
 
 
+def pinned_env(overlay: dict | None = None) -> dict:
+    """Return an environment dictionary with standard pins for wideboi test processes.
+
+    Strips inherited WIDEBOI_* variables and pins SHELL, TERM, PS1, and
+    XDG_CONFIG_HOME so child shells and server instances behave predictably
+    regardless of developer environment.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("WIDEBOI_")}
+    env.update({
+        "SHELL": "/bin/sh",
+        "TERM": "xterm-256color",
+        "PS1": "$ ",
+        "XDG_CONFIG_HOME": os.path.join(
+            tempfile.gettempdir(), f"wideboi-harness-no-config-{os.getpid()}"
+        ),
+    })
+    if overlay:
+        env.update(overlay)
+    return env
+
+
+def wait_until(pred, timeout: float, what: str, interval: float = 0.05, exc=TimeoutError) -> None:
+    """Poll pred() every interval until it returns truthy, or raise exc."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return
+        time.sleep(interval)
+    if not pred():
+        raise exc(f"timed out after {timeout}s waiting for {what}")
+
+
 class Drainer:
     """Continuously reads a pty master on a background thread.
 
@@ -193,47 +225,7 @@ def spawn_in_pty(argv: list[str], cols: int, rows: int, set_winsize: bool,
             for _sig in (signal.SIGINT, signal.SIGQUIT,
                          signal.SIGTERM, signal.SIGHUP):
                 signal.signal(_sig, signal.SIG_DFL)
-            child_env = dict(os.environ)
-            child_env["SHELL"] = "/bin/sh"
-            # Pinned for the same reason SHELL is: the assertions
-            # depend on it, so it cannot be whatever the person
-            # running the suite happens to have.
-            #
-            # A GitHub runner sets no TERM at all, and ultraviolet
-            # then emits a plainer stream -- the status bar still
-            # renders its text but without the SGR 7 that makes the
-            # inversion assertable, and the divider draws without the
-            # absolute cursor move divider_columns matches on. Two
-            # smoke cases failed on the first CI run for exactly that,
-            # and reproduce locally under `env -u TERM`.
-            #
-            # Matches what internal/server/ptyx gives the panes.
-            child_env["TERM"] = "xterm-256color"
-            # And PS1, for the third time the same reason.
-            #
-            # /bin/sh is bash on macOS and dash on Linux, and their
-            # default prompts differ -- "sh-3.2$" against a bare "$".
-            # The golden snapshot records every word wideboi renders,
-            # so the macOS prompt was baked into it as the token
-            # "sh-3" and CI failed on its absence. The prompt is the
-            # child's output, not wideboi's chrome, and the snapshot
-            # exists to pin the chrome.
-            child_env["PS1"] = "$ "
-            # And the layout, for the fourth. Several assertions and the
-            # golden snapshot expect the built-in default (cards) -- the
-            # status line's layout tag, and attachcheck's comparisons
-            # between clients -- so neither WIDEBOI_LAYOUT nor a
-            # developer's own environment may choose it. The callers
-            # pass -c /dev/null to skip discovered config files. Clearing
-            # inherited WIDEBOI_* variables keeps the built-in defaults
-            # under test; env below restores each case's explicit values.
-            for key in list(child_env):
-                if key.startswith("WIDEBOI_"):
-                    del child_env[key]
-            child_env["XDG_CONFIG_HOME"] = os.path.join(
-                tempfile.gettempdir(), f"wideboi-harness-no-config-{os.getpid()}")
-            if env:
-                child_env.update(env)
+            child_env = pinned_env(env)
             os.execvpe(argv[0], argv, child_env)
         except Exception:
             pass

@@ -1040,8 +1040,12 @@ def case_host_resize_resizes_panes(fail):
         return
     before = first[-1]
 
+    mark = len(s.output())
     fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
-    time.sleep(1.5)
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and b"\x1b[20;" not in s.output()[mark:]:
+        time.sleep(0.02)
+    settle_output(s.drainer, timeout=2.0)
     mark = len(s.output())
     s.type("stty size\r", settle=1.6)
     after = re.findall(rb"(\d+) (\d+)", s.output()[mark:])
@@ -1073,8 +1077,12 @@ def case_partly_clipped_pane_keeps_full_width(fail):
 
     # Narrow enough that two full-width columns no longer both fit: pane 1
     # (focused) stays fully visible, pane 2 is scrolled down to a sliver.
+    mark = len(s.output())
     fcntl.ioctl(s.fd, termios.TIOCSWINSZ, struct.pack("HHHH", 20, 70, 0, 0))
-    time.sleep(1.5)
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and b"\x1b[20;" not in s.output()[mark:]:
+        time.sleep(0.02)
+    settle_output(s.drainer, timeout=2.0)
 
     s.type("\x02l")  # C-b l -> focus pane 2, which exits control mode on its own
     mark = len(s.output())

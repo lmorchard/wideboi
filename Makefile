@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-test desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version
+.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-test desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version prune-worktrees
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -217,7 +217,7 @@ web/node_modules/.installed: web/package.json web/package-lock.json
 	cd web && npm ci
 	@touch $@
 
-web/dist: web/node_modules/.installed web/package.json web/package-lock.json $(shell find web/src -type f) web/index.html web/tsconfig.json
+web/dist: web/node_modules/.installed web/package.json web/package-lock.json $(shell find web/src web/public -type f 2>/dev/null) web/index.html web/tsconfig.json
 	cd web && npm run build
 
 web-build: web/dist
@@ -232,3 +232,7 @@ proto: web/node_modules/.installed
 # Keep this outside make check so local checks do not require buf.
 proto-check: proto
 	git diff --exit-code -- internal/protocol/wirepb web/src/gen
+
+# Remove linked worktrees whose GitHub PR is merged or closed and have no uncommitted changes.
+prune-worktrees:
+	@./scripts/prune-worktrees.sh $(PRUNE_FLAGS)

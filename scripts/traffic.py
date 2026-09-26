@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (  # noqa: E402
     Drainer, force_cleanup, private_run_dir, run_main, settle_output,
-    spawn_in_pty, wait_for_exit,
+    spawn_in_pty, wait_for_exit, pinned_env, wait_until as _wait_until,
 )
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -168,9 +168,6 @@ class Run:
         self.overlay = {
             "WIDEBOI_SOCK": self.sock,
             "WIDEBOI_TRAFFIC_TIMING": "1",
-            "SHELL": "/bin/sh",
-            "PS1": "$ ",
-            "TERM": "xterm-256color",
             "XDG_CONFIG_HOME": os.path.join(self.dir, "no-config"),
         }
         if args.profile:
@@ -190,8 +187,7 @@ class Run:
     def env(self) -> dict:
         """The server's and CLI's environment. Pty clients get the same
         overlay on top of ptylib's pinned environment."""
-        base = {k: v for k, v in os.environ.items() if not k.startswith("WIDEBOI_")}
-        return {**base, **self.overlay}
+        return pinned_env(self.overlay)
 
     def cli(self, *argv: str, timeout: float = 5.0) -> str:
         out = subprocess.run([BIN, "-c", self.cfg, *argv], env=self.env(),
@@ -651,13 +647,7 @@ def port_open(port: int) -> bool:
 
 
 def wait_until(pred, timeout: float, what: str, interval: float = 0.05) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if pred():
-            return
-        time.sleep(interval)
-    if not pred():
-        raise ScenarioFailed(f"timed out after {timeout}s waiting for {what}")
+    _wait_until(pred, timeout, what, interval, exc=ScenarioFailed)
 
 
 def transport_counts(stats: dict) -> dict:

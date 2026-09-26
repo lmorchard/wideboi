@@ -10,8 +10,6 @@ import (
 	"strings"
 )
 
-var Log *slog.Logger = slog.Default()
-
 // LevelTrace is below Debug, for lines that fire per message or per
 // frame. slog has no trace level of its own; its levels are integers
 // with room between them for exactly this.
@@ -100,8 +98,7 @@ func Init(path string, level slog.Level, teeToConsole bool) (*os.File, error) {
 		w = io.MultiWriter(f, os.Stderr)
 	}
 
-	Log = slog.New(newHandler(w, level))
-	slog.SetDefault(Log)
+	slog.SetDefault(slog.New(newHandler(w, level)))
 	return f, nil
 }
 

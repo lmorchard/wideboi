@@ -2,14 +2,47 @@ package transport
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
+
+// WebSocketTokenPrefix is the subprotocol prefix for bearer tokens.
+const WebSocketTokenPrefix = "wideboi-token."
+
+// WebSocketSubprotocol returns the protocol version string used during WebSocket negotiation.
+func WebSocketSubprotocol() string {
+	return fmt.Sprintf("wideboi.v%d", protocol.Version)
+}
+
+// WebSocketTokenFromSubprotocols extracts the token provided via subprotocol.
+func WebSocketTokenFromSubprotocols(subprotocols []string) string {
+	for _, p := range subprotocols {
+		if strings.HasPrefix(p, WebSocketTokenPrefix) {
+			decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(p, WebSocketTokenPrefix))
+			if err == nil {
+				return string(decoded)
+			}
+		}
+	}
+	return ""
+}
+
+// CheckWebSocketToken verifies that the subprotocols include the expected token.
+func CheckWebSocketToken(subprotocols []string, want string) bool {
+	if want == "" {
+		return false
+	}
+	got := WebSocketTokenFromSubprotocols(subprotocols)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
 
 const (
 	webSocketReadLimit    = 1 << 20

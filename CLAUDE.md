@@ -36,8 +36,9 @@ Curating those is a human job.
 the viewport scrolls; nothing already on screen gets squeezed. This is the whole
 point of the project, and it is the invariant most likely to be broken by a
 plausible-looking geometry change — see `TestReservedToggleVerbChangesNothing`
-in `internal/server/status_test.go`, `internal/server/server.go:240`,
-`internal/layout/layout.go:247`.
+in `internal/server/status_test.go`, the PTY-sizing-from-ColumnWidth comment on
+`resizePanesLocked` in `internal/server/server.go`, and `Strip.ColumnWidth` in
+`internal/layout/layout.go`.
 
 ## Architecture, in four facts
 

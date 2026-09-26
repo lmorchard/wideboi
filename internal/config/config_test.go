@@ -528,6 +528,33 @@ func TestLoadTLS(t *testing.T) {
 		}
 	}
 
+	// 8b. Environment variable WIDEBOI_DISABLE_TLS false/0/no/off enables it
+	for _, val := range []string{"false", "0", "no", "off"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_DISABLE_TLS": val}))
+		if err != nil {
+			t.Fatalf("Load() with WIDEBOI_DISABLE_TLS=%q error: %v", val, err)
+		}
+		if !cfg.TLSEnabled {
+			t.Errorf("TLSEnabled = false with WIDEBOI_DISABLE_TLS=%q, want true", val)
+		}
+	}
+
+	// 8c. Conflicting TLS environment variables error
+	if _, _, err := config.Load(defaultFlags(), mockEnv(map[string]string{
+		"WIDEBOI_TLS":         "1",
+		"WIDEBOI_DISABLE_TLS": "1",
+	})); err == nil {
+		t.Error("Load() succeeded with conflicting WIDEBOI_TLS=1 and WIDEBOI_DISABLE_TLS=1, want error")
+	}
+
+	// 8d. Agreeing TLS environment variables succeed
+	if cfg, _, err := config.Load(defaultFlags(), mockEnv(map[string]string{
+		"WIDEBOI_TLS":         "1",
+		"WIDEBOI_DISABLE_TLS": "0",
+	})); err != nil || !cfg.TLSEnabled {
+		t.Errorf("Load() with agreeing TLS envs: err=%v, TLSEnabled=%v, want true", err, cfg.TLSEnabled)
+	}
+
 	// 9. Environment variable WIDEBOI_TLS_CERT and WIDEBOI_TLS_KEY
 	cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{
 		"WIDEBOI_TLS_CERT": certPath,
@@ -942,6 +969,18 @@ steps = [
 	if customMacros[0].Steps[0].Text != "echo hi" {
 		t.Errorf("got step 0 text %q, want 'echo hi'", customMacros[0].Steps[0].Text)
 	}
+
+	// Mutating the returned steps must not mutate the configuration
+	customMacros[0].Steps[0].Text = "mutated"
+	if cfgCustom.Macros[0].Steps[0].Text == "mutated" {
+		t.Errorf("ResolvedMacros() shared steps slice with Config.Macros")
+	}
+	freshMacros := cfgCustom.ResolvedMacros()
+	if freshMacros[0].Steps[0].Text != "echo hi" {
+		t.Errorf("fresh ResolvedMacros() reflected mutation: got %q, want 'echo hi'", freshMacros[0].Steps[0].Text)
+	}
+	// Restore for rest of test
+	customMacros[0].Steps[0].Text = "echo hi"
 
 	// 3. SaveMacrosFile and reload from UserMacrosPath
 	macrosFile := filepath.Join(dir, "macros.toml")

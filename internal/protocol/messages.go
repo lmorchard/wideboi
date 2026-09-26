@@ -515,18 +515,18 @@ type MsgUpgradeResponse struct {
 
 // MacroStep defines a single text or key event in an input macro.
 type MacroStep struct {
-	Text  string `json:"text,omitempty"`
-	Key   string `json:"key,omitempty"`
-	Code  string `json:"code,omitempty"`
-	Ctrl  bool   `json:"ctrl,omitempty"`
-	Alt   bool   `json:"alt,omitempty"`
-	Shift bool   `json:"shift,omitempty"`
+	Text  string `json:"text,omitempty" toml:"text,omitempty"`
+	Key   string `json:"key,omitempty" toml:"key,omitempty"`
+	Code  string `json:"code,omitempty" toml:"code,omitempty"`
+	Ctrl  bool   `json:"ctrl,omitempty" toml:"ctrl,omitempty"`
+	Alt   bool   `json:"alt,omitempty" toml:"alt,omitempty"`
+	Shift bool   `json:"shift,omitempty" toml:"shift,omitempty"`
 }
 
 // Macro represents a named sequence of input steps.
 type Macro struct {
-	Name  string      `json:"name"`
-	Steps []MacroStep `json:"steps"`
+	Name  string      `json:"name" toml:"name"`
+	Steps []MacroStep `json:"steps" toml:"steps"`
 }
 
 // MsgMacrosSnapshot is sent by the server to inform clients of available macros.

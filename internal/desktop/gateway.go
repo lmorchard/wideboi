@@ -5,9 +5,6 @@ package desktop
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/base64"
-	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -15,7 +12,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/lmorchard/wideboi/internal/config"
-	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -35,7 +31,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid session", http.StatusBadRequest)
 		return
 	}
-	if !hasToken(r, g.Token) {
+	if !transport.CheckWebSocketToken(websocket.Subprotocols(r), g.Token) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -43,7 +39,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid origin", http.StatusForbidden)
 		return
 	}
-	version := fmt.Sprintf("wideboi.v%d", protocol.Version)
+	version := transport.WebSocketSubprotocol()
 	offered := false
 	for _, p := range websocket.Subprotocols(r) {
 		if p == version {
@@ -107,23 +103,6 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case <-done:
 	case <-ctx.Done():
 	}
-}
-
-func hasToken(r *http.Request, want string) bool {
-	if want == "" {
-		return false
-	}
-	for _, p := range websocket.Subprotocols(r) {
-		const prefix = "wideboi-token."
-		if len(p) <= len(prefix) || p[:len(prefix)] != prefix {
-			continue
-		}
-		got, err := base64.RawURLEncoding.DecodeString(p[len(prefix):])
-		if err == nil && subtle.ConstantTimeCompare(got, []byte(want)) == 1 {
-			return true
-		}
-	}
-	return false
 }
 
 func sameOrigin(r *http.Request) bool {
