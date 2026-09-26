@@ -426,13 +426,6 @@ func (p *Pane) reapedExitCode() (int, bool) {
 	return p.pty.ExitCode()
 }
 
-// UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport at the
-// pane's current scroll offset.
-// It returns false if the pane began closing before rendering could start.
-func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
-	return p.UpdateMessageForOffset(p.ScrollOffset(), false)
-}
-
 // UpdateMessageForOffset constructs a protocol.MsgPaneUpdate for wire transport
 // at a specific scroll offset. When offset > 0, cursor visibility is suppressed.
 // It returns false if the pane began closing before rendering could start.

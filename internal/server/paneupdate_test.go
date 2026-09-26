@@ -488,10 +488,10 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 	s.mu.Unlock()
 	grids[1].bump()
 	s.broadcastPaneUpdates(ctx, false)
-	if _, ok := s.paneGens[tp][2]; ok {
+	if _, ok := s.clientLocked(tp).paneGens[2]; ok {
 		t.Error("record for exited pane 2 survived a broadcast")
 	}
-	if _, ok := s.paneFrames[tp][2]; ok {
+	if _, ok := s.clientLocked(tp).paneFrames[2]; ok {
 		t.Error("baseline for exited pane 2 survived a broadcast")
 	}
 
@@ -501,19 +501,16 @@ func TestDeliveryRecordsAreForgotten(t *testing.T) {
 	delete(s.panes, 1)
 	s.mu.Unlock()
 	s.broadcastPaneUpdates(ctx, false)
-	if n := len(s.paneGens[tp]); n != 0 {
+	if n := len(s.clientLocked(tp).paneGens); n != 0 {
 		t.Errorf("%d record(s) survived the last pane exiting", n)
 	}
-	if n := len(s.paneFrames[tp]); n != 0 {
+	if n := len(s.clientLocked(tp).paneFrames); n != 0 {
 		t.Errorf("%d baseline(s) survived the last pane exiting", n)
 	}
 
 	s.dropClient(context.Background(), tp)
-	if _, ok := s.paneGens[tp]; ok {
+	if _, ok := s.clients[tp]; ok {
 		t.Error("records for a dropped client survived dropClient")
-	}
-	if _, ok := s.paneFrames[tp]; ok {
-		t.Error("baselines for a dropped client survived dropClient")
 	}
 }
 

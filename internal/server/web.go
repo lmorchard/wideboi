@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -413,4 +414,94 @@ func ExposureWarning(addr net.Addr, tlsEnabled bool) string {
 		return ""
 	}
 	return "wideboi: WARNING: web client is exposed beyond loopback over unencrypted HTTP/WS; bind to loopback behind an HTTPS reverse proxy for remote access"
+}
+
+// websocketProtocolToken reads the browser's token-bearing subprotocol offer.
+// The server deliberately does not select it as the negotiated subprotocol.
+func websocketProtocolToken(r *http.Request) string {
+	return transport.WebSocketTokenFromSubprotocols(websocket.Subprotocols(r))
+}
+
+// ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
+func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
+	versionProtocol := transport.WebSocketSubprotocol()
+	upgrader := &websocket.Upgrader{
+		ReadBufferSize:    4096,
+		WriteBufferSize:   4096,
+		Subprotocols:      []string{versionProtocol},
+		CheckOrigin:       webSocketOriginAllowed,
+		EnableCompression: true,
+	}
+
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if token != "" {
+			reqToken := r.URL.Query().Get("token")
+			if reqToken != token && websocketProtocolToken(r) != token {
+				slog.Warn("websocket connection rejected: invalid token", "remote", r.RemoteAddr)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+		}
+		versionOffered := false
+		for _, offered := range websocket.Subprotocols(r) {
+			if offered == versionProtocol {
+				versionOffered = true
+				break
+			}
+		}
+		if !versionOffered {
+			http.Error(w, "Unsupported wideboi protocol version", http.StatusUpgradeRequired)
+			return
+		}
+
+		// gorilla writes the 101 response and every frame to the
+		// hijacked conn, so counting that conn counts the wire.
+		cw := transport.NewCountingResponseWriter(w)
+		conn, err := upgrader.Upgrade(cw, r, nil)
+		if err != nil {
+			slog.Debug("websocket upgrade failed", "err", err)
+			return
+		}
+
+		sConn := transport.NewWebSocketServerConn(conn, 256, cw)
+		sConn.RunPumps(ctx)
+
+		s.mu.Lock()
+		if s.stoppingLocked() {
+			s.mu.Unlock()
+			_ = sConn.Close()
+			return
+		}
+		s.transports = append(s.transports, sConn)
+		if s.remoteTransports == nil {
+			s.remoteTransports = make(map[transport.Transport]bool)
+		}
+		s.remoteTransports[sConn] = true
+		s.clientLocked(sConn).remote = true
+		s.startTransportLoopLocked(ctx, sConn)
+		s.mu.Unlock()
+	})
+}
+
+// webSocketOriginAllowed permits same-host browser connections and the local
+// Vite development server. The development exception must never apply to a
+// remotely addressed WebSocket endpoint.
+func webSocketOriginAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // Non-browser clients still need the token.
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	if u.Host == r.Host {
+		return true
+	}
+	requestHost, _, err := net.SplitHostPort(r.Host)
+	if err != nil || (requestHost != "localhost" && requestHost != "127.0.0.1" && requestHost != "::1") {
+		return false
+	}
+	return u.Scheme == "http" && (u.Host == "localhost:5173" || u.Host == "127.0.0.1:5173" || u.Host == "[::1]:5173")
 }

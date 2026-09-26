@@ -14,8 +14,8 @@ func TestPerPaneWidthOwnerTransfersOnClaim(t *testing.T) {
 	s := NewServer(a, "/bin/sh", "")
 	defer s.Close()
 	s.strip.AddColumn(1, 40, 20, 0)
-	s.clientSizes[a] = protocol.MsgResize{Cols: 100, Rows: 30}
-	s.clientSizes[b] = protocol.MsgResize{Cols: 80, Rows: 24}
+	s.clientLocked(a).size = protocol.MsgResize{Cols: 100, Rows: 30}
+	s.clientLocked(b).size = protocol.MsgResize{Cols: 80, Rows: 24}
 	s.sizeOwner = a
 	ctx := context.Background()
 

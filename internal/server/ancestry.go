@@ -86,15 +86,18 @@ func (s *Server) SetPeerPID(tp transport.Transport, pid uint32) {
 }
 
 func (s *Server) setPeerPIDLocked(tp transport.Transport, pid uint32) {
-	if s.peerPIDs == nil {
-		s.peerPIDs = make(map[transport.Transport]uint32)
-	}
-	s.peerPIDs[tp] = pid
+	s.clientLocked(tp).peerPID = pid
 }
 
 // peerPID is tp's peer's pid, 0 if unknown.
 func (s *Server) peerPID(tp transport.Transport) uint32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.peerPIDs[tp]
+	if s.clients == nil {
+		return 0
+	}
+	if cs := s.clients[tp]; cs != nil {
+		return cs.peerPID
+	}
+	return 0
 }

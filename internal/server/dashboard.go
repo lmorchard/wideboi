@@ -145,6 +145,27 @@ func formatStatus(st protocol.PaneStatus) string {
 	}
 }
 
+// HandleInput processes a protocol.MsgInput event on the dashboard pane.
+// It decodes raw bytes or encoded Key to a KeyEvent and dispatches to HandleKey.
+func (d *Dashboard) HandleInput(m protocol.MsgInput) (int, bool) {
+	var key uv.KeyEvent
+	if !m.Key.IsZero() {
+		key = m.Key.Decode()
+	} else if len(m.Data) > 0 {
+		if len(m.Data) == 1 && (m.Data[0] == '\r' || m.Data[0] == '\n') {
+			key = uv.KeyPressEvent{Code: 13}
+		} else if len(m.Data) == 1 && m.Data[0] == 'j' {
+			key = uv.KeyPressEvent{Code: 'j'}
+		} else if len(m.Data) == 1 && m.Data[0] == 'k' {
+			key = uv.KeyPressEvent{Code: 'k'}
+		}
+	}
+	if key == nil {
+		return 0, false
+	}
+	return d.HandleKey(key)
+}
+
 // HandleKey processes a keyboard event on the dashboard pane.
 // It returns (targetPaneID, handled). If targetPaneID > 0, the client should jump to that pane.
 func (d *Dashboard) HandleKey(ev uv.KeyEvent) (int, bool) {

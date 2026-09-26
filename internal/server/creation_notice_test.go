@@ -13,15 +13,15 @@ func TestCreationNoticeRetriesBeforeSnapshot(t *testing.T) {
 	s := NewServer(tp, "/bin/sh", "")
 	s.strip.AddColumn(1, 40, 20, 0)
 	s.strip.AddColumn(2, 40, 20, 1)
-	s.pendingPaneCreated[tp] = []int{2}
-	s.pendingCreationSnapshot[tp] = true
+	s.clientLocked(tp).pendingPaneCreated = []int{2}
+	s.clientLocked(tp).pendingCreationSnapshot = true
 	ctx := context.Background()
 
 	// A full queue must leave the notice pending.
 	tp.ServerSend <- protocol.MsgPaneClosed{PaneID: 9}
 	s.broadcastLayout(ctx)
 	<-tp.ServerSend
-	if len(s.pendingPaneCreated[tp]) != 1 {
+	if len(s.clientLocked(tp).pendingPaneCreated) != 1 {
 		t.Fatal("creation notice was lost when the queue was full")
 	}
 
@@ -31,7 +31,7 @@ func TestCreationNoticeRetriesBeforeSnapshot(t *testing.T) {
 	if msg := <-tp.ServerSend; msg != (protocol.MsgPaneCreated{PaneID: 2}) {
 		t.Fatalf("first accepted message = %T %+v, want creation notice", msg, msg)
 	}
-	if !s.pendingCreationSnapshot[tp] {
+	if !s.clientLocked(tp).pendingCreationSnapshot {
 		t.Fatal("snapshot retry was lost after the notice was accepted")
 	}
 	s.broadcastLayout(ctx)
@@ -40,7 +40,7 @@ func TestCreationNoticeRetriesBeforeSnapshot(t *testing.T) {
 	if !ok || len(snap.Columns) != 2 {
 		t.Fatalf("message after notice = %T %+v, want two-column snapshot", msg, msg)
 	}
-	if s.pendingCreationSnapshot[tp] {
+	if s.clientLocked(tp).pendingCreationSnapshot {
 		t.Fatal("creation snapshot still pending after delivery")
 	}
 }

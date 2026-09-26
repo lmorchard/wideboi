@@ -44,6 +44,9 @@ func (s *Server) trafficLocked(tp transport.Transport) *clientTraffic {
 // markAttachedLocked makes tp a reported client. A repeated attach keeps
 // the first one's id and time. s.mu held.
 func (s *Server) markAttachedLocked(tp transport.Transport) {
+	if tp != nil {
+		s.clientLocked(tp).attached = true
+	}
 	t := s.trafficLocked(tp)
 	if t.attached.IsZero() {
 		s.nextClientID++

@@ -85,9 +85,9 @@ func attachedTrafficServer(t *testing.T, g term.Grid) (*Server, *transport.InPro
 	s.panes[1].grid = g
 	s.panes[1].cols, s.panes[1].rows = trafficPaneSize()
 	// serverWithStatuses builds a Server literal: maps NewServer would
-	// make are nil. MsgAttach writes clientSizes; trafficLocked must
+	// make are nil. MsgAttach writes client sizes; trafficLocked must
 	// make s.traffic lazily itself.
-	s.clientSizes = make(map[transport.Transport]protocol.MsgResize)
+	s.clients = make(map[transport.Transport]*clientState)
 	client := s.transports[0].(*transport.InProcChannel)
 	s.handleClientMsg(context.Background(), client, protocol.MsgAttach{Cols: 80, Rows: 24})
 	drainPaneUpdates(client)
