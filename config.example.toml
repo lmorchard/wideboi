@@ -27,14 +27,22 @@ prefix = "ctrl+b"
 # socket = "/path/to/socket.sock"
 
 # Address to bind the WebSocket server for the Web Client.
-# Bind to loopback for local use or an HTTPS reverse proxy on this host.
-# A wildcard address such as ":8080" exposes unencrypted HTTP/WS to the network.
 # Defaults to empty (disabled).
 # websocket = "127.0.0.1:8080"
 
 # Optional fixed token for WebSocket clients. Without it, a token is generated
 # at server startup and shown once in a link on stderr.
 # websocket_token = "your-secret-token"
+
+# TLS is enabled by default for the web server (generating an in-memory ephemeral
+# self-signed certificate if no cert/key is specified).
+# Set tls = false to serve unencrypted HTTP/WS.
+# tls = true
+
+# Optional paths to custom PEM-encoded certificate and private key files.
+# If both are provided, wideboi uses them instead of generating a self-signed certificate.
+# tls_cert = "/path/to/cert.pem"
+# tls_key = "/path/to/key.pem"
 
 # Shell executable to spawn in new panes.
 # Defaults to $SHELL, or /bin/sh if $SHELL is empty.

@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	crypto_rand "crypto/rand"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -118,6 +119,10 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.StringVar(&opts.flags.Session, "session", "", "session name")
 	fs.StringVar(&opts.flags.Websocket, "websocket", "", "address for websocket server (e.g. \"127.0.0.1:8080\")")
 	fs.StringVar(&opts.flags.WebsocketToken, "websocket-token", "", "token required for websocket connections")
+	fs.BoolVar(&opts.flags.DisableTLS, "disable-tls", false, "disable TLS/HTTPS for web server (use unencrypted HTTP/WS)")
+	fs.BoolVar(&opts.flags.TLS, "tls", false, "enable TLS/HTTPS for web server (enabled by default)")
+	fs.StringVar(&opts.flags.TLSCert, "tls-cert", "", "path to TLS certificate PEM file")
+	fs.StringVar(&opts.flags.TLSKey, "tls-key", "", "path to TLS private key PEM file")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
@@ -182,6 +187,10 @@ Flags:
   -s, --socket <path>    Unix domain socket path, instead of a session name
       --websocket <addr> Address for WebSocket server (e.g. "127.0.0.1:8080")
       --websocket-token <token> Token required for WebSocket connections
+      --disable-tls      Disable TLS/HTTPS for web server (use unencrypted HTTP/WS)
+      --tls              Enable TLS/HTTPS for web server (enabled by default)
+      --tls-cert <path>  Path to TLS certificate PEM file
+      --tls-key <path>   Path to TLS private key PEM file
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
       --disable-auto-cleanup Disable automatic cleanup of logs and artifacts on clean exit
@@ -193,6 +202,10 @@ Environment Variables:
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SESSION        Session name override
   WIDEBOI_WEBSOCKET      Address for WebSocket server (e.g. "127.0.0.1:8080")
+  WIDEBOI_TLS            Enable TLS/HTTPS for web server (default true)
+  WIDEBOI_DISABLE_TLS    Disable TLS/HTTPS for web server
+  WIDEBOI_TLS_CERT       Path to TLS certificate PEM file
+  WIDEBOI_TLS_KEY        Path to TLS private key PEM file
   WIDEBOI_SOCK           Socket path override
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
@@ -421,7 +434,16 @@ func runServer(cfg config.Config, ownerFD int) error {
 			slog.Error("cannot listen on websocket address", "err", err)
 			return err
 		}
-		warnIfWebClientExposed(os.Stderr, slog.Default(), wsListener.Addr())
+		if cfg.TLSEnabled {
+			tlsConfig, err := transport.LoadOrGenerateTLSConfig(cfg.TLSCert, cfg.TLSKey, cfg.Websocket)
+			if err != nil {
+				_ = wsListener.Close()
+				slog.Error("configure tls failed", "err", err)
+				return fmt.Errorf("configure tls: %w", err)
+			}
+			wsListener = tls.NewListener(wsListener, tlsConfig)
+		}
+		warnIfWebClientExposed(os.Stderr, slog.Default(), wsListener.Addr(), cfg.TLSEnabled)
 		if generatedToken {
 			if err := writeWebToken(cfg.Socket, cfg.WebsocketToken); err != nil {
 				_ = wsListener.Close()
@@ -438,7 +460,7 @@ func runServer(cfg config.Config, ownerFD int) error {
 			if host != "" && host[0] == ':' {
 				host = "localhost" + host
 			}
-			announceWebClient(os.Stderr, slog.Default(), host, cfg.Websocket, cfg.WebsocketToken, generatedToken)
+			announceWebClient(os.Stderr, slog.Default(), host, cfg.Websocket, cfg.WebsocketToken, generatedToken, cfg.TLSEnabled)
 			if err := httpSrv.Serve(wsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("websocket server failed", "err", err)
 			}
@@ -500,18 +522,25 @@ func writeWebToken(socket, token string) error {
 
 // announceWebClient shows a generated credential once on the server's stderr,
 // while the persistent structured log records only that authentication is on.
-func announceWebClient(w io.Writer, log *slog.Logger, host, addr, token string, generated bool) {
+func announceWebClient(w io.Writer, log *slog.Logger, host, addr, token string, generated bool, tlsEnabled bool) {
+	scheme := "http"
+	if tlsEnabled {
+		scheme = "https"
+	}
 	if generated {
 		// A fragment is not sent with the HTTP request. The browser consumes it
 		// and removes it from its history entry before opening the WebSocket.
-		fmt.Fprintf(w, "wideboi: web client listening at http://%s/#token=%s\n", host, token)
+		fmt.Fprintf(w, "wideboi: web client listening at %s://%s/#token=%s\n", scheme, host, token)
 	} else {
-		fmt.Fprintf(w, "wideboi: web client listening at http://%s/ (token configured)\n", host)
+		fmt.Fprintf(w, "wideboi: web client listening at %s://%s/ (token configured)\n", scheme, host)
 	}
-	log.Info("websocket server listening", "addr", addr, "token", "***REDACTED***")
+	log.Info("websocket server listening", "addr", addr, "token", "***REDACTED***", "tls", tlsEnabled)
 }
 
-func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr) {
+func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr, tlsEnabled bool) {
+	if tlsEnabled {
+		return
+	}
 	tcpAddr, ok := addr.(*net.TCPAddr)
 	if !ok || tcpAddr.IP.IsLoopback() {
 		return

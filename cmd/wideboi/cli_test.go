@@ -296,3 +296,32 @@ func TestParseCLIDisableAutoCleanup(t *testing.T) {
 		t.Errorf("serverOpts.flags.DisableAutoCleanup = false, want true")
 	}
 }
+
+func TestParseCLITLSFlags(t *testing.T) {
+	opts, err := parseCLI([]string{
+		"--disable-tls",
+		"--tls-cert", "/tmp/cert.pem",
+		"--tls-key", "/tmp/key.pem",
+		"--websocket", "127.0.0.1:8080",
+	})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if !opts.flags.DisableTLS {
+		t.Errorf("DisableTLS = false, want true")
+	}
+	if opts.flags.TLSCert != "/tmp/cert.pem" {
+		t.Errorf("TLSCert = %q, want /tmp/cert.pem", opts.flags.TLSCert)
+	}
+	if opts.flags.TLSKey != "/tmp/key.pem" {
+		t.Errorf("TLSKey = %q, want /tmp/key.pem", opts.flags.TLSKey)
+	}
+
+	opts2, err := parseCLI([]string{"--tls"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if !opts2.flags.TLS {
+		t.Errorf("TLS = false, want true")
+	}
+}

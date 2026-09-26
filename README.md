@@ -102,17 +102,19 @@ Each client also keeps its own width and horizontal pan for each pane, in either
 
 wideboi is not secure and **will** let strangers into your shell. The access token mechanism is just a speed bump.
 
-wideboi includes an embedded browser client:
+wideboi includes an embedded browser client (with TLS enabled by default):
 
 ```bash
 wideboi server --websocket 127.0.0.1:8080
 ```
 
-Open the link printed on startup (which contains the security token) in your web browser:
+Open the HTTPS link printed on startup (which contains the security token) in your web browser:
 
 ```
-http://127.0.0.1:8080/#token=<generated-token>
+https://127.0.0.1:8080/#token=<generated-token>
 ```
+
+By default, wideboi generates an in-memory ephemeral self-signed TLS certificate. You can provide custom certificates with `--tls-cert <path> --tls-key <path>`, or disable TLS with `--disable-tls` if running behind a reverse proxy.
 
 You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
 
