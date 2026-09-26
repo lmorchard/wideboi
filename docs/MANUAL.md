@@ -351,14 +351,17 @@ wideboi server --websocket 127.0.0.1:8080
 When started, the server outputs an access link containing an authentication token:
 
 ```
-http://127.0.0.1:8080/#token=<generated-token>
+https://127.0.0.1:8080/#token=<generated-token>
 ```
 
-Open this URL in your web browser. The server serves the HTML/JS application and establishes a WebSocket connection.
+Open this URL in your web browser. The server serves the HTML/JS application and establishes a WebSocket connection over TLS (`wss://`).
 
 ### Security and Authentication
 
-- **Loopback Binding:** Always bind to `127.0.0.1:8080` for local access. Binding to `:8080` or `0.0.0.0:8080` allows unencrypted network access. wideboi prints a security warning if you bind to non-loopback addresses.
+- **HTTPS by Default:** wideboi enables TLS by default for embedded web server connections. If no certificate is supplied, it automatically generates an in-memory ephemeral self-signed ECDSA certificate on startup.
+- **Custom Certificates:** Provide your own certificate and key with `--tls-cert <path> --tls-key <path>` (or `tls_cert` and `tls_key` in the config file).
+- **Disabling TLS:** Use `--disable-tls` or `tls = false` in the configuration file if running behind a trusted reverse proxy that terminates TLS.
+- **Loopback vs Network Binding:** Binding to `127.0.0.1:8080` is restricted to local access. When binding to a network address such as `:8080` or `0.0.0.0:8080` with TLS disabled, wideboi prints a security warning about unencrypted network access.
 - **Generated Token:** If you do not specify a token, wideboi generates a secure random token at startup.
 - **Token File:** The server writes the current token to an owner-readable file at `$TMPDIR/wideboi-<uid>/<session-name>.web-token`. For the default session, view it with:
   ```bash
@@ -397,30 +400,6 @@ Opening the on-screen keyboard reduces the visible pane area, which stays
 anchored to the latest output while you are at the bottom. It does not resize
 the session's terminal grid. The phone reports its initial size when it first
 attaches, but does not change an established session's size as a viewer.
-
-### Remote HTTPS Reverse Proxy Setup
-
-To connect to wideboi securely from another computer, keep wideboi bound to `127.0.0.1:8080` and use an HTTPS reverse proxy (such as nginx) with TLS termination:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name wideboi.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/wideboi.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/wideboi.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-Connect to `https://wideboi.example.com/` and enter your token in the web connection form.
 
 ---
 
@@ -497,6 +476,10 @@ You can remap control-mode action keys in the `[keys]` table:
 | `-s, --socket <path>` | Direct path to Unix domain socket | Derived from session name |
 | `--websocket <addr>` | Address for HTTP and WebSocket listener | Disabled |
 | `--websocket-token <token>` | Security token for WebSocket access | Auto-generated |
+| `--disable-tls` | Disable TLS/HTTPS for web server | TLS enabled |
+| `--tls` | Explicitly enable TLS/HTTPS | Enabled by default |
+| `--tls-cert <path>` | Path to TLS certificate PEM file | — |
+| `--tls-key <path>` | Path to TLS private key PEM file | — |
 | `--shell <path>` | Shell executable for new panes | `$SHELL` or `/bin/sh` |
 | `--disable-auto-cleanup` | Keep runtime files on clean exit | Cleanup enabled |
 | `-v, --version` | Display version information and exit | — |
@@ -512,6 +495,10 @@ You can remap control-mode action keys in the `[keys]` table:
 | `WIDEBOI_SOCK` | Direct Unix domain socket path |
 | `WIDEBOI_WEBSOCKET` | Web server bind address |
 | `WIDEBOI_WEBSOCKET_TOKEN` | Web server security token |
+| `WIDEBOI_TLS` | Enable TLS/HTTPS for web server (`1` or `0`, default `1`) |
+| `WIDEBOI_DISABLE_TLS` | Disable TLS/HTTPS for web server (`1`) |
+| `WIDEBOI_TLS_CERT` | Path to TLS certificate PEM file |
+| `WIDEBOI_TLS_KEY` | Path to TLS private key PEM file |
 | `WIDEBOI_SHELL` | Executable path for pane shells |
 | `WIDEBOI_LOG_LEVEL` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
 | `WIDEBOI_AUTO_CLEANUP` | Remove sockets and logs on clean exit (`1` or `0`) |

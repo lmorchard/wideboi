@@ -1,12 +1,21 @@
 # wideboi
 
-wideboi is a scrolling tiling terminal multiplexer for command-line coding agents.
+wideboi is a horizontal scrolling tiling overlapping terminal multiplexer for wide monitors.
 
-Panes keep their configured width. When you open new panes, the screen viewport scrolls horizontally across them instead of squeezing existing panes.
+But, it's also got a web UI, because sometimes you need to check your wideboi from a smol phone or laptop.
 
-Status: v1. See the [open issues](https://github.com/lmorchard/wideboi/issues) for known issues and ongoing work.
+Your UI mileage will vary based on the current state of things, here's the gist:
 
-<video src="https://github.com/lmorchard/wideboi/raw/refs/heads/main/docs/wideboi-2.mp4" width="100%" controls></video>
+<video src="https://github.com/user-attachments/assets/3c4cb3bf-7d33-4c35-9805-d44e74fc4fd7" width="100%" controls></video>
+
+<details>
+<summary>Moar screenshots...</summary>
+  
+<video src="https://github.com/user-attachments/assets/c27eb693-6dd6-48b7-99d6-49aecee42ea5" width="70%" controls></video>
+
+<img alt="mobile web ui" src="https://github.com/user-attachments/assets/81466233-110c-427d-8ac2-5cf4777f3d70" width="25%" /> 
+
+</details>
 
 ---
 
@@ -87,6 +96,30 @@ Each client also keeps its own width and horizontal pan for each pane, in either
 
 ---
 
+## Web Client
+
+**BE VERY CAREFUL WITH USING THIS FEATURE FOR REMOTE ACCESS - USE A VPN OR TAILNET.** 
+
+wideboi is not secure and **will** let strangers into your shell. The access token mechanism is just a speed bump.
+
+wideboi includes an embedded browser client (with TLS enabled by default):
+
+```bash
+wideboi server --websocket 127.0.0.1:8080
+```
+
+Open the HTTPS link printed on startup (which contains the security token) in your web browser:
+
+```
+https://127.0.0.1:8080/#token=<generated-token>
+```
+
+By default, wideboi generates an in-memory ephemeral self-signed TLS certificate. You can provide custom certificates with `--tls-cert <path> --tls-key <path>`, or disable TLS with `--disable-tls` if running behind a reverse proxy.
+
+You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
+
+---
+
 ## Scripting and Agent Control
 
 You can control sessions directly from scripts and AI coding agents without attaching an interactive terminal:
@@ -110,24 +143,6 @@ wideboi close $PANE_ID
 ```
 
 All control commands accept `-L <session-name>` and `-s <socket-path>` to target specific sessions. `wait` exits with the pane process's exit code; the others exit 0 on success and 1 on error. `status --json` reports pane statuses by name (`idle`, `working`, `needs_input`, `done`, `failed`) and, for kept panes, `exited` and `exit_code`. See [`docs/skills/wideboi-control/SKILL.md`](docs/skills/wideboi-control/SKILL.md) for full agent skill instructions and integration patterns.
-
----
-
-## Web Client
-
-wideboi includes an embedded browser client:
-
-```bash
-wideboi server --websocket 127.0.0.1:8080
-```
-
-Open the link printed on startup (which contains the security token) in your web browser:
-
-```
-http://127.0.0.1:8080/#token=<generated-token>
-```
-
-You can attach terminal clients to the same session simultaneously with `wideboi attach`. The web client supports layout modes (cards or scroll), interactive mouse navigation, and client-local history search (`Ctrl+b /` or `Ctrl+F`).
 
 ---
 

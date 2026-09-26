@@ -1,6 +1,6 @@
 import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { decodeColor } from './colors';
-import { CELL_HEIGHT, FONT, type CellPoint } from './pane-state';
+import { termSettings, type CellPoint } from './pane-state';
 import type { RenderStats } from './stats';
 
 // A pane paints only its own cells. CSS positions and clips its canvas.
@@ -11,6 +11,7 @@ export class PanePainter {
   private selection?: { start: CellPoint; end: CellPoint };
   private width = 0;
   private height = 0;
+  private zoom = 1.0;
   private frame: number | null = null;
   private running = false;
   private readonly onVisibilityChange = () => {
@@ -57,6 +58,13 @@ export class PanePainter {
     this.invalidate();
   }
 
+  setZoom(zoom: number) {
+    if (this.zoom === zoom) return;
+    this.zoom = zoom;
+    this.applyTransform();
+    this.invalidate();
+  }
+
   setSelection(start: CellPoint, end: CellPoint) {
     this.selection = { start, end };
     this.invalidate();
@@ -80,8 +88,17 @@ export class PanePainter {
     // CSS controls canvas size; never write its inline width or height here.
     if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
     if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.invalidate();
+    this.applyTransform();
+    if (this.running && !document.hidden) {
+      this.draw();
+    } else {
+      this.invalidate();
+    }
+  }
+
+  private applyTransform() {
+    const dpr = window.devicePixelRatio || 1;
+    this.ctx.setTransform(dpr * this.zoom, 0, 0, dpr * this.zoom, 0, 0);
   }
 
   private cancelFrame() {
@@ -110,17 +127,19 @@ export class PanePainter {
 
   private draw() {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.width, this.height);
+    const logicalWidth = this.zoom > 0 ? this.width / this.zoom : this.width;
+    const logicalHeight = this.zoom > 0 ? this.height / this.zoom : this.height;
+    ctx.clearRect(0, 0, logicalWidth, logicalHeight);
     const pane = this.pane;
     if (!pane) return;
-    ctx.font = FONT;
+    ctx.font = termSettings.font;
     ctx.textBaseline = 'top';
-    for (let y = 0; y < pane.lines.length && y * CELL_HEIGHT < this.height; y++) {
+    for (let y = 0; y < pane.lines.length && y * termSettings.cellHeight < logicalHeight; y++) {
       const line = pane.lines[y]?.cells;
       if (!line) continue;
       // LineData has one entry per terminal column. A wide glyph's
       // continuation occupies the next entry; Width is paint width only.
-      for (let x = 0; x < line.length && x * this.cellWidth < this.width; x++) {
+      for (let x = 0; x < line.length && x * this.cellWidth < logicalWidth; x++) {
         const cell = line[x];
         if (x > 0 && line[x - 1]?.width > 1) continue;
         const attrs = cell.style?.attrs ?? 0;
@@ -130,25 +149,25 @@ export class PanePainter {
         const bg = reverse ? normalFg : normalBg;
         const fg = reverse ? normalBg : normalFg;
         const px = x * this.cellWidth;
-        const py = y * CELL_HEIGHT;
+        const py = y * termSettings.cellHeight;
         if (bg !== '#1e1e1e') {
           ctx.fillStyle = bg;
-          ctx.fillRect(px, py, this.cellWidth * (cell.width || 1), CELL_HEIGHT);
+          ctx.fillRect(px, py, this.cellWidth * (cell.width || 1), termSettings.cellHeight);
         }
         if (cell.content && cell.content !== ' ' && !(attrs & 64)) {
           ctx.fillStyle = fg;
           ctx.globalAlpha = attrs & 2 ? 0.5 : 1;
-          ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}${FONT}`;
-          ctx.fillText(cell.content, px, py);
+          ctx.font = `${attrs & 4 ? 'italic ' : ''}${attrs & 1 ? 'bold ' : ''}${termSettings.font}`;
+          ctx.fillText(cell.content, px, py + 1);
           ctx.globalAlpha = 1;
         }
         if (cell.style?.underline) {
           ctx.fillStyle = cell.style.underlineColor?.kind ? decodeColor(cell.style.underlineColor, false) : fg;
-          ctx.fillRect(px, py + CELL_HEIGHT - 2, this.cellWidth, 1);
+          ctx.fillRect(px, py + termSettings.cellHeight - 2, this.cellWidth, 1);
         }
         if (attrs & 128) {
           ctx.fillStyle = fg;
-          ctx.fillRect(px, py + CELL_HEIGHT / 2, this.cellWidth, 1);
+          ctx.fillRect(px, py + termSettings.cellHeight / 2, this.cellWidth, 1);
         }
         if (this.selection) {
           let { start: a, end: b } = this.selection;
@@ -156,29 +175,29 @@ export class PanePainter {
           if ((y > a.y || (y === a.y && x >= a.x)) &&
               (y < b.y || (y === b.y && x <= b.x))) {
             ctx.fillStyle = 'rgba(100, 160, 220, 0.45)';
-            ctx.fillRect(px, py, this.cellWidth * Math.max(cell.width || 1, 1), CELL_HEIGHT);
+            ctx.fillRect(px, py, this.cellWidth * Math.max(cell.width || 1, 1), termSettings.cellHeight);
           }
         }
       }
     }
     if (pane.cursorVisible && this.focused) {
       const px = pane.cursorX * this.cellWidth;
-      const py = pane.cursorY * CELL_HEIGHT;
-      if (px < this.width && py < this.height) {
+      const py = pane.cursorY * termSettings.cellHeight;
+      if (px < logicalWidth && py < logicalHeight) {
         ctx.fillStyle = '#d4d4d4';
-        ctx.fillRect(px, py, this.cellWidth, CELL_HEIGHT);
+        ctx.fillRect(px, py, this.cellWidth, termSettings.cellHeight);
         const cell = pane.lines[pane.cursorY]?.cells[pane.cursorX];
         if (cell?.content && cell.content !== ' ') {
           ctx.fillStyle = '#1e1e1e';
-          ctx.font = FONT;
-          ctx.fillText(cell.content, px, py);
+          ctx.font = termSettings.font;
+          ctx.fillText(cell.content, px, py + 1);
         }
       }
     }
-    if (pane.scrollOffset > 0 && this.height > CELL_HEIGHT) {
-      const footerY = Math.floor(this.height / CELL_HEIGHT) * CELL_HEIGHT - CELL_HEIGHT;
+    if (pane.scrollOffset > 0 && logicalHeight > termSettings.cellHeight) {
+      const footerY = Math.floor(logicalHeight / termSettings.cellHeight) * termSettings.cellHeight - termSettings.cellHeight;
       ctx.fillStyle = '#333333';
-      ctx.fillRect(0, footerY, this.width, CELL_HEIGHT);
+      ctx.fillRect(0, footerY, logicalWidth, termSettings.cellHeight);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px monospace';
       let footerText = ` [▲ scroll +${pane.scrollOffset}/${pane.scrollbackLen}`;
@@ -188,7 +207,7 @@ export class PanePainter {
         footerText += ']';
       }
       ctx.fillText(footerText, 0, footerY);
-      ctx.font = FONT;
+      ctx.font = termSettings.font;
     }
   }
 }

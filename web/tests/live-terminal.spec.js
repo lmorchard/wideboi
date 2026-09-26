@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { spawn } from 'child_process';
 import net from 'net';
+import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
@@ -49,13 +50,22 @@ test.describe('Live Server Terminal & Input Parity', () => {
       }
     );
 
-    // Wait until HTTP endpoint is answering
+    // Wait until HTTPS endpoint is answering
     const deadline = Date.now() + 10_000;
     let up = false;
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/`);
-        if (res.ok) {
+        const ok = await new Promise((resolve) => {
+          const req = https.get(`https://127.0.0.1:${port}/`, { rejectUnauthorized: false }, (res) => {
+            resolve(res.statusCode === 200);
+          });
+          req.on('error', () => resolve(false));
+          req.setTimeout(500, () => {
+            req.destroy();
+            resolve(false);
+          });
+        });
+        if (ok) {
           up = true;
           break;
         }
@@ -103,7 +113,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
       };
     });
 
-    await page.goto(`http://127.0.0.1:${port}/#token=${token}`);
+    await page.goto(`https://127.0.0.1:${port}/#token=${token}`);
     await page.getByRole('button', { name: 'Connect' }).click();
 
     // Verify connection and panes

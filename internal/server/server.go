@@ -149,6 +149,9 @@ type Server struct {
 	// the CloseGrace default; see Pane.graceOrDefault. Only a test sets
 	// it, via SetCloseGrace in export_test.go.
 	closeGrace time.Duration
+
+	macros       []protocol.Macro
+	onSaveMacros func([]protocol.Macro)
 }
 
 // StartupPane is a pane created on the first attach to a new session.
@@ -165,6 +168,50 @@ func (s *Server) SetStartupPanes(panes []StartupPane) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.startup = append([]StartupPane(nil), panes...)
+}
+
+// SetMacros configures the initial input macros for the server.
+func (s *Server) SetMacros(macros []protocol.Macro) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.macros = append([]protocol.Macro(nil), macros...)
+}
+
+// SetOnSaveMacros configures a callback invoked when a client saves macros.
+func (s *Server) SetOnSaveMacros(fn func([]protocol.Macro)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onSaveMacros = fn
+}
+
+// Macros returns a copy of the current server macros.
+func (s *Server) Macros() []protocol.Macro {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]protocol.Macro, len(s.macros))
+	copy(out, s.macros)
+	return out
+}
+
+func (s *Server) sendMacrosTo(ctx context.Context, tp transport.Transport) {
+	s.mu.Lock()
+	macros := make([]protocol.Macro, len(s.macros))
+	copy(macros, s.macros)
+	s.mu.Unlock()
+	_ = tp.SendServer(ctx, protocol.MsgMacrosSnapshot{Macros: macros})
+}
+
+func (s *Server) broadcastMacros(ctx context.Context) {
+	s.mu.Lock()
+	macros := make([]protocol.Macro, len(s.macros))
+	copy(macros, s.macros)
+	tps := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+
+	msg := protocol.MsgMacrosSnapshot{Macros: macros}
+	for _, tp := range tps {
+		_ = tp.SendServer(ctx, msg)
+	}
 }
 
 // websocketProtocolToken reads the browser's token-bearing subprotocol offer.
@@ -432,6 +479,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	needBroadcast := false
 	needPaneBroadcast := false
 	sendMetadata := false
+	sendMacros := false
+	needMacrosBroadcast := false
 	resyncPaneID := 0
 	createdPaneID := 0
 	focusTargetID := 0
@@ -575,6 +624,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		s.resizePanesLocked()
 		needBroadcast = true
 		sendMetadata = true
+		sendMacros = true
 
 	case protocol.MsgResize:
 		if m.Cols > 0 && m.Rows > 0 {
@@ -809,6 +859,15 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				needPaneBroadcast = true
 			}
 		}
+
+	case protocol.MsgSaveMacros:
+		s.macros = append([]protocol.Macro(nil), m.Macros...)
+		if s.onSaveMacros != nil {
+			fn := s.onSaveMacros
+			macrosCopy := append([]protocol.Macro(nil), m.Macros...)
+			go fn(macrosCopy)
+		}
+		needMacrosBroadcast = true
 	}
 	if tp != nil && createdPaneID != 0 {
 		s.pendingPaneCreated[tp] = append(s.pendingPaneCreated[tp], createdPaneID)
@@ -877,6 +936,12 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 	if sendMetadata && tp != nil {
 		s.sendPaneMetadataTo(ctx, tp)
+	}
+	if sendMacros && tp != nil {
+		s.sendMacrosTo(ctx, tp)
+	}
+	if needMacrosBroadcast {
+		go s.broadcastMacros(ctx)
 	}
 }
 

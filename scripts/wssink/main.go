@@ -15,6 +15,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -35,6 +36,7 @@ func main() {
 	cols := flag.Int("cols", 120, "viewport columns to attach with")
 	rows := flag.Int("rows", 40, "viewport rows to attach with")
 	duration := flag.Duration("duration", 0, "how long to run; 0 runs until SIGINT/SIGTERM")
+	insecure := flag.Bool("insecure", false, "skip TLS certificate verification (for self-signed servers)")
 	flag.Parse()
 
 	// Register before dialing so an early signal still yields a summary.
@@ -50,10 +52,15 @@ func main() {
 	if *token != "" {
 		protocols = append(protocols, "wideboi-token."+base64.RawURLEncoding.EncodeToString([]byte(*token)))
 	}
+	var tlsConfig *tls.Config
+	if *insecure {
+		tlsConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	dialer := websocket.Dialer{
 		Subprotocols:      protocols,
 		HandshakeTimeout:  5 * time.Second,
 		EnableCompression: true,
+		TLSClientConfig:   tlsConfig,
 	}
 	conn, resp, err := dialer.Dial(*url, nil)
 	if err != nil {

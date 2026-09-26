@@ -7,5 +7,9 @@ editing files, running a build that writes artifacts, or committing. Never use
 the main checkout as a task workspace. Keep existing worktrees and uncommitted
 changes untouched.
 
+**NEVER PUSH DIRECTLY TO MAIN.** Always create a branch in your worktree, push the branch, and open a Pull Request for the user to review.
+
 If `gh` authentication or API access fails in the sandbox, retry the GitHub
 CLI command with sandbox escalation before using computer/browser automation.
+
+**DO NOT KILL WIDEBOI SERVERS.** The agent itself is being hosted by a `wideboi server` process. Killing stray `wideboi` processes during tests or otherwise may terminate your own connection.

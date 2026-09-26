@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/logger"
@@ -43,10 +45,33 @@ type Config struct {
 	// rather than as false. Read AutoCleanupEnabled, not this.
 	AutoCleanup        *bool `toml:"auto_cleanup"`
 	AutoCleanupEnabled bool  `toml:"-"`
+	// TLS is a pointer so an absent key reads as the default (on)
+	// rather than as false. Read TLSEnabled, not this.
+	TLS        *bool  `toml:"tls"`
+	TLSEnabled bool   `toml:"-"`
+	TLSCert    string `toml:"tls_cert"`
+	TLSKey     string `toml:"tls_key"`
 	// LogLevelName is what was configured; LogLevel is it resolved.
-	LogLevelName string     `toml:"log_level"`
-	LogLevel     slog.Level `toml:"-"`
-	ConfigFile   string     `toml:"-"`
+	LogLevelName string        `toml:"log_level"`
+	LogLevel     slog.Level    `toml:"-"`
+	ConfigFile   string        `toml:"-"`
+	Macros       []MacroConfig `toml:"macros"`
+}
+
+// MacroStepConfig describes one step in a configured input macro.
+type MacroStepConfig struct {
+	Text  string `toml:"text,omitempty"`
+	Key   string `toml:"key,omitempty"`
+	Code  string `toml:"code,omitempty"`
+	Ctrl  bool   `toml:"ctrl,omitempty"`
+	Alt   bool   `toml:"alt,omitempty"`
+	Shift bool   `toml:"shift,omitempty"`
+}
+
+// MacroConfig describes a named input macro.
+type MacroConfig struct {
+	Name  string            `toml:"name"`
+	Steps []MacroStepConfig `toml:"steps"`
 }
 
 // StartupPane describes a column opened when a new session first attaches.
@@ -90,6 +115,10 @@ type ConfigFlags struct {
 	WebsocketToken     string
 	Shell              string
 	DisableAutoCleanup bool
+	DisableTLS         bool
+	TLS                bool
+	TLSCert            string
+	TLSKey             string
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -271,11 +300,23 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if fileCfg.WebsocketToken != "" {
 			cfg.WebsocketToken = fileCfg.WebsocketToken
 		}
+		if fileCfg.TLS != nil {
+			cfg.TLS = fileCfg.TLS
+		}
+		if fileCfg.TLSCert != "" {
+			cfg.TLSCert = fileCfg.TLSCert
+		}
+		if fileCfg.TLSKey != "" {
+			cfg.TLSKey = fileCfg.TLSKey
+		}
 		if fileCfg.LogLevelName != "" {
 			cfg.LogLevelName = fileCfg.LogLevelName
 		}
 		if fileCfg.Theme != (ThemeConfig{}) {
 			cfg.Theme = fileCfg.Theme
+		}
+		if len(fileCfg.Macros) > 0 {
+			cfg.Macros = fileCfg.Macros
 		}
 
 		if cfg.ConfigFile == "" {
@@ -296,6 +337,18 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		}
 		if err := applyFile(".wideboi.toml", false); err != nil {
 			return Config{}, nil, err
+		}
+	}
+
+	if len(cfg.Macros) == 0 {
+		macrosFile := UserMacrosPath(getenv)
+		if data, err := os.ReadFile(macrosFile); err == nil {
+			var mf struct {
+				Macros []MacroConfig `toml:"macros"`
+			}
+			if err := toml.Unmarshal(data, &mf); err == nil && len(mf.Macros) > 0 {
+				cfg.Macros = mf.Macros
+			}
 		}
 	}
 
@@ -333,6 +386,35 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			return Config{}, nil, fmt.Errorf("WIDEBOI_AUTO_CLEANUP %q: want boolean (true/false/1/0/yes/no/on/off)", envAutoCleanup)
 		}
 	}
+	if envTLS := getenv("WIDEBOI_TLS"); envTLS != "" {
+		switch strings.ToLower(strings.TrimSpace(envTLS)) {
+		case "1", "true", "yes", "on":
+			v := true
+			cfg.TLS = &v
+		case "0", "false", "no", "off":
+			v := false
+			cfg.TLS = &v
+		default:
+			return Config{}, nil, fmt.Errorf("WIDEBOI_TLS %q: want boolean (true/false/1/0/yes/no/on/off)", envTLS)
+		}
+	}
+	if envDisableTLS := getenv("WIDEBOI_DISABLE_TLS"); envDisableTLS != "" {
+		switch strings.ToLower(strings.TrimSpace(envDisableTLS)) {
+		case "1", "true", "yes", "on":
+			v := false
+			cfg.TLS = &v
+		case "0", "false", "no", "off":
+			// no-op: leave default or previous
+		default:
+			return Config{}, nil, fmt.Errorf("WIDEBOI_DISABLE_TLS %q: want boolean (true/false/1/0/yes/no/on/off)", envDisableTLS)
+		}
+	}
+	if envCert := getenv("WIDEBOI_TLS_CERT"); envCert != "" {
+		cfg.TLSCert = envCert
+	}
+	if envKey := getenv("WIDEBOI_TLS_KEY"); envKey != "" {
+		cfg.TLSKey = envKey
+	}
 
 	// 4. Command line flags
 	if flags.Layout != "" {
@@ -356,6 +438,23 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if flags.DisableAutoCleanup {
 		v := false
 		cfg.AutoCleanup = &v
+	}
+	if flags.DisableTLS && flags.TLS {
+		return Config{}, nil, fmt.Errorf("command line sets both --tls and --disable-tls; set one, not both")
+	}
+	if flags.DisableTLS {
+		v := false
+		cfg.TLS = &v
+	}
+	if flags.TLS {
+		v := true
+		cfg.TLS = &v
+	}
+	if flags.TLSCert != "" {
+		cfg.TLSCert = flags.TLSCert
+	}
+	if flags.TLSKey != "" {
+		cfg.TLSKey = flags.TLSKey
 	}
 
 	// 5. Validation
@@ -404,6 +503,16 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 
 	// AutoCleanup
 	cfg.AutoCleanupEnabled = cfg.AutoCleanup == nil || *cfg.AutoCleanup
+
+	// TLS
+	if (cfg.TLSCert != "" && cfg.TLSKey == "") || (cfg.TLSCert == "" && cfg.TLSKey != "") {
+		return Config{}, nil, fmt.Errorf("both tls_cert and tls_key must be specified")
+	}
+	if cfg.TLSCert != "" && cfg.TLSKey != "" && cfg.TLS == nil {
+		v := true
+		cfg.TLS = &v
+	}
+	cfg.TLSEnabled = cfg.TLS == nil || *cfg.TLS
 
 	// Keys
 	lists, err := keyLists(cfg.Keys)
@@ -480,4 +589,128 @@ func keyLists(raw map[string]any) (map[string][]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// DefaultMacros returns the standard input macros provided by wideboi.
+func DefaultMacros() []protocol.Macro {
+	return []protocol.Macro{
+		{
+			Name: "History Search",
+			Steps: []protocol.MacroStep{
+				{Key: "r", Code: "KeyR", Ctrl: true},
+			},
+		},
+		{
+			Name: "Git Status",
+			Steps: []protocol.MacroStep{
+				{Text: "git status"},
+				{Key: "Enter", Code: "Enter"},
+			},
+		},
+		{
+			Name: "Interrupt",
+			Steps: []protocol.MacroStep{
+				{Key: "c", Code: "KeyC", Ctrl: true},
+			},
+		},
+		{
+			Name: "Clear",
+			Steps: []protocol.MacroStep{
+				{Key: "l", Code: "KeyL", Ctrl: true},
+			},
+		},
+	}
+}
+
+// ResolvedMacros returns the configured macros, or DefaultMacros if none are configured.
+func (c *Config) ResolvedMacros() []protocol.Macro {
+	if len(c.Macros) == 0 {
+		return DefaultMacros()
+	}
+	out := make([]protocol.Macro, len(c.Macros))
+	for i, m := range c.Macros {
+		steps := make([]protocol.MacroStep, len(m.Steps))
+		for j, s := range m.Steps {
+			steps[j] = protocol.MacroStep{
+				Text:  s.Text,
+				Key:   s.Key,
+				Code:  s.Code,
+				Ctrl:  s.Ctrl,
+				Alt:   s.Alt,
+				Shift: s.Shift,
+			}
+		}
+		out[i] = protocol.Macro{
+			Name:  m.Name,
+			Steps: steps,
+		}
+	}
+	return out
+}
+
+// UserMacrosPath returns the user-level macros configuration file path.
+func UserMacrosPath(getenv func(string) string) string {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	xdg := getenv("XDG_CONFIG_HOME")
+	if xdg == "" {
+		home := getenv("HOME")
+		if home == "" {
+			home = os.Getenv("HOME")
+		}
+		xdg = filepath.Join(home, ".config")
+	}
+	return filepath.Join(xdg, "wideboi", "macros.toml")
+}
+
+var (
+	macrosSaveMu sync.Mutex
+	macrosTmpSeq uint64
+)
+
+// SaveMacrosFile writes macros to a TOML file atomically with restricted permissions (0600).
+func SaveMacrosFile(path string, macros []protocol.Macro) error {
+	macrosSaveMu.Lock()
+	defer macrosSaveMu.Unlock()
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+	var data struct {
+		Macros []MacroConfig `toml:"macros"`
+	}
+	data.Macros = make([]MacroConfig, len(macros))
+	for i, m := range macros {
+		steps := make([]MacroStepConfig, len(m.Steps))
+		for j, s := range m.Steps {
+			steps[j] = MacroStepConfig{
+				Text:  s.Text,
+				Key:   s.Key,
+				Code:  s.Code,
+				Ctrl:  s.Ctrl,
+				Alt:   s.Alt,
+				Shift: s.Shift,
+			}
+		}
+		data.Macros[i] = MacroConfig{
+			Name:  m.Name,
+			Steps: steps,
+		}
+	}
+	b, err := toml.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("marshal macros: %w", err)
+	}
+	seq := atomic.AddUint64(&macrosTmpSeq, 1)
+	tmp := fmt.Sprintf("%s.tmp.%d.%d", path, os.Getpid(), seq)
+	if err := os.WriteFile(tmp, b, 0600); err != nil {
+		return fmt.Errorf("write temp macros: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename macros file: %w", err)
+	}
+	return nil
 }

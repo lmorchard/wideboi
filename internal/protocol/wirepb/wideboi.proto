@@ -164,6 +164,7 @@ message ServerMessage {
     MsgClosePaneResponse close_pane_response = 12;
     MsgHistorySnapshot history_snapshot = 13;
     MsgWaitResponse wait_response = 14;
+    MsgMacrosSnapshot macros_snapshot = 15;
   }
 }
 
@@ -266,6 +267,7 @@ message ClientMessage {
     MsgHistoryRequest history_request = 16;
     MsgWaitRequest wait_request = 17;
     MsgSetPaneWidth set_pane_width = 18;
+    MsgSaveMacros save_macros = 19;
   }
 }
 
@@ -357,3 +359,26 @@ message MsgTrafficStats {
   TimingStat render = 5;
   TimingStat build_patch = 6;
 }
+
+message MacroStep {
+  string text = 1;
+  string key = 2;
+  string code = 3;
+  bool ctrl = 4;
+  bool alt = 5;
+  bool shift = 6;
+}
+
+message Macro {
+  string name = 1;
+  repeated MacroStep steps = 2;
+}
+
+message MsgMacrosSnapshot {
+  repeated Macro macros = 1;
+}
+
+message MsgSaveMacros {
+  repeated Macro macros = 1;
+}
+

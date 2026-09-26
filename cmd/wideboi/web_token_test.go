@@ -11,15 +11,28 @@ import (
 )
 
 func TestAnnounceWebClientRedactsPersistentLog(t *testing.T) {
-	for _, generated := range []bool{true, false} {
+	for _, tc := range []struct {
+		generated  bool
+		tlsEnabled bool
+		wantScheme string
+	}{
+		{true, true, "https"},
+		{true, false, "http"},
+		{false, true, "https"},
+		{false, false, "http"},
+	} {
 		var stderr, logOutput bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&logOutput, nil))
-		announceWebClient(&stderr, log, "localhost:8080", ":8080", "secret123", generated)
+		announceWebClient(&stderr, log, "localhost:8080", ":8080", "secret123", tc.generated, tc.tlsEnabled)
 
 		if strings.Contains(logOutput.String(), "secret123") {
-			t.Fatalf("generated=%t: token in persistent log: %s", generated, logOutput.String())
+			t.Fatalf("generated=%t tls=%t: token in persistent log: %s", tc.generated, tc.tlsEnabled, logOutput.String())
 		}
-		if generated {
+		expectedPrefix := "wideboi: web client listening at " + tc.wantScheme + "://"
+		if !strings.HasPrefix(stderr.String(), expectedPrefix) {
+			t.Fatalf("stderr does not have prefix %q: %q", expectedPrefix, stderr.String())
+		}
+		if tc.generated {
 			if !strings.Contains(stderr.String(), "#token=secret123") {
 				t.Fatalf("generated link missing fragment token: %q", stderr.String())
 			}
@@ -55,20 +68,24 @@ func TestWriteWebToken(t *testing.T) {
 
 func TestWarnIfWebClientExposed(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		ip   net.IP
-		warn bool
+		name       string
+		ip         net.IP
+		tlsEnabled bool
+		warn       bool
 	}{
-		{"IPv4 loopback", net.ParseIP("127.0.0.1"), false},
-		{"IPv6 loopback", net.ParseIP("::1"), false},
-		{"IPv4 wildcard", net.IPv4zero, true},
-		{"IPv6 wildcard", net.IPv6zero, true},
-		{"network address", net.ParseIP("192.0.2.1"), true},
+		{"IPv4 loopback no tls", net.ParseIP("127.0.0.1"), false, false},
+		{"IPv6 loopback no tls", net.ParseIP("::1"), false, false},
+		{"IPv4 wildcard no tls", net.IPv4zero, false, true},
+		{"IPv6 wildcard no tls", net.IPv6zero, false, true},
+		{"network address no tls", net.ParseIP("192.0.2.1"), false, true},
+		{"IPv4 wildcard with tls", net.IPv4zero, true, false},
+		{"IPv6 wildcard with tls", net.IPv6zero, true, false},
+		{"network address with tls", net.ParseIP("192.0.2.1"), true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stderr, logOutput bytes.Buffer
 			log := slog.New(slog.NewTextHandler(&logOutput, nil))
-			warnIfWebClientExposed(&stderr, log, &net.TCPAddr{IP: tc.ip, Port: 8080})
+			warnIfWebClientExposed(&stderr, log, &net.TCPAddr{IP: tc.ip, Port: 8080}, tc.tlsEnabled)
 			if got := stderr.Len() > 0; got != tc.warn {
 				t.Errorf("stderr warning = %t, want %t", got, tc.warn)
 			}

@@ -26,4 +26,5 @@ package protocol
 // per-client scroll requests for local search (#183).
 // 10 adds split keep, pane exit metadata, and wait requests/responses (#227).
 // 11 adds per-pane widths to size claims and exact owner width changes (#70).
-const Version uint32 = 11
+// 12 adds input macro snapshots and save requests (#237).
+const Version uint32 = 12

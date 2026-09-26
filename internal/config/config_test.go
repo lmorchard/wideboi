@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -423,6 +424,161 @@ func TestLoadAutoCleanup(t *testing.T) {
 	}
 }
 
+func TestLoadTLS(t *testing.T) {
+	// 1. Defaults to true with empty cert and key
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Error("TLSEnabled = false by default, want true")
+	}
+	if cfg.TLSCert != "" || cfg.TLSKey != "" {
+		t.Errorf("TLSCert=%q TLSKey=%q, want empty", cfg.TLSCert, cfg.TLSKey)
+	}
+
+	// 2. TOML tls = false disables it
+	tomlFalse := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlFalse, []byte("tls = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlFalse}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.TLSEnabled {
+		t.Error("TLSEnabled = true with tls = false in TOML")
+	}
+
+	// 3. TOML tls = true enables it explicitly
+	tomlTrue := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlTrue, []byte("tls = true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlTrue}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Error("TLSEnabled = false with tls = true in TOML")
+	}
+
+	// 4. TOML cert and key paths configured
+	certPath := filepath.Join(t.TempDir(), "server.crt")
+	keyPath := filepath.Join(t.TempDir(), "server.key")
+	if err := os.WriteFile(certPath, []byte("cert"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("key"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tomlCertKey := filepath.Join(t.TempDir(), "config.toml")
+	tomlContent := fmt.Sprintf("tls_cert = %q\ntls_key = %q\n", certPath, keyPath)
+	if err := os.WriteFile(tomlCertKey, []byte(tomlContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlCertKey}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Error("TLSEnabled = false when cert and key provided, want true")
+	}
+	if cfg.TLSCert != certPath || cfg.TLSKey != keyPath {
+		t.Errorf("got cert=%q key=%q, want %q and %q", cfg.TLSCert, cfg.TLSKey, certPath, keyPath)
+	}
+
+	// 5. TOML only cert without key is error
+	tomlCertOnly := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlCertOnly, []byte(fmt.Sprintf("tls_cert = %q\n", certPath)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := config.Load(config.ConfigFlags{ConfigFile: tomlCertOnly}, mockEnv(nil)); err == nil {
+		t.Error("Load() succeeded with only tls_cert, want error")
+	}
+
+	// 6. TOML only key without cert is error
+	tomlKeyOnly := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlKeyOnly, []byte(fmt.Sprintf("tls_key = %q\n", keyPath)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := config.Load(config.ConfigFlags{ConfigFile: tomlKeyOnly}, mockEnv(nil)); err == nil {
+		t.Error("Load() succeeded with only tls_key, want error")
+	}
+
+	// 7. Environment variable WIDEBOI_TLS false/0/no/off disables it
+	for _, val := range []string{"false", "0", "no", "off", "FALSE"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_TLS": val}))
+		if err != nil {
+			t.Fatalf("Load() with WIDEBOI_TLS=%q error: %v", val, err)
+		}
+		if cfg.TLSEnabled {
+			t.Errorf("TLSEnabled = true with WIDEBOI_TLS=%q", val)
+		}
+	}
+
+	// 8. Environment variable WIDEBOI_DISABLE_TLS disables it
+	for _, val := range []string{"true", "1", "yes", "on"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_DISABLE_TLS": val}))
+		if err != nil {
+			t.Fatalf("Load() with WIDEBOI_DISABLE_TLS=%q error: %v", val, err)
+		}
+		if cfg.TLSEnabled {
+			t.Errorf("TLSEnabled = true with WIDEBOI_DISABLE_TLS=%q", val)
+		}
+	}
+
+	// 9. Environment variable WIDEBOI_TLS_CERT and WIDEBOI_TLS_KEY
+	cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{
+		"WIDEBOI_TLS_CERT": certPath,
+		"WIDEBOI_TLS_KEY":  keyPath,
+	}))
+	if err != nil {
+		t.Fatalf("Load() with WIDEBOI_TLS_CERT error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Error("TLSEnabled = false with env cert and key, want true")
+	}
+	if cfg.TLSCert != certPath || cfg.TLSKey != keyPath {
+		t.Errorf("got cert=%q key=%q, want %q and %q", cfg.TLSCert, cfg.TLSKey, certPath, keyPath)
+	}
+
+	// 10. CLI flag DisableTLS overrides TOML true
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlTrue, DisableTLS: true}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.TLSEnabled {
+		t.Error("TLSEnabled = true when DisableTLS flag is true")
+	}
+
+	// 11. CLI flag TLS overrides TOML false
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlFalse, TLS: true}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Error("TLSEnabled = false when TLS flag is true")
+	}
+
+	// 12. CLI flags TLSCert and TLSKey
+	cfg, _, err = config.Load(config.ConfigFlags{TLSCert: certPath, TLSKey: keyPath}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.TLSEnabled {
+		t.Error("TLSEnabled = false with flag cert and key")
+	}
+	if cfg.TLSCert != certPath || cfg.TLSKey != keyPath {
+		t.Errorf("got cert=%q key=%q", cfg.TLSCert, cfg.TLSKey)
+	}
+
+	// 13. Conflicting CLI flags DisableTLS and TLS returns error
+	if _, _, err := config.Load(config.ConfigFlags{DisableTLS: true, TLS: true}, mockEnv(nil)); err == nil {
+		t.Error("Load() succeeded with both DisableTLS and TLS, want error")
+	}
+}
+
 func TestLoadLogLevel(t *testing.T) {
 	dir := t.TempDir()
 	env := func(m map[string]string) func(string) string {
@@ -738,5 +894,64 @@ divider = "dim"
 	}
 	if cfg.Theme.Divider != "dim" {
 		t.Errorf("cfg.Theme.Divider = %q, want 'dim'", cfg.Theme.Divider)
+	}
+}
+
+func TestMacrosConfig(t *testing.T) {
+	// 1. Defaults when empty
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	macros := cfg.ResolvedMacros()
+	if len(macros) == 0 {
+		t.Fatal("expected default macros, got 0")
+	}
+	if macros[0].Name != "History Search" {
+		t.Errorf("got %q, want 'History Search'", macros[0].Name)
+	}
+
+	// 2. Custom macros loaded from TOML
+	tomlContent := `
+[[macros]]
+name = "My Macro"
+steps = [
+  { text = "echo hi" },
+  { key = "Enter" }
+]
+`
+	dir := t.TempDir()
+	tomlPath := filepath.Join(dir, "wideboi.toml")
+	if err := os.WriteFile(tomlPath, []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfgCustom, _, err := config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	customMacros := cfgCustom.ResolvedMacros()
+	if len(customMacros) != 1 {
+		t.Fatalf("expected 1 macro, got %d", len(customMacros))
+	}
+	if customMacros[0].Name != "My Macro" {
+		t.Errorf("got %q, want 'My Macro'", customMacros[0].Name)
+	}
+	if len(customMacros[0].Steps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(customMacros[0].Steps))
+	}
+	if customMacros[0].Steps[0].Text != "echo hi" {
+		t.Errorf("got step 0 text %q, want 'echo hi'", customMacros[0].Steps[0].Text)
+	}
+
+	// 3. SaveMacrosFile and reload from UserMacrosPath
+	macrosFile := filepath.Join(dir, "macros.toml")
+	if err := config.SaveMacrosFile(macrosFile, customMacros); err != nil {
+		t.Fatal(err)
+	}
+	// Verify file was written and can be read back
+	env := mockEnv(map[string]string{"XDG_CONFIG_HOME": dir})
+	macrosPath := config.UserMacrosPath(env)
+	if macrosPath != filepath.Join(dir, "wideboi", "macros.toml") {
+		t.Errorf("unexpected UserMacrosPath: %q", macrosPath)
 	}
 }
