@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-
-	"github.com/lmorchard/wideboi/internal/config"
 )
 
 func TestPaletteCancelEsc(t *testing.T) {
@@ -13,7 +11,7 @@ func TestPaletteCancelEsc(t *testing.T) {
 	var out, errOut bytes.Buffer
 
 	in.WriteString("\x1b") // Esc key
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	err := runPalette(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	if err != nil {
@@ -26,7 +24,7 @@ func TestPaletteCancelCtrlC(t *testing.T) {
 	var out, errOut bytes.Buffer
 
 	in.WriteString("\x03") // Ctrl+C
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	err := runPalette(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	if err != nil {
@@ -40,7 +38,7 @@ func TestPaletteFilterAndRender(t *testing.T) {
 
 	// Type "quit" and press Enter
 	in.WriteString("quit\n")
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	_ = runPalette(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	// Render output should display query and matching command
@@ -56,7 +54,7 @@ func TestPaletteFuzzySubsequence(t *testing.T) {
 
 	// Type subsequence "ncl" which should match "new-column"
 	in.WriteString("ncl\n")
-	cfg := config.Config{}
+	cfg := paletteTestConfig(t)
 
 	_ = runPalette(cfg, []string{"--caller-pane=1"}, &in, &out, &errOut)
 	output := out.String()

@@ -506,3 +506,23 @@ keystrokes can arrive out of order. Adding a single log-file write in that
 window made `TestUpgradeServerWithAttachedClientE2E` fail 5 runs in 8, because
 the client reconnecting after an upgrade lands exactly there. The race itself is
 still open, so add no work to that window until it is fixed.
+
+## A test that runs a command can end your session
+
+The suite runs inside wideboi: agents run `go test` or `make check` from a pane
+of the session hosting them. `TestPaletteFilterAndRender` ran the palette with
+an empty `config.Config{}` and typed `quit`. With no socket in the config and no
+`WIDEBOI_SOCK` in a pane, command dispatch falls back to
+`config.DefaultSocketPath()`, the live `default` session, and the test shut it
+down. Every review that ran the suite lost its session, silently. Only `default`
+sessions died, which is why named sessions and scratch repro harnesses never
+showed it.
+
+Two guards now exist. Tests pass an explicit socket in a temp dir, and
+`internal/testenv.Run`, used as `TestMain`, points `TMPDIR` at a private
+directory and clears the session variables. Treat anything that resolves "the
+current session" from a test as a bug.
+
+What found it was a `shutdown-request` record in `exits.log` naming the
+requester's process chain (`wideboi.test<-go<-make<-opencode<-...`). When a
+session vanishes, read that first (#276).
