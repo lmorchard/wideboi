@@ -66,7 +66,7 @@ func TestTableIsWellFormed(t *testing.T) {
 			if (b.Column < 1 || b.Column > 9) && b.Column != keys.LastColumn {
 				t.Errorf("%q is ActionFocusColumn with Column %d; want 1-9 or LastColumn", b.Key, b.Column)
 			}
-		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit, keys.ActionToggleLayout, keys.ActionSearch, keys.ActionToggleFollowPTY:
+		case keys.ActionQuit, keys.ActionDetach, keys.ActionHelp, keys.ActionExit, keys.ActionToggleLayout, keys.ActionSearch, keys.ActionToggleFollowPTY, keys.ActionPrompt, keys.ActionPalette:
 		case keys.ActionPan:
 			if b.Pan == 0 {
 				t.Errorf("%q has zero pan", b.Key)
@@ -143,6 +143,10 @@ func TestEveryPlainFormMatchesItself(t *testing.T) {
 			return []byte{'/'}, true
 		case "tab":
 			return []byte{0x09}, true
+		case ":":
+			return []byte{':'}, true
+		case "space":
+			return []byte{' '}, true
 		case ".":
 			return []byte{0x2e}, true
 		case ",":

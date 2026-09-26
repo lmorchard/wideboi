@@ -12,7 +12,9 @@ export type KeyRouterAction =
   | { type: 'focus_column'; column: number }
   | { type: 'toggle_help' }
   | { type: 'toggle_settings' }
-  | { type: 'search' };
+  | { type: 'search' }
+  | { type: 'prompt' }
+  | { type: 'palette' };
 
 export interface ParsedPrefix {
   name: string;
@@ -138,6 +140,14 @@ export class KeyRouter {
     if (key === '/') {
       this.prefixActive = false;
       return { type: 'search' };
+    }
+    if (key === ':') {
+      this.prefixActive = false;
+      return { type: 'prompt' };
+    }
+    if (key === ' ' || key === 'space' || e.code === 'Space') {
+      this.prefixActive = false;
+      return { type: 'palette' };
     }
 
     // 5. Column jumps: 1-9 and 0

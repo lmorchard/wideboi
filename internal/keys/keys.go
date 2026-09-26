@@ -47,6 +47,8 @@ const (
 	ActionNameDetach       = "detach"
 	ActionNameQuit         = "quit"
 	ActionNameExit         = "exit"
+	ActionNamePrompt       = "prompt"
+	ActionNamePalette      = "palette"
 )
 
 // Action is what a binding does when it fires. It is deliberately not
@@ -77,6 +79,8 @@ const (
 	ActionSearch
 	ActionPan
 	ActionToggleFollowPTY
+	ActionPrompt
+	ActionPalette
 )
 
 // LastColumn is Column's value for "the rightmost column, however many
@@ -155,10 +159,11 @@ type Binding struct {
 const (
 	helpFocus     = "focus the column left / right"
 	helpScroll    = "scroll this pane's history down / up"
-	helpWidth     = "shrink / grow this column's width"
+	helpWidth     = "cycle / shrink / grow column width"
 	helpMove      = "move this column left / right"
 	helpAttention = "jump to attention / status dashboard"
 	helpView      = "cards / claim size / pan / follow PTY"
+	helpCommand   = "command prompt / command palette"
 )
 
 // Bindings is the table, in status-bar display order.
@@ -174,7 +179,7 @@ var Bindings = slices.Concat([]Binding{
 	{ActionName: ActionNameNewColumn, Key: "n", Action: ActionVerb, Verb: protocol.VerbNewColumn,
 		BarGroup: "n new", Long: "open a new column"},
 	{ActionName: ActionNameCycleWidth, Key: "w", Action: ActionVerb, Verb: protocol.VerbCycleWidth,
-		BarGroup: "w width", Long: "cycle this column's width"},
+		BarGroup: "w width", Long: "cycle this column's width", HelpGroup: helpWidth},
 	{ActionName: ActionNameShrinkWidth, Key: "o", Action: ActionVerb, Verb: protocol.VerbShrinkWidth,
 		Long: "shrink this column's width", HelpGroup: helpWidth},
 	{ActionName: ActionNameGrowWidth, Key: "p", Action: ActionVerb, Verb: protocol.VerbGrowWidth,
@@ -194,6 +199,10 @@ var Bindings = slices.Concat([]Binding{
 	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
 		Long: "focus the previously focused pane"},
 }, digitBindings(), []Binding{
+	{ActionName: ActionNamePrompt, Key: ":", Action: ActionPrompt, NoRepeat: true,
+		Long: "open command prompt", HelpGroup: helpCommand},
+	{ActionName: ActionNamePalette, Key: "space", Action: ActionPalette, NoRepeat: true,
+		Long: "open command palette", HelpGroup: helpCommand},
 	{ActionName: ActionNameSearch, Key: "/", Action: ActionSearch, NoRepeat: true,
 		Long: "search the focused pane's history"},
 	{ActionName: ActionNameHelp, Key: "?", Action: ActionHelp,
@@ -335,6 +344,8 @@ var validActions = map[string]string{
 	ActionNameDetach:       ActionNameDetach,
 	ActionNameQuit:         ActionNameQuit,
 	ActionNameExit:         ActionNameExit,
+	ActionNamePrompt:       ActionNamePrompt,
+	ActionNamePalette:      ActionNamePalette,
 }
 
 // validNamedKeys is the set of non-single-character key names produced by ultraviolet.

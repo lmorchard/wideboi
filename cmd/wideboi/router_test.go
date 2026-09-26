@@ -199,6 +199,14 @@ func assertAction(t *testing.T, b keys.Binding, got route) {
 		if got.Kind != routeSearchStart {
 			t.Errorf("%q: got %+v, want routeSearchStart", b.Key, got)
 		}
+	case keys.ActionPrompt:
+		if got.Kind != routePrompt {
+			t.Errorf("%q: got %+v, want routePrompt", b.Key, got)
+		}
+	case keys.ActionPalette:
+		if got.Kind != routePalette {
+			t.Errorf("%q: got %+v, want routePalette", b.Key, got)
+		}
 	case keys.ActionHelp, keys.ActionExit:
 		if got.Kind != routeIgnore {
 			t.Errorf("%q: got %+v, want routeIgnore", b.Key, got)
@@ -377,6 +385,8 @@ func keyNamed(t *testing.T, name string) uv.KeyPressEvent {
 		return uv.KeyPressEvent{Code: '?', Text: "?"}
 	case "tab":
 		return uv.KeyPressEvent{Code: uv.KeyTab}
+	case "space":
+		return uv.KeyPressEvent{Code: ' ', Text: " "}
 	}
 	if rest, ok := strings.CutPrefix(name, "ctrl+"); ok && len(rest) == 1 {
 		return uv.KeyPressEvent{Code: rune(rest[0]), Mod: uv.ModCtrl}
@@ -415,5 +425,17 @@ func TestReplacedDefaultAliasIsUnknown(t *testing.T) {
 	r := customRouter(t, map[string][]string{keys.ActionNameFocusLeft: {"h"}})
 	if got := r.route(uv.KeyPressEvent{Code: uv.KeyLeft}); got.Kind != routeIgnore || r.control {
 		t.Errorf("left: got %+v control=%v, want an unknown key that leaves control mode", got, r.control)
+	}
+}
+
+func TestPromptAndPaletteRoutes(t *testing.T) {
+	r := &router{prefix: "ctrl+b", control: true}
+	if got := r.route(key(':')); got.Kind != routePrompt || r.control {
+		t.Errorf("':' key in control mode: got %+v, control=%v, want routePrompt and control=false", got, r.control)
+	}
+
+	r = &router{prefix: "ctrl+b", control: true}
+	if got := r.route(key(' ')); got.Kind != routePalette || r.control {
+		t.Errorf("' ' key in control mode: got %+v, control=%v, want routePalette and control=false", got, r.control)
 	}
 }

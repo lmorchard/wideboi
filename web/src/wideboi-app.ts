@@ -1450,6 +1450,11 @@ export class WideboiApp extends LitElement {
         case 'paneCreated':
           this.pendingFocusId = message.msg.value.paneId;
           break;
+        case 'splitResponse':
+          if (message.msg.value.paneId) {
+            this.pendingFocusId = message.msg.value.paneId;
+          }
+          break;
         case 'paneUpdate':
           this.panes.update(message.msg.value);
           this.requestUpdate();
@@ -1610,6 +1615,34 @@ export class WideboiApp extends LitElement {
           return;
         case 'search':
           this.startSearch();
+          e.preventDefault();
+          return;
+        case 'prompt':
+          if (this.client) {
+            this.client.send({
+              case: 'splitRequest',
+              value: {
+                command: `wideboi prompt --caller-pane=${this.focusedPaneId}`,
+                afterPaneId: this.focusedPaneId,
+                keep: false,
+                cwd: '',
+              },
+            });
+          }
+          e.preventDefault();
+          return;
+        case 'palette':
+          if (this.client) {
+            this.client.send({
+              case: 'splitRequest',
+              value: {
+                command: `wideboi palette --caller-pane=${this.focusedPaneId}`,
+                afterPaneId: this.focusedPaneId,
+                keep: false,
+                cwd: '',
+              },
+            });
+          }
           e.preventDefault();
           return;
         case 'send_literal_key':

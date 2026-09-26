@@ -75,7 +75,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -278,6 +278,10 @@ func main() {
 		fatal(runList(os.Stdout))
 	case "split":
 		fatal(runSplit(cfg, opts.globalArgs, opts.subcommandArgs, os.Stdout, os.Stderr))
+	case "prompt":
+		fatal(runPrompt(cfg, opts.subcommandArgs, os.Stdin, os.Stdout, os.Stderr))
+	case "palette":
+		fatal(runPalette(cfg, opts.subcommandArgs, os.Stdin, os.Stdout, os.Stderr))
 	case "send":
 		fatal(runSend(cfg, opts.subcommandArgs, os.Stderr))
 	case "capture":
@@ -546,36 +550,14 @@ func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr, tlsEna
 // runKillSession ends the session at cfg.Socket and waits until it has:
 // the server hangs up only once every pane is reaped.
 func runUpgradeServer(cfg config.Config, binPath string) error {
-	conn, err := net.Dial("unix", cfg.Socket)
+	resp, err := rpcQuery[protocol.MsgUpgradeResponse](cfg, protocol.MsgUpgradeRequest{BinPath: binPath}, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf("no wideboi server running at %s: %w", cfg.Socket, err)
+		return err
 	}
-	if _, err := transport.Handshake(conn); err != nil {
-		conn.Close()
-		return describeHandshakeErr(cfg.Socket, err, "")
+	if resp.Error != "" {
+		return fmt.Errorf("upgrade failed: %s", resp.Error)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cc := transport.NewClientSocketConn(conn, 256)
-	cc.RunPumps(ctx)
-	cc.ClientSend <- protocol.MsgUpgradeRequest{BinPath: binPath}
-
-	// Wait for an ack (MsgUpgradeResponse)
-	select {
-	case msg, ok := <-cc.ServerSend:
-		if !ok {
-			return fmt.Errorf("connection closed before receiving response")
-		}
-		if resp, ok := msg.(protocol.MsgUpgradeResponse); ok {
-			if resp.Error != "" {
-				return fmt.Errorf("upgrade failed: %s", resp.Error)
-			}
-			return nil
-		}
-		return fmt.Errorf("unexpected response type: %T", msg)
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return nil
 }
 
 func runKillSession(cfg config.Config) error {
@@ -975,6 +957,18 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					cli.SearchEnd(ctx, false, true)
 				case routeFocusColumn:
 					cli.FocusColumn(ctx, act.Column)
+				case routePrompt:
+					exe, err := os.Executable()
+					if err == nil {
+						cmd := fmt.Sprintf("%s prompt --caller-pane=%d --socket=%s", shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
+						cli.SendSplit(ctx, cmd, "", cli.FocusedPaneID(), false)
+					}
+				case routePalette:
+					exe, err := os.Executable()
+					if err == nil {
+						cmd := fmt.Sprintf("%s palette --caller-pane=%d --socket=%s", shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
+						cli.SendSplit(ctx, cmd, "", cli.FocusedPaneID(), false)
+					}
 				case routeForward:
 					cli.SendKey(ctx, uv.KeyEvent(ev))
 				case routeIgnore:

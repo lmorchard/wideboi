@@ -50,6 +50,8 @@ const (
 	routeSearchCancel
 	routeSearchAccept
 	routeSearchLive
+	routePrompt
+	routePalette
 )
 
 // route is what the router decided about one key event. It describes an
@@ -215,6 +217,12 @@ func (r *router) fire(b keys.Binding, sticky bool) route {
 		r.search = 1
 		r.control = false
 		return route{Kind: routeSearchStart}
+	case keys.ActionPrompt:
+		r.control = false
+		return route{Kind: routePrompt}
+	case keys.ActionPalette:
+		r.control = false
+		return route{Kind: routePalette}
 	case keys.ActionQuit:
 		// ctrl+q is exactly q: "quit but stay in control mode" is not a
 		// thing, because the client is leaving.

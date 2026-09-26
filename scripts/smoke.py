@@ -1094,6 +1094,25 @@ def case_partly_clipped_pane_keeps_full_width(fail):
     s.close()
 
 
+def case_command_prompt_and_palette(fail):
+    s = Session(cols=100, rows=30)
+    # 1. Test prompt spawn and cancellation with Esc
+    s.type("\x02:", settle=1.0)
+    s.type("\x1b", settle=1.0)
+    s.type("echo prompt-cancel-check\r", settle=0.5)
+    if b"prompt-cancel-check" not in s.output():
+        fail("could not type in original pane after prompt was cancelled with Esc")
+
+    # 2. Test palette spawn and cancellation with Esc
+    s.type("\x02 ", settle=1.0)
+    s.type("\x1b", settle=1.0)
+    s.type("echo palette-cancel-check\r", settle=0.5)
+    if b"palette-cancel-check" not in s.output():
+        fail("could not type in original pane after palette was cancelled with Esc")
+
+    s.close()
+
+
 def case_idle_emits_no_bytes(fail):
     s = Session()
     if not settle_output(s.drainer, timeout=5.0):
@@ -1166,6 +1185,7 @@ CASES = [
     ("shell control keys pass through", case_shell_control_keys_pass_through),
     ("host resize resizes panes", case_host_resize_resizes_panes),
     ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),
+    ("command prompt and palette", case_command_prompt_and_palette),
 ]
 
 
