@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
 // A Unix socket is a byte stream, so every protobuf message has a
@@ -50,4 +52,22 @@ func readFrame(r io.Reader) ([]byte, error) {
 	payload := make([]byte, size)
 	_, err := io.ReadFull(r, payload)
 	return payload, err
+}
+
+// WriteClientFrame marshals and writes a length-prefixed ClientMessage frame.
+func WriteClientFrame(w io.Writer, msg ClientMessage) error {
+	payload, err := protocol.MarshalClient(msg)
+	if err != nil {
+		return err
+	}
+	return writeFrame(w, payload)
+}
+
+// ReadServerFrame reads and unmarshals a length-prefixed ServerMessage frame.
+func ReadServerFrame(r io.Reader) (ServerMessage, error) {
+	payload, err := readFrame(r)
+	if err != nil {
+		return nil, err
+	}
+	return protocol.UnmarshalServer(payload)
 }

@@ -141,6 +141,17 @@ describe('KeyRouter', () => {
     expect(router.inPrefix).toBe(true);
   });
 
+  it('supports prompt and palette commands in prefix mode', () => {
+    const router = new KeyRouter('ctrl+b');
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent(':', 'Semicolon'))).toEqual({ type: 'prompt' });
+    expect(router.inPrefix).toBe(false);
+
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent(' ', 'Space'))).toEqual({ type: 'palette' });
+    expect(router.inPrefix).toBe(false);
+  });
+
   it('ignores bare modifier keydown events without resetting prefix mode', () => {
     const router = new KeyRouter('ctrl+b');
     expect(router.handle(keyEvent('Control', 'ControlLeft', { ctrlKey: true }))).toEqual({ type: 'ignore' });

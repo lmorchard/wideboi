@@ -1613,6 +1613,18 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 	c.transport.SendClient(ctx, protocol.MsgResize{Cols: cols, Rows: rows})
 }
 
+// SendSplit requests the server to spawn a new pane.
+func (c *Client) SendSplit(ctx context.Context, cmd, cwd string, afterPaneID int, keep bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.transport.SendClient(ctx, protocol.MsgSplitRequest{
+		Command:     cmd,
+		Cwd:         cwd,
+		AfterPaneID: afterPaneID,
+		Keep:        keep,
+	})
+}
+
 // FocusedPaneID returns current focused pane ID.
 func (c *Client) FocusedPaneID() int {
 	c.mu.Lock()
