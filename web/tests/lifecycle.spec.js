@@ -135,7 +135,9 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
   await expect.poll(() => page.evaluate(() => window.testSockets[0].sent.length)).toBeGreaterThan(0);
-  await page.getByRole('combobox', { name: 'Layout' }).selectOption('scroll');
+  await page.locator('.toolbar .settings-btn').click();
+  await page.locator('#settings-layout-mode').selectOption('scroll');
+  await page.locator('.settings-dialog .close-btn').click();
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
@@ -342,13 +344,13 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
   await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('3');
 
   // 3. Layout toggle: Ctrl+B then 'c' toggles between cards and scroll
-  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+  await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
   await page.keyboard.press('Control+b');
   await page.keyboard.press('c');
-  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('scroll');
+  await expect(page.locator('.pane-strip')).not.toHaveClass(/cards/);
   await page.keyboard.press('Control+b');
   await page.keyboard.press('c');
-  await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+  await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
 
   // 4. Help overlay: Ctrl+B then '?' opens help dialog
   await expect(page.locator('.help-dialog')).toHaveCount(0);
@@ -360,7 +362,9 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
   await expect(page.locator('.help-dialog')).toHaveCount(0);
 
   // 5. Configurable prefix: Change prefix to Ctrl+A
-  await page.getByRole('combobox', { name: 'Prefix' }).selectOption('ctrl+a');
+  await page.locator('.toolbar .settings-btn').click();
+  await page.locator('#settings-prefix-key').selectOption('ctrl+a');
+  await page.locator('.settings-dialog .close-btn').click();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.prefix'))).toBe('ctrl+a');
   await page.locator('wideboi-pane canvas').nth(2).focus();
   await page.keyboard.press('Control+a');

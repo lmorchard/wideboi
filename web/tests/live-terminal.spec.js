@@ -159,13 +159,13 @@ test.describe('Live Server Terminal & Input Parity', () => {
     await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
 
     // 4. Test Prefix Action: Layout Toggle
-    await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+    await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
     await page.keyboard.press('Control+b');
     await page.keyboard.press('c');
-    await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('scroll');
+    await expect(page.locator('.pane-strip')).not.toHaveClass(/cards/);
     await page.keyboard.press('Control+b');
     await page.keyboard.press('c');
-    await expect(page.getByRole('combobox', { name: 'Layout' })).toHaveValue('cards');
+    await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
 
     // 5. Test Prefix Action: Help Overlay
     await expect(page.locator('.help-dialog')).toHaveCount(0);

@@ -28,7 +28,7 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect(page.getByRole('combobox', { name: 'Layout' })).toBeVisible();
+  await expect(page.getByText('Focus Pane:')).toBeVisible();
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
