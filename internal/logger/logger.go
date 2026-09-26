@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -49,6 +50,39 @@ func ParseLevel(name string) (slog.Level, error) {
 // of a process whose stderr goes nowhere.
 func Path(socket, component string) string {
 	return strings.TrimSuffix(socket, ".sock") + "." + component + ".log"
+}
+
+// ExitsPath is the exits log for the sessions in socket's directory.
+// One file for all of them, and never removed by any cleanup: a clean
+// exit deletes the session's own logs, so this is the only record of
+// why a session ended that is sure to outlive it.
+func ExitsPath(socket string) string {
+	return filepath.Join(filepath.Dir(socket), "exits.log")
+}
+
+// SessionOf names the session served at socket, for exits records.
+func SessionOf(socket string) string {
+	return strings.TrimSuffix(filepath.Base(socket), ".sock")
+}
+
+// AppendExit appends one record of a session event -- a start, an exit,
+// a signal, a sweep -- to the exits log beside socket. Opened, written
+// once and closed per record: several processes append to the same
+// file, and one short O_APPEND write keeps each line whole.
+//
+// Never pass a token or a command line: this file is kept forever.
+func AppendExit(socket, component, event string, args ...any) error {
+	var buf bytes.Buffer
+	attrs := append([]any{"session", SessionOf(socket), "component", component, "pid", os.Getpid()}, args...)
+	slog.New(newHandler(&buf, slog.LevelInfo)).Info(event, attrs...)
+
+	f, err := os.OpenFile(ExitsPath(socket), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(buf.Bytes())
+	return err
 }
 
 // Init initializes file-based structured logging to path, recording

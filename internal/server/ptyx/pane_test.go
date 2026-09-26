@@ -186,3 +186,28 @@ func TestExitCode(t *testing.T) {
 	}
 	p.Hangup(2 * time.Second)
 }
+
+// The reaped status in words, for logs: a signal death names the signal
+// rather than hiding it in a number.
+func TestExitDescription(t *testing.T) {
+	cases := []struct{ script, want string }{
+		{"exit 3", "exit status 3"},
+		{"kill -KILL $$", "signal: killed"},
+	}
+	for _, c := range cases {
+		p, err := ptyx.Spawn([]string{"/bin/sh", "-c", c.script}, 40, 10, t.TempDir())
+		if err != nil {
+			t.Fatalf("Spawn(%q): %v", c.script, err)
+		}
+		select {
+		case <-p.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%q: child never reaped", c.script)
+		}
+		got, reaped := p.ExitDescription()
+		if !reaped || got != c.want {
+			t.Errorf("%q: ExitDescription() = (%q, %v), want (%q, true)", c.script, got, reaped, c.want)
+		}
+		p.Hangup(testGrace)
+	}
+}

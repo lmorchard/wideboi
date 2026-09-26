@@ -24,9 +24,10 @@ type Pane struct {
 	// ever calls Wait, because a second call fails.
 	done chan struct{}
 
-	// exitCode is written by the reaper before it closes done; the
-	// close publishes it. See ExitCode.
+	// exitCode and exitDesc are written by the reaper before it closes
+	// done; the close publishes them. See ExitCode and ExitDescription.
 	exitCode int
+	exitDesc string
 }
 
 // Done returns a channel closed when the pane's child process exits.
@@ -41,6 +42,18 @@ func (p *Pane) ExitCode() (code int, reaped bool) {
 		return p.exitCode, true
 	default:
 		return 0, false
+	}
+}
+
+// ExitDescription reports the reaped status in words, as
+// os.ProcessState puts it ("exit status 1", "signal: killed"), for logs.
+// reaped is false while the child is still running.
+func (p *Pane) ExitDescription() (desc string, reaped bool) {
+	select {
+	case <-p.done:
+		return p.exitDesc, true
+	default:
+		return "", false
 	}
 }
 
@@ -76,6 +89,7 @@ func Adopt(pid int, fd int, name string, alreadyExited bool, exitCode int) (*Pan
 
 	if alreadyExited {
 		p.exitCode = exitCode
+		p.exitDesc = fmt.Sprintf("exit code %d (before upgrade)", exitCode)
 		close(p.done)
 		return p, nil
 	}
@@ -87,6 +101,7 @@ func Adopt(pid int, fd int, name string, alreadyExited bool, exitCode int) (*Pan
 		} else {
 			p.exitCode = -1
 		}
+		p.exitDesc = describeState(state, err)
 		close(p.done)
 	}()
 
@@ -146,12 +161,26 @@ func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
 	// Kill must observe exit through this channel rather than waiting
 	// again itself.
 	go func() {
-		_ = cmd.Wait()
+		err := cmd.Wait()
 		p.exitCode = exitStatus(cmd.ProcessState)
+		p.exitDesc = describeState(cmd.ProcessState, err)
 		close(p.done)
 	}()
 
 	return p, nil
+}
+
+// describeState is a reaped status as os.ProcessState words it, for
+// logs. A non-zero exit is an error from Wait but still has a state, so
+// the state wins when there is one.
+func describeState(ps *os.ProcessState, err error) string {
+	if ps != nil {
+		return ps.String()
+	}
+	if err != nil {
+		return "wait failed: " + err.Error()
+	}
+	return "unknown"
 }
 
 // exitStatus renders a reaped child's status the way a shell's $? does.

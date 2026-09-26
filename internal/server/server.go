@@ -39,7 +39,14 @@ type Server struct {
 	transports      []transport.Transport
 	stopCh          chan struct{}
 	closeOnce       sync.Once
-	upgrading       bool
+
+	// reasonMu guards reason; see CloseFor.
+	reasonMu sync.Mutex
+	reason   *closeReason
+	// peerPIDs is each socket client's pid from its hello, for naming
+	// who asked the session to end.
+	peerPIDs  map[transport.Transport]uint32
+	upgrading bool
 
 	statusPaneID int
 	dashboard    *Dashboard
@@ -312,7 +319,8 @@ func (s *Server) ListenSocket(ctx context.Context, sl *transport.SocketListener)
 // off the accept loop: a peer that never says hello costs its own
 // goroutine the handshake ceiling, not everyone else's attach.
 func (s *Server) admitSocketConn(ctx context.Context, conn net.Conn) {
-	if peer, err := transport.Handshake(conn); err != nil {
+	peer, err := transport.Handshake(conn)
+	if err != nil {
 		_ = conn.Close()
 		// `wideboi ls`, `cleanup` and the listener's liveness probe all
 		// dial and hang up at once; that is not worth a warning.
@@ -336,6 +344,7 @@ func (s *Server) admitSocketConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	s.transports = append(s.transports, sConn)
+	s.setPeerPIDLocked(sConn, peer.PID)
 	s.mu.Unlock()
 
 	go s.handleClientConnLoop(ctx, sConn)
@@ -350,7 +359,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 			if !ok {
 				if s.dropClient(ctx, tp) {
 					slog.Info("owning client left without detaching; ending the session")
-					_ = s.Close()
+					_ = s.CloseFor(ReasonOwnerLeft)
 				}
 				return
 			}
@@ -359,7 +368,12 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				// included, and only after reaping. Called here,
 				// not under s.mu, for the same reason dropClient
 				// closes outside it (#43).
-				_ = s.Close()
+				//
+				// The ancestry is looked up now, while the requester
+				// is still waiting on the hangup and so still alive.
+				pid := s.peerPID(tp)
+				_ = s.CloseFor(ReasonShutdownRequest,
+					"requesterPID", pid, "requester", processAncestry(int(pid)))
 				return
 			}
 			if _, ok := msg.(protocol.MsgDetach); ok {
@@ -446,6 +460,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.pendingPaneCreated, tp)
 	delete(s.pendingCreationSnapshot, tp)
 	delete(s.attachedTransports, tp)
+	delete(s.peerPIDs, tp)
 	s.forgetTrafficLocked(tp)
 	if s.sizeOwner == tp {
 		s.sizeOwner = nil
@@ -471,7 +486,7 @@ func (s *Server) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return s.Close()
+			return s.CloseFor(ReasonContextCancelled)
 		case <-s.stopCh:
 			return nil
 		case <-frameTicker.C:
@@ -510,6 +525,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	createdPaneID := 0
 	focusTargetID := 0
 	closeServer := false
+	closedPaneID := 0
 	var trafficReport *protocol.MsgTrafficStats
 	var historyPane *Pane
 	var splitResp *protocol.MsgSplitResponse
@@ -568,6 +584,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
 		} else {
 			closeServer, paneClosed = s.removePaneLocked(m.PaneID)
+			closedPaneID = m.PaneID
 			needBroadcast = true
 			closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID}
 		}
@@ -720,6 +737,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		case protocol.VerbKillPane:
 			if _, ok := s.panes[m.PaneID]; ok {
 				closeServer, paneClosed = s.removePaneLocked(m.PaneID)
+				closedPaneID = m.PaneID
 				s.resizePanesLocked()
 			}
 		case protocol.VerbToggleStatus:
@@ -948,7 +966,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			if paneClosed != nil {
 				<-paneClosed
 			}
-			_ = s.Close()
+			_ = s.CloseFor(ReasonLastPaneClosed, "paneID", closedPaneID)
 		}()
 	}
 	if historyPane != nil {
@@ -1170,13 +1188,16 @@ func (s *Server) onPaneExit(id int) {
 
 	s.broadcastLayout(context.Background())
 	_ = p.Close()
+	// After Close, which waits (up to the grace) for the reap.
+	pid, status := p.ExitSummary()
+	slog.Info("pane ended", "paneID", id, "panePID", pid, "status", status, "how", "exited")
 	// Before any s.Close below, so a waiter hears the code before its
 	// connection goes.
 	answered := s.finishWaiters(id, p)
 
 	if shouldClose {
 		drainAnswered(answered)
-		_ = s.Close()
+		_ = s.CloseFor(ReasonLastPaneExited, "paneID", id, "panePID", pid, "status", status)
 	}
 }
 
@@ -1209,6 +1230,8 @@ func (s *Server) removePaneLocked(id int) (last bool, closed <-chan struct{}) {
 	go func() {
 		defer close(done)
 		_ = p.Close()
+		pid, status := p.ExitSummary()
+		slog.Info("pane ended", "paneID", id, "panePID", pid, "status", status, "how", "closed")
 		answered := s.finishWaiters(id, p)
 		if !hasTerminalPanes {
 			// The session closes behind this; see paneClosed.

@@ -154,8 +154,8 @@ func TestOwnerReportsAMismatchedSpawnedServer(t *testing.T) {
 		_, _ = theirs.Write(otherVersionHello(4242))
 		_, _ = io.Copy(io.Discard, theirs)
 	}()
-	exited := make(chan int, 1)
-	exited <- 1
+	exited := make(chan serverExitStatus, 1)
+	exited <- serverExitStatus{Code: 1, Desc: "exit status 1"}
 
 	dir, err := os.MkdirTemp("", "wb")
 	if err != nil {

@@ -153,6 +153,20 @@ func TestKillSessionShutsDownAServer(t *testing.T) {
 	case <-time.After(shutdownCeiling):
 		t.Fatal("server kept running after kill-session")
 	}
+	// The server names who asked: kill-session ran in this process.
+	reason, attrs := srv.CloseReason()
+	if reason != server.ReasonShutdownRequest {
+		t.Errorf("CloseReason = %q, want %q", reason, server.ReasonShutdownRequest)
+	}
+	var gotPID any
+	for i := 0; i+1 < len(attrs); i += 2 {
+		if attrs[i] == "requesterPID" {
+			gotPID = attrs[i+1]
+		}
+	}
+	if gotPID != uint32(os.Getpid()) {
+		t.Errorf("requesterPID = %v, want %d (this process); attrs %v", gotPID, os.Getpid(), attrs)
+	}
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
