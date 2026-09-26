@@ -358,6 +358,7 @@ Open this URL in your web browser. The server serves the HTML/JS application and
 
 ### Security and Authentication
 
+- **USE A VPN OR TAILNET FOR REMOTE ACCESS:** If you want to access wideboi from outside your network, **USE A VPN OR A TAILNET FOR REMOTE ACCESS**. wideboi is not encrypted and will let strangers into your terminal.
 - **Loopback Binding:** Always bind to `127.0.0.1:8080` for local access. Binding to `:8080` or `0.0.0.0:8080` allows unencrypted network access. wideboi prints a security warning if you bind to non-loopback addresses.
 - **Generated Token:** If you do not specify a token, wideboi generates a secure random token at startup.
 - **Token File:** The server writes the current token to an owner-readable file at `$TMPDIR/wideboi-<uid>/<session-name>.web-token`. For the default session, view it with:
@@ -397,30 +398,6 @@ Opening the on-screen keyboard reduces the visible pane area, which stays
 anchored to the latest output while you are at the bottom. It does not resize
 the session's terminal grid. The phone reports its initial size when it first
 attaches, but does not change an established session's size as a viewer.
-
-### Remote HTTPS Reverse Proxy Setup
-
-To connect to wideboi securely from another computer, keep wideboi bound to `127.0.0.1:8080` and use an HTTPS reverse proxy (such as nginx) with TLS termination:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name wideboi.example.com;
-
-    ssl_certificate /etc/letsencrypt/live/wideboi.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/wideboi.example.com/privkey.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-Connect to `https://wideboi.example.com/` and enter your token in the web connection form.
 
 ---
 
