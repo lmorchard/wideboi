@@ -606,8 +606,8 @@ func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr, tlsEna
 	log.Warn("web client exposed beyond loopback over unencrypted HTTP/WS", "addr", addr)
 }
 
-// runKillSession ends the session at cfg.Socket and waits until it has:
-// the server hangs up only once every pane is reaped.
+// runUpgradeServer asks the running server to exec binPath, passing its state
+// and file descriptors across the upgrade boundary.
 func runUpgradeServer(cfg config.Config, binPath string) error {
 	resp, err := rpcQuery[protocol.MsgUpgradeResponse](cfg, protocol.MsgUpgradeRequest{BinPath: binPath}, 5*time.Second)
 	if err != nil {
@@ -619,6 +619,8 @@ func runUpgradeServer(cfg config.Config, binPath string) error {
 	return nil
 }
 
+// runKillSession ends the session at cfg.Socket and waits until it has:
+// the server hangs up only once every pane is reaped.
 func runKillSession(cfg config.Config) error {
 	conn, err := net.Dial("unix", cfg.Socket)
 	if err != nil {

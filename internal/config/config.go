@@ -59,20 +59,10 @@ type Config struct {
 }
 
 // MacroStepConfig describes one step in a configured input macro.
-type MacroStepConfig struct {
-	Text  string `toml:"text,omitempty"`
-	Key   string `toml:"key,omitempty"`
-	Code  string `toml:"code,omitempty"`
-	Ctrl  bool   `toml:"ctrl,omitempty"`
-	Alt   bool   `toml:"alt,omitempty"`
-	Shift bool   `toml:"shift,omitempty"`
-}
+type MacroStepConfig = protocol.MacroStep
 
 // MacroConfig describes a named input macro.
-type MacroConfig struct {
-	Name  string            `toml:"name"`
-	Steps []MacroStepConfig `toml:"steps"`
-}
+type MacroConfig = protocol.Macro
 
 // StartupPane describes a column opened when a new session first attaches.
 // An empty command starts the configured interactive shell.
@@ -375,39 +365,35 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		cfg.LogLevelName = envLevel
 	}
 	if envAutoCleanup := getenv("WIDEBOI_AUTO_CLEANUP"); envAutoCleanup != "" {
-		switch strings.ToLower(strings.TrimSpace(envAutoCleanup)) {
-		case "1", "true", "yes", "on":
-			v := true
-			cfg.AutoCleanup = &v
-		case "0", "false", "no", "off":
-			v := false
-			cfg.AutoCleanup = &v
-		default:
-			return Config{}, nil, fmt.Errorf("WIDEBOI_AUTO_CLEANUP %q: want boolean (true/false/1/0/yes/no/on/off)", envAutoCleanup)
+		v, err := parseBoolEnv("WIDEBOI_AUTO_CLEANUP", envAutoCleanup)
+		if err != nil {
+			return Config{}, nil, err
 		}
+		cfg.AutoCleanup = &v
 	}
-	if envTLS := getenv("WIDEBOI_TLS"); envTLS != "" {
-		switch strings.ToLower(strings.TrimSpace(envTLS)) {
-		case "1", "true", "yes", "on":
-			v := true
-			cfg.TLS = &v
-		case "0", "false", "no", "off":
-			v := false
-			cfg.TLS = &v
-		default:
-			return Config{}, nil, fmt.Errorf("WIDEBOI_TLS %q: want boolean (true/false/1/0/yes/no/on/off)", envTLS)
+	envTLS := getenv("WIDEBOI_TLS")
+	envDisableTLS := getenv("WIDEBOI_DISABLE_TLS")
+	if envTLS != "" || envDisableTLS != "" {
+		var tlsVal *bool
+		if envTLS != "" {
+			v, err := parseBoolEnv("WIDEBOI_TLS", envTLS)
+			if err != nil {
+				return Config{}, nil, err
+			}
+			tlsVal = &v
 		}
-	}
-	if envDisableTLS := getenv("WIDEBOI_DISABLE_TLS"); envDisableTLS != "" {
-		switch strings.ToLower(strings.TrimSpace(envDisableTLS)) {
-		case "1", "true", "yes", "on":
-			v := false
-			cfg.TLS = &v
-		case "0", "false", "no", "off":
-			// no-op: leave default or previous
-		default:
-			return Config{}, nil, fmt.Errorf("WIDEBOI_DISABLE_TLS %q: want boolean (true/false/1/0/yes/no/on/off)", envDisableTLS)
+		if envDisableTLS != "" {
+			v, err := parseBoolEnv("WIDEBOI_DISABLE_TLS", envDisableTLS)
+			if err != nil {
+				return Config{}, nil, err
+			}
+			disableTLS := !v
+			if tlsVal != nil && *tlsVal != disableTLS {
+				return Config{}, nil, fmt.Errorf("conflicting environment variables: WIDEBOI_TLS=%q and WIDEBOI_DISABLE_TLS=%q", envTLS, envDisableTLS)
+			}
+			tlsVal = &disableTLS
 		}
+		cfg.TLS = tlsVal
 	}
 	if envCert := getenv("WIDEBOI_TLS_CERT"); envCert != "" {
 		cfg.TLSCert = envCert
@@ -622,6 +608,18 @@ func DefaultMacros() []protocol.Macro {
 	}
 }
 
+// parseBoolEnv parses a boolean environment variable value.
+func parseBoolEnv(name, val string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s %q: want boolean (true/false/1/0/yes/no/on/off)", name, val)
+	}
+}
+
 // ResolvedMacros returns the configured macros, or DefaultMacros if none are configured.
 func (c *Config) ResolvedMacros() []protocol.Macro {
 	if len(c.Macros) == 0 {
@@ -629,20 +627,9 @@ func (c *Config) ResolvedMacros() []protocol.Macro {
 	}
 	out := make([]protocol.Macro, len(c.Macros))
 	for i, m := range c.Macros {
-		steps := make([]protocol.MacroStep, len(m.Steps))
-		for j, s := range m.Steps {
-			steps[j] = protocol.MacroStep{
-				Text:  s.Text,
-				Key:   s.Key,
-				Code:  s.Code,
-				Ctrl:  s.Ctrl,
-				Alt:   s.Alt,
-				Shift: s.Shift,
-			}
-		}
 		out[i] = protocol.Macro{
 			Name:  m.Name,
-			Steps: steps,
+			Steps: append([]protocol.MacroStep(nil), m.Steps...),
 		}
 	}
 	return out
@@ -679,26 +666,9 @@ func SaveMacrosFile(path string, macros []protocol.Macro) error {
 		return fmt.Errorf("create directory: %w", err)
 	}
 	var data struct {
-		Macros []MacroConfig `toml:"macros"`
+		Macros []protocol.Macro `toml:"macros"`
 	}
-	data.Macros = make([]MacroConfig, len(macros))
-	for i, m := range macros {
-		steps := make([]MacroStepConfig, len(m.Steps))
-		for j, s := range m.Steps {
-			steps[j] = MacroStepConfig{
-				Text:  s.Text,
-				Key:   s.Key,
-				Code:  s.Code,
-				Ctrl:  s.Ctrl,
-				Alt:   s.Alt,
-				Shift: s.Shift,
-			}
-		}
-		data.Macros[i] = MacroConfig{
-			Name:  m.Name,
-			Steps: steps,
-		}
-	}
+	data.Macros = macros
 	b, err := toml.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal macros: %w", err)

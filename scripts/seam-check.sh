@@ -64,7 +64,7 @@ if [ -n "$new" ]; then
   echo "$new" | sed 's/^/  /'
   echo
   echo "Route this through internal/protocol and internal/transport instead,"
-  echo "or, if it is genuinely another Plan 1 temporary, add it to ALLOW in"
+  echo "or, if it is genuinely a necessary exception, add it to ALLOW in"
   echo "$0 with a dated reason."
   status=1
 fi
@@ -79,7 +79,7 @@ fi
 
 if [ "$status" -eq 0 ]; then
   count=$(echo "$allowed" | grep -c . || true)
-  echo "seam-check: OK -- no new client/server crossings ($count Plan 1 temporaries allowlisted)."
+  echo "seam-check: OK -- no new client/server crossings ($count allowlisted)."
 fi
 
 exit "$status"

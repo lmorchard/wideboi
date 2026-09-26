@@ -10,21 +10,24 @@ jobs:
     name: CI (make check)
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
     - name: Check if CI should be skipped
       id: skip_check
       env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
         HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
       run: |
-        if [[ "$HEAD_COMMIT_MESSAGE" == "[noci]"* ]]; then
+        COMMIT_MSG=$(git log -1 --format=%B 2>/dev/null || echo "$HEAD_COMMIT_MESSAGE")
+        if [[ "$COMMIT_MSG" == "[noci]"* ]] || [[ "$PR_TITLE" == "[noci]"* ]]; then
           echo "skip=true" >> "$GITHUB_OUTPUT"
-          echo "CI skipped due to [noci] in commit message"
+          echo "CI skipped due to [noci]"
         else
           echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
-
-    - name: Checkout
-      if: steps.skip_check.outputs.skip != 'true'
-      uses: actions/checkout@v4
 
     # Read the pin out of go.mod so CI builds on exactly the Go that
     # `make check` runs on locally. setup-go resolves `go-version-file`

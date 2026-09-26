@@ -63,27 +63,9 @@ func MarshalClient(msg any) ([]byte, error) {
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
-		env.Msg = &wirepb.ClientMessage_UpgradeRequest{UpgradeRequest: &wirepb.MsgUpgradeRequest{BinPath: m.BinPath}}
+		env.Msg = &wirepb.ClientMessage_UpgradeRequest{UpgradeRequest: &wirepb.MsgUpgradeRequest{BinPath: validUTF8(m.BinPath)}}
 	case MsgSaveMacros:
-		pbMacros := make([]*wirepb.Macro, len(m.Macros))
-		for i, macro := range m.Macros {
-			steps := make([]*wirepb.MacroStep, len(macro.Steps))
-			for j, step := range macro.Steps {
-				steps[j] = &wirepb.MacroStep{
-					Text:  validUTF8(step.Text),
-					Key:   validUTF8(step.Key),
-					Code:  validUTF8(step.Code),
-					Ctrl:  step.Ctrl,
-					Alt:   step.Alt,
-					Shift: step.Shift,
-				}
-			}
-			pbMacros[i] = &wirepb.Macro{
-				Name:  validUTF8(macro.Name),
-				Steps: steps,
-			}
-		}
-		env.Msg = &wirepb.ClientMessage_SaveMacros{SaveMacros: &wirepb.MsgSaveMacros{Macros: pbMacros}}
+		env.Msg = &wirepb.ClientMessage_SaveMacros{SaveMacros: &wirepb.MsgSaveMacros{Macros: encodeMacros(m.Macros)}}
 	case MsgWebServerControlRequest:
 		env.Msg = &wirepb.ClientMessage_WebServerControlRequest{
 			WebServerControlRequest: &wirepb.MsgWebServerControlRequest{
@@ -152,25 +134,7 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_UpgradeRequest:
 		return MsgUpgradeRequest{BinPath: m.UpgradeRequest.BinPath}, nil
 	case *wirepb.ClientMessage_SaveMacros:
-		macros := make([]Macro, len(m.SaveMacros.Macros))
-		for i, macro := range m.SaveMacros.Macros {
-			steps := make([]MacroStep, len(macro.Steps))
-			for j, step := range macro.Steps {
-				steps[j] = MacroStep{
-					Text:  step.Text,
-					Key:   step.Key,
-					Code:  step.Code,
-					Ctrl:  step.Ctrl,
-					Alt:   step.Alt,
-					Shift: step.Shift,
-				}
-			}
-			macros[i] = Macro{
-				Name:  macro.Name,
-				Steps: steps,
-			}
-		}
-		return MsgSaveMacros{Macros: macros}, nil
+		return MsgSaveMacros{Macros: decodeMacros(m.SaveMacros.Macros)}, nil
 	case *wirepb.ClientMessage_WebServerControlRequest:
 		return MsgWebServerControlRequest{
 			Action:      WebServerAction(m.WebServerControlRequest.Action),
@@ -288,25 +252,7 @@ func MarshalServer(msg any) ([]byte, error) {
 	case MsgUpgradeResponse:
 		env.Msg = &wirepb.ServerMessage_UpgradeResponse{UpgradeResponse: &wirepb.MsgUpgradeResponse{Error: validUTF8(m.Error)}}
 	case MsgMacrosSnapshot:
-		pbMacros := make([]*wirepb.Macro, len(m.Macros))
-		for i, macro := range m.Macros {
-			steps := make([]*wirepb.MacroStep, len(macro.Steps))
-			for j, step := range macro.Steps {
-				steps[j] = &wirepb.MacroStep{
-					Text:  validUTF8(step.Text),
-					Key:   validUTF8(step.Key),
-					Code:  validUTF8(step.Code),
-					Ctrl:  step.Ctrl,
-					Alt:   step.Alt,
-					Shift: step.Shift,
-				}
-			}
-			pbMacros[i] = &wirepb.Macro{
-				Name:  validUTF8(macro.Name),
-				Steps: steps,
-			}
-		}
-		env.Msg = &wirepb.ServerMessage_MacrosSnapshot{MacrosSnapshot: &wirepb.MsgMacrosSnapshot{Macros: pbMacros}}
+		env.Msg = &wirepb.ServerMessage_MacrosSnapshot{MacrosSnapshot: &wirepb.MsgMacrosSnapshot{Macros: encodeMacros(m.Macros)}}
 	case MsgWebServerControlResponse:
 		env.Msg = &wirepb.ServerMessage_WebServerControlResponse{
 			WebServerControlResponse: &wirepb.MsgWebServerControlResponse{
@@ -432,25 +378,7 @@ func UnmarshalServer(data []byte) (any, error) {
 	case *wirepb.ServerMessage_UpgradeResponse:
 		return MsgUpgradeResponse{Error: m.UpgradeResponse.Error}, nil
 	case *wirepb.ServerMessage_MacrosSnapshot:
-		macros := make([]Macro, len(m.MacrosSnapshot.Macros))
-		for i, macro := range m.MacrosSnapshot.Macros {
-			steps := make([]MacroStep, len(macro.Steps))
-			for j, step := range macro.Steps {
-				steps[j] = MacroStep{
-					Text:  step.Text,
-					Key:   step.Key,
-					Code:  step.Code,
-					Ctrl:  step.Ctrl,
-					Alt:   step.Alt,
-					Shift: step.Shift,
-				}
-			}
-			macros[i] = Macro{
-				Name:  macro.Name,
-				Steps: steps,
-			}
-		}
-		return MsgMacrosSnapshot{Macros: macros}, nil
+		return MsgMacrosSnapshot{Macros: decodeMacros(m.MacrosSnapshot.Macros)}, nil
 	case *wirepb.ServerMessage_WebServerControlResponse:
 		return MsgWebServerControlResponse{
 			Running:    m.WebServerControlResponse.Running,
@@ -492,6 +420,50 @@ func decodeLine(cells []*wirepb.CellData) LineData {
 		line = append(line, CellData{Content: cell.Content, Width: int(cell.Width), Style: decodeStyle(cell.Style)})
 	}
 	return line
+}
+
+func encodeMacros(macros []Macro) []*wirepb.Macro {
+	pbMacros := make([]*wirepb.Macro, len(macros))
+	for i, macro := range macros {
+		steps := make([]*wirepb.MacroStep, len(macro.Steps))
+		for j, step := range macro.Steps {
+			steps[j] = &wirepb.MacroStep{
+				Text:  validUTF8(step.Text),
+				Key:   validUTF8(step.Key),
+				Code:  validUTF8(step.Code),
+				Ctrl:  step.Ctrl,
+				Alt:   step.Alt,
+				Shift: step.Shift,
+			}
+		}
+		pbMacros[i] = &wirepb.Macro{
+			Name:  validUTF8(macro.Name),
+			Steps: steps,
+		}
+	}
+	return pbMacros
+}
+
+func decodeMacros(pb []*wirepb.Macro) []Macro {
+	macros := make([]Macro, len(pb))
+	for i, macro := range pb {
+		steps := make([]MacroStep, len(macro.Steps))
+		for j, step := range macro.Steps {
+			steps[j] = MacroStep{
+				Text:  step.Text,
+				Key:   step.Key,
+				Code:  step.Code,
+				Ctrl:  step.Ctrl,
+				Alt:   step.Alt,
+				Shift: step.Shift,
+			}
+		}
+		macros[i] = Macro{
+			Name:  macro.Name,
+			Steps: steps,
+		}
+	}
+	return macros
 }
 
 // Zero-valued styles, colours and keys encode as absent sub-messages and

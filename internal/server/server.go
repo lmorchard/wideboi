@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/gorilla/websocket"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -160,8 +158,13 @@ type Server struct {
 	// it, via SetCloseGrace in export_test.go.
 	closeGrace time.Duration
 
-	macros       []protocol.Macro
-	onSaveMacros func([]protocol.Macro)
+	macros         []protocol.Macro
+	onSaveMacros   func([]protocol.Macro)
+	saveMacrosMu   sync.Mutex
+	saveMacrosCond *sync.Cond
+	saveMacrosQ    [][]protocol.Macro
+	saveMacrosStop bool
+	saveMacrosDone chan struct{}
 }
 
 // StartupPane is a pane created on the first attach to a new session.
@@ -188,10 +191,49 @@ func (s *Server) SetMacros(macros []protocol.Macro) {
 }
 
 // SetOnSaveMacros configures a callback invoked when a client saves macros.
+// Saves are serialized on a single background worker to prevent out-of-order writes.
 func (s *Server) SetOnSaveMacros(fn func([]protocol.Macro)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onSaveMacros = fn
+	s.saveMacrosMu.Lock()
+	if !s.saveMacrosStop && fn != nil {
+		s.ensureSaveMacrosWorkerLocked()
+	}
+	s.saveMacrosMu.Unlock()
+}
+
+func (s *Server) ensureSaveMacrosWorkerLocked() {
+	if s.saveMacrosCond == nil {
+		s.saveMacrosCond = sync.NewCond(&s.saveMacrosMu)
+		s.saveMacrosDone = make(chan struct{})
+		go s.runSaveMacrosWorker()
+	}
+}
+
+func (s *Server) runSaveMacrosWorker() {
+	defer close(s.saveMacrosDone)
+	for {
+		s.saveMacrosMu.Lock()
+		for len(s.saveMacrosQ) == 0 && !s.saveMacrosStop {
+			s.saveMacrosCond.Wait()
+		}
+		if len(s.saveMacrosQ) == 0 && s.saveMacrosStop {
+			s.saveMacrosMu.Unlock()
+			return
+		}
+		macros := s.saveMacrosQ[0]
+		s.saveMacrosQ = s.saveMacrosQ[1:]
+		s.saveMacrosMu.Unlock()
+
+		s.mu.Lock()
+		fn := s.onSaveMacros
+		s.mu.Unlock()
+
+		if fn != nil {
+			fn(macros)
+		}
+	}
 }
 
 // Macros returns a copy of the current server macros.
@@ -227,16 +269,7 @@ func (s *Server) broadcastMacros(ctx context.Context) {
 // websocketProtocolToken reads the browser's token-bearing subprotocol offer.
 // The server deliberately does not select it as the negotiated subprotocol.
 func websocketProtocolToken(r *http.Request) string {
-	const prefix = "wideboi-token."
-	for _, protocol := range websocket.Subprotocols(r) {
-		if strings.HasPrefix(protocol, prefix) {
-			decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(protocol, prefix))
-			if err == nil {
-				return string(decoded)
-			}
-		}
-	}
-	return ""
+	return transport.WebSocketTokenFromSubprotocols(websocket.Subprotocols(r))
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning
@@ -290,6 +323,9 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		stopCh:                  make(chan struct{}),
 		started:                 time.Now(),
 	}
+	srv.saveMacrosMu.Lock()
+	srv.ensureSaveMacrosWorkerLocked()
+	srv.saveMacrosMu.Unlock()
 	if tp != nil {
 		srv.transports = append(srv.transports, tp)
 	}
@@ -906,11 +942,14 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	case protocol.MsgSaveMacros:
 		s.macros = append([]protocol.Macro(nil), m.Macros...)
-		if s.onSaveMacros != nil {
-			fn := s.onSaveMacros
-			macrosCopy := append([]protocol.Macro(nil), m.Macros...)
-			go fn(macrosCopy)
+		macrosCopy := append([]protocol.Macro(nil), m.Macros...)
+		s.saveMacrosMu.Lock()
+		if !s.saveMacrosStop {
+			s.ensureSaveMacrosWorkerLocked()
+			s.saveMacrosQ = append(s.saveMacrosQ, macrosCopy)
+			s.saveMacrosCond.Signal()
 		}
+		s.saveMacrosMu.Unlock()
 		needMacrosBroadcast = true
 	case protocol.MsgWebServerControlRequest:
 		webReq = &m
@@ -2139,6 +2178,17 @@ func (s *Server) Close() error {
 		sl := s.listener
 		ws := s.webServer
 		s.mu.Unlock()
+
+		s.saveMacrosMu.Lock()
+		s.saveMacrosStop = true
+		if s.saveMacrosCond != nil {
+			s.saveMacrosCond.Broadcast()
+		}
+		done := s.saveMacrosDone
+		s.saveMacrosMu.Unlock()
+		if done != nil {
+			<-done
+		}
 		if ws != nil {
 			ws.Close(nil)
 		}
@@ -2209,7 +2259,7 @@ func (s *Server) Close() error {
 
 // ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
 func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
-	versionProtocol := fmt.Sprintf("wideboi.v%d", protocol.Version)
+	versionProtocol := transport.WebSocketSubprotocol()
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:    4096,
 		WriteBufferSize:   4096,

@@ -34,12 +34,32 @@ func (r *Registry) Register(cmd Command) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	c := cmd
-	r.commands = append(r.commands, c)
-	ref := &r.commands[len(r.commands)-1]
+	nameKey := strings.ToLower(cmd.Name)
+	var ref *Command
 
-	r.byName[strings.ToLower(c.Name)] = ref
-	for _, alias := range c.Aliases {
+	if old, exists := r.byName[nameKey]; exists {
+		for _, alias := range old.Aliases {
+			key := strings.ToLower(alias)
+			if r.byAlias[key] == old {
+				delete(r.byAlias, key)
+			}
+		}
+		*old = cmd
+		ref = old
+		for i := range r.commands {
+			if strings.EqualFold(r.commands[i].Name, cmd.Name) {
+				r.commands[i] = cmd
+				break
+			}
+		}
+	} else {
+		ref = new(Command)
+		*ref = cmd
+		r.commands = append(r.commands, cmd)
+	}
+
+	r.byName[nameKey] = ref
+	for _, alias := range cmd.Aliases {
 		r.byAlias[strings.ToLower(alias)] = ref
 	}
 }
