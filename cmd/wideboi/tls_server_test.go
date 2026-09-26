@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -188,5 +189,67 @@ func TestDisabledTLSServerStartupAndConnect(t *testing.T) {
 	case <-serverDone:
 	case <-time.After(3 * time.Second):
 		t.Fatal("runServer did not exit on kill-session")
+	}
+}
+
+func TestExposedServerStartupWarnsStderr(t *testing.T) {
+	port := getFreePort(t)
+	sockPath := filepath.Join(shortTempDir(t), "s.sock")
+
+	cfg := config.Config{
+		Socket:             sockPath,
+		Websocket:          fmt.Sprintf("0.0.0.0:%d", port),
+		TLSEnabled:         false,
+		AutoCleanupEnabled: false,
+	}
+
+	// Capture stderr
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- runServer(cfg, -1)
+	}()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(5 * time.Second)
+	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
+
+	ready := false
+	for time.Now().Before(deadline) {
+		resp, err := httpClient.Get(fmt.Sprintf("http://%s/", addr))
+		if err == nil {
+			io.ReadAll(resp.Body)
+			resp.Body.Close()
+			ready = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	_ = runKillSession(cfg)
+	select {
+	case <-serverDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("runServer did not exit on kill-session")
+	}
+
+	_ = w.Close()
+	os.Stderr = origStderr
+
+	captured, _ := io.ReadAll(r)
+	_ = r.Close()
+
+	if !ready {
+		t.Fatalf("server failed to start on %s", addr)
+	}
+
+	if !strings.Contains(string(captured), "WARNING: web client is exposed beyond loopback") {
+		t.Fatalf("expected exposure warning on stderr, got: %q", string(captured))
 	}
 }

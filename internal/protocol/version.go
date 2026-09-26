@@ -29,4 +29,5 @@ package protocol
 // 12 adds input macro snapshots and save requests (#237).
 // 13 adds the session's startup directory to layout snapshots (#123).
 // 14 adds web server start, stop, and status control requests/responses (#247).
-const Version uint32 = 14
+// 15 adds web server enable_tls option and unencrypted exposure warning (#261, #263).
+const Version uint32 = 15

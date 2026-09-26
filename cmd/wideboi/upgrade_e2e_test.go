@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
 )
 
@@ -201,32 +202,38 @@ func TestUpgradeServerWithAttachedClientE2E(t *testing.T) {
 		t.Fatalf("upgrade-server failed: %v\noutput: %s", err, string(out))
 	}
 
-	// Wait for server to resume after upgrade
-	time.Sleep(500 * time.Millisecond)
-
-	// Type text into the attached client's PTY
-	_, err = clientPane.Master.Write([]byte("echo client-reconnected-ok\r"))
-	if err != nil {
-		t.Fatalf("write to attached client PTY: %v", err)
-	}
-
-	// Read from the attached client's PTY until we see client-reconnected-ok
+	// Read from the attached client's PTY until we see client-reconnected-ok.
+	// Fixed sleeps and single writes race on a loaded runner: poll and retry
+	// writing until the client finishes reconnecting and echoes the output.
+	var accumulated []byte
 	buf := make([]byte, 4096)
 	found := false
-	readDeadline := time.Now().Add(5 * time.Second)
+	readDeadline := time.Now().Add(10 * time.Second)
+	lastWrite := time.Time{}
+
 	for time.Now().Before(readDeadline) {
-		_ = clientPane.Master.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		if time.Since(lastWrite) >= 500*time.Millisecond {
+			_, _ = clientPane.Master.Write([]byte("echo client-reconnected-ok\r"))
+			lastWrite = time.Now()
+		}
+
+		_ = clientPane.Master.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 		n, err := clientPane.Master.Read(buf)
-		if n > 0 && strings.Contains(string(buf[:n]), "client-reconnected-ok") {
-			found = true
-			break
+		if n > 0 {
+			accumulated = append(accumulated, buf[:n]...)
+			if strings.Contains(string(accumulated), "client-reconnected-ok") {
+				found = true
+				break
+			}
 		}
 		if err != nil && !os.IsTimeout(err) {
-			break
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 
 	if !found {
-		t.Fatalf("attached client did not automatically reconnect and receive typed input")
+		clientLog, _ := os.ReadFile(logger.Path(sockPath, "client"))
+		serverLog, _ := os.ReadFile(logger.Path(sockPath, "server"))
+		t.Fatalf("attached client did not automatically reconnect and receive typed input; accum: %q\nclient log:\n%s\nserver log:\n%s", string(accumulated), string(clientLog), string(serverLog))
 	}
 }

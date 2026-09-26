@@ -516,3 +516,276 @@ func TestWebServerStartAfterCloseFails(t *testing.T) {
 		t.Fatalf("expected shutting down error, got: %+v", resp)
 	}
 }
+
+func TestWriteWebToken(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "session.sock")
+	for _, token := range []string{"first", "rotated"} {
+		if err := server.WriteWebToken(socket, token); err != nil {
+			t.Fatal(err)
+		}
+		path := server.WebTokenPath(socket)
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(contents) != token+"\n" {
+			t.Fatalf("token file = %q, want %q", contents, token)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0600 {
+			t.Fatalf("token file permissions = %o, want 600", info.Mode().Perm())
+		}
+	}
+}
+
+func TestExposureWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		ip         net.IP
+		tlsEnabled bool
+		warn       bool
+	}{
+		{"IPv4 loopback no tls", net.ParseIP("127.0.0.1"), false, false},
+		{"IPv6 loopback no tls", net.ParseIP("::1"), false, false},
+		{"IPv4 wildcard no tls", net.IPv4zero, false, true},
+		{"IPv6 wildcard no tls", net.IPv6zero, false, true},
+		{"network address no tls", net.ParseIP("192.0.2.1"), false, true},
+		{"IPv4 wildcard with tls", net.IPv4zero, true, false},
+		{"IPv6 wildcard with tls", net.IPv6zero, true, false},
+		{"network address with tls", net.ParseIP("192.0.2.1"), true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			warn := server.ExposureWarning(&net.TCPAddr{IP: tc.ip, Port: 8080}, tc.tlsEnabled)
+			if got := warn != ""; got != tc.warn {
+				t.Errorf("warning present = %t, want %t (msg: %q)", got, tc.warn, warn)
+			}
+		})
+	}
+}
+
+func TestStartWebServerExposureWarning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+	s.InitWebServer(server.WebServerConfig{})
+
+	// Start exposed on 0.0.0.0:0 with TLS disabled -> should return warning
+	resp, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "0.0.0.0:0",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("StartWebServer: %v", err)
+	}
+	defer s.StopWebServer()
+
+	if resp.Warning == "" {
+		t.Fatal("expected non-empty Warning in response when exposed with TLS disabled")
+	}
+	if !strings.Contains(resp.Warning, "WARNING: web client is exposed beyond loopback") {
+		t.Fatalf("unexpected warning: %q", resp.Warning)
+	}
+
+	// Status should also carry the warning
+	st := s.WebServerStatus()
+	if st.Warning != resp.Warning {
+		t.Fatalf("status warning = %q, want %q", st.Warning, resp.Warning)
+	}
+}
+
+func TestWebServerRotateTokenOnFixedPort(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Find an available port
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	fixedAddr := l.Addr().String()
+	_ = l.Close()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+	s.InitWebServer(server.WebServerConfig{
+		TLSEnabled: true,
+	})
+
+	// 1. Start on fixed port
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action: protocol.WebServerActionStart,
+		Addr:   fixedAddr,
+	})
+	if err != nil {
+		t.Fatalf("start on fixed port failed: %v", err)
+	}
+	if !resp1.Running || resp1.Addr != fixedAddr {
+		t.Fatalf("unexpected start response: %+v", resp1)
+	}
+
+	// Connect WebSocket client
+	wsURL1 := fmt.Sprintf("wss://%s/ws?token=%s", resp1.Addr, resp1.Token)
+	dialer := websocket.Dialer{
+		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
+		Subprotocols:     []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+		HandshakeTimeout: 2 * time.Second,
+	}
+	conn1, _, err := dialer.Dial(wsURL1, nil)
+	if err != nil {
+		t.Fatalf("dial websocket 1 failed: %v", err)
+	}
+	defer conn1.Close()
+
+	// 2. Rotate token without specifying addr (or same addr) on the running server
+	resp2, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:      protocol.WebServerActionStart,
+		RotateToken: true,
+	})
+	if err != nil {
+		t.Fatalf("rotate token on fixed port failed: %v", err)
+	}
+	if !resp2.Running {
+		t.Fatal("expected resp2.Running to be true")
+	}
+	if resp2.Addr != fixedAddr {
+		t.Fatalf("expected port to stay %s, got %s", fixedAddr, resp2.Addr)
+	}
+	if resp2.Token == resp1.Token {
+		t.Fatalf("expected rotated token, got same: %s", resp2.Token)
+	}
+
+	// Old connection should be closed
+	conn1.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = conn1.ReadMessage()
+	if err == nil {
+		t.Fatal("expected old connection to be disconnected after token rotation")
+	}
+
+	// New connection with rotated token should succeed on the same port
+	wsURL2 := fmt.Sprintf("wss://%s/ws?token=%s", resp2.Addr, resp2.Token)
+	conn2, _, err := dialer.Dial(wsURL2, nil)
+	if err != nil {
+		t.Fatalf("dial websocket 2 with rotated token failed: %v", err)
+	}
+	conn2.Close()
+}
+
+func TestWebServerToggleTLS(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+	s.InitWebServer(server.WebServerConfig{
+		TLSEnabled: true,
+	})
+
+	// 1. Initial start with TLS enabled
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action: protocol.WebServerActionStart,
+		Addr:   "127.0.0.1:0",
+	})
+	if err != nil {
+		t.Fatalf("start with TLS failed: %v", err)
+	}
+	if !resp1.TLSEnabled {
+		t.Fatal("expected TLS to be enabled initially")
+	}
+	if !strings.HasPrefix(resp1.URL, "https://") {
+		t.Fatalf("expected https URL, got %s", resp1.URL)
+	}
+
+	// Dial with TLS succeeds
+	tlsDialer := websocket.Dialer{
+		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
+		Subprotocols:     []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+		HandshakeTimeout: 2 * time.Second,
+	}
+	conn1, _, err := tlsDialer.Dial(fmt.Sprintf("wss://%s/ws?token=%s", resp1.Addr, resp1.Token), nil)
+	if err != nil {
+		t.Fatalf("dial wss failed: %v", err)
+	}
+	conn1.Close()
+
+	// 2. Disable TLS on same port
+	resp2, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("disable TLS failed: %v", err)
+	}
+	if resp2.TLSEnabled {
+		t.Fatal("expected TLS to be disabled")
+	}
+	if !strings.HasPrefix(resp2.URL, "http://") {
+		t.Fatalf("expected http URL, got %s", resp2.URL)
+	}
+	if resp2.Addr != resp1.Addr {
+		t.Fatalf("expected same port %s, got %s", resp1.Addr, resp2.Addr)
+	}
+
+	// Dial plain WS succeeds
+	plainDialer := websocket.Dialer{
+		Subprotocols:     []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+		HandshakeTimeout: 2 * time.Second,
+	}
+	conn2, _, err := plainDialer.Dial(fmt.Sprintf("ws://%s/ws?token=%s", resp2.Addr, resp2.Token), nil)
+	if err != nil {
+		t.Fatalf("dial ws failed: %v", err)
+	}
+	conn2.Close()
+
+	// 3. Re-enable TLS on same port
+	resp3, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:    protocol.WebServerActionStart,
+		EnableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("re-enable TLS failed: %v", err)
+	}
+	if !resp3.TLSEnabled {
+		t.Fatal("expected TLS to be re-enabled")
+	}
+	if !strings.HasPrefix(resp3.URL, "https://") {
+		t.Fatalf("expected https URL, got %s", resp3.URL)
+	}
+	if resp3.Addr != resp1.Addr {
+		t.Fatalf("expected same port %s, got %s", resp1.Addr, resp3.Addr)
+	}
+
+	// Dial with TLS succeeds again
+	conn3, _, err := tlsDialer.Dial(fmt.Sprintf("wss://%s/ws?token=%s", resp3.Addr, resp3.Token), nil)
+	if err != nil {
+		t.Fatalf("dial wss after re-enabling TLS failed: %v", err)
+	}
+	conn3.Close()
+}
+
+func TestWebServerConflictingTLSOptions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+	s.InitWebServer(server.WebServerConfig{})
+
+	_, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		EnableTLS:  true,
+		DisableTLS: true,
+	})
+	if err == nil {
+		t.Fatal("expected error with both EnableTLS and DisableTLS")
+	}
+	if !strings.Contains(err.Error(), "cannot specify both") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+}

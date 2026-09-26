@@ -74,6 +74,7 @@ func MarshalClient(msg any) ([]byte, error) {
 				Token:       validUTF8(m.Token),
 				RotateToken: m.RotateToken,
 				DisableTls:  m.DisableTLS,
+				EnableTls:   m.EnableTLS,
 			},
 		}
 	default:
@@ -142,6 +143,7 @@ func UnmarshalClient(data []byte) (any, error) {
 			Token:       m.WebServerControlRequest.Token,
 			RotateToken: m.WebServerControlRequest.RotateToken,
 			DisableTLS:  m.WebServerControlRequest.DisableTls,
+			EnableTLS:   m.WebServerControlRequest.EnableTls,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown client message %T", env.Msg)
@@ -262,6 +264,7 @@ func MarshalServer(msg any) ([]byte, error) {
 				TlsEnabled: m.TLSEnabled,
 				Token:      validUTF8(m.Token),
 				Error:      validUTF8(m.Error),
+				Warning:    validUTF8(m.Warning),
 			},
 		}
 	default:
@@ -387,6 +390,7 @@ func UnmarshalServer(data []byte) (any, error) {
 			TLSEnabled: m.WebServerControlResponse.TlsEnabled,
 			Token:      m.WebServerControlResponse.Token,
 			Error:      m.WebServerControlResponse.Error,
+			Warning:    m.WebServerControlResponse.Warning,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

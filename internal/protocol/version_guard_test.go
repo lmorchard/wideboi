@@ -24,6 +24,7 @@ import (
 // 4. Record the new Version and sha256 below.
 var wireSchemaHashes = map[uint32]string{
 	14: "cc285ebd8a3ea0a5673d106f86a2879695035b9035c18c5f862c06c923d96754",
+	15: "fee133898f4e878d0dbe8debd00d7f7804ebe95e5a36741fa0189cfd1cc4a17f",
 }
 
 func currentWireSchemaHash() (string, error) {

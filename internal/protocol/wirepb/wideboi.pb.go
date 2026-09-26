@@ -3949,6 +3949,7 @@ type MsgWebServerControlRequest struct {
 	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
 	RotateToken   bool                   `protobuf:"varint,4,opt,name=rotate_token,json=rotateToken,proto3" json:"rotate_token,omitempty"`
 	DisableTls    bool                   `protobuf:"varint,5,opt,name=disable_tls,json=disableTls,proto3" json:"disable_tls,omitempty"`
+	EnableTls     bool                   `protobuf:"varint,6,opt,name=enable_tls,json=enableTls,proto3" json:"enable_tls,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4018,6 +4019,13 @@ func (x *MsgWebServerControlRequest) GetDisableTls() bool {
 	return false
 }
 
+func (x *MsgWebServerControlRequest) GetEnableTls() bool {
+	if x != nil {
+		return x.EnableTls
+	}
+	return false
+}
+
 type MsgWebServerControlResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Running       bool                   `protobuf:"varint,1,opt,name=running,proto3" json:"running,omitempty"`
@@ -4026,6 +4034,7 @@ type MsgWebServerControlResponse struct {
 	TlsEnabled    bool                   `protobuf:"varint,4,opt,name=tls_enabled,json=tlsEnabled,proto3" json:"tls_enabled,omitempty"`
 	Token         string                 `protobuf:"bytes,5,opt,name=token,proto3" json:"token,omitempty"`
 	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	Warning       string                 `protobuf:"bytes,7,opt,name=warning,proto3" json:"warning,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4098,6 +4107,13 @@ func (x *MsgWebServerControlResponse) GetToken() string {
 func (x *MsgWebServerControlResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *MsgWebServerControlResponse) GetWarning() string {
+	if x != nil {
+		return x.Warning
 	}
 	return ""
 }
@@ -4387,14 +4403,16 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x11MsgMacrosSnapshot\x12/\n" +
 	"\x06macros\x18\x01 \x03(\v2\x17.wideboi.protocol.MacroR\x06macros\"@\n" +
 	"\rMsgSaveMacros\x12/\n" +
-	"\x06macros\x18\x01 \x03(\v2\x17.wideboi.protocol.MacroR\x06macros\"\xc5\x01\n" +
+	"\x06macros\x18\x01 \x03(\v2\x17.wideboi.protocol.MacroR\x06macros\"\xe4\x01\n" +
 	"\x1aMsgWebServerControlRequest\x129\n" +
 	"\x06action\x18\x01 \x01(\x0e2!.wideboi.protocol.WebServerActionR\x06action\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12!\n" +
 	"\frotate_token\x18\x04 \x01(\bR\vrotateToken\x12\x1f\n" +
 	"\vdisable_tls\x18\x05 \x01(\bR\n" +
-	"disableTls\"\xaa\x01\n" +
+	"disableTls\x12\x1d\n" +
+	"\n" +
+	"enable_tls\x18\x06 \x01(\bR\tenableTls\"\xc4\x01\n" +
 	"\x1bMsgWebServerControlResponse\x12\x18\n" +
 	"\arunning\x18\x01 \x01(\bR\arunning\x12\x12\n" +
 	"\x04addr\x18\x02 \x01(\tR\x04addr\x12\x10\n" +
@@ -4402,7 +4420,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\vtls_enabled\x18\x04 \x01(\bR\n" +
 	"tlsEnabled\x12\x14\n" +
 	"\x05token\x18\x05 \x01(\tR\x05token\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error*\x98\x03\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\x12\x18\n" +
+	"\awarning\x18\a \x01(\tR\awarning*\x98\x03\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +

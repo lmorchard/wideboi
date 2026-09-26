@@ -556,6 +556,7 @@ type MsgWebServerControlRequest struct {
 	Token       string          `json:"token,omitempty"`
 	RotateToken bool            `json:"rotate_token,omitempty"`
 	DisableTLS  bool            `json:"disable_tls,omitempty"`
+	EnableTLS   bool            `json:"enable_tls,omitempty"`
 }
 
 // MsgWebServerControlResponse reports the web server's state after a query or control action.
@@ -566,4 +567,5 @@ type MsgWebServerControlResponse struct {
 	TLSEnabled bool   `json:"tls_enabled"`
 	Token      string `json:"token,omitempty"`
 	Error      string `json:"error,omitempty"`
+	Warning    string `json:"warning,omitempty"`
 }
