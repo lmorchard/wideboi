@@ -17,3 +17,9 @@ Wails webview and was replaced with inline confirmation.
 The first `make quick` failed only under this API session's `NO_COLOR=1` and
 `TERM=dumb`; the client theme tests expect color. It passed with
 `NO_COLOR` unset and `TERM=xterm-256color`.
+
+Review of the first PR pass caught that `SessionCWD` requires a wire version
+bump: a running older server would otherwise omit it while still passing the
+handshake. Version 13 updates the Go handshake and browser subprotocol.
+Desktop ownership tests now drive detach and shutdown messages through
+controllable socket transports, and the Linux CI job compiles and runs them.

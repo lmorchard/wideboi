@@ -8,10 +8,10 @@ async function connect(page) {
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v12';
+        this.protocol = 'wideboi.v13';
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v12')) window.testSockets.push(this);
+        if (protocols?.includes('wideboi.v13')) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }

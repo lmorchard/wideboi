@@ -464,6 +464,23 @@ func (d *desktopApp) release(name string) error {
 	return nil
 }
 
+// keepOwned is the quit dialog's "Keep sessions running" action. Detaching
+// only owner connections leaves independently attached sessions untouched.
+func (d *desktopApp) keepOwned() error {
+	d.mu.Lock()
+	names := make([]string, 0, len(d.owned))
+	for name := range d.owned {
+		names = append(names, name)
+	}
+	d.mu.Unlock()
+	for _, name := range names {
+		if err := d.release(name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *desktopApp) stopOwned(name string, owned *desktopSession) {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownCeiling)
 	defer cancel()
@@ -589,20 +606,12 @@ func (d *desktopApp) showQuitDialog(count int) {
 		d.app.Quit()
 	})
 	dialog.AddButton("Keep sessions running and quit").OnClick(func() {
-		d.mu.Lock()
-		names := make([]string, 0, len(d.owned))
-		for name := range d.owned {
-			names = append(names, name)
-		}
-		d.mu.Unlock()
-		for _, name := range names {
-			if err := d.release(name); err != nil {
-				d.app.Dialog.Error().SetTitle("Could not keep session").SetMessage(err.Error()).Show()
-				d.mu.Lock()
-				d.dialogOpen = false
-				d.mu.Unlock()
-				return
-			}
+		if err := d.keepOwned(); err != nil {
+			d.app.Dialog.Error().SetTitle("Could not keep session").SetMessage(err.Error()).Show()
+			d.mu.Lock()
+			d.dialogOpen = false
+			d.mu.Unlock()
+			return
 		}
 		d.mu.Lock()
 		d.quitting = true

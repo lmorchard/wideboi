@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version
+.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-test desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -117,6 +117,11 @@ DESKTOP_CGO_ENV := MACOSX_DEPLOYMENT_TARGET=13.0 CGO_CFLAGS="-O2 -g -mmacosx-ver
 endif
 desktop: web/dist
 	$(DESKTOP_CGO_ENV) go build -tags desktop,production -ldflags "$(LDFLAGS)" -o bin/wideboi-desktop ./cmd/wideboi
+
+# Desktop-only lifecycle tests also need the native Wails libraries, so CI
+# runs them in a separate job after installing the Linux GUI build packages.
+desktop-test: web/dist
+	$(DESKTOP_CGO_ENV) go test -tags desktop -count=1 ./cmd/wideboi ./internal/desktop
 
 # A macOS bundle for Finder and release archives. Signing and notarization
 # are not configured yet.

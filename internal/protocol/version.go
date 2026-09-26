@@ -27,4 +27,5 @@ package protocol
 // 10 adds split keep, pane exit metadata, and wait requests/responses (#227).
 // 11 adds per-pane widths to size claims and exact owner width changes (#70).
 // 12 adds input macro snapshots and save requests (#237).
-const Version uint32 = 12
+// 13 adds the session's startup directory to layout snapshots (#123).
+const Version uint32 = 13
