@@ -166,6 +166,7 @@ message ServerMessage {
     MsgWaitResponse wait_response = 14;
     MsgMacrosSnapshot macros_snapshot = 15;
     MsgUpgradeResponse upgrade_response = 16;
+    MsgWebServerControlResponse web_server_control_response = 17;
   }
 }
 
@@ -270,6 +271,7 @@ message ClientMessage {
     MsgSetPaneWidth set_pane_width = 18;
     MsgSaveMacros save_macros = 19;
     MsgUpgradeRequest upgrade_request = 20;
+    MsgWebServerControlRequest web_server_control_request = 21;
   }
 }
 
@@ -391,4 +393,29 @@ message MsgMacrosSnapshot {
 message MsgSaveMacros {
   repeated Macro macros = 1;
 }
+
+enum WebServerAction {
+  WEB_SERVER_ACTION_UNSPECIFIED = 0;
+  WEB_SERVER_ACTION_STATUS = 1;
+  WEB_SERVER_ACTION_START = 2;
+  WEB_SERVER_ACTION_STOP = 3;
+}
+
+message MsgWebServerControlRequest {
+  WebServerAction action = 1;
+  string addr = 2;
+  string token = 3;
+  bool rotate_token = 4;
+  bool disable_tls = 5;
+}
+
+message MsgWebServerControlResponse {
+  bool running = 1;
+  string addr = 2;
+  string url = 3;
+  bool tls_enabled = 4;
+  string token = 5;
+  string error = 6;
+}
+
 

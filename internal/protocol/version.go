@@ -28,4 +28,5 @@ package protocol
 // 11 adds per-pane widths to size claims and exact owner width changes (#70).
 // 12 adds input macro snapshots and save requests (#237).
 // 13 adds the session's startup directory to layout snapshots (#123).
-const Version uint32 = 13
+// 14 adds web server start, stop, and status control requests/responses (#247).
+const Version uint32 = 14

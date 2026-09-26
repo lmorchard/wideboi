@@ -45,6 +45,8 @@ var wireTypes = []any{
 	MsgSaveMacros{},
 	MsgUpgradeRequest{},
 	MsgUpgradeResponse{},
+	MsgWebServerControlRequest{},
+	MsgWebServerControlResponse{},
 }
 
 // TestWireTypesCarryNoInterfaces is the structural guard for the defect

@@ -38,16 +38,25 @@ func mockServer(t *testing.T, dir string, snap protocol.MsgLayoutSnapshot, metas
 		t.Cleanup(cancel)
 		sc.RunPumps(ctx)
 
-		// Wait for the client's request
-		select {
-		case msg := <-sc.ClientSendChan():
-			if _, ok := msg.(protocol.MsgStatusRequest); ok {
-				sc.SendServer(ctx, snap)
-				for _, meta := range metas {
-					sc.SendServer(ctx, meta)
+		// Wait for client requests
+		for {
+			select {
+			case msg, ok := <-sc.ClientSendChan():
+				if !ok {
+					return
 				}
+				switch msg.(type) {
+				case protocol.MsgStatusRequest:
+					sc.SendServer(ctx, snap)
+					for _, meta := range metas {
+						sc.SendServer(ctx, meta)
+					}
+				case protocol.MsgWebServerControlRequest:
+					sc.SendServer(ctx, protocol.MsgWebServerControlResponse{})
+				}
+			case <-ctx.Done():
+				return
 			}
-		case <-ctx.Done():
 		}
 	}()
 

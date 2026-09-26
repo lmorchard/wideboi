@@ -538,3 +538,32 @@ type MsgMacrosSnapshot struct {
 type MsgSaveMacros struct {
 	Macros []Macro `json:"macros"`
 }
+
+// WebServerAction specifies the desired action in MsgWebServerControlRequest.
+type WebServerAction int
+
+const (
+	WebServerActionUnspecified WebServerAction = 0
+	WebServerActionStatus      WebServerAction = 1
+	WebServerActionStart       WebServerAction = 2
+	WebServerActionStop        WebServerAction = 3
+)
+
+// MsgWebServerControlRequest controls or queries the session's web server.
+type MsgWebServerControlRequest struct {
+	Action      WebServerAction `json:"action"`
+	Addr        string          `json:"addr,omitempty"`
+	Token       string          `json:"token,omitempty"`
+	RotateToken bool            `json:"rotate_token,omitempty"`
+	DisableTLS  bool            `json:"disable_tls,omitempty"`
+}
+
+// MsgWebServerControlResponse reports the web server's state after a query or control action.
+type MsgWebServerControlResponse struct {
+	Running    bool   `json:"running"`
+	Addr       string `json:"addr,omitempty"`
+	URL        string `json:"url,omitempty"`
+	TLSEnabled bool   `json:"tls_enabled"`
+	Token      string `json:"token,omitempty"`
+	Error      string `json:"error,omitempty"`
+}

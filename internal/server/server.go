@@ -109,6 +109,8 @@ type Server struct {
 	// client can claim size ownership with VerbClaimSize (#184).
 	sizeOwner transport.Transport
 
+	webServer *webServerManager
+
 	// paneSendMu serializes broadcastPaneUpdates. The Run loop, every
 	// client's message loop (via broadcastLayout) and onPaneExit all
 	// broadcast, and two overlapping rounds could deliver an older
@@ -515,6 +517,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	var captureResp *protocol.MsgCaptureResponse
 	var closeResp *protocol.MsgClosePaneResponse
 	var waitResp *protocol.MsgWaitResponse
+	var webReq *protocol.MsgWebServerControlRequest
 	// paneClosed closes once a pane removed here has been hung up and its
 	// waiters answered; a server closing with it waits for that first.
 	var paneClosed <-chan struct{}
@@ -891,6 +894,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			go fn(macrosCopy)
 		}
 		needMacrosBroadcast = true
+	case protocol.MsgWebServerControlRequest:
+		webReq = &m
 	}
 	if tp != nil && createdPaneID != 0 {
 		s.pendingPaneCreated[tp] = append(s.pendingPaneCreated[tp], createdPaneID)
@@ -916,6 +921,22 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		}
 		if waitResp != nil {
 			tp.SendServer(ctx, *waitResp)
+		}
+		if webReq != nil {
+			var resp protocol.MsgWebServerControlResponse
+			switch webReq.Action {
+			case protocol.WebServerActionStatus:
+				resp = s.WebServerStatus()
+			case protocol.WebServerActionStart:
+				resp, _ = s.StartWebServer(ctx, *webReq)
+			case protocol.WebServerActionStop:
+				resp, _ = s.StopWebServer()
+			default:
+				resp = protocol.MsgWebServerControlResponse{
+					Error: fmt.Sprintf("unrecognized web server action: %d", webReq.Action),
+				}
+			}
+			tp.SendServer(ctx, resp)
 		}
 	}
 	if closeServer {
@@ -2079,6 +2100,12 @@ func (s *Server) stoppingLocked() bool {
 	}
 }
 
+func (s *Server) isStopping() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stoppingLocked()
+}
+
 // Close hangs up all panes concurrently, and then hangs up on every
 // client.
 func (s *Server) Close() error {
@@ -2087,7 +2114,11 @@ func (s *Server) Close() error {
 		s.mu.Lock()
 		close(s.stopCh)
 		sl := s.listener
+		ws := s.webServer
 		s.mu.Unlock()
+		if ws != nil {
+			ws.Close(nil)
+		}
 		// Stop answering first. The hangup below can take up to the
 		// pane grace, and a `wideboi` that dialled in during it would
 		// attach to a session about to hang up on it; with the socket

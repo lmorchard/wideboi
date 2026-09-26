@@ -325,3 +325,22 @@ func TestParseCLITLSFlags(t *testing.T) {
 		t.Errorf("TLS = false, want true")
 	}
 }
+
+func TestParseCLIWebSubcommand(t *testing.T) {
+	opts, err := parseCLI([]string{"web", "start", "--addr", "127.0.0.1:9090", "--rotate-token"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if opts.subcommand != "web" {
+		t.Errorf("subcommand = %q, want web", opts.subcommand)
+	}
+	wantArgs := []string{"start", "--addr", "127.0.0.1:9090", "--rotate-token"}
+	if len(opts.subcommandArgs) != len(wantArgs) {
+		t.Fatalf("subcommandArgs = %v, want %v", opts.subcommandArgs, wantArgs)
+	}
+	for i := range wantArgs {
+		if opts.subcommandArgs[i] != wantArgs[i] {
+			t.Errorf("subcommandArgs[%d] = %q, want %q", i, opts.subcommandArgs[i], wantArgs[i])
+		}
+	}
+}
