@@ -65,7 +65,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   expect(geometry[1].right).toBeGreaterThan(geometry[2].left);
   expect(geometry[2].z).toBeGreaterThan(geometry[1].z);
   await page.mouse.click(geometry[1].left + 10, geometry[1].top + 20);
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('2');
+  await expect(page.locator('.pane-tab[data-pane-id="2"]')).toHaveAttribute('aria-selected', 'true');
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'paneUpdate', value: {
@@ -77,7 +77,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await panes.nth(1).locator('canvas').click({ position: { x: 24, y: 26 } });
   await expect.poll(async () => (await messages()).find(msg => msg.case === 'mouse')?.value)
     .toMatchObject({ paneId: 2, x: 2, y: 1 });
-  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('7');
+  await page.locator('.pane-tab[data-pane-id="7"]').click();
   await expect(panes.nth(6)).toHaveAttribute('focused', '');
   await expect(page.locator('.card-count.left')).toContainText('+');
   await expect(panes.nth(6)).toHaveCSS('visibility', 'visible');
@@ -85,7 +85,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await settleLayout();
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(beforeResize);
 
-  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('5');
+  await page.locator('.pane-tab[data-pane-id="5"]').click();
   await expect.poll(() => panes.nth(4).evaluate(element => element.getAnimations().length)).toBe(0);
   // Pause both directions and inspect the three adjacent cards mid-slide.
   await page.evaluate(() => {
@@ -102,7 +102,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   });
   const zOrder = () => panes.evaluateAll(elements => [3, 4, 5].map(index => Number(getComputedStyle(elements[index]).zIndex)));
   for (const target of ['4', '5']) {
-    await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption(target);
+    await page.locator(`.pane-tab[data-pane-id="${target}"]`).click();
     await expect.poll(() => page.evaluate(() => window.pausedMoves.length)).toBeGreaterThan(0);
     const [left, middle, right] = await zOrder();
     expect(left).toBeLessThan(middle);
@@ -171,7 +171,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
       return animation;
     };
   });
-  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('6');
+  await page.locator('.pane-tab[data-pane-id="6"]').click();
   await expect.poll(() => page.evaluate(() => window.pausedMoves.length)).toBeGreaterThan(0);
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');

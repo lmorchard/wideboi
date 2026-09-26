@@ -64,7 +64,8 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect(page.getByText('Focus Pane:')).toBeVisible();
+  await expect(page.locator('.toolbar')).toBeVisible();
+  await expect(page.locator('.terminal-shell .title')).toHaveCount(0);
 
   const messages = () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
@@ -85,7 +86,7 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
       lines: [{ cells: [{ content: 'Z', width: 1 }] }],
     } }));
   });
-  await expect(page.getByRole('option', { name: '[1] Shell' })).toHaveCount(1);
+  await expect(page.locator('.pane-tab[data-pane-id="1"]')).toContainText('Shell');
   await expect.poll(() => page.evaluate(() => window.drawnText.includes('Z'))).toBe(true);
 
   await page.locator('canvas').focus();
@@ -154,7 +155,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   const before = await panes.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
   expect(before.every(width => width === before[0])).toBe(true);
   expect(before[0]).toBeGreaterThan(250);
-  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('4');
+  await page.locator('.pane-tab[data-pane-id="4"]').click();
   await expect.poll(() => page.locator('.pane-strip').evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
   const after = await panes.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().width));
   expect(after).toEqual(before);
@@ -174,7 +175,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     .toMatchObject({ paneId: 4, x: 2, y: 1 });
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(resizeCount);
   await page.locator('wideboi-pane canvas').first().click({ position: { x: 20, y: 26 } });
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
+  await expect(page.locator('.pane-tab[data-pane-id="1"]')).toHaveAttribute('aria-selected', 'true');
   expect(await page.evaluate(() => {
     const app = document.querySelector('wideboi-app');
     const pane = app.shadowRoot.querySelector('wideboi-pane');
@@ -193,12 +194,12 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   expect(await page.evaluate(() => window.paneCanvas === document.querySelector('wideboi-app').shadowRoot
     .querySelectorAll('wideboi-pane')[3].shadowRoot.querySelector('canvas'))).toBe(true);
 
-  await page.getByRole('combobox', { name: 'Focus Pane:' }).selectOption('4');
+  await page.locator('.pane-tab[data-pane-id="4"]').click();
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'paneClosed', value: { paneId: 4 } }));
   });
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('3');
+  await expect(page.locator('.pane-tab[data-pane-id="3"]')).toHaveAttribute('aria-selected', 'true');
   expect(await page.evaluate(() => document.querySelector('wideboi-app').focusedPaneId)).toBe(3);
   expect(await page.evaluate(() => {
     const app = document.querySelector('wideboi-app');
@@ -278,7 +279,7 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect(page.getByText('Focus Pane:')).toBeVisible();
+  await expect(page.locator('.toolbar')).toBeVisible();
   await expect(page.locator('.stats-overlay')).toHaveCount(0);
 });
 
@@ -302,7 +303,7 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
-  await expect(page.getByText('Focus Pane:')).toBeVisible();
+  await expect(page.locator('.toolbar')).toBeVisible();
 
   const messages = () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
@@ -336,12 +337,12 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
   // 2. Column jump: Ctrl+B then '2' focuses pane 2
   await page.keyboard.press('Control+b');
   await page.keyboard.press('2');
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('2');
+  await expect(page.locator('.pane-tab[data-pane-id="2"]')).toHaveAttribute('aria-selected', 'true');
 
   // Jump to last column: Ctrl+B then '0' focuses pane 3
   await page.keyboard.press('Control+b');
   await page.keyboard.press('0');
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('3');
+  await expect(page.locator('.pane-tab[data-pane-id="3"]')).toHaveAttribute('aria-selected', 'true');
 
   // 3. Layout toggle: Ctrl+B then 'c' toggles between cards and scroll
   await expect(page.locator('.pane-strip')).toHaveClass(/cards/);
@@ -369,5 +370,91 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
   await page.locator('wideboi-pane canvas').nth(2).focus();
   await page.keyboard.press('Control+a');
   await page.keyboard.press('1');
-  await expect(page.getByRole('combobox', { name: 'Focus Pane:' })).toHaveValue('1');
+  await expect(page.locator('.pane-tab[data-pane-id="1"]')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('toolbar pane selector tabs display title, status glyphs, and focus state', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.testSockets = [];
+    window.WebSocket = class {
+      static OPEN = 1;
+      constructor(url, protocols) {
+        this.protocol = 'wideboi.v14';
+        this.readyState = 0;
+        this.sent = [];
+        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+      }
+      send(data) { this.sent.push(new Uint8Array(data)); }
+      close() { this.readyState = 3; this.onclose?.(); }
+      open() { this.readyState = 1; this.onopen?.(); }
+      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+  await expect(page.locator('.toolbar')).toBeVisible();
+
+  // Verify standalone title and static status elements are gone
+  await expect(page.locator('.terminal-shell > .title')).toHaveCount(0);
+  await expect(page.locator('.terminal-shell > .status')).toHaveCount(0);
+
+  // Send layout with 4 panes with different statuses
+  // PaneStatus: 0 = IDLE, 1 = WORKING, 2 = NEEDS_INPUT, 3 = DONE, 4 = FAILED
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    const socket = window.testSockets[0];
+    socket.message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [
+        { paneId: 1, width: 40, height: 10 },
+        { paneId: 2, width: 40, height: 10 },
+        { paneId: 3, width: 40, height: 10 },
+        { paneId: 4, width: 40, height: 10 },
+      ],
+      paneTitles: { 1: 'editor', 2: 'build', 3: 'prompt', 4: 'lint' },
+      paneStatuses: { 1: 0, 2: 1, 3: 2, 4: 4 },
+    } }));
+  });
+
+  const tab1 = page.locator('.pane-tab[data-pane-id="1"]');
+  const tab2 = page.locator('.pane-tab[data-pane-id="2"]');
+  const tab3 = page.locator('.pane-tab[data-pane-id="3"]');
+  const tab4 = page.locator('.pane-tab[data-pane-id="4"]');
+
+  await expect(tab1).toBeVisible();
+  await expect(tab1).toContainText('editor');
+  await expect(tab1).toHaveAttribute('aria-selected', 'true');
+  await expect(tab1).toHaveAttribute('aria-label', 'Pane 1: editor');
+
+  await expect(tab2).toContainText('build');
+  await expect(tab2.locator('.tab-status.working')).toHaveText('»');
+  await expect(tab2).toHaveAttribute('aria-selected', 'false');
+  await expect(tab2).toHaveAttribute('aria-label', 'Pane 2: build, working');
+
+  await expect(tab3).toContainText('prompt');
+  await expect(tab3.locator('.tab-status.needs-input')).toHaveText('!');
+  await expect(tab3).toHaveAttribute('aria-label', 'Pane 3: prompt, needs input');
+
+  await expect(tab4).toContainText('lint');
+  await expect(tab4.locator('.tab-status.failed')).toHaveText('✗');
+  await expect(tab4).toHaveAttribute('aria-label', 'Pane 4: lint, failed');
+
+  // Click tab 3 to focus
+  await tab3.click();
+  await expect(tab3).toHaveAttribute('aria-selected', 'true');
+  await expect(tab1).toHaveAttribute('aria-selected', 'false');
+
+  // Tablist keyboard navigation
+  await tab3.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tab4).toBeFocused();
+  await expect(tab4).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('Home');
+  await expect(tab1).toBeFocused();
+  await expect(tab1).toHaveAttribute('aria-selected', 'true');
+
+  await page.keyboard.press('ArrowLeft');
+  await expect(tab4).toBeFocused();
+  await expect(tab4).toHaveAttribute('aria-selected', 'true');
 });
