@@ -932,6 +932,7 @@ type MsgLayoutSnapshot struct {
 	Columns       []*ColumnData          `protobuf:"bytes,1,rep,name=columns,proto3" json:"columns,omitempty"`
 	PaneStatuses  map[int32]PaneStatus   `protobuf:"bytes,2,rep,name=pane_statuses,json=paneStatuses,proto3" json:"pane_statuses,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=wideboi.protocol.PaneStatus"`
 	PaneTitles    map[int32]string       `protobuf:"bytes,3,rep,name=pane_titles,json=paneTitles,proto3" json:"pane_titles,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	SessionCwd    string                 `protobuf:"bytes,4,opt,name=session_cwd,json=sessionCwd,proto3" json:"session_cwd,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -985,6 +986,13 @@ func (x *MsgLayoutSnapshot) GetPaneTitles() map[int32]string {
 		return x.PaneTitles
 	}
 	return nil
+}
+
+func (x *MsgLayoutSnapshot) GetSessionCwd() string {
+	if x != nil {
+		return x.SessionCwd
+	}
+	return ""
 }
 
 type MsgPaneCreated struct {
@@ -3540,12 +3548,14 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"ColumnData\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x14\n" +
 	"\x05width\x18\x02 \x01(\x05R\x05width\x12\x16\n" +
-	"\x06height\x18\x03 \x01(\x05R\x06height\"\x9b\x03\n" +
+	"\x06height\x18\x03 \x01(\x05R\x06height\"\xbc\x03\n" +
 	"\x11MsgLayoutSnapshot\x126\n" +
 	"\acolumns\x18\x01 \x03(\v2\x1c.wideboi.protocol.ColumnDataR\acolumns\x12Z\n" +
 	"\rpane_statuses\x18\x02 \x03(\v25.wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntryR\fpaneStatuses\x12T\n" +
 	"\vpane_titles\x18\x03 \x03(\v23.wideboi.protocol.MsgLayoutSnapshot.PaneTitlesEntryR\n" +
-	"paneTitles\x1a]\n" +
+	"paneTitles\x12\x1f\n" +
+	"\vsession_cwd\x18\x04 \x01(\tR\n" +
+	"sessionCwd\x1a]\n" +
 	"\x11PaneStatusesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\x05R\x03key\x122\n" +
 	"\x05value\x18\x02 \x01(\x0e2\x1c.wideboi.protocol.PaneStatusR\x05value:\x028\x01\x1a=\n" +

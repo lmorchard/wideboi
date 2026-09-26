@@ -320,6 +320,9 @@ type MsgStatusRequest struct{}
 type MsgLayoutSnapshot struct {
 	Columns      []ColumnData
 	PaneStatuses map[int]PaneStatus
+	// SessionCWD is the directory in which this session started. Pane CWDs
+	// may change independently after a shell runs cd.
+	SessionCWD string
 	// PaneTitles is each pane's terminal title, for chrome that wants
 	// to say what a pane is doing rather than show a sliver of it.
 	PaneTitles map[int]string

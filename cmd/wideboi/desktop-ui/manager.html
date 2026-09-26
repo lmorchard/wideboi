@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wideboi Sessions</title>
+  <style>
+    :root { color-scheme: dark; font: 14px system-ui, sans-serif; background: #17191c; color: #e8eaed; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { padding: 24px 28px 18px; border-bottom: 1px solid #34383e; display: flex; align-items: center; justify-content: space-between; }
+    h1 { font-size: 22px; margin: 0; letter-spacing: -.03em; }
+    h2 { font-size: 15px; margin: 0 0 15px; }
+    .muted { color: #a9b0b9; }
+    main { padding: 25px 28px; max-width: 900px; margin: auto; }
+    section { margin-bottom: 28px; }
+    button { font: inherit; border: 1px solid #515861; border-radius: 7px; background: #30353b; color: #f4f5f6; padding: 8px 12px; cursor: pointer; }
+    button:hover { background: #414850; }
+    button:focus-visible, input:focus-visible { outline: 2px solid #7aa8ff; outline-offset: 2px; }
+    button.primary { background: #4269ad; border-color: #5d82c6; }
+    button.primary:hover { background: #527bc1; }
+    button.danger { color: #ffc6c6; }
+    input { font: inherit; color: inherit; background: #22262b; border: 1px solid #515861; border-radius: 7px; padding: 9px 11px; min-width: 0; }
+    .new-row { display: flex; gap: 8px; }
+    .new-row input { flex: 1; }
+    .hint { margin: 10px 0 0; color: #a9b0b9; font-size: 12px; }
+    .session { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid #34383e; }
+    .session strong { display: block; font-size: 15px; }
+    .session small { display: block; margin-top: 4px; color: #a9b0b9; overflow-wrap: anywhere; }
+    .actions { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+    .confirm-stop { flex-basis: 100%; padding: 12px; border: 1px solid #895555; border-radius: 7px; background: #392b2b; }
+    .confirm-stop p { margin: 0 0 10px; }
+    .confirm-stop button { margin-right: 8px; }
+    #notice { min-height: 22px; margin: 0 0 14px; color: #ffc6c6; }
+    #match { display: none; background: #292f37; border: 1px solid #536176; border-radius: 8px; padding: 15px; margin-top: 14px; }
+    #match p { margin: 0 0 12px; }
+    #match-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    @media (max-width: 650px) { .new-row, .session { flex-direction: column; align-items: stretch; } .actions { justify-content: flex-start; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>wideboi Sessions</h1>
+    <button id="quit">Quit wideboi</button>
+  </header>
+  <main>
+    <p id="notice" role="status"></p>
+    <section>
+      <h2>New session</h2>
+      <div class="new-row">
+        <input id="directory" aria-label="Project folder" placeholder="Home directory">
+        <button id="browse">Choose folder…</button>
+        <button class="primary" id="create">Create session</button>
+      </div>
+      <p class="hint">Choose a project folder, or leave this blank to start in Home.</p>
+      <div id="match" role="alert">
+        <p>A session is already running in this folder.</p>
+        <div id="match-actions"></div>
+      </div>
+    </section>
+    <section>
+      <h2>Local sessions</h2>
+      <div id="sessions" aria-live="polite"></div>
+    </section>
+  </main>
+  <script>
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const token = fragment.get('token') || '';
+    history.replaceState(null, '', location.pathname);
+    const notice = document.getElementById('notice');
+    const sessions = document.getElementById('sessions');
+    const directory = document.getElementById('directory');
+    const match = document.getElementById('match');
+    const matchActions = document.getElementById('match-actions');
+    let lastSessions = '';
+
+    async function api(path, body) {
+      const response = await fetch('/api/' + path, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+      if (response.status === 409) return { conflict: await response.json() };
+      if (!response.ok) throw new Error((await response.text()).trim());
+      return response.json();
+    }
+
+    function button(label, callback, className = '') {
+      const element = document.createElement('button');
+      element.textContent = label;
+      element.className = className;
+      element.addEventListener('click', callback);
+      return element;
+    }
+
+    async function act(action) {
+      notice.textContent = '';
+      try { await action(); await refresh(); }
+      catch (error) { notice.textContent = error.message || String(error); }
+    }
+
+    async function refresh() {
+      const items = await api('sessions');
+      const serialized = JSON.stringify(items);
+      if (serialized === lastSessions) return;
+      lastSessions = serialized;
+      sessions.replaceChildren();
+      if (items.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'muted';
+        empty.textContent = 'No local sessions are running.';
+        sessions.append(empty);
+        return;
+      }
+      for (const item of items) {
+        const row = document.createElement('div');
+        row.className = 'session';
+        const description = document.createElement('div');
+        const name = document.createElement('strong');
+        name.textContent = item.name;
+        const detail = document.createElement('small');
+        detail.textContent = item.owned ? 'Owned by this app · ' + item.dir : 'Started outside this app';
+        description.append(name, detail);
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        const open = button('Open', () => act(() => api('open', { name: item.name })), 'primary');
+        open.setAttribute('aria-label', 'Open ' + item.name);
+        actions.append(open);
+        if (item.owned) {
+          const keep = button('Keep running', () => act(() => api('keep', { name: item.name })));
+          keep.setAttribute('aria-label', 'Keep ' + item.name + ' running');
+          actions.append(keep);
+        }
+        const confirmation = document.createElement('div');
+        confirmation.className = 'confirm-stop';
+        confirmation.hidden = true;
+        const warning = document.createElement('p');
+        warning.textContent = 'Stop ' + item.name + '? This closes its panes and disconnects other clients.';
+        confirmation.append(warning);
+        confirmation.append(button('Stop ' + item.name + ' now',
+          () => act(() => api('stop', { name: item.name })), 'danger'));
+        confirmation.append(button('Cancel', () => {
+          confirmation.hidden = true;
+          stop.disabled = false;
+        }));
+        const stop = button('Stop', () => {
+          confirmation.hidden = false;
+          stop.disabled = true;
+        }, 'danger');
+        stop.setAttribute('aria-label', 'Stop ' + item.name);
+        actions.append(stop);
+        row.append(description, actions, confirmation);
+        sessions.append(row);
+      }
+    }
+
+    async function create(force = false) {
+      notice.textContent = '';
+      match.style.display = 'none';
+      try {
+        const result = await api('create', { dir: directory.value.trim(), force });
+        if (result.conflict) {
+          matchActions.replaceChildren();
+          for (const name of result.conflict.matches) {
+            matchActions.append(button('Open ' + name, () => act(() => api('open', { name }))));
+          }
+          matchActions.append(button('Create another', () => act(() => create(true)), 'primary'));
+          match.style.display = 'block';
+          return;
+        }
+        await refresh();
+      } catch (error) { notice.textContent = error.message || String(error); }
+    }
+
+    document.getElementById('create').addEventListener('click', () => create());
+    directory.addEventListener('keydown', event => { if (event.key === 'Enter') create(); });
+    directory.addEventListener('input', () => { match.style.display = 'none'; });
+    document.getElementById('browse').addEventListener('click', () => act(async () => {
+      const result = await api('pick-directory', {});
+      if (result.dir) directory.value = result.dir;
+    }));
+    document.getElementById('quit').addEventListener('click', () => act(() => api('quit', {})));
+    refresh().catch(error => { notice.textContent = error.message || String(error); });
+    setInterval(() => refresh().catch(() => {}), 3000);
+  </script>
+</body>
+</html>

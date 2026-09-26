@@ -190,6 +190,17 @@ all exit cases report the same PID, compare its start time with the run. End
 an older session and rerun; keep the PID 1 check because it catches real
 orphans.
 
+## Keep desktop manager controls stable between polls
+
+The desktop manager polls the local session list. Replacing the whole list on
+every poll invalidates accessibility targets and can discard a user's focused
+control just as they click it. Only rebuild the list when its data changes.
+Give repeated actions accessible names that include the session name: a row of
+generic “Stop” buttons is ambiguous when other sessions belong to the user.
+The Wails webview did not surface JavaScript `confirm()` reliably in the
+macOS smoke test; use an inline confirmation that names the session before
+sending the stop request.
+
 ## Skip canvas resets when its size has not changed
 
 Assigning `canvas.width` or `canvas.height` clears the bitmap even when the

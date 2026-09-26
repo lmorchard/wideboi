@@ -1,5 +1,40 @@
 import { test, expect } from '@playwright/test';
 
+test('desktop session window connects to its named local session automatically', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.testSockets = [];
+    window.WebSocket = class {
+      static OPEN = 1;
+      constructor(url, protocols) {
+        this.url = url;
+        this.protocols = protocols;
+        this.protocol = 'wideboi.v11';
+        this.readyState = 0;
+        this.sent = [];
+        if (protocols?.includes('wideboi.v11')) window.testSockets.push(this);
+      }
+      send(data) { this.sent.push(new Uint8Array(data)); }
+      close() { this.readyState = 3; this.onclose?.(); }
+      open() { this.readyState = 1; this.onopen?.(); }
+    };
+  });
+  await page.goto('/?session=project#token=local-secret');
+  await expect.poll(() => page.evaluate(() => window.testSockets.length)).toBe(1);
+  const connection = await page.evaluate(() => ({
+    url: window.testSockets[0].url,
+    protocols: window.testSockets[0].protocols,
+  }));
+  expect(connection.url).toBe('ws://127.0.0.1:4179/ws?session=project');
+  expect(connection.protocols).toEqual(['wideboi.v11', 'wideboi-token.bG9jYWwtc2VjcmV0']);
+  await expect(page.getByRole('button', { name: 'Reconnect' })).toBeVisible();
+  await expect(page.getByPlaceholder('Token (optional)')).toHaveCount(0);
+  await page.evaluate(() => window.testSockets[0].open());
+  await expect.poll(() => page.evaluate(async () => {
+    const { clientMessages } = await import('/tests/browser-fixture.ts');
+    return clientMessages(window.testSockets[0].sent).some(msg => msg.case === 'attach');
+  })).toBe(true);
+});
+
 test('browser connects, renders, types, resizes, reconnects, and closes a pane', async ({ page }) => {
   await page.addInitScript(() => {
     window.testSockets = [];

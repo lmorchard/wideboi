@@ -1497,6 +1497,7 @@ func (s *Server) broadcastLayout(ctx context.Context) {
 		Columns:      cols,
 		PaneStatuses: statuses,
 		PaneTitles:   titles,
+		SessionCWD:   s.cwd,
 	}
 	tps := append([]transport.Transport{}, s.transports...)
 	pending := make(map[transport.Transport][]int, len(s.pendingPaneCreated))

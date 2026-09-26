@@ -131,6 +131,27 @@ You can attach terminal clients to the same session simultaneously with `wideboi
 
 ---
 
+## Desktop Client (preview)
+
+The Wails desktop app manages local sessions and opens each session in its own
+window. It can attach to sessions started from the CLI. Sessions started from
+the desktop app belong to it: closing a client window leaves them running,
+while quitting offers to stop them or keep them running for later reattachment.
+
+Build and run on macOS:
+
+```bash
+make desktop-app
+open bin/wideboi.app
+```
+
+On Linux, install the GTK4 and WebKitGTK 6.0 development packages required by
+Wails v3, then run `make desktop` and `./bin/wideboi-desktop`. The desktop
+build still supports the regular CLI commands, including `server`, `attach`,
+and `kill-session`. The macOS bundle is a local, unsigned build.
+
+---
+
 ## Complete Manual
 
 For complete details on configuration, architecture, key remapping, multi-client sizing, and remote access, read the full manual:
