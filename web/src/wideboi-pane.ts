@@ -4,6 +4,7 @@ import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { termSettings, type CellPoint } from './pane-state';
 import { PanePainter } from './pane-painter';
 import type { RenderStats } from './stats';
+import { getTheme, type Theme } from './themes';
 
 @customElement('wideboi-pane')
 export class WideboiPane extends LitElement {
@@ -15,8 +16,8 @@ export class WideboiPane extends LitElement {
       height: 100%;
       overflow: hidden;
       box-sizing: content-box;
-      border-right: var(--divider-width) solid #555;
-      background: #1e1e1e;
+      border-right: var(--divider-width) solid var(--wb-border-divider, #555);
+      background: var(--wb-bg-pane, #1e1e1e);
       transition: border-color 160ms ease, box-shadow 160ms ease;
     }
     :host::after {
@@ -30,23 +31,23 @@ export class WideboiPane extends LitElement {
       transition: box-shadow 160ms ease;
     }
     :host([focused]) {
-      border-right-color: #007fd4;
-      box-shadow: inset 0 2px #007fd4;
+      border-right-color: var(--wb-focus, #007fd4);
+      box-shadow: inset 0 2px var(--wb-focus, #007fd4);
     }
     :host([focused])::after {
-      box-shadow: inset 0 2px #007fd4;
+      box-shadow: inset 0 2px var(--wb-focus, #007fd4);
     }
     :host([card-mode]) {
-      box-shadow: inset 3px 0 #b8b8b8, inset 0 2px #b8b8b8;
+      box-shadow: inset 3px 0 var(--wb-card-border, #b8b8b8), inset 0 2px var(--wb-card-border, #b8b8b8);
     }
     :host([card-mode])::after {
-      box-shadow: inset 3px 0 #b8b8b8, inset 0 2px #b8b8b8;
+      box-shadow: inset 3px 0 var(--wb-card-border, #b8b8b8), inset 0 2px var(--wb-card-border, #b8b8b8);
     }
     :host([card-mode][focused]) {
-      box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
+      box-shadow: inset 3px 0 var(--wb-card-border-focus, #0e9aff), inset 0 2px var(--wb-card-border-focus, #0e9aff), inset -2px 0 var(--wb-card-border-focus, #0e9aff);
     }
     :host([card-mode][focused])::after {
-      box-shadow: inset 3px 0 #0e9aff, inset 0 2px #0e9aff, inset -2px 0 #0e9aff;
+      box-shadow: inset 3px 0 var(--wb-card-border-focus, #0e9aff), inset 0 2px var(--wb-card-border-focus, #0e9aff), inset -2px 0 var(--wb-card-border-focus, #0e9aff);
     }
     .viewport {
       width: 100%;
@@ -68,9 +69,9 @@ export class WideboiPane extends LitElement {
       writing-mode: vertical-rl;
       overflow: hidden;
       white-space: nowrap;
-      color: #ddd;
-      background: #303030;
-      border-right: 1px solid #b8b8b8;
+      color: var(--wb-card-label-fg, #ddd);
+      background: var(--wb-card-label-bg, #303030);
+      border-right: 1px solid var(--wb-card-border, #b8b8b8);
       font: 12px sans-serif;
       pointer-events: none;
     }
@@ -95,6 +96,7 @@ export class WideboiPane extends LitElement {
   @property({ type: Number }) minZoom = 0.5;
   // Read once when the painter is created; only set with ?stats=1.
   @property({ attribute: false }) stats?: RenderStats;
+  @property({ attribute: false }) theme: Theme = getTheme('dark');
 
   @query('canvas') private canvas!: HTMLCanvasElement;
   @query('.viewport') private viewport!: HTMLDivElement;
@@ -226,8 +228,8 @@ export class WideboiPane extends LitElement {
     this.viewport.removeEventListener('touchcancel', this.onTouchEnd);
   }
 
-  protected firstUpdated() {
-    this.painter = new PanePainter(this.canvas, this.cellWidth, this.stats);
+  protected   firstUpdated() {
+    this.painter = new PanePainter(this.canvas, this.cellWidth, this.stats, this.theme);
     this.observer = new ResizeObserver(entries => {
       for (const entry of entries) {
         if (entry.target === this.canvas) {
@@ -301,6 +303,7 @@ export class WideboiPane extends LitElement {
 
   private syncPainter() {
     if (!this.painter) return;
+    this.painter.setTheme(this.theme);
     this.painter.setPane(this.pane);
     this.painter.setFocused(this.focused);
     this.painter.setCellWidth(this.cellWidth);
