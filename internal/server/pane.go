@@ -61,6 +61,7 @@ type Pane struct {
 
 	dead atomic.Bool
 
+	keep        bool
 	isDashboard bool
 
 	// exited and exitCode record a kept pane's exit (split --keep); see
@@ -112,6 +113,20 @@ func NewCustomPane(id int, grid term.Grid, cols, rows int) *Pane {
 		grid:   grid,
 		cols:   cols,
 		rows:   rows,
+		input:  make(chan uv.Event, keyQueueDepth),
+		closed: make(chan struct{}),
+	}
+}
+
+// AdoptPane creates a pane from an adopted PTY and restored grid.
+func AdoptPane(id int, pty *ptyx.Pane, grid term.Grid, cols, rows int, keep bool) *Pane {
+	return &Pane{
+		id:     id,
+		pty:    pty,
+		grid:   grid,
+		cols:   cols,
+		rows:   rows,
+		keep:   keep,
 		input:  make(chan uv.Event, keyQueueDepth),
 		closed: make(chan struct{}),
 	}

@@ -78,7 +78,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -170,6 +170,9 @@ func printHelp(w io.Writer) {
   wideboi [flags] wait [--timeout <duration>] <pane-id>
                              Block until a pane's process exits; exit with its code
                              (124 on timeout). Use split --keep to wait after exit
+  wideboi [flags] upgrade-server <binary-path>
+                             Upgrade the running server in-place using a new binary
+                             without closing panes or dropping processes
   wideboi cleanup            Remove logs and sockets from dead sessions
   wideboi ls                 List running sessions (alias: list-sessions)
   wideboi desktop            Open the local desktop session manager (desktop build)
@@ -259,6 +262,11 @@ func main() {
 		fatal(runAttach(cfg, bindings))
 	case "kill-session":
 		fatal(runKillSession(cfg))
+	case "upgrade-server":
+		if len(opts.subcommandArgs) < 1 {
+			fatal(fmt.Errorf("usage: wideboi upgrade-server <path-to-new-binary>"))
+		}
+		fatal(runUpgradeServer(cfg, opts.subcommandArgs[0]))
 	case "status":
 		if opts.trafficOut {
 			fatal(runTrafficStatus(cfg, opts.jsonOut, os.Stdout))
@@ -364,6 +372,11 @@ func runServer(cfg config.Config, ownerFD int) error {
 	}
 
 	srv := server.NewServer(ownerConn, cfg.Shell, cwd)
+	if err := server.RestoreState(srv); err != nil {
+		slog.Error("failed to restore state after upgrade", "err", err)
+		return fmt.Errorf("failed to restore state after upgrade: %w", err)
+	}
+
 	srv.SetMacros(cfg.ResolvedMacros())
 	var saveMacrosMu sync.Mutex
 	srv.SetOnSaveMacros(func(macros []protocol.Macro) {
@@ -556,6 +569,39 @@ func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr, tlsEna
 
 // runKillSession ends the session at cfg.Socket and waits until it has:
 // the server hangs up only once every pane is reaped.
+func runUpgradeServer(cfg config.Config, binPath string) error {
+	conn, err := net.Dial("unix", cfg.Socket)
+	if err != nil {
+		return fmt.Errorf("no wideboi server running at %s: %w", cfg.Socket, err)
+	}
+	if _, err := transport.Handshake(conn); err != nil {
+		conn.Close()
+		return describeHandshakeErr(cfg.Socket, err, "")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cc := transport.NewClientSocketConn(conn, 256)
+	cc.RunPumps(ctx)
+	cc.ClientSend <- protocol.MsgUpgradeRequest{BinPath: binPath}
+
+	// Wait for an ack (MsgUpgradeResponse)
+	select {
+	case msg, ok := <-cc.ServerSend:
+		if !ok {
+			return fmt.Errorf("connection closed before receiving response")
+		}
+		if resp, ok := msg.(protocol.MsgUpgradeResponse); ok {
+			if resp.Error != "" {
+				return fmt.Errorf("upgrade failed: %s", resp.Error)
+			}
+			return nil
+		}
+		return fmt.Errorf("unexpected response type: %T", msg)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func runKillSession(cfg config.Config) error {
 	conn, err := net.Dial("unix", cfg.Socket)
 	if err != nil {
@@ -811,8 +857,14 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					return startupExitError(cfg.Socket)
 				}
 				if owner {
-					slog.Info("server closed the connection")
-					return nil
+					select {
+					case <-serverExit:
+						slog.Info("server closed the connection")
+						return nil
+					default:
+						// The server process is still alive (e.g. an in-place upgrade via syscall.Exec).
+						// Reconnect instead of exiting.
+					}
 				}
 
 				// The server is gone but we didn't ask to detach, and we don't own it.

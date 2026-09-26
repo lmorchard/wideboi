@@ -39,6 +39,7 @@ type Server struct {
 	transports      []transport.Transport
 	stopCh          chan struct{}
 	closeOnce       sync.Once
+	upgrading       bool
 
 	statusPaneID int
 	dashboard    *Dashboard
@@ -367,6 +368,24 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				s.dropClient(ctx, tp)
 				return
 			}
+			if req, ok := msg.(protocol.MsgUpgradeRequest); ok {
+				execFn, err := s.PrepareUpgrade(req.BinPath)
+				if err != nil {
+					tp.SendServer(ctx, protocol.MsgUpgradeResponse{Error: err.Error()})
+					return
+				}
+				tp.SendServer(ctx, protocol.MsgUpgradeResponse{})
+				if d, ok := tp.(interface{ Drain(time.Duration) bool }); ok {
+					d.Drain(500 * time.Millisecond)
+				}
+				if c, ok := tp.(io.Closer); ok {
+					_ = c.Close()
+				}
+				if err := execFn(); err != nil {
+					slog.Error("exec failed during upgrade", "err", err)
+				}
+				return
+			}
 			s.handleClientMsg(ctx, tp, msg)
 		}
 	}
@@ -476,6 +495,10 @@ func (s *Server) StartupComplete() bool {
 
 func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) {
 	s.mu.Lock()
+	if s.upgrading {
+		s.mu.Unlock()
+		return
+	}
 	needBroadcast := false
 	needPaneBroadcast := false
 	sendMetadata := false
@@ -996,6 +1019,7 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 		return nil, err
 	}
 	p.closeGrace = s.closeGrace
+	p.keep = spec.Keep
 
 	s.panes[id] = p
 	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
@@ -2044,6 +2068,9 @@ func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 // stoppingLocked reports whether Close has begun. s.mu must be held; it
 // is what orders this against Close's snapshot of panes and transports.
 func (s *Server) stoppingLocked() bool {
+	if s.upgrading {
+		return true
+	}
 	select {
 	case <-s.stopCh:
 		return true

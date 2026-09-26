@@ -958,6 +958,33 @@ def case_dropped_connection_reconnects(fail):
     finally:
         srv.stop()
 
+def case_upgrade_server_reconnects(fail):
+    srv = Server()
+    try:
+        c = Client(args=("--socket", srv.sock, "attach"))
+        try:
+            c.wait_for(lambda out: b"[pane 1]" in out)
+            pid_before = srv.proc.pid
+
+            # Upgrade server in-place
+            res = subprocess.run([BIN, "--socket", srv.sock, "upgrade-server", BIN], capture_output=True, timeout=5.0)
+            if res.returncode != 0:
+                fail(f"upgrade-server failed: {res.stderr.decode()}")
+                return
+
+            # Client should automatically reconnect, type, and receive output
+            c.type(b"echo UPGRADE_SURVIVED\r")
+            c.wait_for(lambda out: b"UPGRADE_SURVIVED" in out, timeout=5.0)
+
+            # Server process PID must remain unchanged
+            if srv.proc.pid != pid_before:
+                fail(f"server PID changed: {pid_before} -> {srv.proc.pid}")
+            c.detach()
+        finally:
+            c.kill()
+    finally:
+        srv.stop()
+
 def case_small_client_does_not_shrink_session_and_can_claim_size(fail):
     """A smaller client attaching as a viewer does not shrink the hosted PTYs (#184).
     Claiming size with C-b S explicitly adopts the smaller client's dimensions."""
@@ -1005,6 +1032,7 @@ def case_small_client_does_not_shrink_session_and_can_claim_size(fail):
 
 CASES = [
     ("dropped connection reconnects", case_dropped_connection_reconnects),
+    ("upgrade server reconnects", case_upgrade_server_reconnects),
     ("attach renders pane content over the socket", case_attach_renders_pane_content),
     ("attached client emits no bytes while idle", case_attached_client_idle_emits_no_bytes),
     ("attached client presents no empty frames", case_attached_client_presents_no_empty_frames),

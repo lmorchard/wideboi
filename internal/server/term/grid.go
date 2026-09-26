@@ -7,6 +7,7 @@ package term
 
 import (
 	"encoding/base64"
+	"fmt"
 	"image"
 	"io"
 	"net/url"
@@ -133,6 +134,28 @@ type Grid interface {
 	CaptureText(scrollback bool, maxLines int) string
 	Size() (cols, rows int)
 	Close() error
+}
+
+// Snapshotter is implemented by Grids that support serializing and restoring state.
+type Snapshotter interface {
+	ExportSnapshot() *GridSnapshot
+	RestoreSnapshot(snap *GridSnapshot)
+}
+
+type GridSnapshot struct {
+	Cols          int                 `json:"cols"`
+	Rows          int                 `json:"rows"`
+	CursorX       int                 `json:"cursor_x"`
+	CursorY       int                 `json:"cursor_y"`
+	CursorVisible bool                `json:"cursor_visible"`
+	MouseModes    uint32              `json:"mouse_modes"`
+	Status        int32               `json:"status"`
+	Title         string              `json:"title"`
+	CWD           string              `json:"cwd"`
+	UserVars      map[string]string   `json:"user_vars"`
+	ScrollOffset  int                 `json:"scroll_offset"`
+	Scrollback    []protocol.LineData `json:"scrollback"`
+	Screen        []protocol.LineData `json:"screen"`
 }
 
 // encodingMods are the modifiers that change how a key encodes as bytes
@@ -772,6 +795,156 @@ func (g *vtGrid) DrawAt(dst uv.Screen, area image.Rectangle, offset int) {
 // Trailing whitespace is trimmed from each line, and trailing empty lines at
 // the bottom of the viewport are trimmed. If maxLines > 0, at most maxLines
 // recent lines are returned.
+func (g *vtGrid) ExportSnapshot() *GridSnapshot {
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
+
+	cols, rows := g.em.Width(), g.em.Height()
+	sbLen := g.em.ScrollbackLen()
+
+	scrollback := make([]protocol.LineData, sbLen)
+	for y := 0; y < sbLen; y++ {
+		line := make(protocol.LineData, cols)
+		for x := 0; x < cols; x++ {
+			c := g.em.ScrollbackCellAt(x, y)
+			if c == nil {
+				line[x] = protocol.CellData{Content: " ", Width: 1}
+				continue
+			}
+			line[x] = protocol.CellData{
+				Content: c.Content,
+				Width:   c.Width,
+				Style:   protocol.EncodeStyle(c.Style),
+			}
+		}
+		scrollback[y] = line
+	}
+
+	screen := make([]protocol.LineData, rows)
+	for y := 0; y < rows; y++ {
+		line := make(protocol.LineData, cols)
+		for x := 0; x < cols; x++ {
+			c := g.em.CellAt(x, y)
+			if c == nil {
+				line[x] = protocol.CellData{Content: " ", Width: 1}
+				continue
+			}
+			line[x] = protocol.CellData{
+				Content: c.Content,
+				Width:   c.Width,
+				Style:   protocol.EncodeStyle(c.Style),
+			}
+		}
+		screen[y] = line
+	}
+
+	cp := g.em.CursorPosition()
+	snap := &GridSnapshot{
+		Cols:          cols,
+		Rows:          rows,
+		CursorX:       cp.X,
+		CursorY:       cp.Y,
+		CursorVisible: g.cursorVisible.Load(),
+		MouseModes:    g.mouseModes.Load(),
+		Status:        g.status.Load(),
+		Title:         g.Title(),
+		CWD:           g.CWD(),
+		UserVars:      g.UserVars(),
+		ScrollOffset:  int(g.scrollOffset.Load()),
+		Scrollback:    scrollback,
+		Screen:        screen,
+	}
+	return snap
+}
+
+func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
+	if snap == nil {
+		return
+	}
+	g.writeResizeMu.Lock()
+	defer g.writeResizeMu.Unlock()
+
+	// 1. Populate scrollback
+	sb := g.em.Scrollback()
+	sb.Clear()
+	for _, lineData := range snap.Scrollback {
+		uvLine := make(uv.Line, len(lineData))
+		for i, cd := range lineData {
+			uvLine[i] = uv.Cell{
+				Content: cd.Content,
+				Width:   cd.Width,
+				Style:   cd.Style.Decode(),
+			}
+		}
+		sb.Push(uvLine)
+	}
+
+	// 2. Populate screen
+	for y, lineData := range snap.Screen {
+		if y >= g.em.Height() {
+			break
+		}
+		for x := 0; x < len(lineData) && x < g.em.Width(); x++ {
+			cd := lineData[x]
+			// Skip continuation cells so we do not clobber the wide glyph that was set
+			// by the preceding cell (whose Width > 1).
+			if cd.Width == 0 && cd.Content == "" {
+				continue
+			}
+			cell := uv.Cell{
+				Content: cd.Content,
+				Width:   cd.Width,
+				Style:   cd.Style.Decode(),
+			}
+			g.em.SetCell(x, y, &cell)
+		}
+	}
+
+	// 3. Position cursor
+	// ANSI cursor position is 1-indexed: \033[y;xH
+	g.em.Write([]byte(fmt.Sprintf("\033[%d;%dH", snap.CursorY+1, snap.CursorX+1)))
+
+	// 4. Cursor visibility & mouse modes
+	g.cursorVisible.Store(snap.CursorVisible)
+	g.mouseModes.Store(snap.MouseModes)
+	if snap.MouseModes != 0 {
+		var modeSeq strings.Builder
+		if snap.MouseModes&(1<<0) != 0 {
+			modeSeq.WriteString("\033[?9h")
+		}
+		if snap.MouseModes&(1<<1) != 0 {
+			modeSeq.WriteString("\033[?1000h")
+		}
+		if snap.MouseModes&(1<<2) != 0 {
+			modeSeq.WriteString("\033[?1002h")
+		}
+		if snap.MouseModes&(1<<3) != 0 {
+			modeSeq.WriteString("\033[?1003h")
+		}
+		modeSeq.WriteString("\033[?1006h") // SGR encoding
+		_, _ = g.em.Write([]byte(modeSeq.String()))
+	}
+	g.status.Store(snap.Status)
+	if snap.Title != "" {
+		t := snap.Title
+		g.title.Store(&t)
+	}
+	if snap.CWD != "" {
+		c := snap.CWD
+		g.cwd.Store(&c)
+	}
+	if len(snap.UserVars) > 0 {
+		g.userVarsMu.Lock()
+		g.userVars = make(map[string]string, len(snap.UserVars))
+		for k, v := range snap.UserVars {
+			g.userVars[k] = v
+		}
+		g.userVarsMu.Unlock()
+	}
+	g.scrollOffset.Store(int32(snap.ScrollOffset))
+	g.generation.Add(1)
+}
+
 func (g *vtGrid) CaptureText(scrollback bool, maxLines int) string {
 	g.writeResizeMu.Lock()
 	defer g.writeResizeMu.Unlock()

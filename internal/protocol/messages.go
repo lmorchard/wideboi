@@ -505,6 +505,14 @@ type MsgWaitResponse struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type MsgUpgradeRequest struct {
+	BinPath string `json:"bin_path"`
+}
+
+type MsgUpgradeResponse struct {
+	Error string `json:"error,omitempty"`
+}
+
 // MacroStep defines a single text or key event in an input macro.
 type MacroStep struct {
 	Text  string `json:"text,omitempty"`

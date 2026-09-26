@@ -62,6 +62,8 @@ func MarshalClient(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ClientMessage_ClosePaneRequest{ClosePaneRequest: &wirepb.MsgClosePaneRequest{PaneId: int32(m.PaneID)}}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
+	case MsgUpgradeRequest:
+		env.Msg = &wirepb.ClientMessage_UpgradeRequest{UpgradeRequest: &wirepb.MsgUpgradeRequest{BinPath: m.BinPath}}
 	case MsgSaveMacros:
 		pbMacros := make([]*wirepb.Macro, len(m.Macros))
 		for i, macro := range m.Macros {
@@ -137,6 +139,8 @@ func UnmarshalClient(data []byte) (any, error) {
 		return MsgClosePaneRequest{PaneID: int(m.ClosePaneRequest.PaneId)}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
+	case *wirepb.ClientMessage_UpgradeRequest:
+		return MsgUpgradeRequest{BinPath: m.UpgradeRequest.BinPath}, nil
 	case *wirepb.ClientMessage_SaveMacros:
 		macros := make([]Macro, len(m.SaveMacros.Macros))
 		for i, macro := range m.SaveMacros.Macros {
@@ -263,6 +267,8 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_ClosePaneResponse{ClosePaneResponse: &wirepb.MsgClosePaneResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
 	case MsgWaitResponse:
 		env.Msg = &wirepb.ServerMessage_WaitResponse{WaitResponse: &wirepb.MsgWaitResponse{PaneId: int32(m.PaneID), ExitCode: int32(m.ExitCode), Error: validUTF8(m.Error)}}
+	case MsgUpgradeResponse:
+		env.Msg = &wirepb.ServerMessage_UpgradeResponse{UpgradeResponse: &wirepb.MsgUpgradeResponse{Error: validUTF8(m.Error)}}
 	case MsgMacrosSnapshot:
 		pbMacros := make([]*wirepb.Macro, len(m.Macros))
 		for i, macro := range m.Macros {
@@ -394,6 +400,8 @@ func UnmarshalServer(data []byte) (any, error) {
 		return MsgClosePaneResponse{PaneID: int(m.ClosePaneResponse.PaneId), Error: m.ClosePaneResponse.Error}, nil
 	case *wirepb.ServerMessage_WaitResponse:
 		return MsgWaitResponse{PaneID: int(m.WaitResponse.PaneId), ExitCode: int(m.WaitResponse.ExitCode), Error: m.WaitResponse.Error}, nil
+	case *wirepb.ServerMessage_UpgradeResponse:
+		return MsgUpgradeResponse{Error: m.UpgradeResponse.Error}, nil
 	case *wirepb.ServerMessage_MacrosSnapshot:
 		macros := make([]Macro, len(m.MacrosSnapshot.Macros))
 		for i, macro := range m.MacrosSnapshot.Macros {
