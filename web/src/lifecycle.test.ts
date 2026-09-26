@@ -2,6 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { WideboiClient } from './client';
 import { ServerMessageSchema } from './gen/internal/protocol/wirepb/wideboi_pb';
+import { VERSION_PROTOCOL } from './version';
 
 it('ignores events from a connection replaced during reconnect', () => {
   const sockets: FakeSocket[] = [];
@@ -10,7 +11,7 @@ it('ignores events from a connection replaced during reconnect', () => {
     onclose?: () => void;
     onmessage?: (event: { data: ArrayBuffer }) => void;
     binaryType = 'blob';
-    protocol = 'wideboi.v14';
+    protocol = VERSION_PROTOCOL;
     onerror?: () => void;
     constructor() { sockets.push(this); }
     close() {}

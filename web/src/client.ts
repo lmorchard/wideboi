@@ -1,6 +1,7 @@
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { ClientMessageSchema, ServerMessageSchema, type ServerMessage } from "./gen/internal/protocol/wirepb/wideboi_pb";
 import type { RenderStats } from "./stats";
+import { VERSION_PROTOCOL } from "./version";
 
 // ClientMsg is one arm of the ClientMessage oneof, e.g.
 // { case: "resize", value: { cols, rows } }.
@@ -34,7 +35,7 @@ export class WideboiClient {
     const protocol = this.token ? "wideboi-token." + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : undefined;
     // The server must select this version before any shift patches arrive.
     // Browsers reject an upgrade that selects no offered subprotocol.
-    const versionProtocol = "wideboi.v14";
+    const versionProtocol = VERSION_PROTOCOL;
     const ws = new WebSocket(this.url, protocol ? [versionProtocol, protocol] : [versionProtocol]);
     ws.binaryType = "arraybuffer";
     this.ws = ws;

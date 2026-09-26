@@ -1,24 +1,25 @@
 import { test, expect } from '@playwright/test';
+import { VERSION_PROTOCOL } from './browser-fixture';
 
 function setupMockSocket(page) {
-  return page.addInitScript(() => {
+  return page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(url, protocols) {
         this.url = url;
         this.protocols = protocols;
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
 }
 
 async function connectPage(page) {

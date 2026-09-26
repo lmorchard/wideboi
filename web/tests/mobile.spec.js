@@ -1,24 +1,25 @@
 import { test, expect } from '@playwright/test';
+import { VERSION_PROTOCOL } from './browser-fixture';
 
 test.use({ viewport: { width: 390, height: 700 }, hasTouch: true, isMobile: true });
 
 async function connect(page) {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());

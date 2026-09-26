@@ -234,8 +234,16 @@ func (c *Client) Attach(ctx context.Context) {
 
 // HandleServerMsg processes messages received from the server.
 func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
+	var toSend []transport.ClientMessage
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	defer func() {
+		c.mu.Unlock()
+		for _, m := range toSend {
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			c.transport.SendClient(ctx, m)
+			cancel()
+		}
+	}()
 
 	switch m := msg.(type) {
 	case protocol.MsgPaneCreated:
@@ -385,9 +393,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		delete(c.paneUpdates, m.PaneID)
 		// A baseline mismatch means at least one patch was lost or a
 		// layout replaced the mirror. Ask the server for a full snapshot.
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-		c.transport.SendClient(ctx, protocol.MsgPaneResync{PaneID: m.PaneID})
-		cancel()
+		toSend = append(toSend, protocol.MsgPaneResync{PaneID: m.PaneID})
 
 	case protocol.MsgPaneMetadata:
 		if c.paneMetadata == nil {
@@ -399,7 +405,9 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		c.focusPaneID = c.strip.FocusedPaneID()
 		c.updatePlacementsLocked()
 	case protocol.MsgHistorySnapshot:
-		c.applyHistoryLocked(m)
+		if scroll := c.applyHistoryLocked(m); scroll != nil {
+			toSend = append(toSend, *scroll)
+		}
 	}
 }
 
@@ -1455,9 +1463,9 @@ func truncateRunes(s string, n int) string {
 
 // SendVerb forwards a layout action request to the server, appending the currently focused pane.
 func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	var msg transport.ClientMessage
 
+	c.mu.Lock()
 	switch v {
 	case protocol.VerbFocusLeft:
 		c.strip.FocusLeft()
@@ -1499,16 +1507,21 @@ func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
 		}
 		c.clampPanLocked(id)
 		c.updatePlacementsLocked()
-		c.transport.SendClient(ctx, protocol.MsgSetPaneWidth{PaneID: id, Width: c.displayWidths[id]})
+		msg = protocol.MsgSetPaneWidth{PaneID: id, Width: c.displayWidths[id]}
 	case protocol.VerbClaimSize:
 		widths := make(map[int]int, len(c.displayWidths))
 		for id, width := range c.displayWidths {
 			widths[id] = width
 		}
-		c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v, PaneID: c.focusPaneID, Widths: widths})
+		msg = protocol.MsgVerb{Verb: v, PaneID: c.focusPaneID, Widths: widths}
 	default:
 		focused := c.focusPaneID
-		c.transport.SendClient(ctx, protocol.MsgVerb{Verb: v, PaneID: focused})
+		msg = protocol.MsgVerb{Verb: v, PaneID: focused}
+	}
+	c.mu.Unlock()
+
+	if msg != nil {
+		c.transport.SendClient(ctx, msg)
 	}
 }
 
@@ -1615,8 +1628,6 @@ func (c *Client) SendResize(ctx context.Context, cols, rows int) {
 
 // SendSplit requests the server to spawn a new pane.
 func (c *Client) SendSplit(ctx context.Context, cmd, cwd string, afterPaneID int, keep bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.transport.SendClient(ctx, protocol.MsgSplitRequest{
 		Command:     cmd,
 		Cwd:         cwd,

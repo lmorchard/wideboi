@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { VERSION_PROTOCOL } from './browser-fixture';
 
 test('a narrow browser card pans across a wider terminal grid without resizing it', async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.addInitScript((proto) => {
     window.testSockets = [];
     window.drawnText = [];
     const fillText = CanvasRenderingContext2D.prototype.fillText;
@@ -12,17 +13,17 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
     window.WebSocket = class {
       static OPEN = 1;
       constructor(_url, protocols) {
-        this.protocol = 'wideboi.v14';
+        this.protocol = proto;
         this.readyState = 0;
         this.sent = [];
-        if (protocols?.includes('wideboi.v14')) window.testSockets.push(this);
+        if (protocols?.includes(proto)) window.testSockets.push(this);
       }
       send(data) { this.sent.push(new Uint8Array(data)); }
       close() { this.readyState = 3; this.onclose?.(); }
       open() { this.readyState = 1; this.onopen?.(); }
       message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
     };
-  });
+  }, VERSION_PROTOCOL);
 
   await page.setViewportSize({ width: 500, height: 320 });
   await page.goto('/');

@@ -165,6 +165,10 @@ type Server struct {
 	saveMacrosQ    [][]protocol.Macro
 	saveMacrosStop bool
 	saveMacrosDone chan struct{}
+
+	// startedTransports tracks which transports have had handleClientConnLoop
+	// started, preventing double-reader races when clients connect before Run().
+	startedTransports map[transport.Transport]bool
 }
 
 // StartupPane is a pane created on the first attach to a new session.
@@ -320,6 +324,7 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		pendingPaneCreated:      make(map[transport.Transport][]int),
 		pendingCreationSnapshot: make(map[transport.Transport]bool),
 		attachedTransports:      make(map[transport.Transport]bool),
+		startedTransports:       make(map[transport.Transport]bool),
 		stopCh:                  make(chan struct{}),
 		started:                 time.Now(),
 	}
@@ -381,9 +386,19 @@ func (s *Server) admitSocketConn(ctx context.Context, conn net.Conn) {
 	}
 	s.transports = append(s.transports, sConn)
 	s.setPeerPIDLocked(sConn, peer.PID)
+	s.startTransportLoopLocked(ctx, sConn)
 	s.mu.Unlock()
+}
 
-	go s.handleClientConnLoop(ctx, sConn)
+func (s *Server) startTransportLoopLocked(ctx context.Context, tp transport.Transport) {
+	if s.startedTransports == nil {
+		s.startedTransports = make(map[transport.Transport]bool)
+	}
+	if s.startedTransports[tp] {
+		return
+	}
+	s.startedTransports[tp] = true
+	go s.handleClientConnLoop(ctx, tp)
 }
 
 func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transport) {
@@ -497,6 +512,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.pendingCreationSnapshot, tp)
 	delete(s.attachedTransports, tp)
 	delete(s.peerPIDs, tp)
+	delete(s.startedTransports, tp)
 	s.forgetTrafficLocked(tp)
 	if s.sizeOwner == tp {
 		s.sizeOwner = nil
@@ -509,12 +525,10 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.owner == nil {
 		s.startupComplete = true
 	}
-	initialTransports := append([]transport.Transport{}, s.transports...)
-	s.mu.Unlock()
-
-	for _, tp := range initialTransports {
-		go s.handleClientConnLoop(ctx, tp)
+	for _, tp := range s.transports {
+		s.startTransportLoopLocked(ctx, tp)
 	}
+	s.mu.Unlock()
 
 	frameTicker := time.NewTicker(33 * time.Millisecond)
 	defer frameTicker.Stop()
@@ -554,6 +568,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	}
 	needBroadcast := false
 	needPaneBroadcast := false
+	needResizePanes := false
 	sendMetadata := false
 	sendMacros := false
 	needMacrosBroadcast := false
@@ -566,6 +581,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 	var historyPane *Pane
 	var splitResp *protocol.MsgSplitResponse
 	var sendResp *protocol.MsgSendInputResponse
+	var sendInputPane *Pane
+	var sendInputData []byte
+	var sendInputPaneID int
 	var captureResp *protocol.MsgCaptureResponse
 	var closeResp *protocol.MsgClosePaneResponse
 	var waitResp *protocol.MsgWaitResponse
@@ -589,6 +607,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		} else {
 			splitResp = &protocol.MsgSplitResponse{PaneID: p.ID()}
 			needBroadcast = true
+			needResizePanes = true
 			// A server that split auto-spawned never sees an attach,
 			// which is otherwise what marks startup done; without this
 			// its clean exit would skip auto-cleanup.
@@ -601,11 +620,9 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		} else if _, exited := p.ExitStatus(); exited {
 			sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d has exited", m.PaneID)}
 		} else {
-			if _, err := p.Write(m.Data); err != nil {
-				sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID, Error: err.Error()}
-			} else {
-				sendResp = &protocol.MsgSendInputResponse{PaneID: m.PaneID}
-			}
+			sendInputPane = p
+			sendInputData = m.Data
+			sendInputPaneID = m.PaneID
 		}
 	case protocol.MsgCaptureRequest:
 		p, ok := s.panes[m.PaneID]
@@ -700,7 +717,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				}
 			}
 		}
-		s.resizePanesLocked()
+		needResizePanes = true
 		needBroadcast = true
 		sendMetadata = true
 		sendMacros = true
@@ -715,7 +732,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				s.sizeOwner = tp
 				s.cols = m.Cols
 				s.rows = m.Rows
-				s.resizePanesLocked()
+				needResizePanes = true
 				needBroadcast = true
 			} else {
 				if s.sizeOwner == nil && len(s.attachedTransports) == 0 && len(s.transports) <= 1 {
@@ -725,7 +742,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 					oldCols, oldRows := s.cols, s.rows
 					s.cols, s.rows = m.Cols, m.Rows
 					if s.cols != oldCols || s.rows != oldRows {
-						s.resizePanesLocked()
+						needResizePanes = true
 						needBroadcast = true
 					}
 				}
@@ -736,7 +753,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		if tp == s.sizeOwner && m.Width >= layout.MinColumnWidth && m.Width <= layout.MaxColumnWidth {
 			if old, ok := s.strip.ColumnWidth(m.PaneID); ok && old != m.Width {
 				s.strip.SetColumnWidth(m.PaneID, m.Width)
-				s.resizePanesLocked()
+				needResizePanes = true
 				needBroadcast = true
 			}
 		}
@@ -747,21 +764,21 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			if p, err := s.spawnPaneLocked(m.PaneID); err == nil {
 				createdPaneID = p.ID()
 			}
-			s.resizePanesLocked()
+			needResizePanes = true
 		case protocol.VerbCycleWidth:
 			if tp == s.sizeOwner {
 				s.strip.CycleWidth(m.PaneID)
-				s.resizePanesLocked()
+				needResizePanes = true
 			}
 		case protocol.VerbGrowWidth:
 			if tp == s.sizeOwner {
 				s.strip.GrowWidth(m.PaneID, 10)
-				s.resizePanesLocked()
+				needResizePanes = true
 			}
 		case protocol.VerbShrinkWidth:
 			if tp == s.sizeOwner {
 				s.strip.ShrinkWidth(m.PaneID, 10)
-				s.resizePanesLocked()
+				needResizePanes = true
 			}
 		case protocol.VerbMoveLeft:
 			s.strip.MoveLeft(m.PaneID)
@@ -774,7 +791,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 			if _, ok := s.panes[m.PaneID]; ok {
 				closeServer, paneClosed = s.removePaneLocked(m.PaneID)
 				closedPaneID = m.PaneID
-				s.resizePanesLocked()
+				needResizePanes = true
 			}
 		case protocol.VerbToggleStatus:
 			if s.statusPaneID != 0 {
@@ -784,7 +801,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 					createdPaneID = p.ID()
 					focusTargetID = p.ID()
 				}
-				s.resizePanesLocked()
+				needResizePanes = true
 				s.updateDashboardLocked()
 			}
 		case protocol.VerbClaimSize:
@@ -810,10 +827,10 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				oldCols, oldRows := s.cols, s.rows
 				s.cols, s.rows = sz.Cols, sz.Rows
 				if s.cols != oldCols || s.rows != oldRows || len(m.Widths) > 0 {
-					s.resizePanesLocked()
+					needResizePanes = true
 				}
 			} else if len(m.Widths) > 0 {
-				s.resizePanesLocked()
+				needResizePanes = true
 			}
 		case protocol.VerbToggleCards:
 			// Reserved: layout is the client's (#92). An older client
@@ -868,7 +885,7 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 				needPaneBroadcast = true
 			}
 			if len(m.Data) > 0 {
-				_, _ = p.Write(m.Data)
+				p.SendBytes(m.Data)
 			} else if !m.Key.IsZero() {
 				p.SendKey(m.Key.Decode())
 			}
@@ -959,7 +976,25 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		s.pendingCreationSnapshot[tp] = true
 	}
 
+	var resizeJobs []resizeJob
+	var resizeGen uint64
+	if needResizePanes {
+		resizeJobs, resizeGen = s.prepareResizePanesLocked()
+	}
+
 	s.mu.Unlock()
+
+	if len(resizeJobs) > 0 {
+		s.applyResizeJobs(resizeJobs, resizeGen)
+	}
+
+	if sendInputPane != nil {
+		if _, err := sendInputPane.Write(sendInputData); err != nil {
+			sendResp = &protocol.MsgSendInputResponse{PaneID: sendInputPaneID, Error: err.Error()}
+		} else {
+			sendResp = &protocol.MsgSendInputResponse{PaneID: sendInputPaneID}
+		}
+	}
 	if tp != nil {
 		if focusTargetID > 0 {
 			tp.SendServer(ctx, protocol.MsgFocusPane{PaneID: focusTargetID})
@@ -1212,7 +1247,7 @@ func (s *Server) onPaneExit(id int) {
 	delete(s.panes, id)
 	delete(s.lastCWD, id)
 	delete(s.lastUserVars, id)
-	s.resizePanesLocked()
+	resizeJobs, resizeGen := s.prepareResizePanesLocked()
 	s.updateDashboardLocked()
 
 	hasTerminalPanes := false
@@ -1224,6 +1259,10 @@ func (s *Server) onPaneExit(id int) {
 	}
 	shouldClose := !hasTerminalPanes
 	s.mu.Unlock()
+
+	if len(resizeJobs) > 0 {
+		s.applyResizeJobs(resizeJobs, resizeGen)
+	}
 
 	s.broadcastLayout(context.Background())
 	_ = p.Close()
@@ -1402,16 +1441,15 @@ func (s *Server) updateDashboardLocked() {
 // the first MsgAttach). ComputePlacements used to give this for free by
 // returning nil for a non-positive viewport; iterating PaneIDs directly
 // does not.
-func (s *Server) resizePanesLocked() {
+type resizeJob struct {
+	pane *Pane
+	w, h int
+}
+
+func (s *Server) prepareResizePanesLocked() ([]resizeJob, uint64) {
 	if s.rows <= 0 {
-		return
+		return nil, 0
 	}
-
-	type resizeJob struct {
-		pane *Pane
-		w, h int
-	}
-
 	s.resizeGeneration++
 	generation := s.resizeGeneration
 	h := layout.AvailHeight(s.rows)
@@ -1428,6 +1466,23 @@ func (s *Server) resizePanesLocked() {
 		}
 		jobs = append(jobs, resizeJob{pane: p, w: w, h: h})
 	}
+	return jobs, generation
+}
+
+func (s *Server) applyResizeJobs(jobs []resizeJob, generation uint64) {
+	for _, j := range jobs {
+		if err := j.pane.ResizeOrdered(j.w, j.h, generation); err != nil {
+			j.pane.recordFailure(fmt.Errorf("resize to %dx%d: %w", j.w, j.h, err))
+		}
+	}
+}
+
+// resizePanesLocked prepares resize jobs, releases s.mu to execute TIOCSWINSZ
+// on each child, and re-acquires s.mu. For atomic handlers, prefer preparing
+// jobs with prepareResizePanesLocked and applying them with applyResizeJobs
+// after releasing s.mu.
+func (s *Server) resizePanesLocked() {
+	jobs, gen := s.prepareResizePanesLocked()
 	if len(jobs) == 0 {
 		return
 	}
@@ -1435,11 +1490,7 @@ func (s *Server) resizePanesLocked() {
 	s.mu.Unlock()
 	defer s.mu.Lock()
 
-	for _, j := range jobs {
-		if err := j.pane.ResizeOrdered(j.w, j.h, generation); err != nil {
-			j.pane.recordFailure(fmt.Errorf("resize to %dx%d: %w", j.w, j.h, err))
-		}
-	}
+	s.applyResizeJobs(jobs, gen)
 }
 
 // smartJumpTargetLocked picks the pane most worth jumping to, or 0 when
@@ -2308,9 +2359,8 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 			return
 		}
 		s.transports = append(s.transports, sConn)
+		s.startTransportLoopLocked(ctx, sConn)
 		s.mu.Unlock()
-
-		go s.handleClientConnLoop(ctx, sConn)
 	})
 }
 
