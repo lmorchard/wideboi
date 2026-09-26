@@ -59,6 +59,7 @@ func TestTLSServerStartupAndConnect(t *testing.T) {
 	for time.Now().Before(deadline) {
 		resp, err := tlsClient.Get(fmt.Sprintf("https://%s/", addr))
 		if err == nil {
+			io.ReadAll(resp.Body)
 			resp.Body.Close()
 			ready = true
 			break
@@ -74,7 +75,8 @@ func TestTLSServerStartupAndConnect(t *testing.T) {
 	httpClient := &http.Client{Timeout: 500 * time.Millisecond}
 	httpResp, err := httpClient.Get(fmt.Sprintf("http://%s/", addr))
 	if err == nil {
-		defer httpResp.Body.Close()
+		io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
 		if httpResp.StatusCode != http.StatusBadRequest {
 			t.Errorf("plain HTTP request to HTTPS server returned status %d, want 400 Bad Request", httpResp.StatusCode)
 		}
@@ -85,11 +87,11 @@ func TestTLSServerStartupAndConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTPS GET / failed: %v", err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("HTTPS GET status = %d, want 200", resp.StatusCode)
 	}
 	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	if !strings.Contains(string(body), "html") {
 		t.Errorf("expected HTML body, got: %s", string(body))
 	}
@@ -153,6 +155,7 @@ func TestDisabledTLSServerStartupAndConnect(t *testing.T) {
 	for time.Now().Before(deadline) {
 		resp, err := httpClient.Get(fmt.Sprintf("http://%s/", addr))
 		if err == nil {
+			io.ReadAll(resp.Body)
 			resp.Body.Close()
 			ready = true
 			break
@@ -169,10 +172,13 @@ func TestDisabledTLSServerStartupAndConnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTP GET / failed: %v", err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("HTTP GET status = %d, want 200", resp.StatusCode)
 	}
+	// Read the body fully and close it to free the connection
+	// so the server's graceful shutdown doesn't hang waiting on it.
+	io.ReadAll(resp.Body)
+	resp.Body.Close()
 
 	if err := runKillSession(cfg); err != nil {
 		t.Fatalf("runKillSession error: %v", err)
