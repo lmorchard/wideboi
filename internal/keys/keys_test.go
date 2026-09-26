@@ -621,6 +621,48 @@ func TestBuildBindingsMoveGroupSkipsUnbound(t *testing.T) {
 	}
 }
 
+func TestBuildBindingsConflictingAliasesRejected(t *testing.T) {
+	wantBuildError(t, map[string][]string{
+		"attn":                   {"a"},
+		keys.ActionNameSmartJump: {"b"},
+	}, `conflicting actions "attn" and "smart_jump" both configure "smart_jump"`)
+
+	wantBuildError(t, map[string][]string{
+		keys.ActionNameSmartJump: {"b"},
+		"attn":                   {"a"},
+	}, `conflicting actions "attn" and "smart_jump" both configure "smart_jump"`)
+
+	wantBuildError(t, map[string][]string{
+		"status":                    {"s"},
+		keys.ActionNameToggleStatus: {"t"},
+	}, `conflicting actions "status" and "toggle_status" both configure "toggle_status"`)
+
+	wantBuildError(t, map[string][]string{
+		keys.ActionNameToggleStatus: {"t"},
+		"status":                    {"s"},
+	}, `conflicting actions "status" and "toggle_status" both configure "toggle_status"`)
+}
+
+func TestBuildBindingsAliasesAcceptedIndividually(t *testing.T) {
+	b, err := keys.BuildBindings(map[string][]string{"attn": {"b"}})
+	if err != nil {
+		t.Fatalf("BuildBindings with alias attn failed: %v", err)
+	}
+	sj, ok := find(b, keys.ActionNameSmartJump)
+	if !ok || sj.Key != "b" {
+		t.Errorf("expected smart_jump key to be 'b', got %v", sj)
+	}
+
+	b, err = keys.BuildBindings(map[string][]string{"status": {"t"}})
+	if err != nil {
+		t.Fatalf("BuildBindings with alias status failed: %v", err)
+	}
+	ts, ok := find(b, keys.ActionNameToggleStatus)
+	if !ok || ts.Key != "t" {
+		t.Errorf("expected toggle_status key to be 't', got %v", ts)
+	}
+}
+
 // Aliases' repeat chords get the same real-byte check as the defaults'.
 func TestCustomCtrlFormsMatchTheirRealBytes(t *testing.T) {
 	var d uv.EventDecoder
