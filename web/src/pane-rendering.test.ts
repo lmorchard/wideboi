@@ -4,6 +4,7 @@ import { PaneStore, selectionText } from './pane-state';
 import { PanePainter } from './pane-painter';
 import { WideboiPane } from './wideboi-pane';
 import { RenderStats } from './stats';
+import { getTheme } from './themes';
 import {
   CellDataSchema, LineDataSchema, MsgPanePatchSchema, MsgPaneUpdateSchema,
 } from './gen/internal/protocol/wirepb/wideboi_pb';
@@ -126,7 +127,7 @@ describe('per-pane painting', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   const painter = (stats?: RenderStats) => {
-    const ctx = { setTransform: vi.fn(), clearRect, fillRect, fillText };
+    const ctx = { setTransform: vi.fn(), clearRect, fillRect, fillText, fillStyle: '' };
     const canvas = { width: 0, height: 0, style: { width: '', height: '' },
       getContext: () => ctx } as unknown as HTMLCanvasElement;
     return { painter: new PanePainter(canvas, 8, stats), canvas, ctx };
@@ -284,5 +285,30 @@ describe('per-pane painting', () => {
     // dx = 30 -> col 6, dy = 34 -> row 4
     pt = WideboiPane.prototype.cellAt.call(fakePane, 50, 74);
     expect(pt).toEqual({ x: 6, y: 4 });
+  });
+
+  it('redraws and uses theme colors when theme changes', () => {
+    const nord = getTheme('nord');
+    const { painter: p, ctx } = painter();
+    p.start();
+    p.resize(100, 100);
+    p.setFocused(true);
+    p.setPane(create(MsgPaneUpdateSchema, {
+      paneId: 1, cols: 2, rows: 2,
+      cursorVisible: true, cursorX: 0, cursorY: 0,
+      lines: [row('A', 'B'), row('C', 'D')],
+    }));
+    flush();
+
+    // Default dark theme cursor color was used (#d4d4d4)
+    expect(ctx.fillStyle).toBe('#1e1e1e');
+
+    // Switch theme to nord
+    p.setTheme(nord);
+    expect(frames.size).toBe(1);
+    flush();
+    // After drawing cursor under nord: cursor fill is nord's cursor (#d8dee9) and char text is nord's cursorText (#2e3440)
+    expect(ctx.fillStyle).toBe(nord.terminal.cursorText);
+    p.stop();
   });
 });

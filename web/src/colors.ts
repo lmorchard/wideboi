@@ -1,4 +1,5 @@
 import { ColorKind, type ColorData } from './gen/internal/protocol/wirepb/wideboi_pb';
+import type { Theme } from './themes';
 
 // Default xterm 256 color palette
 const ANSI_COLORS = [
@@ -19,18 +20,25 @@ const ANSI_COLORS = [
   })
 ];
 
-export function decodeColor(color: ColorData | undefined, isBg: boolean): string {
-  if (!color) return isBg ? '#1e1e1e' : '#d4d4d4'; 
+export function decodeColor(color: ColorData | undefined, isBg: boolean, theme?: Theme): string {
+  const defaultBg = theme?.terminal.background ?? '#1e1e1e';
+  const defaultFg = theme?.terminal.foreground ?? '#d4d4d4';
+
+  if (!color) return isBg ? defaultBg : defaultFg;
 
   switch (color.kind) {
     case ColorKind.NONE:
-      return isBg ? '#1e1e1e' : '#d4d4d4';
+      return isBg ? defaultBg : defaultFg;
     case ColorKind.BASIC:
-    case ColorKind.INDEXED:
-      return ANSI_COLORS[color.index] || (isBg ? '#1e1e1e' : '#d4d4d4');
+    case ColorKind.INDEXED: {
+      if (theme && color.index < 16) {
+        return theme.terminal.ansi[color.index] || (isBg ? defaultBg : defaultFg);
+      }
+      return ANSI_COLORS[color.index] || (isBg ? defaultBg : defaultFg);
+    }
     case ColorKind.RGBA:
       return `rgba(${color.r}, ${color.g}, ${color.b}, ${color.a / 255})`;
     default:
-      return isBg ? '#1e1e1e' : '#d4d4d4';
+      return isBg ? defaultBg : defaultFg;
   }
 }

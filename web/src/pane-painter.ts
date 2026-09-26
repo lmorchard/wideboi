@@ -2,6 +2,7 @@ import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
 import { decodeColor } from './colors';
 import { termSettings, type CellPoint } from './pane-state';
 import type { RenderStats } from './stats';
+import { getTheme, type Theme } from './themes';
 
 // A pane paints only its own cells. CSS positions and clips its canvas.
 export class PanePainter {
@@ -12,6 +13,7 @@ export class PanePainter {
   private width = 0;
   private height = 0;
   private zoom = 1.0;
+  private theme: Theme;
   private frame: number | null = null;
   private running = false;
   private readonly onVisibilityChange = () => {
@@ -21,10 +23,11 @@ export class PanePainter {
 
   // stats is only set with ?stats=1; when undefined no timing calls are made.
   constructor(private readonly canvas: HTMLCanvasElement, private cellWidth: number,
-              private readonly stats?: RenderStats) {
+              private readonly stats?: RenderStats, theme?: Theme) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not get 2d context');
     this.ctx = ctx;
+    this.theme = theme ?? getTheme('dark');
   }
 
   start() {
@@ -43,6 +46,12 @@ export class PanePainter {
   setPane(pane: MsgPaneUpdate | undefined) {
     if (this.pane === pane) return;
     this.pane = pane;
+    this.invalidate();
+  }
+
+  setTheme(theme: Theme) {
+    if (this.theme === theme || this.theme.id === theme.id) return;
+    this.theme = theme;
     this.invalidate();
   }
 
@@ -144,13 +153,13 @@ export class PanePainter {
         if (x > 0 && line[x - 1]?.width > 1) continue;
         const attrs = cell.style?.attrs ?? 0;
         const reverse = (attrs & 32) !== 0;
-        const normalBg = decodeColor(cell.style?.bg, true);
-        const normalFg = decodeColor(cell.style?.fg, false);
+        const normalBg = decodeColor(cell.style?.bg, true, this.theme);
+        const normalFg = decodeColor(cell.style?.fg, false, this.theme);
         const bg = reverse ? normalFg : normalBg;
         const fg = reverse ? normalBg : normalFg;
         const px = x * this.cellWidth;
         const py = y * termSettings.cellHeight;
-        if (bg !== '#1e1e1e') {
+        if (bg !== this.theme.terminal.background) {
           ctx.fillStyle = bg;
           ctx.fillRect(px, py, this.cellWidth * (cell.width || 1), termSettings.cellHeight);
         }
@@ -162,7 +171,7 @@ export class PanePainter {
           ctx.globalAlpha = 1;
         }
         if (cell.style?.underline) {
-          ctx.fillStyle = cell.style.underlineColor?.kind ? decodeColor(cell.style.underlineColor, false) : fg;
+          ctx.fillStyle = cell.style.underlineColor?.kind ? decodeColor(cell.style.underlineColor, false, this.theme) : fg;
           ctx.fillRect(px, py + termSettings.cellHeight - 2, this.cellWidth, 1);
         }
         if (attrs & 128) {
@@ -174,7 +183,7 @@ export class PanePainter {
           if (a.y > b.y || (a.y === b.y && a.x > b.x)) [a, b] = [b, a];
           if ((y > a.y || (y === a.y && x >= a.x)) &&
               (y < b.y || (y === b.y && x <= b.x))) {
-            ctx.fillStyle = 'rgba(100, 160, 220, 0.45)';
+            ctx.fillStyle = this.theme.terminal.selection;
             ctx.fillRect(px, py, this.cellWidth * Math.max(cell.width || 1, 1), termSettings.cellHeight);
           }
         }
@@ -184,11 +193,11 @@ export class PanePainter {
       const px = pane.cursorX * this.cellWidth;
       const py = pane.cursorY * termSettings.cellHeight;
       if (px < logicalWidth && py < logicalHeight) {
-        ctx.fillStyle = '#d4d4d4';
+        ctx.fillStyle = this.theme.terminal.cursor;
         ctx.fillRect(px, py, this.cellWidth, termSettings.cellHeight);
         const cell = pane.lines[pane.cursorY]?.cells[pane.cursorX];
         if (cell?.content && cell.content !== ' ') {
-          ctx.fillStyle = '#1e1e1e';
+          ctx.fillStyle = this.theme.terminal.cursorText;
           ctx.font = termSettings.font;
           ctx.fillText(cell.content, px, py + 1);
         }
@@ -196,9 +205,9 @@ export class PanePainter {
     }
     if (pane.scrollOffset > 0 && logicalHeight > termSettings.cellHeight) {
       const footerY = Math.floor(logicalHeight / termSettings.cellHeight) * termSettings.cellHeight - termSettings.cellHeight;
-      ctx.fillStyle = '#333333';
+      ctx.fillStyle = this.theme.terminal.scrollFooterBg;
       ctx.fillRect(0, footerY, logicalWidth, termSettings.cellHeight);
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = this.theme.terminal.scrollFooterFg;
       ctx.font = 'bold 12px monospace';
       let footerText = ` [▲ scroll +${pane.scrollOffset}/${pane.scrollbackLen}`;
       if (pane.unreadOutput) {

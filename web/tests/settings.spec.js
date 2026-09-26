@@ -36,10 +36,43 @@ test('settings modal opens via toolbar, mobile button, and shortcut, and updates
   // 1. Initial state: settings dialog is not visible
   await expect(page.locator('.settings-dialog')).toHaveCount(0);
 
+  // Verify theme selector in toolbar and default dark styling
+  const toolbarTheme = page.locator('#theme-select');
+  await expect(toolbarTheme).toBeVisible();
+  await expect(toolbarTheme).toHaveValue('dark');
+  const initialBg = await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
+  });
+  expect(initialBg).toBe('#1e1e1e');
+
+  // Select "Nord" theme via toolbar
+  await toolbarTheme.selectOption('nord');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.theme'))).toBe('nord');
+  const nordBg = await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
+  });
+  expect(nordBg).toBe('#2e3440');
+
   // 2. Open via toolbar button
   await page.locator('.toolbar .settings-btn').click();
   await expect(page.locator('.settings-dialog')).toBeVisible();
   await expect(page.locator('#settings-title')).toContainText('wideboi Settings');
+
+  // Verify theme selector in settings dialog reflects active theme
+  const settingsTheme = page.locator('#settings-theme');
+  await expect(settingsTheme).toBeVisible();
+  await expect(settingsTheme).toHaveValue('nord');
+
+  // Change theme to Solarized Light inside settings dialog
+  await settingsTheme.selectOption('solarized-light');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('wideboi.theme'))).toBe('solarized-light');
+  const lightBg = await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    return app ? getComputedStyle(app).getPropertyValue('--wb-bg-app').trim() : '';
+  });
+  expect(lightBg).toBe('#fdf6e3');
 
   // Verify font options exist in dropdown
   const fontSelect = page.locator('#settings-font-family');

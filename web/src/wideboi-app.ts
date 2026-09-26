@@ -14,6 +14,7 @@ import { MouseKind, MsgHistorySnapshot, MsgPaneMetadata, PaneStatus, VerbType, t
 import { createSearchSession, applySnapshot, cancelSearch, liveSearch, formatSearchStatus, type SearchState } from './search';
 import { executeMacro, macroEndsWithEnter, DEFAULT_MACROS, type Macro, type MacroStep } from './macros';
 import { AVAILABLE_FONTS } from './fonts';
+import { getTheme, listThemes, getThemeCSSVariables, type Theme } from './themes';
 
 const linkToken = typeof window !== 'undefined' ? consumeLinkToken(window.location, window.history) : '';
 const STATS_REPORT_MS = 5000;
@@ -29,7 +30,8 @@ export class WideboiApp extends LitElement {
       width: 100vw;
       height: var(--app-height, 100vh);
       overflow: hidden;
-      background: #1e1e1e;
+      background: var(--wb-bg-app, #1e1e1e);
+      color: var(--wb-fg-primary, #ccc);
       position: relative;
     }
     .terminal-shell {
@@ -39,7 +41,7 @@ export class WideboiApp extends LitElement {
       min-height: 0;
       min-width: 0;
       font: 14px monospace;
-      color: #ccc;
+      color: var(--wb-fg-primary, #ccc);
       position: relative;
     }
     .title, .status {
@@ -49,6 +51,7 @@ export class WideboiApp extends LitElement {
       overflow: hidden;
       white-space: nowrap;
       text-overflow: ellipsis;
+      color: var(--wb-fg-primary, #ccc);
     }
     .status.search-bar {
       position: absolute;
@@ -61,17 +64,17 @@ export class WideboiApp extends LitElement {
       align-items: center;
       gap: 0.4rem;
       padding: 0 0.5rem;
-      background: #252526;
-      border-top: 1px solid #3c3c3c;
+      background: var(--wb-bg-toolbar, #252526);
+      border-top: 1px solid var(--wb-border, #3c3c3c);
       overflow: hidden;
       font: 12px monospace;
-      color: #ccc;
+      color: var(--wb-fg-primary, #ccc);
       z-index: 15;
     }
     .status.search-bar input.search-input {
-      background: #1e1e1e;
-      border: 1px solid #555;
-      color: #ccc;
+      background: var(--wb-bg-input, #1e1e1e);
+      border: 1px solid var(--wb-border-divider, #555);
+      color: var(--wb-fg-primary, #ccc);
       padding: 1px 4px;
       font: 12px monospace;
       border-radius: 2px;
@@ -81,12 +84,12 @@ export class WideboiApp extends LitElement {
       width: 140px;
     }
     .status.search-bar input.search-input:focus {
-      border-color: #007fd4;
+      border-color: var(--wb-focus, #007fd4);
     }
     .status.search-bar button.search-btn {
-      background: #3c3c3c;
-      color: #ccc;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #ccc);
+      border: 1px solid var(--wb-border-divider, #555);
       padding: 0 5px;
       height: 18px;
       line-height: 16px;
@@ -95,7 +98,7 @@ export class WideboiApp extends LitElement {
       cursor: pointer;
     }
     .status.search-bar button.search-btn:hover:not(:disabled) {
-      background: #4c4c4c;
+      background: var(--wb-bg-btn-hover, #4c4c4c);
       color: #fff;
     }
     .status.search-bar button.search-btn:disabled {
@@ -104,7 +107,7 @@ export class WideboiApp extends LitElement {
     }
     .status.search-bar .search-msg {
       margin-left: 0.4rem;
-      color: #aaa;
+      color: var(--wb-fg-muted, #aaa);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -119,7 +122,7 @@ export class WideboiApp extends LitElement {
       scrollbar-width: thin;
       scrollbar-gutter: stable;
       overscroll-behavior-x: contain;
-      background: #1e1e1e;
+      background: var(--wb-bg-pane, #1e1e1e);
     }
     .pane-strip.cards {
       position: relative;
@@ -131,15 +134,15 @@ export class WideboiApp extends LitElement {
       bottom: 0;
       z-index: 1000;
       padding: 2px 5px;
-      background: #252526;
-      color: #ccc;
+      background: var(--wb-bg-toolbar, #252526);
+      color: var(--wb-fg-primary, #ccc);
       pointer-events: none;
     }
     .card-count.right { right: 0; }
 
     .toolbar {
-      background: #252526;
-      border-top: 1px solid #3c3c3c;
+      background: var(--wb-bg-toolbar, #252526);
+      border-top: 1px solid var(--wb-border, #3c3c3c);
       padding: 0.4rem 0.6rem;
       display: flex;
       flex-wrap: wrap;
@@ -151,32 +154,40 @@ export class WideboiApp extends LitElement {
       font-size: 13px;
     }
     .toolbar select {
-      background: #3c3c3c;
-      color: #cccccc;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #cccccc);
+      border: 1px solid var(--wb-border-divider, #555);
+      padding: 0.25rem;
+      border-radius: 3px;
+      outline: none;
+    }
+    .toolbar input {
+      background: var(--wb-bg-input, #1e1e1e);
+      color: var(--wb-fg-primary, #cccccc);
+      border: 1px solid var(--wb-border-divider, #555);
       padding: 0.25rem;
       border-radius: 3px;
       outline: none;
     }
     .claim-size-btn {
-      background: #3c3c3c;
-      color: #cccccc;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #cccccc);
+      border: 1px solid var(--wb-border-divider, #555);
       padding: 0.3rem 0.6rem;
       border-radius: 3px;
       cursor: pointer;
       font-size: 13px;
     }
     .claim-size-btn:hover {
-      background: #4c4c4c;
+      background: var(--wb-bg-btn-hover, #4c4c4c);
       color: #ffffff;
     }
     .toolbar label {
-      color: #aaa;
+      color: var(--wb-fg-muted, #aaa);
       white-space: nowrap;
     }
     .toolbar .tip {
-      color: #666;
+      color: var(--wb-fg-muted, #666);
       margin-left: auto;
       white-space: nowrap;
       overflow: hidden;
@@ -190,10 +201,10 @@ export class WideboiApp extends LitElement {
       align-items: center;
       gap: 0.4rem;
       padding: 0.35rem;
-      background: #252526;
-      color: #ccc;
+      background: var(--wb-bg-toolbar, #252526);
+      color: var(--wb-fg-primary, #ccc);
       font: 13px sans-serif;
-      border-top: 1px solid #3c3c3c;
+      border-top: 1px solid var(--wb-border, #3c3c3c);
     }
     .mobile-bar select { flex: 1; min-width: 0; }
     .mobile-bar button {
@@ -204,11 +215,19 @@ export class WideboiApp extends LitElement {
     }
     .mobile-bar button, .mobile-dock button, .mobile-bar select {
       min-height: 40px;
-      border: 1px solid #555;
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 4px;
-      background: #3c3c3c;
-      color: #eee;
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #eee);
       font-size: 14px;
+    }
+    .mobile-theme-select {
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #eee);
+      border: 1px solid var(--wb-border-divider, #555);
+      border-radius: 4px;
+      padding: 0.2rem 0.4rem;
+      font-size: 12px;
     }
     .mobile-bar button:disabled, .mobile-dock button:disabled { opacity: 0.4; }
     .mobile-zoom {
@@ -229,8 +248,8 @@ export class WideboiApp extends LitElement {
       gap: 0.3rem;
       padding: 0.35rem;
       padding-bottom: max(0.35rem, env(safe-area-inset-bottom));
-      background: #252526;
-      border-top: 1px solid #3c3c3c;
+      background: var(--wb-bg-toolbar, #252526);
+      border-top: 1px solid var(--wb-border, #3c3c3c);
     }
     .mobile-input-bar {
       display: flex;
@@ -242,7 +261,7 @@ export class WideboiApp extends LitElement {
       display: inline-flex;
       border-radius: 4px;
       overflow: hidden;
-      border: 1px solid #555;
+      border: 1px solid var(--wb-border-divider, #555);
       flex-shrink: 0;
       height: 40px;
       box-sizing: border-box;
@@ -251,8 +270,8 @@ export class WideboiApp extends LitElement {
       border: none;
       border-radius: 0;
       padding: 0 0.55rem;
-      background: #333;
-      color: #aaa;
+      background: var(--wb-bg-btn, #333);
+      color: var(--wb-fg-muted, #aaa);
       font-size: 13px;
       cursor: pointer;
       height: 100%;
@@ -261,7 +280,7 @@ export class WideboiApp extends LitElement {
       justify-content: center;
     }
     .mobile-mode-toggle button.active, .mobile-mode-toggle button[aria-pressed="true"] {
-      background: #0e639c;
+      background: var(--wb-focus, #0e639c);
       color: #fff;
     }
     .mobile-draft-input, .mobile-direct-input {
@@ -276,24 +295,24 @@ export class WideboiApp extends LitElement {
       vertical-align: middle;
     }
     .mobile-draft-input {
-      border: 1px solid #555;
-      background: #333;
-      color: #eee;
+      border: 1px solid var(--wb-border-divider, #555);
+      background: var(--wb-bg-input, #333);
+      color: var(--wb-fg-primary, #eee);
     }
     .mobile-direct-input {
-      border: 1px solid #0e639c;
-      background: #1e1e1e;
-      color: #eee;
+      border: 1px solid var(--wb-focus, #0e639c);
+      background: var(--wb-bg-input, #1e1e1e);
+      color: var(--wb-fg-primary, #eee);
     }
     .mobile-send-btn {
       flex-shrink: 0;
       min-width: 50px;
       height: 40px;
       padding: 0 0.6rem;
-      border: 1px solid #555;
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 4px;
-      background: #333;
-      color: #eee;
+      background: var(--wb-bg-btn, #333);
+      color: var(--wb-fg-primary, #eee);
       cursor: pointer;
       font-size: 13px;
       display: flex;
@@ -305,11 +324,11 @@ export class WideboiApp extends LitElement {
       flex-shrink: 0;
       min-width: 56px;
       height: 40px;
-      border: 1px solid #555;
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 4px;
       padding: 0 0.5rem;
-      background: #333;
-      color: #eee;
+      background: var(--wb-bg-btn, #333);
+      color: var(--wb-fg-primary, #eee);
       font-size: 13px;
       cursor: pointer;
       display: flex;
@@ -318,7 +337,7 @@ export class WideboiApp extends LitElement {
       box-sizing: border-box;
     }
     .mobile-macros-btn.active, .mobile-macros-btn[aria-expanded="true"] {
-      background: #0e639c;
+      background: var(--wb-focus, #0e639c);
       color: #fff;
     }
     .mobile-macros-sheet {
@@ -326,8 +345,8 @@ export class WideboiApp extends LitElement {
       bottom: 0;
       left: 0;
       right: 0;
-      background: #252526;
-      border-top: 2px solid #0e639c;
+      background: var(--wb-bg-toolbar, #252526);
+      border-top: 2px solid var(--wb-focus, #0e639c);
       box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.5);
       z-index: 30;
       display: flex;
@@ -342,19 +361,19 @@ export class WideboiApp extends LitElement {
       flex-direction: column;
       gap: 0.3rem;
       padding-bottom: 0.4rem;
-      border-bottom: 1px solid #3c3c3c;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
     }
     .mobile-macros-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding-bottom: 0.3rem;
-      border-bottom: 1px solid #3c3c3c;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
     }
     .mobile-macros-header span {
       font-weight: bold;
       font-size: 14px;
-      color: #fff;
+      color: var(--wb-fg-primary, #fff);
     }
     .mobile-macros-header .sheet-actions {
       display: flex;
@@ -367,9 +386,9 @@ export class WideboiApp extends LitElement {
       padding: 0 0.8rem;
       font-size: 14px;
       font-weight: 500;
-      background: #3c3c3c;
-      color: #eee;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #eee);
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 4px;
       cursor: pointer;
       display: inline-flex;
@@ -377,7 +396,7 @@ export class WideboiApp extends LitElement {
       justify-content: center;
     }
     .mobile-macros-header button:active {
-      background: #4c4c4c;
+      background: var(--wb-bg-btn-hover, #4c4c4c);
     }
     .mobile-macros-header button.close-btn {
       font-size: 16px;
@@ -393,16 +412,16 @@ export class WideboiApp extends LitElement {
       justify-content: space-between;
       align-items: center;
       padding: 0.5rem 0.6rem;
-      background: #333;
-      border: 1px solid #444;
+      background: var(--wb-bg-btn, #333);
+      border: 1px solid var(--wb-border, #444);
       border-radius: 4px;
-      color: #eee;
+      color: var(--wb-fg-primary, #eee);
       font-size: 13px;
       cursor: pointer;
       text-align: left;
     }
     .mobile-macro-item:active {
-      background: #0e639c;
+      background: var(--wb-focus, #0e639c);
     }
     .mobile-macro-name {
       overflow: hidden;
@@ -411,10 +430,10 @@ export class WideboiApp extends LitElement {
     }
     .mobile-macro-enter {
       font-size: 11px;
-      background: #222;
+      background: var(--wb-bg-input, #222);
       padding: 0.1rem 0.3rem;
       border-radius: 3px;
-      color: #79c0ff;
+      color: var(--wb-focus, #79c0ff);
       margin-left: 0.3rem;
       flex-shrink: 0;
     }
@@ -429,8 +448,8 @@ export class WideboiApp extends LitElement {
       padding: 1rem;
     }
     .macro-editor-dialog {
-      background: #252526;
-      border: 1px solid #3c3c3c;
+      background: var(--wb-bg-toolbar, #252526);
+      border: 1px solid var(--wb-border, #3c3c3c);
       border-radius: 6px;
       width: 100%;
       max-width: 440px;
@@ -440,7 +459,7 @@ export class WideboiApp extends LitElement {
       flex-direction: column;
       gap: 0.6rem;
       padding: 1rem;
-      color: #eee;
+      color: var(--wb-fg-primary, #eee);
     }
     .macro-editor-list {
       display: flex;
@@ -453,7 +472,7 @@ export class WideboiApp extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #333;
+      background: var(--wb-bg-btn, #333);
       padding: 0.4rem 0.6rem;
       border-radius: 4px;
       font-size: 13px;
@@ -470,16 +489,16 @@ export class WideboiApp extends LitElement {
       display: flex;
       flex-direction: column;
       gap: 0.4rem;
-      background: #1e1e1e;
+      background: var(--wb-bg-pane, #1e1e1e);
       padding: 0.6rem;
       border-radius: 4px;
-      border: 1px solid #3c3c3c;
+      border: 1px solid var(--wb-border, #3c3c3c);
     }
     .macro-editor-form input, .macro-editor-form select {
-      background: #2d2d2d;
-      border: 1px solid #444;
+      background: var(--wb-bg-input, #2d2d2d);
+      border: 1px solid var(--wb-border-divider, #444);
       border-radius: 3px;
-      color: #eee;
+      color: var(--wb-fg-primary, #eee);
       padding: 0.3rem 0.5rem;
       font-size: 13px;
     }
@@ -487,17 +506,17 @@ export class WideboiApp extends LitElement {
       display: flex;
       flex-direction: column;
       gap: 0.2rem;
-      background: #252526;
+      background: var(--wb-bg-toolbar, #252526);
       padding: 0.3rem 0.5rem;
       border-radius: 4px;
-      border: 1px dashed #555;
+      border: 1px dashed var(--wb-border-divider, #555);
     }
     .macro-draft-step-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 12px;
-      color: #79c0ff;
+      color: var(--wb-focus, #79c0ff);
     }
     .macro-draft-step-row button {
       background: transparent;
@@ -514,35 +533,35 @@ export class WideboiApp extends LitElement {
     .macro-editor-actions button {
       padding: 0.3rem 0.7rem;
       border-radius: 4px;
-      border: 1px solid #555;
-      background: #3c3c3c;
-      color: #eee;
+      border: 1px solid var(--wb-border-divider, #555);
+      background: var(--wb-bg-btn, #3c3c3c);
+      color: var(--wb-fg-primary, #eee);
       cursor: pointer;
     }
     .macro-editor-actions button.primary {
-      background: #0e639c;
-      border-color: #1177bb;
+      background: var(--wb-focus, #0e639c);
+      border-color: var(--wb-focus, #1177bb);
       color: #fff;
     }
     .mobile-keys { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.3rem; }
     .mobile-keys button { min-width: 0; padding: 0; }
-    .mobile-keys button[aria-pressed="true"] { background: #0e639c; }
+    .mobile-keys button[aria-pressed="true"] { background: var(--wb-focus, #0e639c); }
     .mobile-ctrl-palette {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 0.3rem;
-      background: #1b2e3e;
+      background: var(--wb-bg-input, #1b2e3e);
       padding: 0.25rem;
       border-radius: 4px;
-      border: 1px solid #0e639c;
+      border: 1px solid var(--wb-focus, #0e639c);
     }
     .mobile-ctrl-palette button {
       min-width: 0;
       padding: 0.25rem 0;
       font-size: 13px;
       font-weight: bold;
-      background: #23435c;
-      color: #79c0ff;
+      background: var(--wb-bg-btn, #23435c);
+      color: var(--wb-focus, #79c0ff);
     }
     .pane-strip.mobile { overflow: hidden; }
     .pane-strip.mobile wideboi-pane { width: 100% !important; border: 0; box-shadow: none !important; }
@@ -557,37 +576,38 @@ export class WideboiApp extends LitElement {
     .overlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(30, 30, 30, 0.85);
+      background: rgba(0, 0, 0, 0.6);
       display: flex;
       flex-direction: column;
       z-index: 20;
       align-items: center;
       justify-content: center;
-      z-index: 10;
-      color: #cccccc;
+      color: var(--wb-fg-primary, #cccccc);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     .connection-box {
-      background: #252526;
+      background: var(--wb-bg-toolbar, #252526);
       padding: 2rem;
       border-radius: 6px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-      border: 1px solid #3c3c3c;
+      border: 1px solid var(--wb-border, #3c3c3c);
       display: flex;
       flex-direction: column;
       z-index: 20;
       gap: 1rem;
       width: 320px;
+      color: var(--wb-fg-primary, #cccccc);
     }
     .connection-box h2 {
       margin: 0;
       font-size: 1.1rem;
       font-weight: 500;
+      color: var(--wb-fg-primary, #ffffff);
     }
     input {
-      background: #3c3c3c;
-      border: 1px solid #3c3c3c;
-      color: #cccccc;
+      background: var(--wb-bg-input, #3c3c3c);
+      border: 1px solid var(--wb-border-divider, #3c3c3c);
+      color: var(--wb-fg-primary, #cccccc);
       padding: 0.6rem;
       font-size: 1rem;
       border-radius: 3px;
@@ -595,10 +615,10 @@ export class WideboiApp extends LitElement {
       transition: border-color 0.2s;
     }
     input:focus {
-      border: 1px solid #007fd4;
+      border: 1px solid var(--wb-focus, #007fd4);
     }
     button {
-      background: #0e639c;
+      background: var(--wb-focus, #0e639c);
       color: white;
       border: none;
       padding: 0.6rem;
@@ -608,7 +628,7 @@ export class WideboiApp extends LitElement {
       transition: background 0.2s;
     }
     button:hover {
-      background: #1177bb;
+      opacity: 0.9;
     }
     .stats-overlay {
       position: fixed;
@@ -616,9 +636,9 @@ export class WideboiApp extends LitElement {
       bottom: 1.5rem;
       margin: 0;
       padding: 0.4rem 0.6rem;
-      background: rgba(37, 37, 38, 0.9);
-      border: 1px solid #3c3c3c;
-      color: #cccccc;
+      background: var(--wb-bg-toolbar, rgba(37, 37, 38, 0.9));
+      border: 1px solid var(--wb-border, #3c3c3c);
+      color: var(--wb-fg-primary, #cccccc);
       font: 11px monospace;
       z-index: 30;
       pointer-events: none;
@@ -626,17 +646,17 @@ export class WideboiApp extends LitElement {
     .help-overlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.6);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 25;
-      color: #cccccc;
+      color: var(--wb-fg-primary, #cccccc);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
     }
     .help-dialog {
-      background: #252526;
-      border: 1px solid #454545;
+      background: var(--wb-bg-toolbar, #252526);
+      border: 1px solid var(--wb-border, #454545);
       border-radius: 6px;
       padding: 1.5rem;
       max-width: 580px;
@@ -644,6 +664,7 @@ export class WideboiApp extends LitElement {
       max-height: 85vh;
       overflow-y: auto;
       box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      color: var(--wb-fg-primary, #ccc);
     }
     .help-dialog h3 {
       margin: 0 0 1rem;
@@ -652,19 +673,20 @@ export class WideboiApp extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid #3c3c3c;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
       padding-bottom: 0.5rem;
+      color: var(--wb-fg-primary, #fff);
     }
     .help-dialog .close-btn {
       background: transparent;
       border: none;
-      color: #999;
+      color: var(--wb-fg-muted, #999);
       font-size: 1.2rem;
       cursor: pointer;
       padding: 0 0.5rem;
     }
     .help-dialog .close-btn:hover {
-      color: #fff;
+      color: var(--wb-fg-primary, #fff);
     }
     .help-table {
       width: 100%;
@@ -677,29 +699,29 @@ export class WideboiApp extends LitElement {
       text-align: left;
     }
     .help-table th {
-      color: #888;
+      color: var(--wb-fg-muted, #888);
       font-weight: normal;
-      border-bottom: 1px solid #3c3c3c;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
     }
     .help-table kbd {
-      background: #333;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #333);
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 3px;
       padding: 1px 5px;
       font-family: monospace;
-      color: #eee;
+      color: var(--wb-fg-primary, #eee);
     }
     .toolbar .help-btn {
-      background: #333;
-      color: #ccc;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #333);
+      color: var(--wb-fg-primary, #ccc);
+      border: 1px solid var(--wb-border-divider, #555);
       padding: 0.25rem 0.6rem;
       font-size: 12px;
       border-radius: 3px;
       cursor: pointer;
     }
     .toolbar .help-btn:hover {
-      background: #444;
+      background: var(--wb-bg-btn-hover, #444);
       color: #fff;
     }
     .toolbar .settings-btn {
@@ -728,23 +750,23 @@ export class WideboiApp extends LitElement {
       justify-content: center;
     }
     .mobile-settings-btn:hover {
-      background: #333;
+      background: var(--wb-bg-btn-hover, #333);
       color: #fff;
     }
     .settings-overlay {
       position: absolute;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.6);
       display: flex;
       align-items: center;
       justify-content: center;
       z-index: 25;
-      color: #cccccc;
+      color: var(--wb-fg-primary, #cccccc);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
     }
     .settings-dialog {
-      background: #252526;
-      border: 1px solid #454545;
+      background: var(--wb-bg-toolbar, #252526);
+      border: 1px solid var(--wb-border, #454545);
       border-radius: 6px;
       padding: 1.5rem;
       max-width: 580px;
@@ -752,6 +774,7 @@ export class WideboiApp extends LitElement {
       max-height: 85vh;
       overflow-y: auto;
       box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      color: var(--wb-fg-primary, #ccc);
     }
     .settings-dialog h3 {
       margin: 0 0 1rem;
@@ -760,33 +783,34 @@ export class WideboiApp extends LitElement {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid #3c3c3c;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
       padding-bottom: 0.5rem;
+      color: var(--wb-fg-primary, #fff);
     }
     .settings-dialog .close-btn {
       background: transparent;
       border: none;
-      color: #999;
+      color: var(--wb-fg-muted, #999);
       font-size: 1.2rem;
       cursor: pointer;
       padding: 0 0.5rem;
     }
     .settings-dialog .close-btn:hover {
-      color: #fff;
+      color: var(--wb-fg-primary, #fff);
     }
     .settings-section {
       margin-bottom: 1.25rem;
       padding: 0.75rem 1rem;
-      background: #202020;
+      background: var(--wb-bg-pane, #202020);
       border-radius: 4px;
-      border: 1px solid #383838;
+      border: 1px solid var(--wb-border, #383838);
     }
     .settings-section h4 {
       margin: 0 0 0.75rem 0;
       font-size: 0.85rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      color: #aaa;
+      color: var(--wb-fg-muted, #aaa);
     }
     .settings-row {
       display: flex;
@@ -799,12 +823,12 @@ export class WideboiApp extends LitElement {
       margin-bottom: 0;
     }
     .settings-row label {
-      color: #bbb;
+      color: var(--wb-fg-primary, #bbb);
     }
     .settings-row select, .settings-row input[type="number"] {
-      background: #1e1e1e;
-      color: #eee;
-      border: 1px solid #555;
+      background: var(--wb-bg-input, #1e1e1e);
+      color: var(--wb-fg-primary, #eee);
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 3px;
       padding: 0.25rem 0.5rem;
       font-size: 13px;
@@ -815,16 +839,16 @@ export class WideboiApp extends LitElement {
       gap: 0.25rem;
     }
     .font-size-controls button {
-      background: #333;
-      color: #eee;
-      border: 1px solid #555;
+      background: var(--wb-bg-btn, #333);
+      color: var(--wb-fg-primary, #eee);
+      border: 1px solid var(--wb-border-divider, #555);
       border-radius: 3px;
       padding: 0.2rem 0.5rem;
       cursor: pointer;
       font-size: 13px;
     }
     .font-size-controls button:hover {
-      background: #444;
+      background: var(--wb-bg-btn-hover, #444);
     }
     .font-size-controls input {
       width: 50px;
@@ -833,16 +857,16 @@ export class WideboiApp extends LitElement {
     .settings-preview {
       margin-top: 0.75rem;
       padding: 0.75rem;
-      background: #141414;
-      border: 1px solid #2a2a2a;
+      background: var(--wb-bg-app, #141414);
+      border: 1px solid var(--wb-border, #2a2a2a);
       border-radius: 4px;
-      color: #4ec9b0;
+      color: var(--wb-focus, #4ec9b0);
       overflow-x: auto;
       white-space: pre;
       line-height: 1.4;
     }
     .settings-preview .symbols {
-      color: #ce9178;
+      color: var(--wb-fg-primary, #ce9178);
       margin-top: 0.25rem;
     }
     .error {
@@ -899,6 +923,44 @@ export class WideboiApp extends LitElement {
 
   @state()
   private showSettings = false;
+
+  @state()
+  private themeId = (() => {
+    try {
+      return getTheme(localStorage.getItem('wideboi.theme')).id;
+    } catch {
+      return 'dark';
+    }
+  })();
+
+  get currentTheme(): Theme {
+    return getTheme(this.themeId);
+  }
+
+  private applyTheme(id: string) {
+    const theme = getTheme(id);
+    this.themeId = theme.id;
+    const vars = getThemeCSSVariables(theme);
+    for (const [key, val] of Object.entries(vars)) {
+      this.style.setProperty(key, val);
+    }
+  }
+
+  public setTheme(id: string) {
+    const validId = getTheme(id).id;
+    this.applyTheme(validId);
+    try {
+      localStorage.setItem('wideboi.theme', validId);
+    } catch {
+      // ignore
+    }
+    this.requestUpdate();
+  }
+
+  private handleThemeSelect = (e: Event) => {
+    const val = (e.target as HTMLSelectElement).value;
+    this.setTheme(val);
+  };
 
   @state()
   private prefixSetting = (() => {
@@ -1192,6 +1254,7 @@ export class WideboiApp extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
+    this.applyTheme(this.themeId);
     if (this.paneStrip && !this.listeners) {
       this.listeners = new AbortController();
       this.setupViewport();
@@ -2136,6 +2199,7 @@ export class WideboiApp extends LitElement {
               style=${`width: ${this.mobile ? '100%' : `${displayWidth(column) * this.cellWidth}px`}; --divider-width: ${cards || this.mobile ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
               .paneId=${column.paneId}
               .pane=${this.panes.get(column.paneId)}
+              .theme=${this.currentTheme}
               .focused=${column.paneId === this.focusedPaneId}
               .cardMode=${cards}
               .cardLabel=${`[${column.paneId}] ${this.paneTitles[column.paneId] || 'Terminal'}`}
@@ -2242,6 +2306,12 @@ export class WideboiApp extends LitElement {
             <option value="ctrl+a" .selected=${this.prefixSetting === 'ctrl+a'}>Ctrl+A</option>
             <option value="ctrl+space" .selected=${this.prefixSetting === 'ctrl+space'}>Ctrl+Space</option>
           </select>
+          <label for="theme-select">Theme:</label>
+          <select id="theme-select" aria-label="Color theme" @change=${this.handleThemeSelect}>
+            ${listThemes().map(t => html`
+              <option value=${t.id} .selected=${t.id === this.themeId}>${t.name}</option>
+            `)}
+          </select>
           <button class="claim-size-btn" @click=${this.claimSize} title="Fit session terminal size to this window">Fit to Window</button>
           <button class="claim-size-btn search-btn" @click=${this.startSearch} title="Search pane history (/ or Ctrl+F)">Search</button>
           <button class="settings-btn" @click=${this.toggleSettings} aria-label="Settings" title="Settings (${this.keyRouter.prefixLabel} ,)">⚙ Settings</button>
@@ -2324,6 +2394,11 @@ export class WideboiApp extends LitElement {
             <div class="mobile-macros-header">
               <span>Keys & Macros</span>
               <div class="sheet-actions">
+                <select aria-label="Color theme" @change=${this.handleThemeSelect} class="mobile-theme-select">
+                  ${listThemes().map(t => html`
+                    <option value=${t.id} .selected=${t.id === this.themeId}>${t.name}</option>
+                  `)}
+                </select>
                 <button aria-label="Edit macros" @click=${() => { this.showMacroEditor = true; this.showMacros = false; }}>Edit</button>
                 <button class="close-btn" aria-label="Close macros" @click=${() => { this.showMacros = false; }}>✕</button>
               </div>
@@ -2427,7 +2502,7 @@ export class WideboiApp extends LitElement {
               <input name="macroName" placeholder="Macro Name (e.g. Git Log or Vim Quit)" required />
               ${this.draftMacroSteps.length > 0 ? html`
                 <div class="macro-draft-steps" aria-label="Steps in new macro">
-                  <span style="font-size: 11px; color: #aaa;">Sequence steps:</span>
+                  <span style="font-size: 11px; color: var(--wb-fg-muted, #aaa);">Sequence steps:</span>
                   ${this.draftMacroSteps.map((step, idx) => html`
                     <div class="macro-draft-step-row">
                       <span>${idx + 1}. ${step.text ? `Text: "${step.text}"` : `Key: ${step.ctrl ? '^' : ''}${step.key}`}</span>
@@ -2446,7 +2521,7 @@ export class WideboiApp extends LitElement {
               <div style="display: flex; gap: 0.8rem; font-size: 12px; align-items: center; flex-wrap: wrap;">
                 <label><input type="checkbox" name="macroCtrl" /> Ctrl</label>
                 <label><input type="checkbox" name="macroEnter" checked /> Include Enter</label>
-                <button type="button" aria-label="Add Step to Sequence" style="margin-left: auto; padding: 0.2rem 0.5rem; font-size: 11px; background: #3c3c3c; color: #eee; border: 1px solid #555; border-radius: 3px; cursor: pointer;"
+                <button type="button" aria-label="Add Step to Sequence" style="margin-left: auto; padding: 0.2rem 0.5rem; font-size: 11px; background: var(--wb-bg-btn, #3c3c3c); color: var(--wb-fg-primary, #eee); border: 1px solid var(--wb-border-divider, #555); border-radius: 3px; cursor: pointer;"
                   @click=${(e: Event) => {
                     const btn = e.target as HTMLElement;
                     const form = btn.closest('form') as HTMLFormElement;
@@ -2479,7 +2554,7 @@ export class WideboiApp extends LitElement {
               <span>wideboi Shortcuts</span>
               <button class="close-btn" @click=${this.closeHelp} aria-label="Close help">×</button>
             </h3>
-            <p style="margin-top: 0; color: #aaa;">Prefix: <kbd>${this.keyRouter.prefixLabel}</kbd> (press twice to send literal key)</p>
+            <p style="margin-top: 0; color: var(--wb-fg-muted, #aaa);">Prefix: <kbd>${this.keyRouter.prefixLabel}</kbd> (press twice to send literal key)</p>
 
             <table class="help-table">
               <thead><tr><th>Key after prefix</th><th>Action</th></tr></thead>
@@ -2544,6 +2619,14 @@ export class WideboiApp extends LitElement {
 
             <div class="settings-section">
               <h4>Preferences</h4>
+              <div class="settings-row">
+                <label for="settings-theme">Color Theme</label>
+                <select id="settings-theme" @change=${this.handleThemeSelect}>
+                  ${listThemes().map(t => html`
+                    <option value=${t.id} .selected=${t.id === this.themeId}>${t.name}</option>
+                  `)}
+                </select>
+              </div>
               <div class="settings-row">
                 <label for="settings-prefix-key">Prefix Key</label>
                 <select id="settings-prefix-key" @change=${this.handlePrefixChange}>
