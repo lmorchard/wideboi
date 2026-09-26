@@ -45,6 +45,12 @@ type Config struct {
 	// rather than as false. Read AutoCleanupEnabled, not this.
 	AutoCleanup        *bool `toml:"auto_cleanup"`
 	AutoCleanupEnabled bool  `toml:"-"`
+	// TLS is a pointer so an absent key reads as the default (on)
+	// rather than as false. Read TLSEnabled, not this.
+	TLS        *bool  `toml:"tls"`
+	TLSEnabled bool   `toml:"-"`
+	TLSCert    string `toml:"tls_cert"`
+	TLSKey     string `toml:"tls_key"`
 	// LogLevelName is what was configured; LogLevel is it resolved.
 	LogLevelName string        `toml:"log_level"`
 	LogLevel     slog.Level    `toml:"-"`
@@ -109,6 +115,10 @@ type ConfigFlags struct {
 	WebsocketToken     string
 	Shell              string
 	DisableAutoCleanup bool
+	DisableTLS         bool
+	TLS                bool
+	TLSCert            string
+	TLSKey             string
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -290,6 +300,15 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if fileCfg.WebsocketToken != "" {
 			cfg.WebsocketToken = fileCfg.WebsocketToken
 		}
+		if fileCfg.TLS != nil {
+			cfg.TLS = fileCfg.TLS
+		}
+		if fileCfg.TLSCert != "" {
+			cfg.TLSCert = fileCfg.TLSCert
+		}
+		if fileCfg.TLSKey != "" {
+			cfg.TLSKey = fileCfg.TLSKey
+		}
 		if fileCfg.LogLevelName != "" {
 			cfg.LogLevelName = fileCfg.LogLevelName
 		}
@@ -367,6 +386,35 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			return Config{}, nil, fmt.Errorf("WIDEBOI_AUTO_CLEANUP %q: want boolean (true/false/1/0/yes/no/on/off)", envAutoCleanup)
 		}
 	}
+	if envTLS := getenv("WIDEBOI_TLS"); envTLS != "" {
+		switch strings.ToLower(strings.TrimSpace(envTLS)) {
+		case "1", "true", "yes", "on":
+			v := true
+			cfg.TLS = &v
+		case "0", "false", "no", "off":
+			v := false
+			cfg.TLS = &v
+		default:
+			return Config{}, nil, fmt.Errorf("WIDEBOI_TLS %q: want boolean (true/false/1/0/yes/no/on/off)", envTLS)
+		}
+	}
+	if envDisableTLS := getenv("WIDEBOI_DISABLE_TLS"); envDisableTLS != "" {
+		switch strings.ToLower(strings.TrimSpace(envDisableTLS)) {
+		case "1", "true", "yes", "on":
+			v := false
+			cfg.TLS = &v
+		case "0", "false", "no", "off":
+			// no-op: leave default or previous
+		default:
+			return Config{}, nil, fmt.Errorf("WIDEBOI_DISABLE_TLS %q: want boolean (true/false/1/0/yes/no/on/off)", envDisableTLS)
+		}
+	}
+	if envCert := getenv("WIDEBOI_TLS_CERT"); envCert != "" {
+		cfg.TLSCert = envCert
+	}
+	if envKey := getenv("WIDEBOI_TLS_KEY"); envKey != "" {
+		cfg.TLSKey = envKey
+	}
 
 	// 4. Command line flags
 	if flags.Layout != "" {
@@ -390,6 +438,23 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if flags.DisableAutoCleanup {
 		v := false
 		cfg.AutoCleanup = &v
+	}
+	if flags.DisableTLS && flags.TLS {
+		return Config{}, nil, fmt.Errorf("command line sets both --tls and --disable-tls; set one, not both")
+	}
+	if flags.DisableTLS {
+		v := false
+		cfg.TLS = &v
+	}
+	if flags.TLS {
+		v := true
+		cfg.TLS = &v
+	}
+	if flags.TLSCert != "" {
+		cfg.TLSCert = flags.TLSCert
+	}
+	if flags.TLSKey != "" {
+		cfg.TLSKey = flags.TLSKey
 	}
 
 	// 5. Validation
@@ -438,6 +503,16 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 
 	// AutoCleanup
 	cfg.AutoCleanupEnabled = cfg.AutoCleanup == nil || *cfg.AutoCleanup
+
+	// TLS
+	if (cfg.TLSCert != "" && cfg.TLSKey == "") || (cfg.TLSCert == "" && cfg.TLSKey != "") {
+		return Config{}, nil, fmt.Errorf("both tls_cert and tls_key must be specified")
+	}
+	if cfg.TLSCert != "" && cfg.TLSKey != "" && cfg.TLS == nil {
+		v := true
+		cfg.TLS = &v
+	}
+	cfg.TLSEnabled = cfg.TLS == nil || *cfg.TLS
 
 	// Keys
 	lists, err := keyLists(cfg.Keys)

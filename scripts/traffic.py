@@ -162,6 +162,7 @@ class Run:
         self.pty_rows = sc.rows + CHROME_ROWS
         with open(self.cfg, "w") as f:
             f.write(f'websocket = "127.0.0.1:{self.port}"\n'
+                    f'tls = false\n'
                     f'websocket_token = "{TOKEN}"\n'
                     f'[[startup]]\nwidth = {sc.cols}\n')
         self.overlay = {
