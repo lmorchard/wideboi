@@ -86,6 +86,11 @@ describe('KeyRouter', () => {
     expect(router.handle(keyEvent('?', 'Slash', { shiftKey: true }))).toEqual({ type: 'toggle_help' });
     expect(router.inPrefix).toBe(false);
 
+    // ',' toggles settings overlay
+    router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
+    expect(router.handle(keyEvent(',', 'Comma'))).toEqual({ type: 'toggle_settings' });
+    expect(router.inPrefix).toBe(false);
+
     // '/' triggers search
     router.handle(keyEvent('b', 'KeyB', { ctrlKey: true }));
     expect(router.handle(keyEvent('/', 'Slash'))).toEqual({ type: 'search' });
