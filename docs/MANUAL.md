@@ -332,6 +332,15 @@ Closes a pane using standard hangup semantics:
 wideboi close $PANE_ID
 ```
 
+#### `upgrade-server`
+Upgrades the running session server in-place using a new binary:
+
+```bash
+wideboi upgrade-server /path/to/new/wideboi
+```
+
+The running server process replaces itself in-place via `execve`, preserving its Process ID (PID), child processes, PTY file descriptors, scrollback history, and layout. Connected clients automatically reconnect and resume.
+
 For agent skill specifications, refer to [`docs/skills/wideboi-control/SKILL.md`](skills/wideboi-control/SKILL.md).
 
 ---

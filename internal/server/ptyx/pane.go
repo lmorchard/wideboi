@@ -52,6 +52,47 @@ func (p *Pane) PID() int {
 	return 0
 }
 
+// Adopt takes ownership of an existing child process and its PTY master fd.
+func Adopt(pid int, fd int, name string, alreadyExited bool, exitCode int) (*Pane, error) {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return nil, fmt.Errorf("ptyx: find process %d: %w", pid, err)
+	}
+
+	// Restore CloseOnExec so future child spawns don't leak this PTY fd
+	syscall.CloseOnExec(fd)
+
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		_ = syscall.Close(fd)
+		return nil, fmt.Errorf("ptyx: set nonblock: %w", err)
+	}
+	master := os.NewFile(uintptr(fd), name)
+
+	p := &Pane{
+		Master: master,
+		Cmd:    &exec.Cmd{Process: proc},
+		done:   make(chan struct{}),
+	}
+
+	if alreadyExited {
+		p.exitCode = exitCode
+		close(p.done)
+		return p, nil
+	}
+
+	go func() {
+		state, err := proc.Wait()
+		if err == nil {
+			p.exitCode = exitStatus(state)
+		} else {
+			p.exitCode = -1
+		}
+		close(p.done)
+	}()
+
+	return p, nil
+}
+
 // Spawn starts argv on a new PTY sized cols x rows, with dir as its
 // working directory.
 func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {

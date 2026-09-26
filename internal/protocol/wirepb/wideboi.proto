@@ -165,6 +165,7 @@ message ServerMessage {
     MsgHistorySnapshot history_snapshot = 13;
     MsgWaitResponse wait_response = 14;
     MsgMacrosSnapshot macros_snapshot = 15;
+    MsgUpgradeResponse upgrade_response = 16;
   }
 }
 
@@ -268,7 +269,16 @@ message ClientMessage {
     MsgWaitRequest wait_request = 17;
     MsgSetPaneWidth set_pane_width = 18;
     MsgSaveMacros save_macros = 19;
+    MsgUpgradeRequest upgrade_request = 20;
   }
+}
+
+message MsgUpgradeRequest {
+  string bin_path = 1;
+}
+
+message MsgUpgradeResponse {
+  string error = 1;
 }
 
 message MsgWaitRequest {
