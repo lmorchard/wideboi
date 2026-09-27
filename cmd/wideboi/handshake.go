@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"time"
 
 	"github.com/lmorchard/wideboi/internal/commands"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -13,6 +14,12 @@ import (
 // protocol, and turns a refusal into something a user can act on.
 func handshakeServer(conn net.Conn, socket string) error {
 	return commands.HandshakeServer(conn, socket)
+}
+
+// handshakeServerWithin is handshakeServer with an explicit ceiling on
+// the wait for the server's hello.
+func handshakeServerWithin(conn net.Conn, socket string, ceiling time.Duration) error {
+	return commands.HandshakeServerWithin(conn, socket, ceiling)
 }
 
 // describeHandshakeErr phrases a failed handshake with the server at

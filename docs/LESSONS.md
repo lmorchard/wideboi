@@ -54,6 +54,16 @@ pinned versions. These behaviors have already surprised us:
 
 Keep `term.Grid` narrow so upstream fixes stay behind one interface.
 
+`go.mod` replaces vt with the fork `lmorchard/x/vt` (branch
+`vt-scrollback-ring`). Besides upstream's pending scrollback PRs, the fork
+adds `Emulator.ScrollRegion` and `Emulator.CursorPen`, which the upgrade
+snapshot needs (#299). vt keeps both on an unexported `Screen`, so there
+is no other way to read them. Removing the fork therefore means
+upstreaming those accessors first. To change the fork, clone it with
+`GIT_LFS_SKIP_SMUDGE=1` (an unrelated example font is in LFS). Develop
+against a local `replace … => /path/to/x/vt`, then point the `replace` at
+the pushed pseudo-version.
+
 The input decoder has its own traps. Ultraviolet maps byte `0x08` to `ctrl+h`;
 Backspace sends `0x7F`. But `ctrl+i`, `ctrl+m`, and `ctrl+[` decode as Tab,
 Enter, and Escape. They cannot serve as distinct repeat bindings.

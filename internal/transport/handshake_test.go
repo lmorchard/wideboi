@@ -8,6 +8,7 @@ import (
 	"os"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
@@ -179,5 +180,57 @@ func TestHandshakeResetIsEOF(t *testing.T) {
 	var mm *MismatchError
 	if !errors.Is(err, io.EOF) || !errors.As(err, &mm) || mm.Theirs != 0 {
 		t.Fatalf("err = %v, want a pre-handshake mismatch wrapping io.EOF", err)
+	}
+}
+
+// TestHandshakeWithinTimesOut pins that a silent peer ends the wait at
+// the given ceiling as a timeout, not as a protocol mismatch: the
+// upgrade reconnect reports the two differently.
+func TestHandshakeWithinTimesOut(t *testing.T) {
+	ours, theirs := net.Pipe()
+	defer ours.Close()
+	defer theirs.Close()
+
+	start := time.Now()
+	_, err := HandshakeWithin(ours, 50*time.Millisecond)
+	if err == nil {
+		t.Fatal("HandshakeWithin succeeded against a silent peer")
+	}
+	var mm *MismatchError
+	if errors.As(err, &mm) {
+		t.Fatalf("timeout reported as a mismatch: %v", err)
+	}
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("err = %v, want a deadline error", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("HandshakeWithin took %s, ignoring its 50ms ceiling", elapsed)
+	}
+}
+
+// TestHandshakeWithinWaitsForSlowPeer pins that the ceiling is what
+// decides: a peer that answers late succeeds under a long ceiling and
+// fails under a short one.
+func TestHandshakeWithinWaitsForSlowPeer(t *testing.T) {
+	slowPeer := func(c net.Conn) {
+		time.Sleep(100 * time.Millisecond) // the slowness under test
+		_ = writeFrame(c, helloFrame(protocol.Version, 4242))
+		drainHello(c)
+	}
+	run := func(ceiling time.Duration) error {
+		ours, theirs := net.Pipe()
+		defer ours.Close()
+		go func() {
+			defer theirs.Close()
+			slowPeer(theirs)
+		}()
+		_, err := HandshakeWithin(ours, ceiling)
+		return err
+	}
+	if err := run(2 * time.Second); err != nil {
+		t.Fatalf("slow peer under a 2s ceiling: %v", err)
+	}
+	if err := run(20 * time.Millisecond); err == nil {
+		t.Fatal("slow peer under a 20ms ceiling succeeded")
 	}
 }

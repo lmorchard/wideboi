@@ -3,10 +3,12 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
@@ -14,6 +16,11 @@ import (
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"golang.org/x/sys/unix"
 )
+
+// inputDrainCeiling bounds how long execFn waits for each pane's queued
+// input to reach its child before exec. The key-writer drains in
+// microseconds; this only matters for a child that stopped reading.
+const inputDrainCeiling = 500 * time.Millisecond
 
 type UpgradeState struct {
 	Cols            int                 `json:"cols"`
@@ -195,6 +202,16 @@ func (s *Server) PrepareUpgrade(binPath string) (func() error, error) {
 		}
 
 		s.mu.Lock()
+		// Hand queued keys to the children before the snapshot, so any
+		// output they cause has the best chance of being in it, and
+		// before exec, which would take them with it. s.mu stays held
+		// from here through exec so no handler can queue more; a
+		// successful exec never returns to release it.
+		for _, p := range s.panes {
+			if !p.drainInput(inputDrainCeiling) {
+				slog.Warn("upgrade: pane input did not drain before exec", "pane", p.id)
+			}
+		}
 		state, modifiedFDs, err := s.buildUpgradeStateLocked(webStatus)
 		if err != nil {
 			s.rollbackUpgradeLocked(modifiedFDs)
@@ -217,7 +234,6 @@ func (s *Server) PrepareUpgrade(binPath string) (func() error, error) {
 			return fmt.Errorf("serializing state: %w", err)
 		}
 		f.Close()
-		s.mu.Unlock()
 
 		stateFilePath := f.Name()
 		os.Setenv("WIDEBOI_RESTORE_STATE", stateFilePath)
@@ -227,7 +243,6 @@ func (s *Server) PrepareUpgrade(binPath string) (func() error, error) {
 		}
 		err = execSys(absBin, execArgs, os.Environ())
 		// If syscall.Exec returns, it failed. Roll back state:
-		s.mu.Lock()
 		s.rollbackUpgradeLocked(modifiedFDs)
 		s.mu.Unlock()
 		_ = os.Remove(stateFilePath)

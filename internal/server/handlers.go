@@ -117,8 +117,16 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 
 	s.mu.Lock()
 	if s.upgrading {
-		s.mu.Unlock()
-		return false
+		// Keystrokes for a pty pane still reach the child: the pty
+		// survives exec (CLOEXEC is cleared) and execFn drains queued
+		// keys before exec. Everything else mutates state that is being
+		// serialized, or is re-sent by the client on reconnect (MsgAttach
+		// carries its size).
+		in, ok := msg.(protocol.MsgInput)
+		if !ok || !s.isPtyPaneLocked(in.PaneID) {
+			s.mu.Unlock()
+			return false
+		}
 	}
 
 	var eff msgEffects
@@ -468,6 +476,12 @@ func (s *Server) handleVerbLocked(tp transport.Transport, m protocol.MsgVerb) ms
 		eff.needBroadcast = true
 	}
 	return eff
+}
+
+// isPtyPaneLocked reports whether id is a pane backed by a pty.
+func (s *Server) isPtyPaneLocked(id int) bool {
+	p, ok := s.panes[id]
+	return ok && p.pty != nil && id != s.statusPaneID
 }
 
 func (s *Server) handleInputLocked(tp transport.Transport, m protocol.MsgInput) msgEffects {

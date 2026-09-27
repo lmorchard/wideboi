@@ -159,6 +159,14 @@ type GridSnapshot struct {
 	IsAltScreen    bool                `json:"is_alt_screen,omitempty"`
 	BracketedPaste bool                `json:"bracketed_paste,omitempty"`
 	CursorKeys     bool                `json:"cursor_keys,omitempty"`
+	KeypadApp      bool                `json:"keypad_app,omitempty"`
+	// ScrollTop and ScrollBottom are the DECSTBM margins as 0-based rows,
+	// bottom exclusive. Both are zero when the region is the whole screen.
+	ScrollTop    int `json:"scroll_top,omitempty"`
+	ScrollBottom int `json:"scroll_bottom,omitempty"`
+	// Pen is the SGR style text written next will carry; nil for the
+	// default pen.
+	Pen *protocol.StyleData `json:"pen,omitempty"`
 }
 
 // encodingMods are the modifiers that change how a key encodes as bytes
@@ -200,6 +208,7 @@ type vtGrid struct {
 	sawAuthoritativeStatus atomic.Bool
 	bracketedPaste         atomic.Bool
 	cursorKeys             atomic.Bool
+	keypadApp              atomic.Bool
 
 	userVarsMu sync.Mutex
 	userVars   map[string]string
@@ -614,6 +623,8 @@ func (g *vtGrid) trackTerminalMode(m ansi.Mode, on bool) {
 		g.bracketedPaste.Store(on)
 	case ansi.ModeCursorKeys:
 		g.cursorKeys.Store(on)
+	case ansi.ModeNumericKeypad:
+		g.keypadApp.Store(on)
 	}
 }
 
@@ -880,6 +891,14 @@ func (g *vtGrid) ExportSnapshot() *GridSnapshot {
 		IsAltScreen:    g.em.IsAltScreen(),
 		BracketedPaste: g.bracketedPaste.Load(),
 		CursorKeys:     g.cursorKeys.Load(),
+		KeypadApp:      g.keypadApp.Load(),
+	}
+	if r := g.em.ScrollRegion(); r.Min.Y != 0 || r.Max.Y != rows {
+		snap.ScrollTop, snap.ScrollBottom = r.Min.Y, r.Max.Y
+	}
+	if pen := g.em.CursorPen(); !pen.IsZero() {
+		sd := protocol.EncodeStyle(pen)
+		snap.Pen = &sd
 	}
 	return snap
 }
@@ -933,6 +952,18 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 		}
 	}
 
+	// 2a. Scroll region before the cursor: DECSTBM homes the cursor.
+	if snap.ScrollBottom > 0 {
+		g.em.Write([]byte(fmt.Sprintf("\033[%d;%dr", snap.ScrollTop+1, snap.ScrollBottom)))
+	}
+
+	// 2b. Pen, for text the child writes next. SetCell above leaves it
+	// alone.
+	if snap.Pen != nil {
+		pen := snap.Pen.Decode()
+		_, _ = g.em.Write([]byte(pen.String()))
+	}
+
 	// 3. Position cursor
 	// ANSI cursor position is 1-indexed: \033[y;xH
 	g.em.Write([]byte(fmt.Sprintf("\033[%d;%dH", snap.CursorY+1, snap.CursorX+1)))
@@ -964,6 +995,10 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 	if snap.CursorKeys {
 		g.cursorKeys.Store(true)
 		_, _ = g.em.Write([]byte("\033[?1h"))
+	}
+	if snap.KeypadApp {
+		g.keypadApp.Store(true)
+		_, _ = g.em.Write([]byte("\033[?66h"))
 	}
 	g.status.Store(snap.Status)
 	if snap.Title != "" {
