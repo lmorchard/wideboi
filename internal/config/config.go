@@ -46,6 +46,13 @@ type Config struct {
 	// rather than as false. Read AutoCleanupEnabled, not this.
 	AutoCleanup        *bool `toml:"auto_cleanup"`
 	AutoCleanupEnabled bool  `toml:"-"`
+	// KeepSessionOnOwnerLoss is a pointer so an absent key reads as the
+	// default (on) rather than as false. Read
+	// KeepSessionOnOwnerLossEnabled, not this. On, an owner whose
+	// terminal hangs up detaches, and an owner that dies without a word
+	// leaves the session running; off, either ends the session.
+	KeepSessionOnOwnerLoss        *bool `toml:"keep_session_on_owner_loss"`
+	KeepSessionOnOwnerLossEnabled bool  `toml:"-"`
 	// TLS is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read TLSEnabled, not this.
 	TLS        *bool  `toml:"tls"`
@@ -106,10 +113,12 @@ type ConfigFlags struct {
 	WebsocketToken     string
 	Shell              string
 	DisableAutoCleanup bool
-	DisableTLS         bool
-	TLS                bool
-	TLSCert            string
-	TLSKey             string
+	// EndSessionOnOwnerLoss turns KeepSessionOnOwnerLoss off.
+	EndSessionOnOwnerLoss bool
+	DisableTLS            bool
+	TLS                   bool
+	TLSCert               string
+	TLSKey                string
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -276,6 +285,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if fileCfg.AutoCleanup != nil {
 			cfg.AutoCleanup = fileCfg.AutoCleanup
 		}
+		if fileCfg.KeepSessionOnOwnerLoss != nil {
+			cfg.KeepSessionOnOwnerLoss = fileCfg.KeepSessionOnOwnerLoss
+		}
 		if len(fileCfg.WidthPresets) > 0 {
 			cfg.WidthPresets = fileCfg.WidthPresets
 		}
@@ -372,6 +384,13 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		}
 		cfg.AutoCleanup = &v
 	}
+	if envKeep := getenv("WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS"); envKeep != "" {
+		v, err := parseBoolEnv("WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS", envKeep)
+		if err != nil {
+			return Config{}, nil, err
+		}
+		cfg.KeepSessionOnOwnerLoss = &v
+	}
 	envTLS := getenv("WIDEBOI_TLS")
 	envDisableTLS := getenv("WIDEBOI_DISABLE_TLS")
 	if envTLS != "" || envDisableTLS != "" {
@@ -425,6 +444,10 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if flags.DisableAutoCleanup {
 		v := false
 		cfg.AutoCleanup = &v
+	}
+	if flags.EndSessionOnOwnerLoss {
+		v := false
+		cfg.KeepSessionOnOwnerLoss = &v
 	}
 	if flags.DisableTLS && flags.TLS {
 		return Config{}, nil, fmt.Errorf("command line sets both --tls and --disable-tls; set one, not both")
@@ -490,6 +513,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 
 	// AutoCleanup
 	cfg.AutoCleanupEnabled = cfg.AutoCleanup == nil || *cfg.AutoCleanup
+
+	// KeepSessionOnOwnerLoss
+	cfg.KeepSessionOnOwnerLossEnabled = cfg.KeepSessionOnOwnerLoss == nil || *cfg.KeepSessionOnOwnerLoss
 
 	// TLS
 	if (cfg.TLSCert != "" && cfg.TLSKey == "") || (cfg.TLSCert == "" && cfg.TLSKey != "") {

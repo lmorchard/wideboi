@@ -296,6 +296,58 @@ func TestPaneTitlesReachTheSnapshot(t *testing.T) {
 	}
 }
 
+// The snapshot counts attached clients -- what `wideboi ls` reports --
+// and not connections that only asked a question, like ls itself.
+func TestSnapshotCountsOnlyAttachedClients(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
+	attached := s.transports[0]
+	asker := transport.NewInProcChannel(64)
+	s.transports = append(s.transports, asker)
+	s.clientLocked(attached).attached = true
+	s.clientLocked(asker)
+
+	s.broadcastLayout(context.Background())
+
+	var snap protocol.MsgLayoutSnapshot
+	for len(asker.ServerSend) > 0 {
+		if m, ok := (<-asker.ServerSend).(protocol.MsgLayoutSnapshot); ok {
+			snap = m
+		}
+	}
+	if snap.AttachedClients != 1 {
+		t.Errorf("snapshot AttachedClients = %d, want 1 (the unattached asker must not count)", snap.AttachedClients)
+	}
+}
+
+// A status query -- `wideboi status`, and `wideboi ls` probing every
+// session -- is answered to the asker alone. Broadcasting it nudged
+// every attached client into a layout and pane-update round (#300).
+func TestStatusRequestAnswersOnlyTheAsker(t *testing.T) {
+	s, _ := serverWithStatuses(t, map[int]protocol.PaneStatus{1: protocol.StatusIdle})
+	attached := s.transports[0].(*transport.InProcChannel)
+	asker := transport.NewInProcChannel(64)
+	s.transports = append(s.transports, asker)
+	s.clientLocked(attached).attached = true
+	s.clientLocked(asker)
+
+	s.handleClientMsg(context.Background(), asker, protocol.MsgStatusRequest{})
+
+	askerGotSnapshot := false
+	for len(asker.ServerSend) > 0 {
+		if _, ok := (<-asker.ServerSend).(protocol.MsgLayoutSnapshot); ok {
+			askerGotSnapshot = true
+		}
+	}
+	if !askerGotSnapshot {
+		t.Error("the asker got no layout snapshot")
+	}
+	for len(attached.ServerSend) > 0 {
+		if m := <-attached.ServerSend; m != nil {
+			t.Errorf("an attached bystander was sent %T by someone else's status query", m)
+		}
+	}
+}
+
 // "Delivered" has to mean every attached client got it, not any one.
 // A status or title broadcast is edge-triggered, so a client whose
 // buffer was full when it fired never sees that change again -- the

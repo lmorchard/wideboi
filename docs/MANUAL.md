@@ -100,7 +100,9 @@ When you run `wideboi`:
 ### Session Lifecycle and Teardown
 
 A session started interactively attaches to the parent terminal window.
-- If you close the terminal window or terminate the client process before detaching, wideboi tears down the entire session.
+- If the terminal goes away without detaching -- a dropped ssh connection, a closed window, or a client killed outright -- the session keeps running, detached. Reattach with `wideboi attach`, or find it with `wideboi ls`.
+- Stopping the client deliberately (`SIGINT` or `SIGTERM`), pressing `Ctrl+b q`, or running `wideboi kill-session` tears down the entire session.
+- To have the session end with its terminal instead, set `keep_session_on_owner_loss = false` (or `WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS=0`, or `--end-session-on-owner-loss`).
 - During teardown, the server closes the PTY master for each pane. The operating system kernel sends `SIGHUP` to the foreground process group.
 - Background tasks started with `nohup`, `disown`, or `setsid` continue running, matching standard Unix terminal behavior.
 - Detached sessions remain active until you run `wideboi kill-session` or press `Ctrl+b q` in a connected client.
@@ -113,8 +115,10 @@ You can run multiple isolated sessions on the same system. Use the `-L <name>` f
 # Start or attach to a session named "project-a"
 wideboi -L project-a
 
-# List all running sessions
+# List all running sessions, with how many clients each has and its web address
 wideboi ls
+# project-a  detached   https://127.0.0.1:8080
+# scratch    1 client   -
 
 # Stop the session named "project-a"
 wideboi -L project-a kill-session
@@ -472,6 +476,7 @@ mouse = true
 shell = "/bin/bash"
 websocket = "127.0.0.1:8080"
 auto_cleanup = true
+keep_session_on_owner_loss = true
 
 # Startup columns created when a new session starts
 [[startup]]
@@ -541,6 +546,7 @@ You can remap control-mode action keys in the `[keys]` table:
 | `WIDEBOI_SHELL` | Executable path for pane shells |
 | `WIDEBOI_LOG_LEVEL` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
 | `WIDEBOI_AUTO_CLEANUP` | Remove sockets and logs on clean exit (`1` or `0`) |
+| `WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS` | Keep the session running when its terminal hangs up (`1` or `0`, default `1`) |
 | `SHELL` | Default fallback shell path |
 
 ### Logging and Cleanup

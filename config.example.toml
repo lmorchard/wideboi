@@ -105,6 +105,13 @@ prefix = "ctrl+b"
 # Set to false to retain logs for post-exit inspection. Defaults to true.
 # auto_cleanup = true
 
+# Keep the session running when the terminal that started it goes away
+# without detaching: a dropped ssh connection or a closed window (SIGHUP),
+# or an owner killed outright. The session is left detached; see
+# `wideboi ls` and `wideboi kill-session`. SIGINT and SIGTERM still end it.
+# Set to false to end the session with its terminal. Defaults to true.
+# keep_session_on_owner_loss = true
+
 # Key remapping for control mode
 #
 # Remap actions to customize your control-mode shortcuts.

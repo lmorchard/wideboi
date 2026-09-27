@@ -45,7 +45,9 @@ This command attaches to an existing default session or starts a new background 
 
 Press `Ctrl+b` and then press `d`.
 
-Your panes and running processes continue running in the background.
+Your panes and running processes continue running in the background. The
+same happens if the terminal goes away without detaching, such as a dropped ssh
+connection; `wideboi ls` shows which sessions are detached.
 
 ### 4. Stop a Session
 

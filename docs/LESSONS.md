@@ -158,13 +158,28 @@ jobs. Do not scan the process table or send extra signals. Jobs that opted out
 with `nohup`, `disown`, an ignored HUP, or `setsid` may keep running. This is
 the tmux model, pinned by `TestHangupLeavesANohupJobRunning`.
 
-Each session runs in a separate `wideboi server`. When its owning client ends
-without detaching, the server must hang up its panes:
+Each session runs in a separate `wideboi server`. What happens when its owning
+client ends without detaching depends on how it ends, and on
+`keep_session_on_owner_loss` (default on):
 
-- On a signal, the owner sends `MsgShutdown`, waits for the server to finish
-  hanging up panes, restores the terminal, and re-raises the signal.
-- If the owner dies without cleanup, the server detects EOF on the owner's
-  socketpair without a preceding `MsgDetach`.
+- On SIGHUP -- the terminal went away: a dropped ssh connection, a closed
+  window -- the owner sends `MsgDetach`, restores the terminal, and re-raises.
+  The session keeps running, detached. With the option off it shuts down as
+  below.
+- On SIGINT, SIGTERM or SIGQUIT, the owner sends `MsgShutdown`, waits for the
+  server to finish hanging up panes, restores the terminal, and re-raises the
+  signal. These are deliberate stops.
+- If the owner dies without cleanup (SIGKILL, a crash), the server sees EOF on
+  the owner's socketpair with no `MsgDetach` before it. With the option on it
+  gives up ownership and keeps the session, recording `owner lost, session
+  kept` in `exits.log`; off, it ends the session.
+
+The default used to be "the session dies with its terminal". On 2026-09-26 an
+ssh connection dropped; Les reconnected and reattached as a second client, and
+two minutes later sshd closed the stale tty. The owner's SIGHUP ended the
+session under the live client. A dropped connection must never lose work, so
+a lingering detached server is the accepted cost: `wideboi ls` shows which
+sessions have no clients.
 
 A detached server remains until `kill-session`, `q`, or a signal.
 

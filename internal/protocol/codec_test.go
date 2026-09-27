@@ -306,3 +306,19 @@ func TestMarshalReplacesInvalidUTF8(t *testing.T) {
 		t.Fatalf("input with invalid key text: %v", err)
 	}
 }
+
+// `wideboi ls` reads the attached count off a snapshot, so it has to
+// survive the wire.
+func TestLayoutSnapshotCarriesAttachedClients(t *testing.T) {
+	data, err := MarshalServer(MsgLayoutSnapshot{AttachedClients: 2})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got, err := UnmarshalServer(data)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if n := got.(MsgLayoutSnapshot).AttachedClients; n != 2 {
+		t.Errorf("AttachedClients = %d after the round trip, want 2", n)
+	}
+}

@@ -371,6 +371,26 @@ func TestParseCLIDisableAutoCleanup(t *testing.T) {
 	}
 }
 
+func TestParseCLIEndSessionOnOwnerLoss(t *testing.T) {
+	opts, err := parseCLI([]string{"--end-session-on-owner-loss", "-L", "test"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if !opts.flags.EndSessionOnOwnerLoss {
+		t.Errorf("EndSessionOnOwnerLoss = false, want true")
+	}
+
+	// The spawned server must see the same setting: it decides what an
+	// owner's EOF means, and the client decides what a SIGHUP means.
+	serverOpts, err := parseCLI(serverArgs([]string{"--end-session-on-owner-loss", "-L", "test"}))
+	if err != nil {
+		t.Fatalf("parseCLI(serverArgs) error: %v", err)
+	}
+	if !serverOpts.flags.EndSessionOnOwnerLoss {
+		t.Errorf("serverOpts.flags.EndSessionOnOwnerLoss = false, want true")
+	}
+}
+
 func TestParseCLITLSFlags(t *testing.T) {
 	opts, err := parseCLI([]string{
 		"--disable-tls",

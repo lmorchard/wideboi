@@ -15,6 +15,7 @@ import (
 type msgEffects struct {
 	needBroadcast       bool
 	needPaneBroadcast   bool
+	sendLayout          bool
 	sendMetadata        bool
 	sendMacros          bool
 	sendConfig          bool
@@ -49,8 +50,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 		case msg, ok := <-tp.ClientSendChan():
 			if !ok {
 				if s.dropClient(ctx, tp) {
-					slog.Info("owning client left without detaching; ending the session")
-					_ = s.CloseFor(ReasonOwnerLeft)
+					s.ownerLeftWithoutDetaching()
 				}
 				return
 			}
@@ -61,6 +61,25 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				return
 			}
 		}
+	}
+}
+
+// ownerLeftWithoutDetaching handles the owner's connection ending with
+// no MsgDetach before it: its terminal hung up without a word reaching
+// us, or it was killed outright. dropClient has already given up
+// ownership, so a kept session is ownerless exactly as after a detach.
+func (s *Server) ownerLeftWithoutDetaching() {
+	s.mu.Lock()
+	keep, lost := s.keepOnOwnerLoss, s.onOwnerLost
+	s.mu.Unlock()
+	if !keep {
+		slog.Info("owning client left without detaching; ending the session")
+		_ = s.CloseFor(ReasonOwnerLeft)
+		return
+	}
+	slog.Info("owning client left without detaching; keeping the session")
+	if lost != nil {
+		lost()
 	}
 }
 
@@ -263,7 +282,7 @@ func (s *Server) handlePaneResyncLocked(tp transport.Transport, m protocol.MsgPa
 }
 
 func (s *Server) handleStatusRequestLocked(tp transport.Transport, m protocol.MsgStatusRequest) msgEffects {
-	return msgEffects{needBroadcast: true, sendMetadata: true}
+	return msgEffects{sendLayout: true, sendMetadata: true}
 }
 
 func (s *Server) handleTrafficRequestLocked(tp transport.Transport, m protocol.MsgTrafficRequest) msgEffects {
@@ -667,6 +686,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 	}
 	if eff.needPaneBroadcast {
 		go s.broadcastPaneUpdates(ctx, false)
+	}
+	if eff.sendLayout && tp != nil {
+		s.sendLayoutTo(ctx, tp)
 	}
 	if eff.sendMetadata && tp != nil {
 		s.sendPaneMetadataTo(ctx, tp)

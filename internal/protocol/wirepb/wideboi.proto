@@ -125,6 +125,7 @@ message MsgLayoutSnapshot {
   map<int32, PaneStatus> pane_statuses = 2;
   map<int32, string> pane_titles = 3;
   string session_cwd = 4;
+  int32 attached_clients = 5;
 }
 
 message MsgPaneCreated {

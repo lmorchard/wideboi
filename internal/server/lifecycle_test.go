@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -88,7 +89,9 @@ func TestDetachHangsUpOnlyThatClient(t *testing.T) {
 }
 
 // An owner that vanishes without a word -- SIGKILL runs no code at all
-// -- takes the session with it.
+// -- takes the session with it when keep_session_on_owner_loss is off,
+// which is the bare server's zero value. (The configured default is on;
+// see TestOwnerEOFWithoutDetachKeepsTheSessionWhenConfigured.)
 func TestOwnerEOFWithoutDetachEndsTheSession(t *testing.T) {
 	owner := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
 	other := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
@@ -105,6 +108,39 @@ func TestOwnerEOFWithoutDetachEndsTheSession(t *testing.T) {
 	}
 	if !other.closed.Load() {
 		t.Error("ending the session did not hang up on the other client")
+	}
+}
+
+// An owner lost without a word -- a dropped ssh connection, SIGKILL --
+// leaves the session running when configured to keep it: ownership is
+// given up exactly as a detach would, and the other client stays.
+func TestOwnerEOFWithoutDetachKeepsTheSessionWhenConfigured(t *testing.T) {
+	owner := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
+	other := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
+	s := newBareServer(owner, other)
+	s.SetOwner(owner)
+	s.SetKeepSessionOnOwnerLoss(true)
+	var lost atomic.Int32
+	s.SetOnOwnerLost(func() { lost.Add(1) })
+
+	close(owner.ClientSend)
+	runLoopUntilReturn(t, s, owner)
+
+	select {
+	case <-s.stopCh:
+		t.Fatal("owner EOF ended the session despite keep-on-owner-loss")
+	default:
+	}
+	if other.closed.Load() {
+		t.Error("keeping the session hung up on the other client")
+	}
+	if n := lost.Load(); n != 1 {
+		t.Errorf("onOwnerLost called %d times, want 1", n)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.owner != nil {
+		t.Error("lost owner still recorded as owner")
 	}
 }
 
