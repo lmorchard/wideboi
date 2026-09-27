@@ -9,23 +9,31 @@ import (
 	"syscall"
 
 	"github.com/lmorchard/wideboi/internal/layout"
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/ptyx"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"golang.org/x/sys/unix"
 )
 
 type UpgradeState struct {
-	Cols         int                 `json:"cols"`
-	Rows         int                 `json:"rows"`
-	NextPaneID   int                 `json:"next_pane_id"`
-	Shell        string              `json:"shell"`
-	Cwd          string              `json:"cwd"`
-	StatusPaneID int                 `json:"status_pane_id"`
-	Columns      []layout.Column     `json:"columns"`
-	FocusPaneID  int                 `json:"focus_pane_id"`
-	LastFocusID  int                 `json:"last_focus_pane_id"`
-	IsCards      bool                `json:"is_cards"`
-	Panes        map[int]UpgradePane `json:"panes"`
+	Cols            int                 `json:"cols"`
+	Rows            int                 `json:"rows"`
+	NextPaneID      int                 `json:"next_pane_id"`
+	Shell           string              `json:"shell"`
+	Cwd             string              `json:"cwd"`
+	StatusPaneID    int                 `json:"status_pane_id"`
+	Columns         []layout.Column     `json:"columns"`
+	FocusPaneID     int                 `json:"focus_pane_id"`
+	LastFocusID     int                 `json:"last_focus_pane_id"`
+	IsCards         bool                `json:"is_cards"`
+	Panes           map[int]UpgradePane `json:"panes"`
+	OwnerPID        uint32              `json:"owner_pid,omitempty"`
+	SizeOwnerPID    uint32              `json:"size_owner_pid,omitempty"`
+	StartupLaunched bool                `json:"startup_launched,omitempty"`
+	WebRunning      bool                `json:"web_running,omitempty"`
+	WebAddr         string              `json:"web_addr,omitempty"`
+	WebToken        string              `json:"web_token,omitempty"`
+	WebTLSEnabled   bool                `json:"web_tls_enabled,omitempty"`
 }
 
 type UpgradePane struct {
@@ -66,8 +74,94 @@ func cleanExecArgs(args []string) []string {
 	return out
 }
 
-// PrepareUpgrade freezes the server, serializes all state to a temporary file,
-// clears close-on-exec on all PTY master file descriptors, and returns an exec function.
+func (s *Server) rollbackUpgradeLocked(modifiedFDs []int) {
+	for _, fd := range modifiedFDs {
+		_, _ = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC)
+	}
+	s.upgrading = false
+}
+
+func (s *Server) buildUpgradeStateLocked(webStatus protocol.MsgWebServerControlResponse) (UpgradeState, []int, error) {
+	state := UpgradeState{
+		Cols:         s.cols,
+		Rows:         s.rows,
+		NextPaneID:   s.nextPaneID,
+		Shell:        s.shell,
+		Cwd:          s.cwd,
+		StatusPaneID: s.statusPaneID,
+		Panes:        make(map[int]UpgradePane),
+	}
+
+	if s.strip != nil {
+		state.Columns = s.strip.Columns()
+		state.FocusPaneID = s.strip.FocusedPaneID()
+		state.LastFocusID = s.strip.LastFocusPaneID()
+		_, isCards := s.strip.Strategy().(layout.CardStrategy)
+		state.IsCards = isCards
+	}
+
+	if s.owner != nil {
+		if cs := s.clients[s.owner]; cs != nil {
+			state.OwnerPID = cs.peerPID
+		}
+	}
+	if s.sizeOwner != nil {
+		if cs := s.clients[s.sizeOwner]; cs != nil {
+			state.SizeOwnerPID = cs.peerPID
+		}
+	}
+	state.StartupLaunched = s.startupLaunched
+	if webStatus.Running {
+		state.WebRunning = true
+		state.WebAddr = webStatus.Addr
+		state.WebToken = webStatus.Token
+		state.WebTLSEnabled = webStatus.TLSEnabled
+	}
+
+	var modifiedFDs []int
+	for id, p := range s.panes {
+		var gridSnap *term.GridSnapshot
+		p.resizeMu.Lock()
+		cols, rows := p.cols, p.rows
+		if sn, ok := p.grid.(term.Snapshotter); ok {
+			gridSnap = sn.ExportSnapshot()
+		}
+		p.resizeMu.Unlock()
+
+		up := UpgradePane{
+			ID:          id,
+			Cols:        cols,
+			Rows:        rows,
+			Keep:        p.keep,
+			IsDashboard: p.isDashboard || id == s.statusPaneID,
+			GridSnap:    gridSnap,
+		}
+
+		if p.pty != nil && p.pty.Master != nil {
+			up.HasPTY = true
+			up.PtyFD = int(p.pty.Master.Fd())
+			up.Pid = p.pty.PID()
+			if code, reaped := p.pty.ExitCode(); reaped {
+				up.Exited = true
+				up.ExitCode = code
+			}
+
+			// Clear close-on-exec so the file descriptor survives the syscall.Exec
+			if _, err := unix.FcntlInt(uintptr(up.PtyFD), unix.F_SETFD, 0); err != nil {
+				return state, modifiedFDs, fmt.Errorf("clearing CLOEXEC on pty fd %d: %w", up.PtyFD, err)
+			}
+			modifiedFDs = append(modifiedFDs, up.PtyFD)
+		}
+
+		state.Panes[id] = up
+	}
+
+	return state, modifiedFDs, nil
+}
+
+// PrepareUpgrade freezes the server and returns an exec function.
+// Pane snapshots and state serialization occur inside the returned exec function
+// immediately prior to exec, eliminating output loss during client drain.
 func (s *Server) PrepareUpgrade(binPath string) (func() error, error) {
 	absBin, err := filepath.Abs(binPath)
 	if err != nil {
@@ -87,92 +181,54 @@ func (s *Server) PrepareUpgrade(binPath string) (func() error, error) {
 	// Quiesce the server: mark as upgrading so no concurrent mutations occur
 	s.upgrading = true
 
-	state := UpgradeState{
-		Cols:         s.cols,
-		Rows:         s.rows,
-		NextPaneID:   s.nextPaneID,
-		Shell:        s.shell,
-		Cwd:          s.cwd,
-		StatusPaneID: s.statusPaneID,
-		Panes:        make(map[int]UpgradePane),
-	}
-
-	if s.strip != nil {
-		state.Columns = s.strip.Columns()
-		state.FocusPaneID = s.strip.FocusedPaneID()
-		state.LastFocusID = s.strip.LastFocusPaneID()
-		_, isCards := s.strip.Strategy().(layout.CardStrategy)
-		state.IsCards = isCards
-	}
-
-	var modifiedFDs []int
-	rollback := func() {
-		for _, fd := range modifiedFDs {
-			_, _ = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC)
-		}
-		s.upgrading = false
-	}
-
-	for id, p := range s.panes {
-		var gridSnap *term.GridSnapshot
-		p.resizeMu.Lock()
-		if sn, ok := p.grid.(term.Snapshotter); ok {
-			gridSnap = sn.ExportSnapshot()
-		}
-		p.resizeMu.Unlock()
-
-		up := UpgradePane{
-			ID:          id,
-			Cols:        p.cols,
-			Rows:        p.rows,
-			Keep:        p.keep,
-			IsDashboard: p.isDashboard || id == s.statusPaneID,
-			GridSnap:    gridSnap,
-		}
-
-		if p.pty != nil && p.pty.Master != nil {
-			up.HasPTY = true
-			up.PtyFD = int(p.pty.Master.Fd())
-			up.Pid = p.pty.PID()
-			if code, reaped := p.pty.ExitCode(); reaped {
-				up.Exited = true
-				up.ExitCode = code
-			}
-
-			// Clear close-on-exec so the file descriptor survives the syscall.Exec
-			if _, err := unix.FcntlInt(uintptr(up.PtyFD), unix.F_SETFD, 0); err != nil {
-				rollback()
-				return nil, fmt.Errorf("clearing CLOEXEC on pty fd %d: %w", up.PtyFD, err)
-			}
-			modifiedFDs = append(modifiedFDs, up.PtyFD)
-		}
-
-		state.Panes[id] = up
-	}
-
-	f, err := os.CreateTemp("", "wideboi-upgrade-*.json")
-	if err != nil {
-		rollback()
-		return nil, fmt.Errorf("creating state file: %w", err)
-	}
-
-	if err := json.NewEncoder(f).Encode(state); err != nil {
-		f.Close()
-		_ = os.Remove(f.Name())
-		rollback()
-		return nil, fmt.Errorf("serializing state: %w", err)
-	}
-	f.Close()
-
 	execArgs := append([]string{absBin}, cleanExecArgs(os.Args[1:])...)
-	stateFilePath := f.Name()
 
 	return func() error {
+		// Capture web server status outside s.mu to avoid lock-order inversion
+		// (webServer methods take w.mu and then s.mu to disconnect clients).
+		var webStatus protocol.MsgWebServerControlResponse
+		s.mu.Lock()
+		ws := s.webServer
+		s.mu.Unlock()
+		if ws != nil {
+			webStatus = ws.Status()
+		}
+
+		s.mu.Lock()
+		state, modifiedFDs, err := s.buildUpgradeStateLocked(webStatus)
+		if err != nil {
+			s.rollbackUpgradeLocked(modifiedFDs)
+			s.mu.Unlock()
+			return err
+		}
+
+		f, err := os.CreateTemp("", "wideboi-upgrade-*.json")
+		if err != nil {
+			s.rollbackUpgradeLocked(modifiedFDs)
+			s.mu.Unlock()
+			return fmt.Errorf("creating state file: %w", err)
+		}
+
+		if err := json.NewEncoder(f).Encode(state); err != nil {
+			f.Close()
+			_ = os.Remove(f.Name())
+			s.rollbackUpgradeLocked(modifiedFDs)
+			s.mu.Unlock()
+			return fmt.Errorf("serializing state: %w", err)
+		}
+		f.Close()
+		s.mu.Unlock()
+
+		stateFilePath := f.Name()
 		os.Setenv("WIDEBOI_RESTORE_STATE", stateFilePath)
-		err := syscall.Exec(absBin, execArgs, os.Environ())
+		execSys := syscall.Exec
+		if s.execSyscall != nil {
+			execSys = s.execSyscall
+		}
+		err = execSys(absBin, execArgs, os.Environ())
 		// If syscall.Exec returns, it failed. Roll back state:
 		s.mu.Lock()
-		rollback()
+		s.rollbackUpgradeLocked(modifiedFDs)
 		s.mu.Unlock()
 		_ = os.Remove(stateFilePath)
 		_ = os.Unsetenv("WIDEBOI_RESTORE_STATE")
@@ -209,6 +265,15 @@ func RestoreState(s *Server) error {
 	s.shell = state.Shell
 	s.cwd = state.Cwd
 	s.statusPaneID = state.StatusPaneID
+	s.startupLaunched = state.StartupLaunched
+	s.expectedOwnerPID = state.OwnerPID
+	s.expectedSizeOwnerPID = state.SizeOwnerPID
+	s.restoredWeb = RestoredWebState{
+		Running:    state.WebRunning,
+		Addr:       state.WebAddr,
+		Token:      state.WebToken,
+		TLSEnabled: state.WebTLSEnabled,
+	}
 
 	if state.IsCards {
 		s.strip.SetStrategy(layout.CardStrategy{})

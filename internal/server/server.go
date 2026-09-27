@@ -39,6 +39,12 @@ type Server struct {
 	reason    *closeReason
 	upgrading bool
 
+	expectedOwnerPID     uint32
+	expectedSizeOwnerPID uint32
+	restoredWeb          RestoredWebState
+
+	execSyscall func(bin string, args []string, env []string) error
+
 	statusPaneID int
 	dashboard    *Dashboard
 
@@ -230,6 +236,22 @@ func (s *Server) broadcastMacros(ctx context.Context) {
 	for _, tp := range tps {
 		_ = tp.SendServer(ctx, msg)
 	}
+}
+
+// RestoredWebState holds the web server configuration and active status
+// restored from an in-place upgrade state file.
+type RestoredWebState struct {
+	Running    bool
+	Addr       string
+	Token      string
+	TLSEnabled bool
+}
+
+// RestoredWebState returns any web server state restored from an in-place upgrade.
+func (s *Server) RestoredWebState() RestoredWebState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restoredWeb
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning

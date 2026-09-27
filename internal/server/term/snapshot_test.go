@@ -84,3 +84,47 @@ func TestGridSnapshotRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestGridSnapshotModesRoundTrip(t *testing.T) {
+	g1 := NewVT(80, 24)
+	defer g1.Close()
+
+	// Enter alt-screen, enable bracketed paste, enable cursor key mode
+	_, _ = g1.Write([]byte("\033[?1049h\033[?2004h\033[?1h"))
+	_, _ = g1.Write([]byte("\033[1;1HAltScreen Mode Text"))
+
+	snap := g1.(Snapshotter).ExportSnapshot()
+	if snap == nil {
+		t.Fatal("ExportSnapshot returned nil")
+	}
+	if !snap.IsAltScreen {
+		t.Error("expected snap.IsAltScreen to be true")
+	}
+	if !snap.BracketedPaste {
+		t.Error("expected snap.BracketedPaste to be true")
+	}
+	if !snap.CursorKeys {
+		t.Error("expected snap.CursorKeys to be true")
+	}
+
+	g2 := NewVT(80, 24)
+	defer g2.Close()
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	snap2 := g2.(Snapshotter).ExportSnapshot()
+	if !snap2.IsAltScreen {
+		t.Error("expected restored grid to be in alt-screen")
+	}
+	if !snap2.BracketedPaste {
+		t.Error("expected restored grid to have bracketed paste enabled")
+	}
+	if !snap2.CursorKeys {
+		t.Error("expected restored grid to have cursor keys enabled")
+	}
+
+	// Verify the alt screen cell content was preserved
+	cell := g2.CellAt(0, 0)
+	if cell == nil || cell.Content != "A" {
+		t.Fatalf("cell at (0, 0) content = %v, want 'A'", cell)
+	}
+}
