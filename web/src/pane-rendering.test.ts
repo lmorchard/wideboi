@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { create } from '@bufbuild/protobuf';
-import { PaneStore, selectionText } from './pane-state';
+import { PaneStore, selectionText, findUrlAt } from './pane-state';
 import { PanePainter } from './pane-painter';
 import { WideboiPane } from './wideboi-pane';
 import { RenderStats } from './stats';
@@ -67,6 +67,81 @@ describe('pane mirrors', () => {
     const pane = create(MsgPaneUpdateSchema, { paneId: 1, cols: 4, rows: 1,
       lines: [{ cells: [{ content: '界', width: 2 }, cell(' '), cell('B'), cell(' ')] }] });
     expect(selectionText(pane, { x: 0, y: 0 }, { x: 2, y: 0 })).toBe('界B');
+  });
+
+  describe('findUrlAt', () => {
+    it('detects URL at clicked point', () => {
+      const text = 'Check https://example.com/docs for info';
+      const pane = create(MsgPaneUpdateSchema, {
+        paneId: 1, cols: text.length, rows: 1,
+        lines: [row(...text.split(''))],
+      });
+      // 'https://example.com/docs' starts at index 6 and ends at index 29
+      const found = findUrlAt(pane, { x: 10, y: 0 });
+      expect(found).toBeDefined();
+      expect(found?.url).toBe('https://example.com/docs');
+      expect(found?.start).toEqual({ x: 6, y: 0 });
+      expect(found?.end).toEqual({ x: 29, y: 0 });
+
+      // Click outside returns undefined
+      expect(findUrlAt(pane, { x: 2, y: 0 })).toBeUndefined();
+      expect(findUrlAt(pane, { x: 35, y: 0 })).toBeUndefined();
+    });
+
+    it('cleans trailing punctuation', () => {
+      const text = 'See https://example.com/path, and (https://test.org/wiki/Go_(lang)).';
+      const pane = create(MsgPaneUpdateSchema, {
+        paneId: 1, cols: text.length, rows: 1,
+        lines: [row(...text.split(''))],
+      });
+      const url1 = findUrlAt(pane, { x: 10, y: 0 });
+      expect(url1?.url).toBe('https://example.com/path');
+
+      const url2 = findUrlAt(pane, { x: 40, y: 0 });
+      expect(url2?.url).toBe('https://test.org/wiki/Go_(lang)');
+    });
+
+    it('detects URLs wrapped across rows', () => {
+      // 20-col terminal
+      // Row 0: "See https://example." (20 chars)
+      // Row 1: "com/long/path done  " (20 chars)
+      const row0 = 'See https://example.'.split('');
+      const row1 = 'com/long/path done  '.split('');
+      const pane = create(MsgPaneUpdateSchema, {
+        paneId: 1, cols: 20, rows: 2,
+        lines: [row(...row0), row(...row1)],
+      });
+      // Click on row 0
+      const found0 = findUrlAt(pane, { x: 10, y: 0 });
+      expect(found0?.url).toBe('https://example.com/long/path');
+      expect(found0?.start).toEqual({ x: 4, y: 0 });
+      expect(found0?.end).toEqual({ x: 12, y: 1 });
+
+      // Click on row 1
+      const found1 = findUrlAt(pane, { x: 2, y: 1 });
+      expect(found1?.url).toBe('https://example.com/long/path');
+      expect(found1?.start).toEqual({ x: 4, y: 0 });
+      expect(found1?.end).toEqual({ x: 12, y: 1 });
+    });
+
+    it('accounts for wide characters in line offset', () => {
+      // '界' is width 2, cell 1 is continuation ' '
+      const pane = create(MsgPaneUpdateSchema, {
+        paneId: 1, cols: 30, rows: 1,
+        lines: [{
+          cells: [
+            { content: '界', width: 2 },
+            cell(' '),
+            cell(' '),
+            ...('https://wide.dev'.split('').map(cell)),
+          ],
+        }],
+      });
+      // '界' is at x=0 (w=2), continuation at x=1, space at x=2, url starts at x=3
+      const found = findUrlAt(pane, { x: 5, y: 0 });
+      expect(found?.url).toBe('https://wide.dev');
+      expect(found?.start).toEqual({ x: 3, y: 0 });
+    });
   });
 
   it('updates scroll offset, scrollback length, and unread output from patch', () => {
@@ -285,6 +360,24 @@ describe('per-pane painting', () => {
     // dx = 30 -> col 6, dy = 34 -> row 4
     pt = WideboiPane.prototype.cellAt.call(fakePane, 50, 74);
     expect(pt).toEqual({ x: 6, y: 4 });
+  });
+
+  it('tracks selection and returns selected text', () => {
+    const pane = new WideboiPane();
+    pane.pane = create(MsgPaneUpdateSchema, {
+      paneId: 1, cols: 10, rows: 2,
+      lines: [row(...'Hello World'.slice(0, 10).split('')), row(...'Wideboi Web'.slice(0, 10).split(''))],
+    });
+    expect(pane.getSelection()).toBeUndefined();
+    expect(pane.selectedText()).toBe('');
+
+    pane.setSelection({ x: 0, y: 0 }, { x: 4, y: 0 });
+    expect(pane.getSelection()).toEqual({ start: { x: 0, y: 0 }, end: { x: 4, y: 0 } });
+    expect(pane.selectedText()).toBe('Hello');
+
+    pane.clearSelection();
+    expect(pane.getSelection()).toBeUndefined();
+    expect(pane.selectedText()).toBe('');
   });
 
   it('redraws and uses theme colors when theme changes', () => {
