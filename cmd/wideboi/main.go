@@ -451,11 +451,9 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 	// its pid is a death no code in this process got to record: SIGKILL,
 	// a crash, the OOM killer.
 	//
-	// Before ListenSocket, not after: a client admitted between it and
-	// Run gets a second reader loop from Run's snapshot of s.transports,
-	// and anything that lingers in that window widens the race -- this
-	// record there broke TestUpgradeServerWithAttachedClientE2E 5 runs
-	// in 8, by reordering the reconnected client's keystrokes.
+	// Placed before ListenSocket to avoid answering queries until startup
+	// is prepared. srv.startedTransports guarantees each transport receives
+	// exactly one reader loop even if admitted before Run (#279).
 	_ = logger.AppendExit(cfg.Socket, "server", "server started",
 		"ownerFD", ownerFD, "restored", restored)
 	// Any return from here on that has not recorded its exit is a

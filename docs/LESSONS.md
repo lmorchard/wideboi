@@ -497,15 +497,16 @@ socket e2e tests fail with `bind: invalid argument` rather than running. Nothing
 says they were skipped. For a private `TMPDIR`, use something like
 `mktemp -d /tmp/wbr.XXXX`.
 
-## Nothing may run between `ListenSocket` and `Run`
+## Each transport must have exactly one reader loop
 
 A socket client admitted after `srv.ListenSocket` but before `srv.Run` starts
-gets two reader loops: one from `admitSocketConn` and another from `Run`'s
-snapshot of `s.transports`. Its messages then split between goroutines, and its
-keystrokes can arrive out of order. Adding a single log-file write in that
-window made `TestUpgradeServerWithAttachedClientE2E` fail 5 runs in 8, because
-the client reconnecting after an upgrade lands exactly there. The race itself is
-still open, so add no work to that window until it is fixed.
+previously received two reader loops: one from `admitSocketConn` and another from
+`Run`'s initial iteration of `s.transports`. Its messages then split between
+goroutines, and its keystrokes could arrive out of order (#279). Adding a single
+log-file write in that window made `TestUpgradeServerWithAttachedClientE2E` fail
+5 runs in 8, because the client reconnecting after an upgrade lands exactly there.
+The server tracks started reader loops per transport (`startedTransports`) across
+admission and `Run`, ensuring each transport receives exactly one loop.
 
 ## A test that runs a command can end your session
 
