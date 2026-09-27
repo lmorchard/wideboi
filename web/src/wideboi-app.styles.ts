@@ -266,6 +266,12 @@ export const wideboiAppStyles = css`
       line-height: 1;
       padding: 0 0.35rem;
     }
+    .mobile-bar .pane-nav-btn {
+      min-width: 44px;
+      font-size: 22px;
+      padding: 0 0.5rem;
+      font-weight: bold;
+    }
     .mobile-bar button, .mobile-dock button, .mobile-bar select {
       min-height: 40px;
       border: 1px solid var(--wb-border-divider, #555);
@@ -806,20 +812,23 @@ export const wideboiAppStyles = css`
       color: #fff;
     }
     .mobile-settings-btn, .mobile-cmd-btn {
-      background: var(--wb-bg-toolbar, #252526);
-      border: 1px solid var(--wb-border, #3c3c3c);
+      background: var(--wb-bg-btn, #333);
+      border: 1px solid var(--wb-border-divider, #555);
       color: var(--wb-fg-primary, #ccc);
       border-radius: 4px;
-      padding: 0 0.35rem;
-      min-width: 30px;
-      font-size: 15px;
+      padding: 0 0.4rem;
+      min-width: 36px;
+      height: 40px;
+      font-size: 16px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
+      box-sizing: border-box;
+      flex-shrink: 0;
     }
     .mobile-settings-btn:hover, .mobile-cmd-btn:hover {
-      background: var(--wb-bg-btn-hover, #333);
+      background: var(--wb-bg-btn-hover, #444);
       color: #fff;
     }
     .settings-overlay {
