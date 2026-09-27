@@ -29,3 +29,17 @@ func BenchmarkGridScrollbackFull(b *testing.B) {
 		_, _ = g.Write(line)
 	}
 }
+
+func BenchmarkExportSnapshotHeavy(b *testing.B) {
+	g := NewVT(120, 40)
+	defer g.Close()
+	line := []byte("\x1b[31mline 00000 the quick brown fox jumps over the lazy dog 0123456789abcdefghijklmnopqrstuvwxyz\x1b[0m\r\n")
+	for i := 0; i < 10040; i++ {
+		_, _ = g.Write(line)
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = g.(Snapshotter).ExportSnapshot()
+	}
+}

@@ -143,23 +143,21 @@ type Snapshotter interface {
 }
 
 type GridSnapshot struct {
-	Cols           int                 `json:"cols"`
-	Rows           int                 `json:"rows"`
-	CursorX        int                 `json:"cursor_x"`
-	CursorY        int                 `json:"cursor_y"`
-	CursorVisible  bool                `json:"cursor_visible"`
-	MouseModes     uint32              `json:"mouse_modes"`
-	Status         int32               `json:"status"`
-	Title          string              `json:"title"`
-	CWD            string              `json:"cwd"`
-	UserVars       map[string]string   `json:"user_vars"`
-	ScrollOffset   int                 `json:"scroll_offset"`
-	Scrollback     []protocol.LineData `json:"scrollback"`
-	Screen         []protocol.LineData `json:"screen"`
-	IsAltScreen    bool                `json:"is_alt_screen,omitempty"`
-	BracketedPaste bool                `json:"bracketed_paste,omitempty"`
-	CursorKeys     bool                `json:"cursor_keys,omitempty"`
-	KeypadApp      bool                `json:"keypad_app,omitempty"`
+	Cols           int               `json:"cols"`
+	Rows           int               `json:"rows"`
+	CursorX        int               `json:"cursor_x"`
+	CursorY        int               `json:"cursor_y"`
+	CursorVisible  bool              `json:"cursor_visible"`
+	MouseModes     uint32            `json:"mouse_modes"`
+	Status         int32             `json:"status"`
+	Title          string            `json:"title"`
+	CWD            string            `json:"cwd"`
+	UserVars       map[string]string `json:"user_vars"`
+	ScrollOffset   int               `json:"scroll_offset"`
+	IsAltScreen    bool              `json:"is_alt_screen,omitempty"`
+	BracketedPaste bool              `json:"bracketed_paste,omitempty"`
+	CursorKeys     bool              `json:"cursor_keys,omitempty"`
+	KeypadApp      bool              `json:"keypad_app,omitempty"`
 	// ScrollTop and ScrollBottom are the DECSTBM margins as 0-based rows,
 	// bottom exclusive. Both are zero when the region is the whole screen.
 	ScrollTop    int `json:"scroll_top,omitempty"`
@@ -167,6 +165,37 @@ type GridSnapshot struct {
 	// Pen is the SGR style text written next will carry; nil for the
 	// default pen.
 	Pen *protocol.StyleData `json:"pen,omitempty"`
+
+	// Compact line representation
+	Styles          []protocol.StyleData `json:"styles,omitempty"`
+	ScrollbackLines []LineSnapshot       `json:"scrollback_lines,omitempty"`
+	ScreenLines     []LineSnapshot       `json:"screen_lines,omitempty"`
+
+	// Legacy line representation for backward-compatibility when restoring an older snapshot
+	Scrollback []protocol.LineData `json:"scrollback,omitempty"`
+	Screen     []protocol.LineData `json:"screen,omitempty"`
+}
+
+// ScrollbackCount returns the number of scrollback lines in the snapshot.
+func (s *GridSnapshot) ScrollbackCount() int {
+	if s == nil {
+		return 0
+	}
+	if len(s.ScrollbackLines) > 0 {
+		return len(s.ScrollbackLines)
+	}
+	return len(s.Scrollback)
+}
+
+// ScreenCount returns the number of screen lines in the snapshot.
+func (s *GridSnapshot) ScreenCount() int {
+	if s == nil {
+		return 0
+	}
+	if len(s.ScreenLines) > 0 {
+		return len(s.ScreenLines)
+	}
+	return len(s.Screen)
 }
 
 // encodingMods are the modifiers that change how a key encodes as bytes
@@ -835,63 +864,51 @@ func (g *vtGrid) ExportSnapshot() *GridSnapshot {
 	defer g.writeResizeMu.Unlock()
 
 	cols, rows := g.em.Width(), g.em.Height()
-	sbLen := g.em.ScrollbackLen()
+	palette := newStylePalette()
 
-	scrollback := make([]protocol.LineData, sbLen)
-	for y := 0; y < sbLen; y++ {
-		line := make(protocol.LineData, cols)
-		for x := 0; x < cols; x++ {
-			c := g.em.ScrollbackCellAt(x, y)
-			if c == nil {
-				line[x] = protocol.CellData{Content: " ", Width: 1}
-				continue
-			}
-			line[x] = protocol.CellData{
-				Content: c.Content,
-				Width:   c.Width,
-				Style:   protocol.EncodeStyle(c.Style),
-			}
+	var sbLines []LineSnapshot
+	if sb := g.em.Scrollback(); sb != nil {
+		lines := sb.Lines()
+		sbLines = make([]LineSnapshot, len(lines))
+		for y, l := range lines {
+			sbLines[y] = encodeUVLine(l, palette)
 		}
-		scrollback[y] = line
 	}
 
-	screen := make([]protocol.LineData, rows)
+	screenLines := make([]LineSnapshot, rows)
 	for y := 0; y < rows; y++ {
-		line := make(protocol.LineData, cols)
+		row := make(uv.Line, cols)
 		for x := 0; x < cols; x++ {
 			c := g.em.CellAt(x, y)
 			if c == nil {
-				line[x] = protocol.CellData{Content: " ", Width: 1}
-				continue
-			}
-			line[x] = protocol.CellData{
-				Content: c.Content,
-				Width:   c.Width,
-				Style:   protocol.EncodeStyle(c.Style),
+				row[x] = uv.EmptyCell
+			} else {
+				row[x] = *c
 			}
 		}
-		screen[y] = line
+		screenLines[y] = encodeUVLine(row, palette)
 	}
 
 	cp := g.em.CursorPosition()
 	snap := &GridSnapshot{
-		Cols:           cols,
-		Rows:           rows,
-		CursorX:        cp.X,
-		CursorY:        cp.Y,
-		CursorVisible:  g.cursorVisible.Load(),
-		MouseModes:     g.mouseModes.Load(),
-		Status:         g.status.Load(),
-		Title:          g.Title(),
-		CWD:            g.CWD(),
-		UserVars:       g.UserVars(),
-		ScrollOffset:   int(g.scrollOffset.Load()),
-		Scrollback:     scrollback,
-		Screen:         screen,
-		IsAltScreen:    g.em.IsAltScreen(),
-		BracketedPaste: g.bracketedPaste.Load(),
-		CursorKeys:     g.cursorKeys.Load(),
-		KeypadApp:      g.keypadApp.Load(),
+		Cols:            cols,
+		Rows:            rows,
+		CursorX:         cp.X,
+		CursorY:         cp.Y,
+		CursorVisible:   g.cursorVisible.Load(),
+		MouseModes:      g.mouseModes.Load(),
+		Status:          g.status.Load(),
+		Title:           g.Title(),
+		CWD:             g.CWD(),
+		UserVars:        g.UserVars(),
+		ScrollOffset:    int(g.scrollOffset.Load()),
+		Styles:          palette.styles,
+		ScrollbackLines: sbLines,
+		ScreenLines:     screenLines,
+		IsAltScreen:     g.em.IsAltScreen(),
+		BracketedPaste:  g.bracketedPaste.Load(),
+		CursorKeys:      g.cursorKeys.Load(),
+		KeypadApp:       g.keypadApp.Load(),
 	}
 	if r := g.em.ScrollRegion(); r.Min.Y != 0 || r.Max.Y != rows {
 		snap.ScrollTop, snap.ScrollBottom = r.Min.Y, r.Max.Y
@@ -919,36 +936,69 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 	// 1. Populate scrollback
 	sb := g.em.Scrollback()
 	sb.Clear()
-	for _, lineData := range snap.Scrollback {
-		uvLine := make(uv.Line, len(lineData))
-		for i, cd := range lineData {
-			uvLine[i] = uv.Cell{
-				Content: cd.Content,
-				Width:   cd.Width,
-				Style:   cd.Style.Decode(),
-			}
-		}
-		sb.Push(uvLine)
-	}
 
-	// 2. Populate screen
-	for y, lineData := range snap.Screen {
-		if y >= g.em.Height() {
-			break
+	if len(snap.ScrollbackLines) > 0 || len(snap.ScreenLines) > 0 || len(snap.Styles) > 0 {
+		styles := make([]uv.Style, len(snap.Styles))
+		for i, sd := range snap.Styles {
+			styles[i] = sd.Decode()
 		}
-		for x := 0; x < len(lineData) && x < g.em.Width(); x++ {
-			cd := lineData[x]
-			// Skip continuation cells so we do not clobber the wide glyph that was set
-			// by the preceding cell (whose Width > 1).
-			if cd.Width == 0 && cd.Content == "" {
-				continue
+
+		for _, lineRuns := range snap.ScrollbackLines {
+			uvLine := decodeUVLine(lineRuns, styles)
+			sb.Push(uvLine)
+		}
+
+		// 2. Populate screen
+		for y, lineRuns := range snap.ScreenLines {
+			if y >= g.em.Height() {
+				break
 			}
-			cell := uv.Cell{
-				Content: cd.Content,
-				Width:   cd.Width,
-				Style:   cd.Style.Decode(),
+			uvLine := decodeUVLine(lineRuns, styles)
+			for x := 0; x < len(uvLine) && x < g.em.Width(); x++ {
+				c := &uvLine[x]
+				if c.Width == 0 && c.Content == "" {
+					continue
+				}
+				g.em.SetCell(x, y, c)
 			}
-			g.em.SetCell(x, y, &cell)
+			for x := len(uvLine); x < g.em.Width(); x++ {
+				g.em.SetCell(x, y, &uv.EmptyCell)
+			}
+		}
+		for y := len(snap.ScreenLines); y < g.em.Height(); y++ {
+			for x := 0; x < g.em.Width(); x++ {
+				g.em.SetCell(x, y, &uv.EmptyCell)
+			}
+		}
+	} else {
+		for _, lineData := range snap.Scrollback {
+			uvLine := make(uv.Line, len(lineData))
+			for i, cd := range lineData {
+				uvLine[i] = uv.Cell{
+					Content: cd.Content,
+					Width:   cd.Width,
+					Style:   cd.Style.Decode(),
+				}
+			}
+			sb.Push(uvLine)
+		}
+
+		for y, lineData := range snap.Screen {
+			if y >= g.em.Height() {
+				break
+			}
+			for x := 0; x < len(lineData) && x < g.em.Width(); x++ {
+				cd := lineData[x]
+				if cd.Width == 0 && cd.Content == "" {
+					continue
+				}
+				cell := uv.Cell{
+					Content: cd.Content,
+					Width:   cd.Width,
+					Style:   cd.Style.Decode(),
+				}
+				g.em.SetCell(x, y, &cell)
+			}
 		}
 	}
 

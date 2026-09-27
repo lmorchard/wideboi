@@ -35,11 +35,11 @@ func TestGridSnapshotRoundTrip(t *testing.T) {
 		t.Fatalf("ExportSnapshot returned nil")
 	}
 
-	if len(snap.Scrollback) != g1.ScrollbackLen() {
-		t.Fatalf("snapshot scrollback len %d != %d", len(snap.Scrollback), g1.ScrollbackLen())
+	if snap.ScrollbackCount() != g1.ScrollbackLen() {
+		t.Fatalf("snapshot scrollback len %d != %d", snap.ScrollbackCount(), g1.ScrollbackLen())
 	}
-	if len(snap.Screen) != 24 {
-		t.Fatalf("snapshot screen len %d != 24", len(snap.Screen))
+	if snap.ScreenCount() != 24 {
+		t.Fatalf("snapshot screen len %d != 24", snap.ScreenCount())
 	}
 
 	// Now restore into a fresh grid
@@ -69,7 +69,7 @@ func TestGridSnapshotRoundTrip(t *testing.T) {
 		t.Errorf("cursor position mismatch: g1=%v, g2=%v", pos1, pos2)
 	}
 
-	// Verify cell contents and widths (especially wide glyphs)
+	// Verify cell contents, widths, and styles
 	for y := 0; y < 24; y++ {
 		for x := 0; x < 80; x++ {
 			c1 := g1.CellAt(x, y)
@@ -85,6 +85,9 @@ func TestGridSnapshotRoundTrip(t *testing.T) {
 			}
 			if c1.Width != c2.Width {
 				t.Fatalf("cell width mismatch at (%d, %d): %d vs %d", x, y, c1.Width, c2.Width)
+			}
+			if !c1.Style.Equal(&c2.Style) {
+				t.Fatalf("cell style mismatch at (%d, %d): %+v vs %+v", x, y, c1.Style, c2.Style)
 			}
 		}
 	}
@@ -305,5 +308,164 @@ func TestGridSnapshotRegionPenWithAltScreen(t *testing.T) {
 	}
 	if snap2.CursorX != 6 || snap2.CursorY != 5 {
 		t.Errorf("cursor after restore = (%d,%d), want (6,5)", snap2.CursorX, snap2.CursorY)
+	}
+}
+
+func TestGridSnapshotCompactScrollbackAndStyles(t *testing.T) {
+	g1 := NewVT(80, 24)
+	defer g1.Close()
+
+	// Produce diverse scrollback lines
+	lines := []string{
+		"\x1b[31;1mRed Bold Text\x1b[0m\r\n",
+		"\x1b[42;30mGreen Bg Black Fg\x1b[0m\r\n",
+		"Wide emoji 🚀 and characters 世界 in text\r\n",
+		"Line with repeated spaces      and more\r\n",
+		"\x1b[4mUnderlined text\x1b[0m\r\n",
+	}
+	// Write enough lines to push all into scrollback
+	for _, l := range lines {
+		_, _ = g1.Write([]byte(l))
+	}
+	for i := 0; i < 30; i++ {
+		_, _ = g1.Write([]byte("Filler line\r\n"))
+	}
+
+	snap := g1.(Snapshotter).ExportSnapshot()
+	if snap.ScrollbackCount() < 5 {
+		t.Fatalf("expected >= 5 scrollback lines, got %d", snap.ScrollbackCount())
+	}
+	if len(snap.Styles) < 2 {
+		t.Fatalf("expected style palette with multiple styles, got %d", len(snap.Styles))
+	}
+
+	g2 := NewVT(80, 24)
+	defer g2.Close()
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	if g2.ScrollbackLen() != g1.ScrollbackLen() {
+		t.Fatalf("scrollback len mismatch: %d vs %d", g2.ScrollbackLen(), g1.ScrollbackLen())
+	}
+
+	// Verify all cells in scrollback match between g1 and g2
+	vg1, vg2 := g1.(*vtGrid), g2.(*vtGrid)
+	for y := 0; y < g1.ScrollbackLen(); y++ {
+		for x := 0; x < 80; x++ {
+			c1 := vg1.em.ScrollbackCellAt(x, y)
+			c2 := vg2.em.ScrollbackCellAt(x, y)
+			if c1 == nil && c2 == nil {
+				continue
+			}
+			if (c1 == nil) != (c2 == nil) {
+				t.Fatalf("scrollback nil mismatch at (%d, %d)", x, y)
+			}
+			if c1.Content != c2.Content {
+				t.Fatalf("scrollback content mismatch at (%d, %d): %q vs %q", x, y, c1.Content, c2.Content)
+			}
+			if c1.Width != c2.Width {
+				t.Fatalf("scrollback width mismatch at (%d, %d): %d vs %d", x, y, c1.Width, c2.Width)
+			}
+			if !c1.Style.Equal(&c2.Style) {
+				t.Fatalf("scrollback style mismatch at (%d, %d): %+v vs %+v", x, y, c1.Style, c2.Style)
+			}
+		}
+	}
+}
+
+func TestGridSnapshotLegacyRestore(t *testing.T) {
+	// Construct a snapshot that only has legacy Scrollback and Screen (no compact lines or styles)
+	legacySnap := &GridSnapshot{
+		Cols:          80,
+		Rows:          24,
+		CursorX:       5,
+		CursorY:       2,
+		CursorVisible: true,
+		Scrollback: []protocol.LineData{
+			{
+				{Content: "L", Width: 1, Style: protocol.StyleData{Underline: 1}},
+				{Content: "1", Width: 1},
+			},
+		},
+		Screen: []protocol.LineData{
+			{
+				{Content: "H", Width: 1},
+				{Content: "i", Width: 1},
+			},
+		},
+	}
+
+	g := NewVT(80, 24)
+	defer g.Close()
+	g.(Snapshotter).RestoreSnapshot(legacySnap)
+
+	if g.ScrollbackLen() != 1 {
+		t.Fatalf("restored legacy scrollback len = %d, want 1", g.ScrollbackLen())
+	}
+	vg := g.(*vtGrid)
+	c0 := vg.em.ScrollbackCellAt(0, 0)
+	if c0 == nil || c0.Content != "L" || c0.Style.Underline != 1 {
+		t.Fatalf("legacy scrollback cell 0 = %+v, want 'L' underlined", c0)
+	}
+
+	sc0 := g.CellAt(0, 0)
+	if sc0 == nil || sc0.Content != "H" {
+		t.Fatalf("legacy screen cell 0 = %+v, want 'H'", sc0)
+	}
+}
+
+func TestGridSnapshotMultiRuneCells(t *testing.T) {
+	g1 := NewVT(80, 24)
+	defer g1.Close()
+
+	// "e\u0301" is a base character + combining acute accent (2 runes in 1 cell)
+	// Write "Cafe\u0301" followed by a multi-rune emoji
+	_, _ = g1.Write([]byte("Cafe\u0301 👨‍👩‍👧‍👦 done\r\n"))
+
+	snap := g1.(Snapshotter).ExportSnapshot()
+
+	g2 := NewVT(80, 24)
+	defer g2.Close()
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	vg1 := g1.(*vtGrid)
+	vg2 := g2.(*vtGrid)
+
+	// Check row 0 cells
+	for x := 0; x < 80; x++ {
+		c1 := vg1.em.CellAt(x, 0)
+		c2 := vg2.em.CellAt(x, 0)
+		if c1 == nil && c2 == nil {
+			continue
+		}
+		if (c1 == nil) != (c2 == nil) {
+			t.Fatalf("cell %d nil mismatch: c1=%v, c2=%v", x, c1, c2)
+		}
+		if c1.Content != c2.Content {
+			t.Fatalf("cell %d Content mismatch: got %q, want %q", x, c2.Content, c1.Content)
+		}
+		if c1.Width != c2.Width {
+			t.Fatalf("cell %d Width mismatch: got %d, want %d", x, c2.Width, c1.Width)
+		}
+	}
+}
+
+func TestGridSnapshotClearsStaleScreenCells(t *testing.T) {
+	g1 := NewVT(80, 24)
+	defer g1.Close()
+	_, _ = g1.Write([]byte("Short line"))
+	snap := g1.(Snapshotter).ExportSnapshot()
+
+	// g2 has long text on row 0 that should be cleared by restoring the short snapshot
+	g2 := NewVT(80, 24)
+	defer g2.Close()
+	_, _ = g2.Write([]byte("This is a much longer line with stale trailing text that must be cleared"))
+
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	for x := len("Short line"); x < 80; x++ {
+		c := g2.CellAt(x, 0)
+		if c != nil && !c.Equal(&uv.EmptyCell) && !c.IsZero() {
+			t.Fatalf("cell at %d was not cleared: %+v", x, c)
+		}
 	}
 }
