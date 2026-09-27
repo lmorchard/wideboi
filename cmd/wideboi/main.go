@@ -841,6 +841,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 			// ExitAltScreen carries that state to the parent screen, and
 			// Terminal.Stop's Reset does not show a hidden cursor.
 			scr.ShowCursor()
+			scr.DisableBracketedPaste()
 			scr.ExitAltScreen()
 			_ = scr.Flush()
 			err = t.Stop()
@@ -1064,9 +1065,11 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				screenLock.Lock()
 				if !stopped.Load() {
 					scr.EnterAltScreen()
+					scr.EnableBracketedPaste()
 					enableMouse(scr, cfg)
 					if err := t.Start(); err != nil {
 						scr.ShowCursor()
+						scr.DisableBracketedPaste()
 						scr.ExitAltScreen()
 						_ = scr.Flush()
 						_ = t.Stop()
@@ -1170,6 +1173,9 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				cli.SetControlMode(rt.control)
 				cli.SetHelpVisible(rt.help)
 
+			case uv.PasteEvent:
+				handlePaste(ctx, cli, rt, ev)
+
 			case uv.MouseEvent:
 				if text := cli.HandleMouse(ctx, ev); text != "" {
 					screenLock.Lock()
@@ -1232,6 +1238,24 @@ func printEndNotice(w io.Writer, socket, why string) {
 	fmt.Fprintf(w, "[wideboi: the session at %s ended (%s); see %s]\n", socket, why, logger.ExitsPath(socket))
 }
 
+// handlePaste routes a bracketed paste event: clearing any active selection,
+// directing text to search query input if searching, or forwarding the raw bytes
+// to the focused pane.
+func handlePaste(ctx context.Context, cli *client.Client, rt *router, ev uv.PasteEvent) {
+	cli.ClearSelection()
+	if rt.help {
+		return
+	}
+	if rt.search == 1 {
+		cli.SearchEdit(ev.Content, false)
+		return
+	}
+	if rt.search == 2 {
+		return
+	}
+	cli.SendInput(ctx, []byte(ev.Content))
+}
+
 // enableMouse asks the host terminal to report presses, releases and
 // drags in SGR encoding, unless config turned the mouse off.
 //
@@ -1258,4 +1282,5 @@ func enableMouse(scr *uv.TerminalScreen, cfg config.Config) {
 func writeClipboard(scr *uv.TerminalScreen, text string) {
 	_, _ = scr.WriteString(ansi.SetSystemClipboard(text))
 	_ = scr.Flush()
+	writeLocalClipboard(text)
 }
