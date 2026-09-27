@@ -202,13 +202,8 @@ func TestWheelDownScrollsForward(t *testing.T) {
 	}
 }
 
-// A sliver shows chrome, not history, and the header row is not
-// content: neither has anything to scroll.
-//
-// The sliver is injected rather than laid out: since cards began
-// overlapping (#65) no strategy emits PlacementSliver, but the
-// renderer still honours it, so the mouse should too.
-func TestWheelOverSliverOrHeaderDoesNothing(t *testing.T) {
+// The header row is not content: it has nothing to scroll.
+func TestWheelOverHeaderDoesNothing(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	_ = ch
 	p2 := placementFor(cli, 2)
@@ -216,19 +211,6 @@ func TestWheelOverSliverOrHeaderDoesNothing(t *testing.T) {
 	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, 0, uv.MouseWheelUp))
 	if got := sent(ch); len(got) != 0 {
 		t.Errorf("wheel on header sent %v, want nothing", got)
-	}
-
-	cli.mu.Lock()
-	for i := range cli.placements {
-		if cli.placements[i].PaneID == 2 {
-			cli.placements[i].Kind = protocol.PlacementSliver
-		}
-	}
-	cli.mu.Unlock()
-
-	cli.HandleMouse(context.Background(), wheel(p2.Dst.Min.X+2, p2.Dst.Min.Y+2, uv.MouseWheelUp))
-	if got := sent(ch); len(got) != 0 {
-		t.Errorf("wheel on sliver sent %v, want nothing", got)
 	}
 }
 

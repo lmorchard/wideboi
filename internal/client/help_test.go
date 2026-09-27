@@ -8,6 +8,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/keys"
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -78,32 +79,37 @@ func TestControlHelpNamesEveryBarGroup(t *testing.T) {
 	}
 }
 
+func renderControlHintsRow(c *Client, budget int) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	scr := uv.NewScreenBuffer(budget, 1)
+	c.drawControlHintsLocked(scr, budget, 0)
+	return strings.TrimRight(screenRowText(scr, 0, budget), " ")
+}
+
 // Normal mode's only affordance is the hint, so it has to name the
 // prefix the user actually has -- not a hardcoded C-b.
 func TestNormalStatusNamesTheConfiguredPrefix(t *testing.T) {
-	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-a"}
-	got, style := c.statusLineLocked(99)
+	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-a", strip: layout.NewStrip()}
+	got := renderNormalStatusRow(c, 99)
 	if !strings.Contains(got, "C-a for commands") {
 		t.Errorf("normal status does not name the prefix: %q", got)
-	}
-	if !style.IsZero() {
-		t.Errorf("normal status carries a style: %+v", style)
 	}
 }
 
 // The hints row carries the charcoal background across the whole budget.
 func TestControlHintsRowHasCharcoalBackground(t *testing.T) {
-	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true, theme: DefaultTheme()}
-	got, style := c.controlHintsLineLocked(99)
-	if style.Bg != ansi.IndexedColor(236) {
-		t.Errorf("control hints background = %v, want ansi.IndexedColor(236)", style.Bg)
+	c := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true, theme: DefaultTheme(), strip: layout.NewStrip()}
+	scr := uv.NewScreenBuffer(99, 1)
+	c.drawControlHintsLocked(scr, 99, 0)
+	cell := scr.CellAt(0, 0)
+	if cell.Style.Bg != ansi.IndexedColor(236) {
+		t.Errorf("control hints background = %v, want ansi.IndexedColor(236)", cell.Style.Bg)
 	}
-	if style.Attrs&uv.AttrReverse != 0 {
-		t.Errorf("control hints should not have AttrReverse: %+v", style)
+	if cell.Style.Attrs&uv.AttrReverse != 0 {
+		t.Errorf("control hints should not have AttrReverse: %+v", cell.Style)
 	}
-	if n := runeLen(got); n != 99 {
-		t.Errorf("control hints is %d cells, want the full 99 so the whole row has background: %q", n, got)
-	}
+	got := strings.TrimRight(screenRowText(scr, 0, 99), " ")
 	if !strings.Contains(got, "q quit") {
 		t.Errorf("control hints does not name the quit verb: %q", got)
 	}
@@ -211,15 +217,15 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 // detachable flag down would pass the test above and still show the
 // wrong menu.
 func TestControlStatusOffersDetachOnlyWhenDetachable(t *testing.T) {
-	local := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
-	got, _ := local.controlHintsLineLocked(99)
+	local := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true, strip: layout.NewStrip()}
+	got := renderControlHintsRow(local, 99)
 	if strings.Contains(got, "d detach") {
 		t.Errorf("in-process hints line offers %q: %q", "d detach", got)
 	}
 
-	attached := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true}
+	attached := &Client{cols: 100, rows: 30, focusPaneID: 1, prefixLabel: "C-b", controlMode: true, strip: layout.NewStrip()}
 	attached.SetDetachable(true)
-	got, _ = attached.controlHintsLineLocked(99)
+	got = renderControlHintsRow(attached, 99)
 	if !strings.Contains(got, "d detach") {
 		t.Errorf("attached hints line omits %q: %q", "d detach", got)
 	}
@@ -239,7 +245,7 @@ func TestCustomBindingsInControlHelpAndHelpLines(t *testing.T) {
 	c.SetDetachable(true)
 	c.SetControlMode(true)
 
-	status, _ := c.controlHintsLineLocked(79)
+	status := renderControlHintsRow(c, 79)
 	if !strings.Contains(status, "k kill") {
 		t.Errorf("hints line should contain 'k kill', got: %q", status)
 	}

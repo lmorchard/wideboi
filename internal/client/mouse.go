@@ -3,10 +3,10 @@ package client
 import (
 	"context"
 	"image"
-	"sort"
 	"strings"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -25,10 +25,7 @@ const wheelStep = 3
 // which sits above Dst but belongs to the placement whose columns it
 // spans. c.mu must be held.
 func (c *Client) hitTestLocked(pt image.Point) *protocol.PlacementData {
-	ps := c.currentPlacementsLocked()
-	sorted := make([]protocol.PlacementData, len(ps))
-	copy(sorted, ps)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Z < sorted[j].Z })
+	sorted := sortByZ(c.currentPlacementsLocked())
 	for i := len(sorted) - 1; i >= 0; i-- {
 		p := sorted[i]
 		f := c.frameLocked(p)
@@ -41,37 +38,8 @@ func (c *Client) hitTestLocked(pt image.Point) *protocol.PlacementData {
 
 // visibleRectLocked is the part of p's Dst not painted over by a
 // placement drawn after it, narrowed toward pt.
-//
-// In the card fan a lower card's rect runs underneath the card above
-// it, so its visible part is a strip. Cards overlap horizontally and
-// span the same rows, so trimming whole sides keeps it a rectangle;
-// pt, which hit p, decides which side of an overlapping card to keep.
-// c.mu must be held.
 func (c *Client) visibleRectLocked(p *protocol.PlacementData, pt image.Point) image.Rectangle {
-	ps := c.currentPlacementsLocked()
-	sorted := make([]protocol.PlacementData, len(ps))
-	copy(sorted, ps)
-	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Z < sorted[j].Z })
-	r := p.Dst
-	above := false
-	for _, q := range sorted {
-		if q.PaneID == p.PaneID {
-			above = true
-			continue
-		}
-		// q's frame, not its Dst: a card's border covers the cell
-		// before its content.
-		qf := c.frameLocked(q)
-		if !above || !qf.Overlaps(r) {
-			continue
-		}
-		if pt.X < qf.Min.X {
-			r.Max.X = min(r.Max.X, qf.Min.X)
-		} else {
-			r.Min.X = max(r.Min.X, qf.Max.X)
-		}
-	}
-	return r
+	return layout.VisibleRect(*p, pt, sortByZ(c.currentPlacementsLocked()))
 }
 
 // contentHitLocked is hitTestLocked restricted to a pane's own content:

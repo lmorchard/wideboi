@@ -185,6 +185,7 @@ type PlacementData struct {
 	PaneID int
 	Src    image.Rectangle
 	Dst    image.Rectangle
+	Frame  image.Rectangle
 	Z      int
 	Kind   PlacementKind
 }

@@ -69,10 +69,12 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		col := s.columns[0]
 		w := min(col.Width, viewportWidth)
 		maxSrcY := max(0, col.Height-availHeight)
+		dst := image.Rect(0, 1, w, 1+availHeight)
 		return []Placement{{
 			PaneID: col.PaneID,
 			Src:    image.Rect(0, maxSrcY, w, maxSrcY+availHeight),
-			Dst:    image.Rect(0, 1, w, 1+availHeight),
+			Dst:    dst,
+			Frame:  dst,
 			Z:      1,
 			// A lone column is occluded by nothing.
 			Kind: protocol.PlacementFull,
@@ -118,6 +120,11 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			return
 		}
 
+		frame := dst
+		if left > 0 {
+			frame = image.Rect(left-1, 1, right, 1+availHeight)
+		}
+
 		// With overlapping cards, every pane is rendered as full content.
 		// It's the z-order and clipping that handles the "sliver" effect.
 		kind := protocol.PlacementFull
@@ -127,6 +134,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			PaneID: col.PaneID,
 			Src:    image.Rect(0, maxSrcY, dst.Dx(), maxSrcY+availHeight),
 			Dst:    dst,
+			Frame:  frame,
 			Z:      z,
 			Kind:   kind,
 		})
