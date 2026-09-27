@@ -36,9 +36,7 @@ func TestToggleLayoutSendsNothing(t *testing.T) {
 
 	cli.ToggleLayout()
 
-	cli.mu.Lock()
-	mode := cli.layoutMode
-	cli.mu.Unlock()
+	mode := cli.LayoutMode()
 	if mode != protocol.LayoutCards {
 		t.Errorf("layoutMode = %v after one toggle from scroll, want %v", mode, protocol.LayoutCards)
 	}

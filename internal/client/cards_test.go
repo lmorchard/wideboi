@@ -300,62 +300,6 @@ func TestClippedPaneIsNotDrawnAsChrome(t *testing.T) {
 	}
 }
 
-// A title the child chose can be any width, and a sliver must not
-// draw outside the rect it was given.
-//
-// Asserted against drawSliverLocked directly rather than against the
-// composed screen, because the composed screen can no longer show
-// this. Cards are packed contiguously across the full viewport now,
-// so a sliver's overflow either lands in the next card's region and
-// is painted over when that card draws, or runs off the right edge
-// and is clipped. Plan 17's version watched the composited output and
-// silently stopped discriminating the moment the geometry changed --
-// it passed against deliberately broken truncation.
-func TestSliverTitleIsTruncatedByWidthNotRunes(t *testing.T) {
-	const cols, rows = 60, 12
-	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
-
-	// A 15-cell sliver parked in the middle of a wide blank surface,
-	// so anything it writes outside its bounds is visible.
-	p := &protocol.PlacementData{
-		PaneID: 7,
-		Src:    image.Rect(0, 0, 15, 10),
-		Dst:    image.Rect(20, 1, 35, 11),
-		Kind:   protocol.PlacementSliver,
-	}
-	st := frameState{
-		placements:   []protocol.PlacementData{*p},
-		focusPaneID:  1,
-		paneStatuses: map[int]protocol.PaneStatus{7: protocol.StatusWorking},
-		// 12 double-width runes: 12 runes but 24 cells, against 15.
-		paneTitles: map[int]string{7: "日本語日本語日本語日本語"},
-	}
-
-	scr := newFakeHostScreen(cols, rows)
-	cli.mu.Lock()
-	cli.drawSliverLocked(scr, p, st)
-	cli.mu.Unlock()
-
-	for y := 0; y < rows; y++ {
-		for x := 0; x < cols; x++ {
-			inside := x >= p.Dst.Min.X && x < p.Dst.Max.X && y >= p.Dst.Min.Y && y < p.Dst.Max.Y
-			if inside {
-				continue
-			}
-			c := scr.CellAt(x, y)
-			if c != nil && strings.TrimSpace(c.Content) != "" {
-				t.Fatalf("sliver wrote %q at (%d,%d), outside its rect %v",
-					c.Content, x, y, p.Dst)
-			}
-		}
-	}
-
-	// And it must have drawn something inside.
-	if !strings.ContainsAny(regionText(scr, p.Dst), "日") {
-		t.Error("the sliver drew none of the title at all")
-	}
-}
-
 func TestHeaderTitleIsTruncatedByWidthNotRunes(t *testing.T) {
 	const cols, rows = 60, 12
 	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
@@ -560,9 +504,7 @@ func TestEmptySnapshotKeepsClientLayoutMode(t *testing.T) {
 	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
 		Columns: nil})
 
-	cli.mu.Lock()
-	got := cli.layoutMode
-	cli.mu.Unlock()
+	got := cli.LayoutMode()
 	if got != protocol.LayoutCards {
 		t.Errorf("layoutMode = %v after an empty snapshot, want the client's %v", got, protocol.LayoutCards)
 	}

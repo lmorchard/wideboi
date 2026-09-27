@@ -4,9 +4,18 @@ import (
 	"strings"
 	"testing"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
+
+func renderNormalStatusRow(c *Client, budget int) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	scr := uv.NewScreenBuffer(budget, 1)
+	c.drawNormalStatusBarLocked(scr, budget, 0)
+	return strings.TrimRight(screenRowText(scr, 0, budget), " ")
+}
 
 // The status line names this client's layout (#91): an accidental C-b c
 // used to leave a session in scroll mode with nothing on screen to say
@@ -26,7 +35,7 @@ func TestNormalStatusShowsLayoutMode(t *testing.T) {
 		mode protocol.LayoutMode
 		name string
 	}{{protocol.LayoutCards, "cards"}, {protocol.LayoutScroll, "scroll"}} {
-		got, _ := tagClient(tc.mode).statusLineLocked(99)
+		got := renderNormalStatusRow(tagClient(tc.mode), 99)
 		if want := tc.name + " · C-b for commands"; !strings.HasSuffix(got, want) {
 			t.Errorf("%s: status line %q does not end with %q", tc.name, got, want)
 		}
@@ -40,7 +49,7 @@ func TestNormalStatusDropsHintBeforeLayoutTag(t *testing.T) {
 	if runeLen(plainStatus)+2+runeLen("cards · C-b for commands") <= budget {
 		t.Fatal("test setup bug: tag and hint both fit at this budget")
 	}
-	got, _ := tagClient(protocol.LayoutCards).statusLineLocked(budget)
+	got := renderNormalStatusRow(tagClient(protocol.LayoutCards), budget)
 	if !strings.HasSuffix(got, "cards") || strings.Contains(got, "for commands") {
 		t.Errorf("at %d cells got %q; want the tag kept and the hint dropped", budget, got)
 	}
@@ -48,7 +57,7 @@ func TestNormalStatusDropsHintBeforeLayoutTag(t *testing.T) {
 
 func TestNormalStatusDropsLayoutTagWhenNothingFits(t *testing.T) {
 	budget := runeLen(plainStatus) + 1
-	got, _ := tagClient(protocol.LayoutCards).statusLineLocked(budget)
+	got := renderNormalStatusRow(tagClient(protocol.LayoutCards), budget)
 	if strings.Contains(got, "cards") || strings.Contains(got, "for commands") {
 		t.Errorf("at %d cells got %q; want neither tag nor hint", budget, got)
 	}
@@ -60,7 +69,7 @@ func TestNormalStatusDropsLayoutTagWhenNothingFits(t *testing.T) {
 func TestToggleLayoutUpdatesStatusTag(t *testing.T) {
 	c := tagClient(protocol.LayoutCards)
 	c.ToggleLayout()
-	if got, _ := c.statusLineLocked(99); !strings.Contains(got, "scroll · ") {
+	if got := renderNormalStatusRow(c, 99); !strings.Contains(got, "scroll · ") {
 		t.Errorf("after toggling from cards the status line is %q; want the scroll tag", got)
 	}
 }

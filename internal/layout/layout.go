@@ -12,6 +12,7 @@ type Placement struct {
 	PaneID int
 	Src    image.Rectangle
 	Dst    image.Rectangle
+	Frame  image.Rectangle
 	Z      int
 	// Kind distinguishes a pane drawing its own content from an
 	// occluded card drawn as chrome. Geometry cannot: see
@@ -416,6 +417,7 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 			PaneID: c.PaneID,
 			Src:    src,
 			Dst:    dst,
+			Frame:  dst,
 			Z:      0,
 			// Always Full. This strategy clips panes at the viewport
 			// edge, and a clipped pane is still showing its own
@@ -431,10 +433,15 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 func ToProtocol(placements []Placement) []protocol.PlacementData {
 	out := make([]protocol.PlacementData, len(placements))
 	for i, p := range placements {
+		frame := p.Frame
+		if frame.Empty() {
+			frame = p.Dst
+		}
 		out[i] = protocol.PlacementData{
 			PaneID: p.PaneID,
 			Src:    p.Src,
 			Dst:    p.Dst,
+			Frame:  frame,
 			Z:      p.Z,
 			Kind:   p.Kind,
 		}
@@ -496,4 +503,66 @@ func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
 		}
 	}
 	s.lastFocusPaneID = 0
+}
+
+// HiddenCounts reports how many columns have no placement, split by which
+// side of the focused column they sit on.
+func (s *Strip) HiddenCounts(placedPaneIDs []int) (left, right int) {
+	if len(s.columns) == 0 {
+		return 0, 0
+	}
+
+	placed := make(map[int]bool, len(placedPaneIDs))
+	for _, id := range placedPaneIDs {
+		placed[id] = true
+	}
+
+	for i, col := range s.columns {
+		if placed[col.PaneID] {
+			continue
+		}
+		if i < s.focusIndex {
+			left++
+		} else {
+			right++
+		}
+	}
+	return left, right
+}
+
+// ApplyPan shifts the Src crop rectangle of full-content placements horizontally by panX.
+func ApplyPan(placements []Placement, panX map[int]int) {
+	for i := range placements {
+		if placements[i].Kind == protocol.PlacementFull {
+			if dx := panX[placements[i].PaneID]; dx != 0 {
+				placements[i].Src = placements[i].Src.Add(image.Pt(dx, 0))
+			}
+		}
+	}
+}
+
+// VisibleRect calculates the screen rect of p not painted over by a
+// placement drawn after it, narrowed toward pt.
+func VisibleRect(p protocol.PlacementData, pt image.Point, sorted []protocol.PlacementData) image.Rectangle {
+	r := p.Dst
+	above := false
+	for _, q := range sorted {
+		if q.PaneID == p.PaneID {
+			above = true
+			continue
+		}
+		qf := q.Frame
+		if qf.Empty() {
+			qf = q.Dst
+		}
+		if !above || !qf.Overlaps(r) {
+			continue
+		}
+		if pt.X < qf.Min.X {
+			r.Max.X = min(r.Max.X, qf.Min.X)
+		} else {
+			r.Min.X = max(r.Min.X, qf.Max.X)
+		}
+	}
+	return r
 }
