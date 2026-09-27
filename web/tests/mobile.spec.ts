@@ -479,3 +479,177 @@ test('fresh terminal starts zoomed all the way out with no vertical scroll', asy
     scrollDiff: 0,
   });
 });
+
+test('mobile bar command menu button opens dialog and closes with close button', async ({ page }) => {
+  await connect(page);
+  const cmdBtn = page.getByRole('button', { name: 'Command menu' });
+  await expect(cmdBtn).toBeVisible();
+
+  await cmdBtn.click();
+  const dialog = page.locator('.command-menu-dialog');
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('#command-menu-title')).toContainText('Commands');
+  await expect(page.getByRole('menuitem', { name: 'Command Palette' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Command Prompt' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'New Pane' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Close Pane' })).toBeVisible();
+
+  const closeBtn = page.getByRole('button', { name: 'Close command menu' });
+  await closeBtn.click();
+  await expect(dialog).toHaveCount(0);
+});
+
+test('mobile command menu summons command palette and command prompt', async ({ page }) => {
+  await connect(page);
+
+  // 1. Summon Command Palette
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Command Palette' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  let splitMsgs = (await sent(page)).filter(msg => msg.case === 'splitRequest');
+  expect(splitMsgs).toHaveLength(1);
+  expect((splitMsgs[0].value as any).command).toBe('wideboi palette --caller-pane=1');
+
+  // 2. Summon Command Prompt
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Command Prompt' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  splitMsgs = (await sent(page)).filter(msg => msg.case === 'splitRequest');
+  expect(splitMsgs).toHaveLength(2);
+  expect((splitMsgs[1].value as any).command).toBe('wideboi prompt --caller-pane=1');
+});
+
+test('mobile command menu triggers new pane and dismisses on Escape or backdrop click', async ({ page }) => {
+  await connect(page);
+
+  // 1. Trigger New Pane
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'New Pane' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  const verbMsgs = (await sent(page)).filter(msg => msg.case === 'verb');
+  expect(verbMsgs.length).toBeGreaterThan(0);
+  expect((verbMsgs[0].value as any).paneId).toBe(1);
+
+  // 2. Dismiss via Escape
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await expect(page.locator('.command-menu-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  // 3. Dismiss via backdrop click
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await expect(page.locator('.command-menu-dialog')).toBeVisible();
+  await page.locator('.command-menu-overlay').click({ position: { x: 5, y: 5 } });
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+});
+
+test('mobile bar keeps select dropdown wide enough on 320px viewport', async ({ page }) => {
+  await connect(page);
+  await page.setViewportSize({ width: 320, height: 700 });
+  const select = page.getByRole('combobox', { name: 'Mobile pane' });
+  await expect(select).toBeVisible();
+  const box = await select.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.width).toBeGreaterThanOrEqual(60);
+});
+
+test('mobile command menu executes close-pane and triggers search', async ({ page }) => {
+  await connect(page);
+
+  // 1. Close pane
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Close Pane' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+  const verbMsgs = (await sent(page)).filter(msg => msg.case === 'verb');
+  expect(verbMsgs.length).toBeGreaterThan(0);
+  const killMsg = verbMsgs.find(m => (m.value as any).verb === 5); // VerbType.KILL_PANE
+  expect(killMsg).toBeDefined();
+
+  // 2. Search
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Search Scrollback' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+  await expect(page.locator('.toolbar.searching')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.toolbar.searching')).toHaveCount(0);
+});
+
+test('mobile command menu toggles cards layout and follow PTY', async ({ page }) => {
+  await connect(page);
+
+  // 1. Toggle Layout: Cards -> Scroll -> Cards
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  const toggleCards = page.getByRole('menuitem', { name: 'Switch to Scroll Mode' });
+  await expect(toggleCards).toBeVisible();
+  await toggleCards.click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  const toggleScroll = page.getByRole('menuitem', { name: 'Switch to Cards Mode' });
+  await expect(toggleScroll).toBeVisible();
+  await toggleScroll.click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  // 2. Toggle Follow PTY
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  const followBtn = page.getByRole('menuitem', { name: 'Follow PTY Width' });
+  await expect(followBtn).toBeVisible();
+  await followBtn.click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  const unfollowBtn = page.getByRole('menuitem', { name: 'Unfollow PTY Width' });
+  await expect(unfollowBtn).toBeVisible();
+  await unfollowBtn.click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+});
+
+test('mobile command menu opens settings and help overlays', async ({ page }) => {
+  await connect(page);
+
+  // 1. Settings
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Settings' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+  await expect(page.locator('.settings-dialog')).toBeVisible();
+  await page.locator('.settings-dialog .close-btn').click();
+  await expect(page.locator('.settings-dialog')).toHaveCount(0);
+
+  // 2. Help
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Help' }).click();
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+  await expect(page.locator('.help-dialog')).toBeVisible();
+  await page.locator('.help-dialog .close-btn').click();
+  await expect(page.locator('.help-dialog')).toHaveCount(0);
+});
+
+test('mobile command menu traps focus within modal dialog', async ({ page }) => {
+  await connect(page);
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  const dialog = page.locator('.command-menu-dialog');
+  await expect(dialog).toBeVisible();
+
+  // Focus moves into the dialog automatically
+  const firstItem = page.getByRole('menuitem', { name: 'Command Palette' });
+  await expect(firstItem).toBeFocused();
+
+  // Tab forwards around dialog focusable buttons
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press('Tab');
+  }
+  // Focus should remain inside the command menu dialog
+  const focusedTagName = await page.evaluate(() => {
+    const app = document.querySelector('wideboi-app');
+    const menu = app?.shadowRoot?.querySelector('wideboi-command-menu');
+    return menu?.shadowRoot?.activeElement?.tagName;
+  });
+  expect(focusedTagName).toBe('BUTTON');
+
+  // Escape closes and restores focus
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
