@@ -6,9 +6,12 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -286,5 +289,169 @@ func TestUpgradeStateRoundTrip(t *testing.T) {
 	}
 	if newS.expectedOwnerPID != 0 {
 		t.Errorf("newS.expectedOwnerPID = %d, want 0", newS.expectedOwnerPID)
+	}
+}
+
+// startReadPane starts a pty pane whose child reads one line and prints
+// it back with a prefix, so a test can assert on output the child
+// produced rather than on the tty's echo of what was typed.
+func startReadPane(t *testing.T, id int) *Pane {
+	t.Helper()
+	p, err := NewPane(id, []string{"/bin/sh", "-c", "read x; echo got:$x; sleep 5"}, 40, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Start(func() {})
+	t.Cleanup(func() { _ = p.Close() })
+	return p
+}
+
+func TestInputDuringUpgradeReachesPtyPane(t *testing.T) {
+	ctx := context.Background()
+	tp := transport.NewInProcChannel(64)
+	s := newBareServer(tp)
+	dataPane := startReadPane(t, 1)
+	keyPane := startReadPane(t, 2)
+	s.panes[1] = dataPane
+	s.panes[2] = keyPane
+
+	s.mu.Lock()
+	s.upgrading = true
+	s.mu.Unlock()
+
+	// Data-form input is written to the pty synchronously.
+	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 1, Data: []byte("abc\r")})
+	// Key-form input goes through the pane's queue and key-writer.
+	for _, r := range "xyz" {
+		k := uv.KeyPressEvent{Code: r, Text: string(r)}
+		s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 2, Key: protocol.EncodeKey(k)})
+	}
+	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 2, Key: protocol.EncodeKey(uv.KeyPressEvent{Code: uv.KeyEnter})})
+
+	waitFor(t, 3*time.Second, "data input to reach the child", func() bool {
+		return strings.Contains(dataPane.CaptureText(false, 0), "got:abc")
+	})
+	waitFor(t, 3*time.Second, "key input to reach the child", func() bool {
+		return strings.Contains(keyPane.CaptureText(false, 0), "got:xyz")
+	})
+}
+
+func TestUpgradeDropsNonInputMessages(t *testing.T) {
+	ctx := context.Background()
+	tp := transport.NewInProcChannel(64)
+	s := newBareServer(tp)
+	custom := NewCustomPane(3, term.NewVT(20, 5), 20, 5)
+	s.panes[3] = custom
+
+	s.mu.Lock()
+	s.upgrading = true
+	s.clientLocked(tp).clientScrollOffsets[3] = 5
+	s.mu.Unlock()
+
+	// With no size owner and no size yet, a resize would claim the size
+	// and set the session geometry, were it handled.
+	s.handleClientMsg(ctx, tp, protocol.MsgResize{Cols: 99, Rows: 9})
+	// Input to a pane without a pty would snap this client's scroll
+	// offset back to live, were it handled.
+	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 3, Data: []byte("x")})
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cols != 0 || s.rows != 0 || s.sizeOwner != nil {
+		t.Errorf("resize during upgrade was handled: cols=%d rows=%d sizeOwner=%v", s.cols, s.rows, s.sizeOwner)
+	}
+	if got := s.clientLocked(tp).clientScrollOffsets[3]; got != 5 {
+		t.Errorf("input to a pty-less pane during upgrade was handled: scroll offset %d, want 5", got)
+	}
+}
+
+func TestDrainInputWaitsForQueuedKeys(t *testing.T) {
+	p, err := NewPane(1, []string{"/bin/cat"}, 40, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Start(func() {})
+	t.Cleanup(func() { _ = p.Close() })
+
+	for i := 0; i < 50; i++ {
+		p.SendBytes([]byte("0123456789"))
+	}
+	if !p.drainInput(2 * time.Second) {
+		t.Fatal("drainInput timed out")
+	}
+	if n := len(p.input); n != 0 {
+		t.Errorf("%d events still queued after drain, want 0", n)
+	}
+
+	noPty := NewCustomPane(2, term.NewVT(20, 5), 20, 5)
+	noPty.SendBytes([]byte("x"))
+	if !noPty.drainInput(10 * time.Millisecond) {
+		t.Error("a pane without a pty should drain trivially")
+	}
+}
+
+func TestExecHoldsLockAfterDrain(t *testing.T) {
+	tp := &closableTransport{InProcChannel: transport.NewInProcChannel(8)}
+	s := newBareServer(tp)
+	s.startedTransports = map[transport.Transport]bool{tp: true}
+
+	binPath, err := exec.LookPath("sh")
+	if err != nil {
+		binPath = os.Args[0]
+	}
+
+	heldAtExec := false
+	s.execSyscall = func(bin string, args, env []string) error {
+		// Nothing may queue input between the drain and the exec.
+		if s.mu.TryLock() {
+			s.mu.Unlock()
+		} else {
+			heldAtExec = true
+		}
+		return errors.New("simulated exec error")
+	}
+
+	tp.ClientSend <- protocol.MsgUpgradeRequest{BinPath: binPath}
+	runLoopUntilReturn(t, s, tp)
+
+	if !heldAtExec {
+		t.Error("s.mu was not held at exec")
+	}
+	if !s.mu.TryLock() {
+		t.Fatal("s.mu still held after failed exec")
+	}
+	defer s.mu.Unlock()
+	if s.upgrading {
+		t.Error("s.upgrading still true after failed exec rollback")
+	}
+}
+
+// TestDrainInputWaitsForPtyWrite pins that drainInput covers the last
+// hop. A key reaches the pty-writer through vt's reply pipe, and the
+// pty-writer can still be writing it to the pty after the key-writer is
+// done with it. Slow each pty write down, and when drainInput returns
+// every byte must already have been written.
+func TestDrainInputWaitsForPtyWrite(t *testing.T) {
+	p, err := NewPane(1, []string{"/bin/cat"}, 40, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written atomic.Int64
+	p.ptyWritten = func(n int) {
+		time.Sleep(20 * time.Millisecond) // the slow hop under test
+		written.Add(int64(n))
+	}
+	p.Start(func() {})
+	t.Cleanup(func() { _ = p.Close() })
+
+	const keys = 5
+	for i := 0; i < keys; i++ {
+		p.SendKey(uv.KeyPressEvent{Code: 'a', Text: "a"})
+	}
+	if !p.drainInput(5 * time.Second) {
+		t.Fatal("drainInput timed out")
+	}
+	if got := written.Load(); got != keys {
+		t.Fatalf("drainInput returned with %d of %d key bytes written to the pty", got, keys)
 	}
 }

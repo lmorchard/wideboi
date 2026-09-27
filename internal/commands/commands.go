@@ -80,7 +80,13 @@ func DescribeHandshakeErr(socket string, err error, hint string) error {
 // ordinary; before this it surfaced as "protobuf frame too large"
 // (#174). conn is closed on failure.
 func HandshakeServer(conn net.Conn, socket string) error {
-	if _, err := transport.Handshake(conn); err != nil {
+	return HandshakeServerWithin(conn, socket, transport.HandshakeCeiling)
+}
+
+// HandshakeServerWithin is HandshakeServer with an explicit ceiling on
+// the wait for the server's hello; see transport.HandshakeWithin.
+func HandshakeServerWithin(conn net.Conn, socket string, ceiling time.Duration) error {
+	if _, err := transport.HandshakeWithin(conn, ceiling); err != nil {
 		conn.Close()
 		return DescribeHandshakeErr(socket, err, "")
 	}

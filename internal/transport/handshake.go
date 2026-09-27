@@ -63,7 +63,15 @@ func (e *MismatchError) Unwrap() error { return e.cause }
 // first. On failure the caller closes conn, which also releases a send
 // the peer never read.
 func Handshake(conn net.Conn) (Hello, error) {
-	_ = conn.SetDeadline(time.Now().Add(HandshakeCeiling))
+	return HandshakeWithin(conn, HandshakeCeiling)
+}
+
+// HandshakeWithin is Handshake with an explicit ceiling, for a peer that
+// is known to be alive but may be slow to answer: a server restoring
+// its state after an in-place upgrade accepts connections before it is
+// ready to say hello.
+func HandshakeWithin(conn net.Conn, ceiling time.Duration) (Hello, error) {
+	_ = conn.SetDeadline(time.Now().Add(ceiling))
 	defer conn.SetDeadline(time.Time{})
 
 	sent := make(chan error, 1)

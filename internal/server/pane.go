@@ -59,6 +59,11 @@ type Pane struct {
 	// default; see graceOrDefault.
 	closeGrace time.Duration
 
+	// ptyWritten, if set, is called by the pty-writer after each write to
+	// the pty with the byte count. Tests use it to slow that hop down and
+	// to see when bytes have really left the process.
+	ptyWritten func(n int)
+
 	dead atomic.Bool
 
 	keep        bool
@@ -181,7 +186,11 @@ func (p *Pane) Start(onExit func()) {
 		for {
 			n, err := p.grid.Read(buf)
 			if n > 0 {
-				if _, werr := p.pty.WriteBounded(buf[:n], ptyWriteTimeout); werr != nil {
+				_, werr := p.pty.WriteBounded(buf[:n], ptyWriteTimeout)
+				if p.ptyWritten != nil {
+					p.ptyWritten(n)
+				}
+				if werr != nil {
 					if errors.Is(werr, os.ErrDeadlineExceeded) {
 						p.dropped.Add(uint64(n))
 						continue
@@ -212,6 +221,13 @@ func (p *Pane) Start(onExit func()) {
 					p.grid.SendMouse(ev)
 				case RawBytes:
 					_, _ = p.Write(ev)
+				case inputFlush:
+					// Everything queued before this is with vt or the
+					// pty. An empty send still waits for the pty-writer's
+					// next Read (io.Pipe), which it makes only once its
+					// previous pty write has returned.
+					p.grid.SendText("")
+					close(ev)
 				}
 			case <-p.closed:
 				return
@@ -611,3 +627,36 @@ func (p *Pane) recordFailure(err error) {
 }
 
 var _ io.Writer = (*Pane)(nil)
+
+// inputFlush is queued behind pending input by drainInput, and closed
+// by the key-writer once everything ahead of it has reached the pty.
+type inputFlush chan struct{}
+
+// drainInput waits until every queued key, mouse event and paste has
+// been written to the pty, or ceiling passes, and reports whether it
+// finished. A pane without a pty has no writer and drains trivially. The
+// in-place upgrade calls it before exec, which would otherwise take
+// whatever is still queued with it.
+func (p *Pane) drainInput(ceiling time.Duration) bool {
+	if p.pty == nil {
+		return true
+	}
+	timer := time.NewTimer(ceiling)
+	defer timer.Stop()
+	done := make(inputFlush)
+	select {
+	case p.input <- done:
+	case <-p.closed:
+		return true
+	case <-timer.C:
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	case <-p.closed:
+		return true
+	case <-timer.C:
+		return false
+	}
+}

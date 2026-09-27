@@ -472,3 +472,35 @@ func TestSendClientMsgAndSendVerb(t *testing.T) {
 		t.Fatal("timed out waiting for MsgDetach")
 	}
 }
+
+// TestHandshakeServerWithinKeepsTimeoutApartFromMismatch pins what the
+// upgrade reconnect relies on to label a failure: a server that never
+// answers is not a *transport.MismatchError, one of another protocol is.
+func TestHandshakeServerWithinKeepsTimeoutApartFromMismatch(t *testing.T) {
+	var mm *transport.MismatchError
+
+	silent, silentPeer := net.Pipe()
+	defer silentPeer.Close()
+	err := commands.HandshakeServerWithin(silent, "sock", 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("handshake with a silent server succeeded")
+	}
+	if errors.As(err, &mm) {
+		t.Errorf("timeout reported as a mismatch: %v", err)
+	}
+
+	other, otherPeer := net.Pipe()
+	go func() {
+		defer otherPeer.Close()
+		_ = writeMismatchHello(otherPeer, 999, 4321)
+		var header [4]byte
+		if _, err := io.ReadFull(otherPeer, header[:]); err == nil {
+			buf := make([]byte, binary.BigEndian.Uint32(header[:]))
+			_, _ = io.ReadFull(otherPeer, buf)
+		}
+	}()
+	err = commands.HandshakeServerWithin(other, "sock", 2*time.Second)
+	if !errors.As(err, &mm) {
+		t.Errorf("mismatch not reported as one: %v", err)
+	}
+}

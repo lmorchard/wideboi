@@ -37,4 +37,8 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 )
 
-replace github.com/charmbracelet/x/vt => github.com/lmorchard/x/vt v0.0.0-20260924233645-cacc71cdcc0f
+// The fork carries upstream's scrollback ring-buffer PRs (#205) plus
+// Emulator.ScrollRegion/CursorPen accessors that upstream lacks (#299).
+// Dropping it needs those accessors upstreamed or their callers in
+// internal/server/term reworked, not just this line removed.
+replace github.com/charmbracelet/x/vt => github.com/lmorchard/x/vt v0.0.0-20260927070202-7093773bb668

@@ -683,6 +683,15 @@ var errSessionTaken = errors.New("session taken")
 // holds the lock before it binds, so it is normally milliseconds away.
 const takenCeiling = 5 * time.Second
 
+// reconnectHandshakeCeiling bounds the wait for a reconnected server's
+// hello. After an in-place upgrade the new process binds the socket
+// before restoring state and answers only once the restore is done:
+// 8 panes of 10,000 scrollback lines took 12-18s to restore
+// (BenchmarkRestoreStateHeavy, 2026-09-26, #299). The dial itself
+// stays short -- a dead server refuses it just as a not-yet-bound one
+// does -- so only a server that accepted the connection gets this long.
+const reconnectHandshakeCeiling = 60 * time.Second
+
 // reapCeiling bounds the wait for a spawned server's exit code once
 // its owner connection has closed; the reap follows the close promptly.
 const reapCeiling = 2 * time.Second
@@ -1026,8 +1035,13 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 
 				// A server restarted from another build is not one to
 				// rejoin.
-				if err := handshakeServer(reconnectConn, cfg.Socket); err != nil {
-					endReason = "reconnected to an incompatible server"
+				if err := handshakeServerWithin(reconnectConn, cfg.Socket, reconnectHandshakeCeiling); err != nil {
+					var mm *transport.MismatchError
+					if errors.As(err, &mm) {
+						endReason = "reconnected to an incompatible server"
+					} else {
+						endReason = "reconnected server did not answer: " + err.Error()
+					}
 					return err
 				}
 				slog.Info("reconnected successfully")
