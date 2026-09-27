@@ -185,6 +185,8 @@ func (s *Server) handleSplitRequestLocked(tp transport.Transport, m protocol.Msg
 		eff.splitResp = &protocol.MsgSplitResponse{Error: err.Error()}
 	} else {
 		eff.splitResp = &protocol.MsgSplitResponse{PaneID: p.ID()}
+		eff.createdPaneID = p.ID()
+		eff.focusTargetID = p.ID()
 		eff.needBroadcast = true
 		// A server that split auto-spawned never sees an attach,
 		// which is otherwise what marks startup done; without this
@@ -349,7 +351,7 @@ func (s *Server) handleResizeLocked(tp transport.Transport, m protocol.MsgResize
 
 func (s *Server) handleSetPaneWidthLocked(tp transport.Transport, m protocol.MsgSetPaneWidth) msgEffects {
 	var eff msgEffects
-	if tp == s.sizeOwner && m.Width >= layout.MinColumnWidth && m.Width <= layout.MaxColumnWidth {
+	if (tp == s.sizeOwner || !s.isAttachedLocked(tp)) && m.Width >= layout.MinColumnWidth && m.Width <= layout.MaxColumnWidth {
 		if old, ok := s.strip.ColumnWidth(m.PaneID); ok && old != m.Width {
 			s.strip.SetColumnWidth(m.PaneID, m.Width)
 			s.resizePanesLocked()

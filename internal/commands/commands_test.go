@@ -4,10 +4,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lmorchard/wideboi/internal/commands"
+	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server"
+	"github.com/lmorchard/wideboi/internal/transport"
 )
 
 func TestParseLine(t *testing.T) {
@@ -189,5 +196,154 @@ func TestQuotedArgsPreservedInRun(t *testing.T) {
 	}
 	if len(args) != 3 || args[0] != "printf" || args[1] != "%s" || args[2] != "hello world" {
 		t.Fatalf("args = %v, want ['printf', '%%s', 'hello world']", args)
+	}
+}
+
+func TestSetWidthValidation(t *testing.T) {
+	r := commands.DefaultRegistry
+	ctx := context.Background()
+
+	// No args
+	inv := commands.Invocation{CallerPaneID: 1}
+	err := r.Execute(ctx, inv, ":set-width")
+	if err == nil || !strings.Contains(err.Error(), "usage:") {
+		t.Fatalf("expected usage error, got %v", err)
+	}
+
+	// No caller pane
+	invNoPane := commands.Invocation{CallerPaneID: 0}
+	err = r.Execute(ctx, invNoPane, ":set-width 60")
+	if err == nil || !strings.Contains(err.Error(), "no focused pane") {
+		t.Fatalf("expected 'no focused pane' error, got %v", err)
+	}
+
+	// Invalid int
+	err = r.Execute(ctx, inv, ":set-width invalid")
+	if err == nil || !strings.Contains(err.Error(), "invalid width") {
+		t.Fatalf("expected 'invalid width' error, got %v", err)
+	}
+
+	// Below MinColumnWidth
+	err = r.Execute(ctx, inv, ":set-width 10")
+	if err == nil || !strings.Contains(err.Error(), "between") {
+		t.Fatalf("expected width bounds error, got %v", err)
+	}
+
+	// Above MaxColumnWidth (layout.MaxColumnWidth is 4096)
+	err = r.Execute(ctx, inv, ":set-width 5000")
+	if err == nil || !strings.Contains(err.Error(), "between") {
+		t.Fatalf("expected width bounds error, got %v", err)
+	}
+}
+
+func TestSetWidthExecution(t *testing.T) {
+	dir, err := os.MkdirTemp("", "wbtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	sock := filepath.Join(dir, "s.sock")
+	sl, err := transport.NewSocketListener(sock)
+	if err != nil {
+		t.Fatalf("NewSocketListener: %v", err)
+	}
+	defer sl.Close()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.ListenSocket(ctx, sl)
+	go func() { _ = s.Run(ctx) }()
+
+	// Attach a client so the server has active session geometry and startup panes
+	clientConn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 100, Rows: 30}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+
+	// Read until initial layout snapshot arrives
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+			break
+		}
+	}
+
+	inv := commands.Invocation{
+		CallerPaneID: paneID,
+		Socket:       sock,
+	}
+
+	r := commands.DefaultRegistry
+	if err := r.Execute(ctx, inv, ":set-width 65"); err != nil {
+		t.Fatalf("Execute(:set-width 65) failed: %v", err)
+	}
+
+	// Read frames until layout snapshot with updated width arrives
+	var updatedWidth int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading server frame after set-width: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+			for _, col := range snap.Columns {
+				if col.PaneID == paneID && col.Width == 65 {
+					updatedWidth = col.Width
+					break
+				}
+			}
+			if updatedWidth == 65 {
+				break
+			}
+		}
+	}
+
+	if updatedWidth != 65 {
+		t.Fatalf("column width = %d, want 65", updatedWidth)
+	}
+}
+
+func TestDetachCommand(t *testing.T) {
+	dir, err := os.MkdirTemp("", "wbtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	detachFile := filepath.Join(dir, "detach.tmp")
+	inv := commands.Invocation{
+		CallerPaneID: 1,
+		DetachFile:   detachFile,
+	}
+
+	r := commands.DefaultRegistry
+	if err := r.Execute(context.Background(), inv, ":detach"); err != nil {
+		t.Fatalf("Execute(:detach) with DetachFile failed: %v", err)
+	}
+
+	data, err := os.ReadFile(detachFile)
+	if err != nil {
+		t.Fatalf("reading detachFile: %v", err)
+	}
+	if !strings.Contains(string(data), "detach") {
+		t.Fatalf("detachFile content = %q, want 'detach'", string(data))
 	}
 }

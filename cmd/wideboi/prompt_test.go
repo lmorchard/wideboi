@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -45,5 +47,29 @@ func TestPromptHelpExecution(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Available Commands:") {
 		t.Errorf("output missing help text, got:\n%s", out.String())
+	}
+}
+
+func TestPromptDetachFile(t *testing.T) {
+	var in bytes.Buffer
+	var out, errOut bytes.Buffer
+
+	dir := shortTempDir(t)
+	detachFile := filepath.Join(dir, "detach.tmp")
+
+	in.WriteString("detach\n")
+	cfg := paletteTestConfig(t)
+
+	err := runPrompt(cfg, []string{"--caller-pane=1", "--detach-file=" + detachFile}, &in, &out, &errOut)
+	if err != nil {
+		t.Fatalf("runPrompt failed: %v", err)
+	}
+
+	data, err := os.ReadFile(detachFile)
+	if err != nil {
+		t.Fatalf("reading detachFile: %v", err)
+	}
+	if !strings.Contains(string(data), "detach") {
+		t.Errorf("detachFile content = %q, want 'detach'", string(data))
 	}
 }

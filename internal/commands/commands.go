@@ -24,6 +24,7 @@ type Invocation struct {
 	Cfg          config.Config
 	Socket       string
 	CallerPaneID int
+	DetachFile   string
 	Args         []string
 	Stdout       io.Writer
 	Stderr       io.Writer

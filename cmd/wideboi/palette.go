@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/lmorchard/wideboi/internal/commands"
@@ -21,10 +22,11 @@ func runPalette(cfg config.Config, args []string, stdin io.Reader, stdout, stder
 	fs.SetOutput(stderr)
 
 	var callerPane int
-	var session, socket string
+	var session, socket, detachFile string
 
 	fs.IntVar(&callerPane, "caller-pane", 0, "pane ID that invoked the palette")
 	addTargetFlags(fs, &session, &socket)
+	fs.StringVar(&detachFile, "detach-file", "", "path to file to touch on detach")
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -39,6 +41,7 @@ func runPalette(cfg config.Config, args []string, stdin io.Reader, stdout, stder
 		Cfg:          cfg,
 		Socket:       cfg.Socket,
 		CallerPaneID: callerPane,
+		DetachFile:   detachFile,
 		Stdout:       stdout,
 		Stderr:       stderr,
 	}
@@ -66,7 +69,7 @@ func runPalette(cfg config.Config, args []string, stdin io.Reader, stdout, stder
 			_, _ = fmt.Fprintf(stdout, "%s - %s\n", m.Name, m.Description)
 		}
 		if len(matches) > 0 && query != "" {
-			_ = commands.DefaultRegistry.Execute(context.Background(), inv, matches[0].Name)
+			_ = commands.DefaultRegistry.Execute(context.Background(), inv, buildExecLine(matches[0].Name, query))
 		}
 		return nil
 	}
@@ -183,7 +186,7 @@ func runPalette(cfg config.Config, args []string, stdin io.Reader, stdout, stder
 			matches := filterCommands(allCmds, query.String())
 			_, _ = io.WriteString(stdout, "\x1b[H\x1b[2J")
 			if len(matches) > 0 && selected < len(matches) {
-				_ = commands.DefaultRegistry.Execute(context.Background(), inv, matches[selected].Name)
+				_ = commands.DefaultRegistry.Execute(context.Background(), inv, buildExecLine(matches[selected].Name, query.String()))
 			}
 			return nil
 
@@ -250,5 +253,38 @@ func filterCommands(all []commands.Command, q string) []commands.Command {
 			}
 		}
 	}
+	if len(matches) > 0 {
+		return matches
+	}
+	// Fall back to matching the first word as a command or alias if the query had arguments
+	fields := strings.Fields(q)
+	if len(fields) <= 1 {
+		return nil
+	}
+	cmdWord := fields[0]
+	for _, cmd := range all {
+		if fuzzyMatch(cmd.Name, cmdWord) {
+			matches = append(matches, cmd)
+			continue
+		}
+		for _, a := range cmd.Aliases {
+			if fuzzyMatch(a, cmdWord) {
+				matches = append(matches, cmd)
+				break
+			}
+		}
+	}
 	return matches
+}
+
+func buildExecLine(cmdName, rawQuery string) string {
+	q := strings.TrimSpace(rawQuery)
+	idx := strings.IndexFunc(q, unicode.IsSpace)
+	if idx >= 0 {
+		remainder := strings.TrimSpace(q[idx:])
+		if remainder != "" {
+			return cmdName + " " + remainder
+		}
+	}
+	return cmdName
 }

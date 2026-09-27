@@ -38,6 +38,14 @@ func TestPerPaneWidthOwnerTransfersOnClaim(t *testing.T) {
 	if width, _ := s.strip.ColumnWidth(1); width != 30 {
 		t.Fatalf("former owner resized PTY to %d", width)
 	}
+
+	// An unattached command transport (like CLI or ephemeral prompt/palette)
+	// can set the column width even though it is not the size owner.
+	cmd := transport.NewInProcChannel(32)
+	s.handleClientMsg(ctx, cmd, protocol.MsgSetPaneWidth{PaneID: 1, Width: 75})
+	if width, _ := s.strip.ColumnWidth(1); width != 75 {
+		t.Fatalf("unattached command failed to set width: got %d, want 75", width)
+	}
 }
 
 func TestOlderResizeSnapshotCannotOverwriteNewerWidth(t *testing.T) {

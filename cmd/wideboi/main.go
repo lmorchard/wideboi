@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -866,6 +867,63 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	var events <-chan uv.Event
 	var frameC <-chan time.Time
 
+	var detachTriggerDir string
+	var detachTriggerFile string
+	defer func() {
+		if detachTriggerDir != "" {
+			_ = os.RemoveAll(detachTriggerDir)
+		}
+	}()
+
+	createDetachTrigger := func() string {
+		if detachTriggerDir != "" {
+			_ = os.RemoveAll(detachTriggerDir)
+			detachTriggerDir = ""
+			detachTriggerFile = ""
+		}
+		dir, err := os.MkdirTemp("", "wb-detach-*")
+		if err != nil {
+			return ""
+		}
+		detachTriggerDir = dir
+		detachTriggerFile = filepath.Join(dir, "trigger")
+		return detachTriggerFile
+	}
+
+	performDetach := func() error {
+		slog.Info("client detaching")
+		cConnLock.Lock()
+		hConn := cConn
+		cConnLock.Unlock()
+		if !hangUp(ctx, hConn, protocol.MsgDetach{}, detachCeiling) {
+			slog.Warn("server did not acknowledge the detach", "ceiling", detachCeiling)
+		}
+		hungUp.Store(true)
+		awaitReRaise()
+		signalled := stopped.Load()
+		_ = guard.Stop()
+		if !signalled {
+			printDetachNotice(os.Stdout, cfg.Socket)
+		}
+		endReason = "detached"
+		return nil
+	}
+
+	checkDetachTrigger := func() bool {
+		if detachTriggerFile == "" {
+			return false
+		}
+		if _, err := os.Stat(detachTriggerFile); err == nil {
+			if detachTriggerDir != "" {
+				_ = os.RemoveAll(detachTriggerDir)
+				detachTriggerDir = ""
+			}
+			detachTriggerFile = ""
+			return true
+		}
+		return false
+	}
+
 	for {
 		cConnLock.Lock()
 		currentConn := cConn
@@ -984,6 +1042,9 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				screenLock.Unlock()
 			}
 			cli.HandleServerMsg(msg)
+			if checkDetachTrigger() {
+				return performDetach()
+			}
 
 		case ev := <-events:
 			switch ev := ev.(type) {
@@ -1000,31 +1061,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				act := rt.route(ev)
 				switch act.Kind {
 				case routeDetach:
-					// Leaves the server and its children running.
-					// Waiting for the hang-up makes sure the detach
-					// was read before our socket closes.
-					slog.Info("client detaching")
-					cConnLock.Lock()
-					hConn := cConn
-					cConnLock.Unlock()
-					if !hangUp(ctx, hConn, protocol.MsgDetach{}, detachCeiling) {
-						slog.Warn("server did not acknowledge the detach", "ceiling", detachCeiling)
-					}
-					hungUp.Store(true)
-					awaitReRaise()
-					// Restore the terminal first, so the notice lands in
-					// the scrollback rather than in the alt screen the
-					// restore wipes. The deferred Stop is then a no-op.
-					// Sampled before Stop, whose teardown sets stopped
-					// itself: only a signal's teardown means the process
-					// is about to die rather than detach.
-					signalled := stopped.Load()
-					_ = guard.Stop()
-					if !signalled {
-						printDetachNotice(os.Stdout, cfg.Socket)
-					}
-					endReason = "detached"
-					return nil
+					return performDetach()
 				case routeQuit:
 					slog.Info("client ending the session")
 					acked := hangUp(ctx, cConn, protocol.MsgShutdown{}, shutdownCeiling)
@@ -1068,13 +1105,23 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				case routePrompt:
 					exe, err := os.Executable()
 					if err == nil {
-						cmd := fmt.Sprintf("%s prompt --caller-pane=%d --socket=%s", shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
+						triggerPath := createDetachTrigger()
+						cmd := fmt.Sprintf("%s prompt --caller-pane=%d --socket=%s",
+							shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
+						if triggerPath != "" {
+							cmd += fmt.Sprintf(" --detach-file=%s", shellQuote(triggerPath))
+						}
 						cli.SendSplit(ctx, cmd, "", cli.FocusedPaneID(), false)
 					}
 				case routePalette:
 					exe, err := os.Executable()
 					if err == nil {
-						cmd := fmt.Sprintf("%s palette --caller-pane=%d --socket=%s", shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
+						triggerPath := createDetachTrigger()
+						cmd := fmt.Sprintf("%s palette --caller-pane=%d --socket=%s",
+							shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
+						if triggerPath != "" {
+							cmd += fmt.Sprintf(" --detach-file=%s", shellQuote(triggerPath))
+						}
 						cli.SendSplit(ctx, cmd, "", cli.FocusedPaneID(), false)
 					}
 				case routeForward:
@@ -1095,6 +1142,9 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 			}
 
 		case <-frameC:
+			if checkDetachTrigger() {
+				return performDetach()
+			}
 			screenLock.Lock()
 			if !stopped.Load() {
 				if cli.Draw(scr) {

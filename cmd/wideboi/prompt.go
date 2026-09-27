@@ -21,10 +21,11 @@ func runPrompt(cfg config.Config, args []string, stdin io.Reader, stdout, stderr
 	fs.SetOutput(stderr)
 
 	var callerPane int
-	var session, socket string
+	var session, socket, detachFile string
 
 	fs.IntVar(&callerPane, "caller-pane", 0, "pane ID that invoked the prompt")
 	addTargetFlags(fs, &session, &socket)
+	fs.StringVar(&detachFile, "detach-file", "", "path to file to touch on detach")
 
 	if err := fs.Parse(reorderFlags(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -48,6 +49,7 @@ func runPrompt(cfg config.Config, args []string, stdin io.Reader, stdout, stderr
 		Cfg:          cfg,
 		Socket:       cfg.Socket,
 		CallerPaneID: callerPane,
+		DetachFile:   detachFile,
 		Stdout:       stdout,
 		Stderr:       stderr,
 	}

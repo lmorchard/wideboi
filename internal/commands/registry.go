@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
@@ -276,9 +278,15 @@ func registerBuiltins(r *Registry) {
 			if len(inv.Args) < 1 {
 				return fmt.Errorf("usage: set-width <columns>")
 			}
+			if inv.CallerPaneID <= 0 {
+				return fmt.Errorf("no focused pane")
+			}
 			width, err := strconv.Atoi(inv.Args[0])
 			if err != nil {
 				return fmt.Errorf("invalid width: %w", err)
+			}
+			if width < layout.MinColumnWidth || width > layout.MaxColumnWidth {
+				return fmt.Errorf("width must be between %d and %d", layout.MinColumnWidth, layout.MaxColumnWidth)
 			}
 			return SendClientMsg(ctx, inv, protocol.MsgSetPaneWidth{
 				PaneID: inv.CallerPaneID,
@@ -323,6 +331,15 @@ func registerBuiltins(r *Registry) {
 		Description: "Detach the current client from the session",
 		Category:    "Session",
 		Run: func(ctx context.Context, inv Invocation) error {
+			if inv.DetachFile != "" {
+				f, err := os.OpenFile(inv.DetachFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+				if err != nil {
+					return err
+				}
+				_, err = f.Write([]byte("detach\n"))
+				_ = f.Close()
+				return err
+			}
 			return SendClientMsg(ctx, inv, protocol.MsgDetach{})
 		},
 	})
