@@ -1,29 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { installMockWebSocket } from './browser-fixture';
 
 test('a short browser pane can reach the bottom of a taller terminal without resizing it', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
+  await page.addInitScript(() => {
     window.drawnText = [];
     const fillText = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
-      window.drawnText.push(text);
+      window.drawnText?.push(text);
       return fillText.call(this, text, ...args);
     };
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(_url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  });
+  await installMockWebSocket(page);
 
   await page.setViewportSize({ width: 600, height: 320 });
   await page.goto('/');
@@ -47,7 +34,7 @@ test('a short browser pane can reach the bottom of a taller terminal without res
   const pane = page.locator('wideboi-pane');
   const viewport = pane.locator('.viewport');
   await expect.poll(() => viewport.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.drawnText.includes('row-49'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.drawnText?.includes('row-49'))).toBe(true);
   const sizeBefore = await page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
     return clientMessages(window.testSockets[0].sent).filter(msg => msg.case === 'resize').length;
@@ -72,17 +59,17 @@ test('a short browser pane can reach the bottom of a taller terminal without res
     Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThan(2);
 
   const mouseY = await page.evaluate(() => {
-    const pane = document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane');
+    const pane = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane');
     const viewport = pane.shadowRoot.querySelector('.viewport');
     const rect = viewport.getBoundingClientRect();
     return pane.cellAt(rect.left + 20, rect.bottom - 10).y;
   });
   expect(mouseY).toBeGreaterThan(30);
-  const bounds = await viewport.boundingBox();
+  const bounds = (await viewport.boundingBox())!;
   await page.mouse.click(bounds.x + 20, bounds.y + bounds.height - 10);
   await expect.poll(async () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
-    return clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'mouse')?.value.y;
+    return (clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'mouse')?.value as any).y;
   })).toBeGreaterThan(30);
   const sizeAfter = await page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
@@ -96,5 +83,5 @@ test('a short browser pane can reach the bottom of a taller terminal without res
     const { clientMessages } = await import('/tests/browser-fixture.ts');
     return clientMessages(window.testSockets[0].sent);
   });
-  await expect.poll(async () => (await messages()).some(msg => msg.case === 'verb' && msg.value.verb === 14)).toBe(true);
+  await expect.poll(async () => (await messages()).some(msg => msg.case === 'verb' && (msg.value as any).verb === 14)).toBe(true);
 });

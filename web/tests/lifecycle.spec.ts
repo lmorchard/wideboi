@@ -1,24 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { installMockWebSocket, VERSION_PROTOCOL } from './browser-fixture';
 
 test('desktop session window connects to its named local session automatically', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.url = url;
-        this.protocols = protocols;
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-    };
-  }, VERSION_PROTOCOL);
+  await installMockWebSocket(page);
   await page.goto('/?session=project#token=local-secret');
   await expect.poll(() => page.evaluate(() => window.testSockets.length)).toBe(1);
   const connection = await page.evaluate(() => ({
@@ -37,30 +21,15 @@ test('desktop session window connects to its named local session automatically',
 });
 
 test('browser connects, renders, types, resizes, reconnects, and closes a pane', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
+  await page.addInitScript(() => {
     window.drawnText = [];
     const original = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
-      window.drawnText.push(text);
+      window.drawnText?.push(text);
       return original.call(this, text, ...args);
     };
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.url = url;
-        this.protocols = protocols;
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  });
+  await installMockWebSocket(page);
 
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -70,7 +39,7 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
 
   const messages = () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
-    return clientMessages(window.testSockets.at(-1).sent).map(msg => ({
+    return clientMessages(window.testSockets.at(-1)!.sent).map(msg => ({
       case: msg.case, value: msg.value,
     }));
   });
@@ -88,11 +57,11 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
     } }));
   });
   await expect(page.locator('.pane-tab[data-pane-id="1"]')).toContainText('Shell');
-  await expect.poll(() => page.evaluate(() => window.drawnText.includes('Z'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.drawnText?.includes('Z'))).toBe(true);
 
   await page.locator('canvas').focus();
   await page.keyboard.type('x');
-  await expect.poll(async () => (await messages()).some(msg => msg.case === 'input' && msg.value.paneId === 1 && msg.value.key?.text === 'x')).toBe(true);
+  await expect.poll(async () => (await messages()).some(msg => msg.case === 'input' && msg.value.paneId === 1 && (msg.value.key as any)?.text === 'x')).toBe(true);
 
   const resizeCount = (await messages()).filter(msg => msg.case === 'resize').length;
   await page.setViewportSize({ width: 700, height: 500 });
@@ -116,22 +85,7 @@ test('browser connects, renders, types, resizes, reconnects, and closes a pane',
 });
 
 test('pane elements keep their widths and browser scrolling reveals focus', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  await installMockWebSocket(page);
   await page.setViewportSize({ width: 500, height: 420 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -166,7 +120,7 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     const { clientMessages } = await import('/tests/browser-fixture.ts');
     return clientMessages(window.testSockets[0].sent).map(msg => msg);
   });
-  const attachedRows = (await messages()).find(msg => msg.case === 'attach').value.rows;
+  const attachedRows = (await messages()).find(msg => msg.case === 'attach')!.value.rows;
   const canvasHeight = await page.locator('wideboi-pane canvas').nth(3)
     .evaluate(canvas => canvas.getBoundingClientRect().height);
   expect(canvasHeight).toBeGreaterThanOrEqual((attachedRows - 2) * 16.8);
@@ -178,21 +132,21 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   await page.locator('wideboi-pane canvas').first().click({ position: { x: 20, y: 26 } });
   await expect(page.locator('.pane-tab[data-pane-id="1"]')).toHaveAttribute('aria-selected', 'true');
   expect(await page.evaluate(() => {
-    const app = document.querySelector('wideboi-app');
+    const app = document.querySelector('wideboi-app') as any;
     const pane = app.shadowRoot.querySelector('wideboi-pane');
     return app.shadowRoot.activeElement === pane && pane.shadowRoot.activeElement?.tagName === 'CANVAS';
   })).toBe(true);
 
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
-    window.paneCanvas = document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane').shadowRoot.querySelector('canvas');
+    (window as any).paneCanvas = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane').shadowRoot.querySelector('canvas');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
       columns: [4, 3, 2, 1].map(paneId => ({ paneId, width: 40, height: 20 })),
     } }));
   });
-  await expect.poll(() => panes.evaluateAll(elements => elements.map(element => element.paneId)))
+  await expect.poll(() => panes.evaluateAll(elements => elements.map(element => (element as any).paneId)))
     .toEqual([4, 3, 2, 1]);
-  expect(await page.evaluate(() => window.paneCanvas === document.querySelector('wideboi-app').shadowRoot
+  expect(await page.evaluate(() => (window as any).paneCanvas === (document.querySelector('wideboi-app') as any).shadowRoot
     .querySelectorAll('wideboi-pane')[3].shadowRoot.querySelector('canvas'))).toBe(true);
 
   await page.locator('.pane-tab[data-pane-id="4"]').click();
@@ -201,39 +155,21 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
     window.testSockets[0].message(serverBytes({ case: 'paneClosed', value: { paneId: 4 } }));
   });
   await expect(page.locator('.pane-tab[data-pane-id="3"]')).toHaveAttribute('aria-selected', 'true');
-  expect(await page.evaluate(() => document.querySelector('wideboi-app').focusedPaneId)).toBe(3);
+  expect(await page.evaluate(() => (document.querySelector('wideboi-app') as any).focusedPaneId)).toBe(3);
   expect(await page.evaluate(() => {
-    const app = document.querySelector('wideboi-app');
-    const pane = [...app.shadowRoot.querySelectorAll('wideboi-pane')].find(element => element.paneId === 3);
+    const app = document.querySelector('wideboi-app') as any;
+    const pane = [...app.shadowRoot.querySelectorAll('wideboi-pane')].find(element => (element as any).paneId === 3);
     return app.shadowRoot.activeElement === pane && pane.shadowRoot.activeElement?.tagName === 'CANVAS';
   })).toBe(true);
   await page.keyboard.type('q');
   await expect.poll(async () => (await messages()).some(msg =>
-    msg.case === 'input' && msg.value.paneId === 3 && msg.value.key?.text === 'q')).toBe(true);
+    msg.case === 'input' && msg.value.paneId === 3 && (msg.value.key as any)?.text === 'q')).toBe(true);
 });
 
-// ?stats=1 (#179): an overlay that starts as "collecting…" and a periodic
-// summary on the console. The fake clock stands in for the 5 s report
-// interval (STATS_REPORT_MS), so the test does not wait it out.
 test('?stats=1 shows the stats overlay and reports periodically', async ({ page }) => {
   await page.clock.install();
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
-  const reports = [];
+  await installMockWebSocket(page);
+  const reports: string[] = [];
   page.on('console', msg => {
     if (msg.type() === 'info' && msg.text().startsWith('[wideboi stats]')) reports.push(msg.text());
   });
@@ -263,20 +199,7 @@ test('?stats=1 shows the stats overlay and reports periodically', async ({ page 
 });
 
 test('without ?stats=1 there is no stats overlay', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send() {}
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-    };
-  }, VERSION_PROTOCOL);
+  await installMockWebSocket(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
@@ -285,22 +208,7 @@ test('without ?stats=1 there is no stats overlay', async ({ page }) => {
 });
 
 test('client handles prefix, double prefix, column focus, layout switch, and help overlay', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  await installMockWebSocket(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
@@ -308,7 +216,7 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
 
   const messages = () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
-    return clientMessages(window.testSockets.at(-1).sent).map(msg => ({
+    return clientMessages(window.testSockets.at(-1)!.sent).map(msg => ({
       case: msg.case, value: msg.value,
     }));
   });
@@ -332,7 +240,7 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
   await page.keyboard.press('Control+b');
   await page.keyboard.press('Control+b');
   await expect.poll(async () => (await messages()).some(msg =>
-    msg.case === 'input' && msg.value.paneId === 1 && msg.value.key?.code === 98 && msg.value.key?.mod === 4
+    msg.case === 'input' && msg.value.paneId === 1 && (msg.value.key as any)?.code === 98 && (msg.value.key as any)?.mod === 4
   )).toBe(true);
 
   // 2. Column jump: Ctrl+B then '2' focuses pane 2
@@ -375,22 +283,7 @@ test('client handles prefix, double prefix, column focus, layout switch, and hel
 });
 
 test('toolbar pane selector tabs display title, status glyphs, and focus state', async ({ page }) => {
-  await page.addInitScript(() => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = 'wideboi.v15';
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes('wideboi.v15')) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  });
+  await installMockWebSocket(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());

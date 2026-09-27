@@ -1,13 +1,14 @@
 import { create } from '@bufbuild/protobuf';
 import { formatFontSpec } from './fonts';
+import { getPref, setPref } from './prefs';
 import {
   LineDataSchema, type MsgPanePatch, type MsgPaneUpdate,
 } from './gen/internal/protocol/wirepb/wideboi_pb';
 import type { RenderStats } from './stats';
 
 export const termSettings = {
-  fontSize: parseInt(typeof localStorage !== 'undefined' ? localStorage.getItem('wideboi:fontSize') || '14' : '14', 10),
-  fontFamily: (typeof localStorage !== 'undefined' ? localStorage.getItem('wideboi:fontFamily') : null) || 'monospace',
+  fontSize: getPref('fontSize'),
+  fontFamily: getPref('fontFamily'),
   get font() {
     return formatFontSpec(this.fontFamily, this.fontSize);
   },
@@ -15,10 +16,8 @@ export const termSettings = {
     return this.fontSize * 1.2;
   },
   save() {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('wideboi:fontSize', this.fontSize.toString());
-      localStorage.setItem('wideboi:fontFamily', this.fontFamily);
-    }
+    setPref('fontSize', this.fontSize);
+    setPref('fontFamily', this.fontFamily);
   }
 };
 

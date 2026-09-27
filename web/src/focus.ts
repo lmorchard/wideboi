@@ -1,6 +1,6 @@
 import type { ColumnData } from './gen/internal/protocol/wirepb/wideboi_pb';
 
-export function reconcileFocus(previous: ColumnData[], next: ColumnData[], focusedPaneId: number): number {
+export function reconcileFocus(previous: readonly ColumnData[], next: readonly ColumnData[], focusedPaneId: number): number {
   if (next.some(c => c.paneId === focusedPaneId)) return focusedPaneId;
   if (next.length === 0) return 0;
 

@@ -1,29 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { installMockWebSocket } from './browser-fixture';
 
 test('a narrow browser card pans across a wider terminal grid without resizing it', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
+  await page.addInitScript(() => {
     window.drawnText = [];
     const fillText = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
-      window.drawnText.push(text);
+      window.drawnText?.push(text);
       return fillText.call(this, text, ...args);
     };
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(_url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  });
+  await installMockWebSocket(page);
 
   await page.setViewportSize({ width: 500, height: 320 });
   await page.goto('/');
@@ -49,13 +36,13 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
     return clientMessages(window.testSockets[0].sent).filter(msg => msg.case === 'resize').length;
   });
   const cardWidth = page.getByRole('spinbutton', { name: 'Pane width' });
-  const controlBounds = await cardWidth.boundingBox();
+  const controlBounds = (await cardWidth.boundingBox())!;
   expect(controlBounds.x + controlBounds.width).toBeLessThanOrEqual(500);
   await cardWidth.fill('40');
   await cardWidth.dispatchEvent('change');
   await expect.poll(() => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
-    return clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'setPaneWidth')?.value.width;
+    return (clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'setPaneWidth')?.value as any).width;
   })).toBe(40);
 
   const pane = page.locator('wideboi-pane');
@@ -63,7 +50,7 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
   await expect.poll(() => viewport.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
   expect(await pane.evaluate(el => el.getBoundingClientRect().width)).toBeLessThan(
     await pane.locator('canvas').evaluate(el => el.getBoundingClientRect().width));
-  await expect.poll(() => page.evaluate(() => window.drawnText.includes('R'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.drawnText?.includes('R'))).toBe(true);
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
@@ -74,7 +61,7 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
   await page.getByRole('button', { name: 'Fit to Window' }).click();
   await expect.poll(() => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
-    return clientMessages(window.testSockets[0].sent).findLast(msg => msg.case === 'verb')?.value.widths?.[1];
+    return (clientMessages(window.testSockets[0].sent).findLast(msg => msg.case === 'verb')?.value as any).widths?.[1];
   })).toBe(40);
   await expect.poll(() => viewport.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
   const counts = async () => page.evaluate(async () => {
@@ -82,7 +69,7 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
     const messages = clientMessages(window.testSockets[0].sent);
     return {
       resize: messages.filter(msg => msg.case === 'resize').length,
-      stripLeft: document.querySelector('wideboi-app').shadowRoot.querySelector('.pane-strip').scrollLeft,
+      stripLeft: (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('.pane-strip').scrollLeft,
     };
   });
   const before = await counts();
@@ -93,11 +80,11 @@ test('a narrow browser card pans across a wider terminal grid without resizing i
   await viewport.evaluate(el => { el.scrollLeft = el.scrollWidth; });
   await expect.poll(() => viewport.evaluate(el =>
     Math.abs(el.scrollWidth - el.clientWidth - el.scrollLeft))).toBeLessThan(2);
-  const bounds = await viewport.boundingBox();
+  const bounds = (await viewport.boundingBox())!;
   await page.mouse.click(bounds.x + bounds.width - 15, bounds.y + 30);
   await expect.poll(async () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
-    return clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'mouse')?.value.x;
+    return (clientMessages(window.testSockets[0].sent).find(msg => msg.case === 'mouse')?.value as any).x;
   })).toBeGreaterThan(40);
   const after = await counts();
   expect(after).toEqual(before);
