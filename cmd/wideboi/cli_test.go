@@ -157,6 +157,80 @@ func TestParseCLISession(t *testing.T) {
 	}
 }
 
+func TestParseCLIValueFlagsSubcommandValue(t *testing.T) {
+	tests := []struct {
+		flag       string
+		subAsValue string
+		check      func(opts cliOptions) string
+	}{
+		{"-c", "server", func(o cliOptions) string { return o.flags.ConfigFile }},
+		{"-config", "status", func(o cliOptions) string { return o.flags.ConfigFile }},
+		{"--config", "attach", func(o cliOptions) string { return o.flags.ConfigFile }},
+		{"-l", "split", func(o cliOptions) string { return o.flags.Layout }},
+		{"-layout", "send", func(o cliOptions) string { return o.flags.Layout }},
+		{"--layout", "capture", func(o cliOptions) string { return o.flags.Layout }},
+		{"-p", "close", func(o cliOptions) string { return o.flags.Prefix }},
+		{"-prefix", "wait", func(o cliOptions) string { return o.flags.Prefix }},
+		{"--prefix", "upgrade-server", func(o cliOptions) string { return o.flags.Prefix }},
+		{"-s", "web", func(o cliOptions) string { return o.flags.Socket }},
+		{"-socket", "prompt", func(o cliOptions) string { return o.flags.Socket }},
+		{"--socket", "palette", func(o cliOptions) string { return o.flags.Socket }},
+		{"-L", "server", func(o cliOptions) string { return o.flags.Session }},
+		{"-session", "status", func(o cliOptions) string { return o.flags.Session }},
+		{"--session", "attach", func(o cliOptions) string { return o.flags.Session }},
+		{"-websocket", "kill-session", func(o cliOptions) string { return o.flags.Websocket }},
+		{"--websocket", "cleanup", func(o cliOptions) string { return o.flags.Websocket }},
+		{"-websocket-token", "version", func(o cliOptions) string { return o.flags.WebsocketToken }},
+		{"--websocket-token", "help", func(o cliOptions) string { return o.flags.WebsocketToken }},
+		{"-tls-cert", "desktop", func(o cliOptions) string { return o.flags.TLSCert }},
+		{"--tls-cert", "ls", func(o cliOptions) string { return o.flags.TLSCert }},
+		{"-tls-key", "list-sessions", func(o cliOptions) string { return o.flags.TLSKey }},
+		{"--tls-key", "server", func(o cliOptions) string { return o.flags.TLSKey }},
+		{"-shell", "status", func(o cliOptions) string { return o.flags.Shell }},
+		{"--shell", "attach", func(o cliOptions) string { return o.flags.Shell }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.flag, func(t *testing.T) {
+			opts, err := parseCLI([]string{tt.flag, tt.subAsValue})
+			if err != nil {
+				t.Fatalf("parseCLI(%s, %s) error: %v", tt.flag, tt.subAsValue, err)
+			}
+			if opts.subcommand != "" {
+				t.Errorf("parseCLI(%s, %s).subcommand = %q, want empty", tt.flag, tt.subAsValue, opts.subcommand)
+			}
+			if got := tt.check(opts); got != tt.subAsValue {
+				t.Errorf("parseCLI(%s, %s) flag value = %q, want %q", tt.flag, tt.subAsValue, got, tt.subAsValue)
+			}
+		})
+	}
+
+	// Also verify that when followed by an actual subcommand, the flag value is preserved
+	// and the subsequent subcommand is recognized.
+	opts, err := parseCLI([]string{"--websocket-token", "status", "server"})
+	if err != nil {
+		t.Fatalf("parseCLI with trailing subcommand error: %v", err)
+	}
+	if opts.flags.WebsocketToken != "status" {
+		t.Errorf("WebsocketToken = %q, want status", opts.flags.WebsocketToken)
+	}
+	if opts.subcommand != "server" {
+		t.Errorf("subcommand = %q, want server", opts.subcommand)
+	}
+
+	// Verify that boolean flags do not consume a following subcommand name as a value.
+	opts, err = parseCLI([]string{"--disable-tls", "server"})
+	if err != nil {
+		t.Fatalf("parseCLI with bool flag error: %v", err)
+	}
+	if !opts.flags.DisableTLS {
+		t.Errorf("DisableTLS = false, want true")
+	}
+	if opts.subcommand != "server" {
+		t.Errorf("subcommand = %q, want server", opts.subcommand)
+	}
+}
+
 func TestPrintHelp(t *testing.T) {
 	var buf bytes.Buffer
 	printHelp(&buf)
