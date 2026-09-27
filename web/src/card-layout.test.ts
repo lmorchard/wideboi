@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cardLayout } from './card-layout';
+import goldenCases from './fixtures/card-layout-golden.json';
 
 const columns = [1, 2, 3, 4, 5, 6].map(paneId => ({ paneId, width: 30 }));
 
@@ -31,6 +32,18 @@ describe('card layout', () => {
       const z = [4, 5, 6].map(paneId => layout.placements.find(p => p.paneId === paneId)!.z);
       expect(z[0]).toBeLessThan(z[1]);
       expect(z[1]).toBeLessThan(z[2]);
+    }
+  });
+
+  describe('golden fixtures generated from Go', () => {
+    for (const tc of goldenCases) {
+      it(`matches Go layout for "${tc.name}"`, () => {
+        const result = cardLayout(tc.columns, tc.focusedPaneId, tc.viewportWidth, tc.previousFirst);
+        expect(result.first).toBe(tc.first);
+        expect(result.hiddenLeft).toBe(tc.hiddenLeft);
+        expect(result.hiddenRight).toBe(tc.hiddenRight);
+        expect(result.placements).toEqual(tc.placements);
+      });
     }
   });
 });

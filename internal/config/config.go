@@ -37,6 +37,7 @@ type Config struct {
 	Startup      []StartupPane       `toml:"startup"`
 	Theme        ThemeConfig         `toml:"theme"`
 	Keys         map[string]any      `toml:"keys"`
+	Bindings     []keys.Binding      `toml:"-"`
 	// Mouse is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read MouseEnabled, not this.
 	Mouse        *bool `toml:"mouse"`
@@ -528,6 +529,7 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		}
 	}
 
+	cfg.Bindings = bindings
 	return cfg, bindings, nil
 }
 

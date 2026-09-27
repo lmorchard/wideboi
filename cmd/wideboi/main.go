@@ -411,6 +411,11 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 		srv.SetOwner(ownerConn)
 		srv.SetPeerPID(ownerConn, ownerPID)
 	}
+	bindings := cfg.Bindings
+	if len(bindings) == 0 {
+		bindings = keys.Bindings
+	}
+	srv.SetBindings(keys.ToProtocolList(bindings))
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
 	}

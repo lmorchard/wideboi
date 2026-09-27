@@ -289,6 +289,36 @@ func (b Binding) MatchNames() []string {
 	return out
 }
 
+// ToProtocol converts a Binding to its wire protocol representation.
+func (b Binding) ToProtocol() protocol.KeyBinding {
+	return protocol.KeyBinding{
+		ActionName:  b.ActionName,
+		Key:         b.Key,
+		Aliases:     append([]string(nil), b.Aliases...),
+		Action:      int(b.Action),
+		Verb:        b.Verb,
+		Scroll:      b.Scroll,
+		Pan:         b.Pan,
+		Column:      b.Column,
+		BarGroup:    b.BarGroup,
+		Long:        b.Long,
+		HelpGroup:   b.HelpGroup,
+		HelpKey:     b.HelpKey,
+		NeedsDetach: b.NeedsDetach,
+		Essential:   b.Essential,
+		NoRepeat:    b.NoRepeat,
+	}
+}
+
+// ToProtocolList converts a slice of Bindings to wire protocol KeyBindings.
+func ToProtocolList(bindings []Binding) []protocol.KeyBinding {
+	out := make([]protocol.KeyBinding, len(bindings))
+	for i, b := range bindings {
+		out[i] = b.ToProtocol()
+	}
+	return out
+}
+
 // BarItemsFor returns the distinct status-bar labels for the given bindings,
 // split into the ones that may be dropped when the terminal is narrow and the
 // ones that may not, both in table order.

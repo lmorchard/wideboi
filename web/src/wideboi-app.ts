@@ -140,6 +140,9 @@ export class WideboiApp extends LitElement {
   private lastSentSize?: { cols: number; rows: number };
   @state() private layoutMode: 'scroll' | 'cards' = 'cards';
   @state() private followPTY = false;
+  @state() private widthPresets: number[] = [40, 60, 80];
+  @state() private minColumnWidth: number = 20;
+  @state() private maxColumnWidth: number = 4096;
   private pendingReveal = new Set<number>();
   @state() private mobile = this.narrowMedia.matches;
   @state() private mobileDraft = '';
@@ -296,9 +299,10 @@ export class WideboiApp extends LitElement {
     const current = this.displayWidths[this.focusedPaneId];
     if (!current) return;
     let next = current;
-    if (verb === VerbType.CYCLE_WIDTH) next = [40, 60, 80].find(width => width > current) ?? 40;
-    if (verb === VerbType.GROW_WIDTH) next = Math.min(4096, current + 10);
-    if (verb === VerbType.SHRINK_WIDTH) next = Math.max(20, current - 10);
+    const presets = this.widthPresets && this.widthPresets.length > 0 ? this.widthPresets : [40, 60, 80];
+    if (verb === VerbType.CYCLE_WIDTH) next = presets.find(width => width > current) ?? presets[0];
+    if (verb === VerbType.GROW_WIDTH) next = Math.min(this.maxColumnWidth, current + 10);
+    if (verb === VerbType.SHRINK_WIDTH) next = Math.max(this.minColumnWidth, current - 10);
     this.editWidth(next);
   }
 
@@ -616,6 +620,23 @@ export class WideboiApp extends LitElement {
           }
           break;
         }
+        case 'configSnapshot': {
+          const config = message.msg.value;
+          if (config.widthPresets && config.widthPresets.length > 0) {
+            this.widthPresets = config.widthPresets;
+          }
+          if (config.minColumnWidth) {
+            this.minColumnWidth = config.minColumnWidth;
+          }
+          if (config.maxColumnWidth) {
+            this.maxColumnWidth = config.maxColumnWidth;
+          }
+          if (config.bindings && config.bindings.length > 0) {
+            this.keyRouter.setBindings(config.bindings);
+          }
+          this.requestUpdate();
+          break;
+        }
       }
     };
 
@@ -815,6 +836,16 @@ export class WideboiApp extends LitElement {
     },
     toggle_settings: (_action, e) => {
       this.toggleSettings();
+      e.preventDefault();
+    },
+    quit: (_action, e) => {
+      this.client?.send({ case: 'shutdown', value: {} });
+      this.client?.disconnect();
+      e.preventDefault();
+    },
+    detach: (_action, e) => {
+      this.client?.send({ case: 'detach', value: {} });
+      this.client?.disconnect();
       e.preventDefault();
     },
     verb: (action, e) => {
@@ -1815,24 +1846,12 @@ export class WideboiApp extends LitElement {
             <table class="help-table">
               <thead><tr><th>Key after prefix</th><th>Action</th></tr></thead>
               <tbody>
-                <tr><td><kbd>h</kbd> / <kbd>←</kbd></td><td>Focus left</td></tr>
-                <tr><td><kbd>l</kbd> / <kbd>→</kbd></td><td>Focus right</td></tr>
-                <tr><td><kbd>Tab</kbd></td><td>Focus previous pane</td></tr>
-                <tr><td><kbd>1</kbd>–<kbd>9</kbd>, <kbd>0</kbd></td><td>Focus column by position (0 is last)</td></tr>
-                <tr><td><kbd>a</kbd></td><td>Smart jump (needs input / failed / done)</td></tr>
-                <tr><td><kbd>c</kbd></td><td>Toggle cards / scroll layout</td></tr>
-                <tr><td><kbd>n</kbd></td><td>New column</td></tr>
-                <tr><td><kbd>w</kbd></td><td>Cycle column width</td></tr>
-                <tr><td><kbd>o</kbd> / <kbd>p</kbd></td><td>Shrink / grow column width</td></tr>
-                <tr><td><kbd>H</kbd> / <kbd>L</kbd></td><td>Pan focused pane left / right</td></tr>
-                <tr><td><kbd>f</kbd></td><td>Toggle following PTY widths</td></tr>
-                <tr><td><kbd>y</kbd> / <kbd>u</kbd></td><td>Move column left / right</td></tr>
-                <tr><td><kbd>j</kbd> / <kbd>k</kbd></td><td>Scroll history down / up</td></tr>
-                <tr><td><kbd>/</kbd></td><td>Search focused pane history (Ctrl+F)</td></tr>
-                <tr><td><kbd>,</kbd></td><td>Toggle settings dialog</td></tr>
-                <tr><td><kbd>x</kbd></td><td>Kill focused pane</td></tr>
-                <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
-                <tr><td><kbd>Esc</kbd> / <kbd>Ctrl+C</kbd></td><td>Cancel prefix mode</td></tr>
+                ${this.keyRouter.helpEntries.map(entry => html`
+                  <tr>
+                    <td>${entry.keys.map((k, i) => html`${i > 0 ? ' / ' : ''}<kbd>${k}</kbd>`)}</td>
+                    <td>${entry.description}</td>
+                  </tr>
+                `)}
               </tbody>
             </table>
           </div>

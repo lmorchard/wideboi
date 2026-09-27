@@ -668,3 +668,16 @@ func TestCustomCtrlFormsMatchTheirRealBytes(t *testing.T) {
 	var d uv.EventDecoder
 	assertCtrlFormsMatchRealBytes(t, &d, mustBuild(t, map[string][]string{keys.ActionNameFocusLeft: {"h", "g"}}))
 }
+
+func TestToProtocolList(t *testing.T) {
+	pb := keys.ToProtocolList(keys.Bindings)
+	if len(pb) != len(keys.Bindings) {
+		t.Fatalf("ToProtocolList len = %d, want %d", len(pb), len(keys.Bindings))
+	}
+	for i, b := range keys.Bindings {
+		p := pb[i]
+		if p.ActionName != b.ActionName || p.Key != b.Key || p.Action != int(b.Action) || p.Verb != b.Verb {
+			t.Errorf("mismatch at %d: got %+v, want %+v", i, p, b)
+		}
+	}
+}
