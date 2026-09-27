@@ -76,6 +76,16 @@ export class WideboiApp extends LitElement {
   get pendingFocusId(): number { return this.session.pendingFocusId; }
   get focusTransition(): number { return this.session.focusTransition; }
   get paneStatuses(): Record<number, PaneStatus> { return this.session.paneStatuses as Record<number, PaneStatus>; }
+  get paneScrolls(): Record<number, string> {
+    const scrolls: Record<number, string> = {};
+    for (const id of this.activePanes) {
+      const pane = this.panes.get(id);
+      if (pane && pane.scrollOffset > 0) {
+        scrolls[id] = `+${pane.scrollOffset}${pane.unreadOutput ? ' ⤓' : ''}`;
+      }
+    }
+    return scrolls;
+  }
 
   @state()
   private wsUrl = (() => {
@@ -1037,9 +1047,18 @@ export class WideboiApp extends LitElement {
 
 
 
-  private handlePaneSelect(e: Event) {
-    const select = e.target as HTMLSelectElement;
-    const paneID = parseInt(select.value, 10);
+  private handlePaneSelect(paneIdOrEvent: number | CustomEvent<number> | Event) {
+    let paneID = 0;
+    if (typeof paneIdOrEvent === 'number') {
+      paneID = paneIdOrEvent;
+    } else if (paneIdOrEvent instanceof CustomEvent && typeof paneIdOrEvent.detail === 'number') {
+      paneID = paneIdOrEvent.detail;
+    } else if ('detail' in paneIdOrEvent && typeof (paneIdOrEvent as CustomEvent).detail === 'number') {
+      paneID = (paneIdOrEvent as CustomEvent).detail;
+    } else {
+      const select = (paneIdOrEvent as Event).target as HTMLSelectElement;
+      paneID = parseInt(select?.value, 10);
+    }
     if (paneID > 0 && this.client && this.connected) {
       this.focusPane(paneID);
     }
@@ -1274,7 +1293,11 @@ export class WideboiApp extends LitElement {
   private closeSettings() {
     this.showSettings = false;
     void this.updateComplete.then(() => {
-      if (!this.mobile) this.focusedPane()?.focusInput();
+      if (!this.mobile) {
+        this.focusedPane()?.focusInput();
+      } else {
+        this.renderRoot.querySelector<HTMLElement>('.mobile-input-bar .mobile-settings-btn')?.focus();
+      }
     });
   }
 
@@ -1306,8 +1329,7 @@ export class WideboiApp extends LitElement {
       if (!this.mobile) {
         this.focusedPane()?.focusInput();
       } else {
-        const mobileBar = this.renderRoot.querySelector<LitElement>('wideboi-mobile-bar');
-        (mobileBar?.renderRoot as ShadowRoot | undefined)?.querySelector<HTMLElement>('.mobile-cmd-btn')?.focus();
+        this.renderRoot.querySelector<HTMLElement>('.mobile-input-bar .mobile-cmd-btn')?.focus();
       }
     });
   }
@@ -1620,14 +1642,14 @@ export class WideboiApp extends LitElement {
           .activePanes=${this.activePanes}
           .focusedPaneId=${this.focusedPaneId}
           .paneTitles=${this.paneTitles}
+          .paneStatuses=${this.paneStatuses}
+          .paneScrolls=${this.paneScrolls}
           .currentZoom=${this.currentZoom}
           .currentMinZoom=${this.currentMinZoom}
           @pane-move=${(e: CustomEvent<number>) => this.moveMobilePane(e.detail)}
-          @pane-select=${this.handlePaneSelect}
+          @pane-select=${(e: CustomEvent<number>) => this.handlePaneSelect(e.detail)}
           @zoom-step=${(e: CustomEvent<number>) => this.stepZoom(e.detail)}
           @zoom-reset=${() => this.resetZoom()}
-          @open-command-menu=${() => this.openCommandMenu()}
-          @open-settings=${this.toggleSettings}
         ></wideboi-mobile-bar>
         <div class="mobile-dock">
           <div class="mobile-input-bar">
@@ -1678,6 +1700,8 @@ export class WideboiApp extends LitElement {
               aria-label="Macros panel"
               aria-expanded=${this.showMacros}
               @click=${() => { this.showMacros = !this.showMacros; }}>Macros</button>
+            <button class="mobile-cmd-btn" aria-label="Command menu" title="Command menu" @click=${this.openCommandMenu}>⌘</button>
+            <button class="mobile-settings-btn" aria-label="Settings" title="Settings" @click=${this.toggleSettings}>⚙</button>
           </div>
         </div>
         ${this.showMacros ? html`

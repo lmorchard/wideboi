@@ -653,3 +653,85 @@ test('mobile command menu traps focus within modal dialog', async ({ page }) => 
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
+
+test('mobile pane selector switches active pane when option selected', async ({ page }) => {
+  await connect(page);
+  const select = page.getByRole('combobox', { name: 'Mobile pane' });
+  await expect(select).toBeVisible();
+  const panes = page.locator('wideboi-pane');
+  await expect(panes.nth(0)).toBeVisible();
+  await expect(panes.nth(1)).toBeHidden();
+
+  // Select pane 2 via the dropdown
+  await select.selectOption('2');
+  await expect(panes.nth(1)).toBeVisible();
+  await expect(panes.nth(0)).toBeHidden();
+
+  // Sending draft text should now target pane 2
+  await page.getByRole('textbox', { name: 'Command or response' }).fill('target pane two');
+  await page.getByRole('button', { name: 'Send text' }).click();
+  const afterSend = await sent(page);
+  const inputs = afterSend.filter(msg => msg.case === 'input');
+  expect(inputs.length).toBeGreaterThan(0);
+  expect((inputs[0].value as any).paneId).toBe(2);
+
+  // Switching back to pane 1 via the dropdown
+  await select.selectOption('1');
+  await expect(panes.nth(0)).toBeVisible();
+  await expect(panes.nth(1)).toBeHidden();
+});
+
+test('mobile pane selector displays status glyphs in options', async ({ page }) => {
+  await connect(page);
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
+      columns: [{ paneId: 1, width: 80, height: 24 }, { paneId: 2, width: 80, height: 24 }],
+      paneTitles: { 1: 'editor', 2: 'build' },
+      paneStatuses: { 1: 0, 2: 1 }, // 1 is idle, 2 is working
+    } }));
+  });
+
+  const select = page.getByRole('combobox', { name: 'Mobile pane' });
+  const options = select.locator('option');
+  await expect(options).toHaveCount(2);
+  await expect(options.nth(0)).toHaveText('[1] editor');
+  await expect(options.nth(1)).toHaveText('[2] » build');
+});
+
+test('mobile bar previous and next buttons have larger touch target styling', async ({ page }) => {
+  await connect(page);
+  const prevBtn = page.getByRole('button', { name: 'Previous pane' });
+  const nextBtn = page.getByRole('button', { name: 'Next pane' });
+  await expect(prevBtn).toBeVisible();
+  await expect(nextBtn).toBeVisible();
+  const prevBox = await prevBtn.boundingBox();
+  const nextBox = await nextBtn.boundingBox();
+  expect(prevBox).not.toBeNull();
+  expect(nextBox).not.toBeNull();
+  expect(prevBox!.width).toBeGreaterThanOrEqual(44);
+  expect(prevBox!.height).toBeGreaterThanOrEqual(40);
+  expect(nextBox!.width).toBeGreaterThanOrEqual(44);
+  expect(nextBox!.height).toBeGreaterThanOrEqual(40);
+});
+
+test('mobile input bar hosts command menu and settings buttons', async ({ page }) => {
+  await connect(page);
+  const inputBar = page.locator('.mobile-input-bar');
+  const cmdBtn = inputBar.getByRole('button', { name: 'Command menu' });
+  const settingsBtn = inputBar.getByRole('button', { name: 'Settings' });
+  await expect(cmdBtn).toBeVisible();
+  await expect(settingsBtn).toBeVisible();
+
+  // Verify command menu opens from the input bar button
+  await cmdBtn.click();
+  await expect(page.locator('.command-menu-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+
+  // Verify settings dialog opens from the input bar button
+  await settingsBtn.click();
+  await expect(page.locator('.settings-dialog')).toBeVisible();
+  await page.locator('.settings-dialog .close-btn').click();
+  await expect(page.locator('.settings-dialog')).toHaveCount(0);
+});
