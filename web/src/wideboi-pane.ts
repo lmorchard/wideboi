@@ -1,7 +1,7 @@
 import { LitElement, html, css, type PropertyValues } from 'lit';
 import { customElement, property, query } from 'lit/decorators.js';
 import type { MsgPaneUpdate } from './gen/internal/protocol/wirepb/wideboi_pb';
-import { termSettings, type CellPoint } from './pane-state';
+import { termSettings, selectionText, type CellPoint } from './pane-state';
 import { PanePainter } from './pane-painter';
 import type { RenderStats } from './stats';
 import { getTheme, type Theme } from './themes';
@@ -324,8 +324,34 @@ export class WideboiPane extends LitElement {
     };
   }
 
-  setSelection(start: CellPoint, end: CellPoint) { this.painter?.setSelection(start, end); }
-  clearSelection() { this.painter?.clearSelection(); }
+  private currentSelection?: { start: CellPoint; end: CellPoint };
+
+  setSelection(start: CellPoint, end: CellPoint) {
+    this.currentSelection = { start, end };
+    this.painter?.setSelection(start, end);
+  }
+
+  clearSelection() {
+    this.currentSelection = undefined;
+    this.painter?.clearSelection();
+  }
+
+  getSelection(): { start: CellPoint; end: CellPoint } | undefined {
+    return this.currentSelection;
+  }
+
+  selectedText(): string {
+    if (!this.currentSelection) return '';
+    return selectionText(this.pane, this.currentSelection.start, this.currentSelection.end);
+  }
+
+  setHoverCursor(cursor: string, title = '') {
+    if (this.canvas) {
+      this.canvas.style.cursor = cursor;
+      this.canvas.title = title;
+    }
+  }
+
   focusInput() { this.canvas.focus({ preventScroll: true }); }
 
   render() { return html`

@@ -3,7 +3,7 @@ import { customElement, query, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { appHostStyles, wideboiAppStyles } from './wideboi-app.styles';
 import { WideboiClient } from './client';
-import { termSettings, measureCellWidth, PaneStore, selectionText, type CellPoint } from './pane-state';
+import { termSettings, measureCellWidth, PaneStore, selectionText, findUrlAt, type CellPoint } from './pane-state';
 import { WideboiPane } from './wideboi-pane';
 import { cardLayout } from './card-layout';
 import { sendKeyboardInput, sendTextInput } from './input';
@@ -135,6 +135,7 @@ export class WideboiApp extends LitElement {
   private listeners?: AbortController;
   private pointer?: { id: number; pane: WideboiPane; button: number; tracking: boolean; focusOnClick: boolean; dragged: boolean; start: CellPoint };
   private selectedPane?: WideboiPane;
+  private hoveredPane?: WideboiPane;
   private movement = new Map<number, Animation>();
   private lastSentSize?: { cols: number; rows: number };
   @state() private layoutMode: 'scroll' | 'cards' = 'cards';
@@ -656,6 +657,45 @@ export class WideboiApp extends LitElement {
       }
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
+      if (!this.keyRouter.inPrefix && e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+          const text = this.selectedPane?.selectedText() || this.focusedPane()?.selectedText() || '';
+          if (text) {
+            if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+            this.selectedPane?.clearSelection();
+            this.selectedPane = undefined;
+          }
+          e.preventDefault();
+          return;
+        }
+        if (!e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+          const text = this.selectedPane?.selectedText() || this.focusedPane()?.selectedText() || '';
+          if (text) {
+            if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+            this.selectedPane?.clearSelection();
+            this.selectedPane = undefined;
+            e.preventDefault();
+            return;
+          }
+        }
+        if (e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+          if (navigator.clipboard?.readText) {
+            navigator.clipboard.readText().then(text => {
+              if (text && this.client) {
+                sendTextInput(this.client, this.focusedPaneId, text);
+                this.pendingReveal.add(this.focusedPaneId);
+                this.focusedPane()?.revealCursor();
+              }
+            }).catch(() => {});
+          }
+          e.preventDefault();
+          return;
+        }
+        if (!e.shiftKey && (e.key === 'v' || e.key === 'V')) {
+          return;
+        }
+      }
+
       if (this.searchController.handleTerminalKeydown(e)) {
         this.requestUpdate();
         return;
@@ -663,6 +703,16 @@ export class WideboiApp extends LitElement {
 
       const action = this.keyRouter.handle(e);
       this.dispatchKeyAction(action, e);
+    }, { signal: this.listeners?.signal });
+
+    document.addEventListener('copy', (e) => {
+      if (!this.connected || !this.client || fromFormControl(e)) return;
+      const text = this.selectedPane?.selectedText() || this.focusedPane()?.selectedText() || '';
+      if (text) {
+        e.clipboardData?.setData('text/plain', text);
+        if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+        e.preventDefault();
+      }
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('paste', (e) => {
@@ -794,7 +844,7 @@ export class WideboiApp extends LitElement {
       this.pointer = {
         id: e.pointerId, pane,
         button: e.button === 0 ? 1 : e.button === 2 ? 3 : 2,
-        tracking: pane.paneId === this.focusedPaneId && this.panes.mouseTracking(pane.paneId),
+        tracking: !e.metaKey && pane.paneId === this.focusedPaneId && this.panes.mouseTracking(pane.paneId),
         focusOnClick: pane.paneId !== this.focusedPaneId, dragged: false, start,
       };
       pane.setPointerCapture(e.pointerId);
@@ -807,7 +857,27 @@ export class WideboiApp extends LitElement {
     this.paneStrip.addEventListener('pointermove', (e) => {
       if (this.mobile) return;
       const press = this.pointer;
-      if (!press || press.id !== e.pointerId) return;
+      if (!press) {
+        const pane = this.eventPane(e);
+        if (pane && (pane.paneId === this.focusedPaneId || !pane.cardMode) && !this.panes.mouseTracking(pane.paneId)) {
+          if (this.hoveredPane && this.hoveredPane !== pane) {
+            this.hoveredPane.setHoverCursor('');
+          }
+          this.hoveredPane = pane;
+          const point = pane.cellAt(e.clientX, e.clientY);
+          const urlMatch = findUrlAt(this.panes.get(pane.paneId), point);
+          if (urlMatch) {
+            pane.setHoverCursor('pointer', urlMatch.url);
+          } else {
+            pane.setHoverCursor('');
+          }
+        } else if (this.hoveredPane) {
+          this.hoveredPane.setHoverCursor('');
+          this.hoveredPane = undefined;
+        }
+        return;
+      }
+      if (press.id !== e.pointerId) return;
       const end = press.pane.cellAt(e.clientX, e.clientY);
       if (end.x !== press.start.x || end.y !== press.start.y) press.dragged = true;
       if (press.tracking) this.sendPointerMouse(MouseKind.MOTION, e);
@@ -818,24 +888,40 @@ export class WideboiApp extends LitElement {
       e.preventDefault();
     }, { signal: this.listeners?.signal });
 
+    this.paneStrip.addEventListener('pointerleave', () => {
+      if (this.hoveredPane) {
+        this.hoveredPane.setHoverCursor('');
+        this.hoveredPane = undefined;
+      }
+    }, { signal: this.listeners?.signal });
+
     const release = (e: PointerEvent) => {
       if (this.mobile) return;
       if (!this.pointer || this.pointer.id !== e.pointerId) return;
-      if (this.pointer.tracking) this.sendPointerMouse(MouseKind.RELEASE, e);
-      else {
-        if (e.type === 'pointerup' && this.pointer.focusOnClick && !this.pointer.dragged) {
-          this.pointer.pane.clearSelection();
-          this.focusPane(this.pointer.pane.paneId);
-        } else {
-          const press = this.pointer;
+      const press = this.pointer;
+      this.pointer = undefined;
+      if (press.pane.hasPointerCapture(e.pointerId)) press.pane.releasePointerCapture(e.pointerId);
+
+      if (press.tracking) {
+        this.sendPointerMouse(MouseKind.RELEASE, e);
+      } else if (e.type === 'pointerup') {
+        if (press.focusOnClick && !press.dragged) {
+          press.pane.clearSelection();
+          this.focusPane(press.pane.paneId);
+        } else if (press.dragged) {
           const text = selectionText(this.panes.get(press.pane.paneId), press.start,
             press.pane.cellAt(e.clientX, e.clientY));
           if (text && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+        } else {
+          const urlMatch = findUrlAt(this.panes.get(press.pane.paneId), press.start);
+          if (urlMatch) {
+            window.open(urlMatch.url, '_blank', 'noopener,noreferrer');
+          } else {
+            this.selectedPane?.clearSelection();
+            this.selectedPane = undefined;
+          }
         }
       }
-      const pane = this.pointer.pane;
-      this.pointer = undefined;
-      if (pane.hasPointerCapture(e.pointerId)) pane.releasePointerCapture(e.pointerId);
       e.preventDefault();
     };
     this.paneStrip.addEventListener('pointerup', release, { signal: this.listeners?.signal });
@@ -845,6 +931,13 @@ export class WideboiApp extends LitElement {
       if (!this.mobile) return;
       const pane = this.eventPane(e);
       if (pane) {
+        const mouseEvent = e as MouseEvent;
+        const cell = pane.cellAt(mouseEvent.clientX, mouseEvent.clientY);
+        const urlMatch = findUrlAt(this.panes.get(pane.paneId), cell);
+        if (urlMatch) {
+          window.open(urlMatch.url, '_blank', 'noopener,noreferrer');
+          return;
+        }
         this.focusPane(pane.paneId);
         if (this.mobileInputMode === 'direct') {
           this.renderRoot.querySelector<HTMLInputElement>('.mobile-input-bar .mobile-direct-input')?.focus();

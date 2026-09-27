@@ -124,3 +124,99 @@ export function selectionText(pane: MsgPaneUpdate | undefined, start: CellPoint,
   }
   return rows.join('\n');
 }
+
+export interface DetectedUrl {
+  url: string;
+  start: CellPoint;
+  end: CellPoint;
+}
+
+function cleanUrl(raw: string): string {
+  let url = raw;
+  while (url.length > 0) {
+    const last = url[url.length - 1];
+    if (['.', ',', ';', ':', '!', "'", '"', '`', '>'].includes(last)) {
+      url = url.slice(0, -1);
+    } else if (last === ')' || last === ']' || last === '}') {
+      const open = last === ')' ? '(' : last === ']' ? '[' : '{';
+      const openCount = (url.match(new RegExp('\\' + open, 'g')) || []).length;
+      const closeCount = (url.match(new RegExp('\\' + last, 'g')) || []).length;
+      if (closeCount > openCount) {
+        url = url.slice(0, -1);
+      } else {
+        break;
+      }
+    } else {
+      break;
+    }
+  }
+  return url;
+}
+
+export function findUrlAt(pane: MsgPaneUpdate | undefined, point: CellPoint): DetectedUrl | undefined {
+  if (!pane || point.y < 0 || point.y >= pane.lines.length) return undefined;
+
+  let startY = point.y;
+  while (startY > 0) {
+    const prevLine = pane.lines[startY - 1]?.cells || [];
+    if (prevLine.length >= pane.cols && prevLine[pane.cols - 1]?.content?.trim()) {
+      startY--;
+    } else {
+      break;
+    }
+  }
+
+  let endY = point.y;
+  while (endY < pane.lines.length - 1) {
+    const curLine = pane.lines[endY]?.cells || [];
+    if (curLine.length >= pane.cols && curLine[pane.cols - 1]?.content?.trim()) {
+      endY++;
+    } else {
+      break;
+    }
+  }
+
+  const charToPoint: CellPoint[] = [];
+  let combinedText = '';
+
+  for (let y = startY; y <= endY; y++) {
+    const cells = pane.lines[y]?.cells || [];
+    for (let x = 0; x < cells.length; x++) {
+      const cell = cells[x];
+      if (!cell) continue;
+      let continuation = false;
+      for (let back = 1; back <= 3 && x - back >= 0; back++) {
+        if (cells[x - back]?.width > back) {
+          continuation = true;
+          break;
+        }
+      }
+      if (continuation) continue;
+      const content = cell.content || ' ';
+      for (let i = 0; i < content.length; i++) {
+        charToPoint.push({ x, y });
+        combinedText += content[i];
+      }
+    }
+  }
+
+  const urlRegex = /https?:\/\/[^\s<>"'|\\^`]+/g;
+  let match: RegExpExecArray | null;
+  while ((match = urlRegex.exec(combinedText)) !== null) {
+    const rawUrl = match[0];
+    const cleaned = cleanUrl(rawUrl);
+    if (!cleaned) continue;
+    const matchStart = match.index;
+    const matchEnd = matchStart + cleaned.length - 1;
+    const startPoint = charToPoint[matchStart];
+    const endPoint = charToPoint[matchEnd];
+    if (!startPoint || !endPoint) continue;
+
+    const afterOrAtStart = point.y > startPoint.y || (point.y === startPoint.y && point.x >= startPoint.x);
+    const beforeOrAtEnd = point.y < endPoint.y || (point.y === endPoint.y && point.x <= endPoint.x);
+    if (afterOrAtStart && beforeOrAtEnd) {
+      return { url: cleaned, start: startPoint, end: endPoint };
+    }
+  }
+  return undefined;
+}
