@@ -407,6 +407,7 @@ message MsgWebServerControlRequest {
   string token = 3;
   bool rotate_token = 4;
   bool disable_tls = 5;
+  bool enable_tls = 6;
 }
 
 message MsgWebServerControlResponse {
@@ -416,6 +417,7 @@ message MsgWebServerControlResponse {
   bool tls_enabled = 4;
   string token = 5;
   string error = 6;
+  string warning = 7;
 }
 
 

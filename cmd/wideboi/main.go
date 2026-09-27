@@ -10,8 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -469,7 +467,6 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 				"reason", "startup-failed", "err", errString(retErr))
 		}
 	}()
-	srv.ListenSocket(ctx, sl)
 
 	distFS, err := web.DistFS()
 	if err != nil {
@@ -497,6 +494,9 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 			slog.Error("cannot listen on websocket address", "err", err)
 			return err
 		}
+		if resp.Warning != "" {
+			fmt.Fprintln(os.Stderr, resp.Warning)
+		}
 		if cfg.WebsocketToken != "" {
 			host := resp.Addr
 			if tcpAddr, err := net.ResolveTCPAddr("tcp", resp.Addr); err == nil && (tcpAddr.IP.IsLoopback() || tcpAddr.IP.IsUnspecified()) {
@@ -512,6 +512,7 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 		}
 	}
 
+	srv.ListenSocket(ctx, sl)
 	err = srv.Run(ctx)
 
 	// Run returns as soon as Close begins, and the guard's Close is
@@ -536,7 +537,7 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 		// (which releases the flock), preventing a successor from racing.
 		_ = os.Remove(logger.Path(cfg.Socket, "server"))
 		_ = os.Remove(logger.Path(cfg.Socket, "client"))
-		_ = os.Remove(webTokenPath(cfg.Socket))
+		_ = os.Remove(server.WebTokenPath(cfg.Socket))
 
 		_ = sl.Close()
 
@@ -553,57 +554,6 @@ func errString(err error) string {
 		return ""
 	}
 	return err.Error()
-}
-
-func webTokenPath(socket string) string {
-	return strings.TrimSuffix(socket, ".sock") + ".web-token"
-}
-
-// writeWebToken replaces a stale token atomically, with owner-only access.
-func writeWebToken(socket, token string) error {
-	path := webTokenPath(socket)
-	f, err := os.CreateTemp(filepath.Dir(path), ".web-token-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.WriteString(token + "\n"); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
-}
-
-// announceWebClient shows a generated credential once on the server's stderr,
-// while the persistent structured log records only that authentication is on.
-func announceWebClient(w io.Writer, log *slog.Logger, host, addr, token string, generated bool, tlsEnabled bool) {
-	scheme := "http"
-	if tlsEnabled {
-		scheme = "https"
-	}
-	if generated {
-		// A fragment is not sent with the HTTP request. The browser consumes it
-		// and removes it from its history entry before opening the WebSocket.
-		fmt.Fprintf(w, "wideboi: web client listening at %s://%s/#token=%s\n", scheme, host, token)
-	} else {
-		fmt.Fprintf(w, "wideboi: web client listening at %s://%s/ (token configured)\n", scheme, host)
-	}
-	log.Info("websocket server listening", "addr", addr, "token", "***REDACTED***", "tls", tlsEnabled)
-}
-
-func warnIfWebClientExposed(w io.Writer, log *slog.Logger, addr net.Addr, tlsEnabled bool) {
-	if tlsEnabled {
-		return
-	}
-	tcpAddr, ok := addr.(*net.TCPAddr)
-	if !ok || tcpAddr.IP.IsLoopback() {
-		return
-	}
-	fmt.Fprintln(w, "wideboi: WARNING: web client is exposed beyond loopback over unencrypted HTTP/WS; bind to loopback behind an HTTPS reverse proxy for remote access")
-	log.Warn("web client exposed beyond loopback over unencrypted HTTP/WS", "addr", addr)
 }
 
 // runUpgradeServer asks the running server to exec binPath, passing its state

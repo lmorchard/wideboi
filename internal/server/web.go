@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -73,6 +74,7 @@ type webServerManager struct {
 	running     bool
 	boundAddr   string
 	url         string
+	warning     string
 	httpSrv     *http.Server
 	listener    net.Listener
 	isGenerated bool
@@ -144,6 +146,18 @@ func (s *Server) disconnectWebSocketClients() {
 	}
 }
 
+func sameTCPAddr(a, b string) bool {
+	if a == b {
+		return true
+	}
+	_, portA, errA := net.SplitHostPort(a)
+	_, portB, errB := net.SplitHostPort(b)
+	if errA == nil && errB == nil && portA == portB && portA != "0" {
+		return true
+	}
+	return false
+}
+
 func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.MsgWebServerControlRequest) (protocol.MsgWebServerControlResponse, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -153,23 +167,35 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 		return protocol.MsgWebServerControlResponse{Error: err.Error()}, err
 	}
 
-	// If already running: if no address change and no rotate token, return current status
-	addr := req.Addr
-	if addr == "" {
-		addr = w.addr
-	}
-	if addr == "" {
-		addr = "127.0.0.1:0"
+	if req.EnableTLS && req.DisableTLS {
+		err := errors.New("cannot specify both enable and disable TLS")
+		return protocol.MsgWebServerControlResponse{Error: err.Error()}, err
 	}
 
-	disableTLS := req.DisableTLS
-	tlsEnabled := w.tlsEnabled
-	if disableTLS {
-		tlsEnabled = false
+	targetTLS := w.tlsEnabled
+	if req.EnableTLS {
+		targetTLS = true
+	} else if req.DisableTLS {
+		targetTLS = false
 	}
+
+	targetAddr := req.Addr
+	if targetAddr == "" {
+		if w.running && w.boundAddr != "" {
+			targetAddr = w.boundAddr
+		} else {
+			targetAddr = w.addr
+		}
+	}
+	if targetAddr == "" {
+		targetAddr = "127.0.0.1:0"
+	}
+
+	tlsChanged := (targetTLS != w.tlsEnabled)
+	addrChanged := (req.Addr != "" && req.Addr != w.addr && req.Addr != w.boundAddr)
 
 	if w.running {
-		if (req.Addr == "" || req.Addr == w.boundAddr || req.Addr == w.addr) && !req.RotateToken && (!req.DisableTLS || !w.tlsEnabled) {
+		if !addrChanged && !req.RotateToken && !tlsChanged && (req.Token == "" || req.Token == w.token) {
 			return w.statusLocked(), nil
 		}
 	}
@@ -191,16 +217,46 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 		isGenerated = w.isGenerated
 	}
 
-	l, err := net.Listen("tcp", addr)
+	reusingAddr := w.running && (req.Addr == "" || targetAddr == w.boundAddr || targetAddr == w.addr || sameTCPAddr(targetAddr, w.boundAddr))
+
+	if reusingAddr {
+		if w.httpSrv != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = w.httpSrv.Shutdown(shutdownCtx)
+			cancel()
+			w.httpSrv = nil
+		}
+		if w.listener != nil {
+			_ = w.listener.Close()
+			w.listener = nil
+		}
+		if (req.RotateToken || tlsChanged) && s != nil {
+			s.disconnectWebSocketClients()
+		}
+	}
+
+	l, err := net.Listen("tcp", targetAddr)
 	if err != nil {
-		errStr := fmt.Sprintf("cannot listen on %s: %v", addr, err)
+		if reusingAddr {
+			w.running = false
+			w.boundAddr = ""
+			w.url = ""
+			w.warning = ""
+		}
+		errStr := fmt.Sprintf("cannot listen on %s: %v", targetAddr, err)
 		return protocol.MsgWebServerControlResponse{Error: errStr}, err
 	}
 
-	if tlsEnabled {
-		tlsConfig, err := transport.LoadOrGenerateTLSConfig(w.tlsCert, w.tlsKey, addr)
+	if targetTLS {
+		tlsConfig, err := transport.LoadOrGenerateTLSConfig(w.tlsCert, w.tlsKey, targetAddr)
 		if err != nil {
 			_ = l.Close()
+			if reusingAddr {
+				w.running = false
+				w.boundAddr = ""
+				w.url = ""
+				w.warning = ""
+			}
 			errStr := fmt.Sprintf("configure tls: %v", err)
 			return protocol.MsgWebServerControlResponse{Error: errStr}, err
 		}
@@ -208,7 +264,9 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 	}
 
 	mux := http.NewServeMux()
-	s.ListenWebSocket(context.Background(), mux, token)
+	if s != nil {
+		s.ListenWebSocket(context.Background(), mux, token)
+	}
 
 	if w.assetFS != nil {
 		mux.Handle("/", http.FileServer(w.assetFS))
@@ -219,6 +277,12 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 	if w.socketPath != "" {
 		if err := WriteWebToken(w.socketPath, token); err != nil {
 			_ = l.Close()
+			if reusingAddr {
+				w.running = false
+				w.boundAddr = ""
+				w.url = ""
+				w.warning = ""
+			}
 			errStr := fmt.Sprintf("save web token: %v", err)
 			return protocol.MsgWebServerControlResponse{Error: errStr}, err
 		}
@@ -233,36 +297,40 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 	}
 
 	scheme := "https"
-	if !tlsEnabled {
+	if !targetTLS {
 		scheme = "http"
 	}
 	webURL := fmt.Sprintf("%s://%s/#token=%s", scheme, host, url.QueryEscape(token))
 
-	// All setup for new server succeeded. Tear down old listener if replacing a running server.
-	if w.running {
+	if w.running && !reusingAddr {
 		if w.httpSrv != nil {
-			_ = w.httpSrv.Shutdown(context.Background())
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = w.httpSrv.Shutdown(shutdownCtx)
+			cancel()
 		}
 		if w.listener != nil {
 			_ = w.listener.Close()
 		}
-		if req.RotateToken && s != nil {
+		if (req.RotateToken || tlsChanged) && s != nil {
 			s.disconnectWebSocketClients()
 		}
 	}
 
 	w.running = true
-	w.addr = addr
+	w.addr = targetAddr
 	w.boundAddr = boundAddr
 	w.token = token
 	w.isGenerated = isGenerated
-	w.tlsEnabled = tlsEnabled
+	w.tlsEnabled = targetTLS
 	w.url = webURL
 	w.httpSrv = httpSrv
 	w.listener = l
 
-	slog.Info("websocket server listening", "addr", boundAddr, "token", "***REDACTED***", "tls", tlsEnabled)
-	warnIfWebClientExposed(l.Addr(), tlsEnabled)
+	slog.Info("websocket server listening", "addr", boundAddr, "token", "***REDACTED***", "tls", targetTLS)
+	w.warning = ExposureWarning(l.Addr(), targetTLS)
+	if w.warning != "" {
+		slog.Warn("web client exposed beyond loopback over unencrypted HTTP/WS", "addr", boundAddr)
+	}
 
 	go func() {
 		if err := httpSrv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -285,7 +353,9 @@ func (w *webServerManager) stopLocked(s *Server) (protocol.MsgWebServerControlRe
 	}
 
 	if w.httpSrv != nil {
-		_ = w.httpSrv.Shutdown(context.Background())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = w.httpSrv.Shutdown(shutdownCtx)
+		cancel()
 		w.httpSrv = nil
 	}
 	if w.listener != nil {
@@ -299,6 +369,7 @@ func (w *webServerManager) stopLocked(s *Server) (protocol.MsgWebServerControlRe
 	w.running = false
 	w.boundAddr = ""
 	w.url = ""
+	w.warning = ""
 
 	if s != nil {
 		s.disconnectWebSocketClients()
@@ -320,6 +391,7 @@ func (w *webServerManager) statusLocked() protocol.MsgWebServerControlResponse {
 		URL:        w.url,
 		TLSEnabled: w.tlsEnabled,
 		Token:      w.token,
+		Warning:    w.warning,
 	}
 }
 
@@ -330,13 +402,15 @@ func (w *webServerManager) Close(s *Server) {
 	_, _ = w.stopLocked(s)
 }
 
-func warnIfWebClientExposed(addr net.Addr, tlsEnabled bool) {
+// ExposureWarning returns a warning message if the web client is exposed beyond
+// loopback without TLS, or an empty string otherwise.
+func ExposureWarning(addr net.Addr, tlsEnabled bool) string {
 	if tlsEnabled {
-		return
+		return ""
 	}
 	tcpAddr, ok := addr.(*net.TCPAddr)
 	if !ok || tcpAddr.IP.IsLoopback() {
-		return
+		return ""
 	}
-	slog.Warn("web client exposed beyond loopback over unencrypted HTTP/WS", "addr", addr.String())
+	return "wideboi: WARNING: web client is exposed beyond loopback over unencrypted HTTP/WS; bind to loopback behind an HTTPS reverse proxy for remote access"
 }

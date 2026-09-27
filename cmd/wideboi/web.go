@@ -37,11 +37,15 @@ func runWeb(cfg config.Config, args []string, stdout, stderr io.Writer) error {
 		rotate := fs.Bool("rotate-token", false, "generate a new access token")
 		fs.BoolVar(rotate, "r", false, "generate a new access token (shorthand)")
 		disableTLS := fs.Bool("disable-tls", false, "disable TLS/HTTPS for web server")
+		enableTLS := fs.Bool("enable-tls", false, "enable TLS/HTTPS for web server")
 		jsonOut := fs.Bool("json", false, "output JSON")
 		if err := fs.Parse(subArgs); err != nil {
 			return err
 		}
-		return runWebStart(cfg, *addr, *rotate, *disableTLS, *jsonOut, stdout)
+		if *disableTLS && *enableTLS {
+			return fmt.Errorf("cannot specify both --enable-tls and --disable-tls")
+		}
+		return runWebStart(cfg, *addr, *rotate, *disableTLS, *enableTLS, *jsonOut, stdout, stderr)
 
 	case "stop":
 		fs := flag.NewFlagSet("wideboi web stop", flag.ContinueOnError)
@@ -75,7 +79,7 @@ func printWebHelp(w io.Writer) {
 	fmt.Fprintf(w, `Usage:
   wideboi [flags] web [status] [--json]
                              Show web server status, address, and URL
-  wideboi [flags] web start [--addr|-a <addr>] [--rotate-token|-r] [--disable-tls] [--json]
+  wideboi [flags] web start [--addr|-a <addr>] [--rotate-token|-r] [--disable-tls] [--enable-tls] [--json]
                              Start or update the session web server
   wideboi [flags] web stop [--json]
                              Stop the session web server and disconnect web clients
@@ -114,12 +118,13 @@ func runWebStatus(cfg config.Config, jsonOut bool, w io.Writer) error {
 	return nil
 }
 
-func runWebStart(cfg config.Config, addr string, rotateToken bool, disableTLS bool, jsonOut bool, w io.Writer) error {
+func runWebStart(cfg config.Config, addr string, rotateToken bool, disableTLS bool, enableTLS bool, jsonOut bool, stdout, stderr io.Writer) error {
 	req := protocol.MsgWebServerControlRequest{
 		Action:      protocol.WebServerActionStart,
 		Addr:        addr,
 		RotateToken: rotateToken,
 		DisableTLS:  disableTLS,
+		EnableTLS:   enableTLS,
 	}
 	resp, err := rpcQuery[protocol.MsgWebServerControlResponse](cfg, req, 5*time.Second)
 	if err != nil {
@@ -129,13 +134,17 @@ func runWebStart(cfg config.Config, addr string, rotateToken bool, disableTLS bo
 		return fmt.Errorf("failed to start web server: %s", resp.Error)
 	}
 
+	if resp.Warning != "" {
+		fmt.Fprintln(stderr, resp.Warning)
+	}
+
 	if jsonOut {
-		enc := json.NewEncoder(w)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(resp)
 	}
 
-	fmt.Fprintf(w, "wideboi: web client listening at %s\n", resp.URL)
+	fmt.Fprintf(stdout, "wideboi: web client listening at %s\n", resp.URL)
 	return nil
 }
 

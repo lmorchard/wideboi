@@ -124,4 +124,66 @@ func TestWebCommandE2E(t *testing.T) {
 	if !strings.Contains(out.String(), "web server: disabled") {
 		t.Fatalf("expected web server: disabled after stop, got: %q", out.String())
 	}
+
+	// 8. Start exposed on 0.0.0.0:0 with --disable-tls -> prints warning to stderr
+	out.Reset()
+	errOut.Reset()
+	err = runWeb(cfg, []string{"start", "--addr", "0.0.0.0:0", "--disable-tls"}, &out, &errOut)
+	if err != nil {
+		t.Fatalf("runWeb start exposed failed: %v", err)
+	}
+	if !strings.Contains(errOut.String(), "WARNING: web client is exposed beyond loopback") {
+		t.Fatalf("expected exposure warning on stderr, got: %q", errOut.String())
+	}
+
+	// Clean up web server
+	out.Reset()
+	errOut.Reset()
+	_ = runWeb(cfg, []string{"stop"}, &out, &errOut)
+
+	// 9. Mutually exclusive flags
+	out.Reset()
+	errOut.Reset()
+	err = runWeb(cfg, []string{"start", "--enable-tls", "--disable-tls"}, &out, &errOut)
+	if err == nil {
+		t.Fatal("expected error with both --enable-tls and --disable-tls")
+	}
+	if !strings.Contains(err.Error(), "cannot specify both") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 10. Disable TLS then re-enable TLS via CLI
+	out.Reset()
+	errOut.Reset()
+	err = runWeb(cfg, []string{"start", "--addr", "127.0.0.1:0", "--disable-tls"}, &out, &errOut)
+	if err != nil {
+		t.Fatalf("start --disable-tls failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "http://") {
+		t.Fatalf("expected http URL, got: %q", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	err = runWeb(cfg, []string{"start", "--enable-tls"}, &out, &errOut)
+	if err != nil {
+		t.Fatalf("start --enable-tls failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "https://") {
+		t.Fatalf("expected https URL, got: %q", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	err = runWeb(cfg, []string{"status"}, &out, &errOut)
+	if err != nil {
+		t.Fatalf("status failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "tls:        enabled") {
+		t.Fatalf("expected tls enabled in status, got: %q", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	_ = runWeb(cfg, []string{"stop"}, &out, &errOut)
 }
