@@ -961,6 +961,14 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 				}
 				g.em.SetCell(x, y, c)
 			}
+			for x := len(uvLine); x < g.em.Width(); x++ {
+				g.em.SetCell(x, y, &uv.EmptyCell)
+			}
+		}
+		for y := len(snap.ScreenLines); y < g.em.Height(); y++ {
+			for x := 0; x < g.em.Width(); x++ {
+				g.em.SetCell(x, y, &uv.EmptyCell)
+			}
 		}
 	} else {
 		for _, lineData := range snap.Scrollback {

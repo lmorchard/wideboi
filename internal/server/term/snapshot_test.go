@@ -412,3 +412,60 @@ func TestGridSnapshotLegacyRestore(t *testing.T) {
 		t.Fatalf("legacy screen cell 0 = %+v, want 'H'", sc0)
 	}
 }
+
+func TestGridSnapshotMultiRuneCells(t *testing.T) {
+	g1 := NewVT(80, 24)
+	defer g1.Close()
+
+	// "e\u0301" is a base character + combining acute accent (2 runes in 1 cell)
+	// Write "Cafe\u0301" followed by a multi-rune emoji
+	_, _ = g1.Write([]byte("Cafe\u0301 👨‍👩‍👧‍👦 done\r\n"))
+
+	snap := g1.(Snapshotter).ExportSnapshot()
+
+	g2 := NewVT(80, 24)
+	defer g2.Close()
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	vg1 := g1.(*vtGrid)
+	vg2 := g2.(*vtGrid)
+
+	// Check row 0 cells
+	for x := 0; x < 80; x++ {
+		c1 := vg1.em.CellAt(x, 0)
+		c2 := vg2.em.CellAt(x, 0)
+		if c1 == nil && c2 == nil {
+			continue
+		}
+		if (c1 == nil) != (c2 == nil) {
+			t.Fatalf("cell %d nil mismatch: c1=%v, c2=%v", x, c1, c2)
+		}
+		if c1.Content != c2.Content {
+			t.Fatalf("cell %d Content mismatch: got %q, want %q", x, c2.Content, c1.Content)
+		}
+		if c1.Width != c2.Width {
+			t.Fatalf("cell %d Width mismatch: got %d, want %d", x, c2.Width, c1.Width)
+		}
+	}
+}
+
+func TestGridSnapshotClearsStaleScreenCells(t *testing.T) {
+	g1 := NewVT(80, 24)
+	defer g1.Close()
+	_, _ = g1.Write([]byte("Short line"))
+	snap := g1.(Snapshotter).ExportSnapshot()
+
+	// g2 has long text on row 0 that should be cleared by restoring the short snapshot
+	g2 := NewVT(80, 24)
+	defer g2.Close()
+	_, _ = g2.Write([]byte("This is a much longer line with stale trailing text that must be cleared"))
+
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	for x := len("Short line"); x < 80; x++ {
+		c := g2.CellAt(x, 0)
+		if c != nil && !c.Equal(&uv.EmptyCell) && !c.IsZero() {
+			t.Fatalf("cell at %d was not cleared: %+v", x, c)
+		}
+	}
+}

@@ -90,21 +90,25 @@ func BenchmarkRestoreStateHeavyUncompressed(b *testing.B) {
 	}
 }
 
-// BenchmarkEncodeStateHeavy times ExportSnapshot + serialization + gzip compression
-// for a heavy session: 8 panes of 120x40 with 10,000 styled scrollback lines.
-// This measures the old process's work while holding s.mu before exec in PrepareUpgrade.
+// BenchmarkEncodeStateHeavy times ExportSnapshot for all 8 panes + serialization + gzip compression
+// for a heavy session: 8 panes of 120x40 each with 10,000 styled scrollback lines.
+// This measures the old process's total work while holding s.mu before exec in PrepareUpgrade.
 func BenchmarkEncodeStateHeavy(b *testing.B) {
 	const panes, cols, rows = 8, 120, 40
-	g := term.NewVT(cols, rows)
-	defer g.Close()
-	for i := 0; i < 10000+rows; i++ {
-		fmt.Fprintf(g, "\x1b[3%dmline %05d the quick brown fox jumps over the lazy dog 0123456789abcdefghijklmnopqrstuvwxyz\x1b[0m\r\n", i%8, i)
+	grids := make([]term.Grid, panes)
+	for id := 0; id < panes; id++ {
+		g := term.NewVT(cols, rows)
+		defer g.Close()
+		for i := 0; i < 10000+rows; i++ {
+			fmt.Fprintf(g, "\x1b[3%dmline %05d the quick brown fox jumps over the lazy dog 0123456789abcdefghijklmnopqrstuvwxyz\x1b[0m\r\n", i%8, i)
+		}
+		grids[id] = g
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		snap := g.(term.Snapshotter).ExportSnapshot()
 		state := UpgradeState{Cols: cols, Rows: rows, Panes: map[int]UpgradePane{}}
 		for id := 1; id <= panes; id++ {
+			snap := grids[id-1].(term.Snapshotter).ExportSnapshot()
 			state.Panes[id] = UpgradePane{ID: id, Cols: cols, Rows: rows, GridSnap: snap}
 		}
 		var buf bytes.Buffer
