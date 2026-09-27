@@ -1,6 +1,7 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -289,6 +290,71 @@ func TestUpgradeStateRoundTrip(t *testing.T) {
 	}
 	if newS.expectedOwnerPID != 0 {
 		t.Errorf("newS.expectedOwnerPID = %d, want 0", newS.expectedOwnerPID)
+	}
+}
+
+func TestUpgradeStateGzipRoundTrip(t *testing.T) {
+	s := newBareServer()
+	s.cols = 80
+	s.rows = 24
+	s.nextPaneID = 2
+
+	grid := term.NewVT(80, 24)
+	_, _ = grid.Write([]byte("Hello \x1b[32mGreen\x1b[0m World\r\n"))
+	p := NewCustomPane(1, grid, 80, 24)
+	s.panes[1] = p
+	s.strip.AddColumn(1, 80, 24, 0)
+	s.strip.FocusPaneID(1)
+
+	s.mu.Lock()
+	state, _, err := s.buildUpgradeStateLocked(protocol.MsgWebServerControlResponse{})
+	s.mu.Unlock()
+	if err != nil {
+		t.Fatalf("buildUpgradeStateLocked: %v", err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "wideboi-test-upgrade-*.state")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	gw := gzip.NewWriter(tmpFile)
+	if err := json.NewEncoder(gw).Encode(state); err != nil {
+		t.Fatalf("encode gzipped state: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	tmpFile.Close()
+
+	os.Setenv("WIDEBOI_RESTORE_STATE", tmpFile.Name())
+
+	newS := newBareServer()
+	if err := RestoreState(newS); err != nil {
+		t.Fatalf("RestoreState failed: %v", err)
+	}
+
+	newS.mu.Lock()
+	defer newS.mu.Unlock()
+
+	if len(newS.panes) != 1 {
+		t.Fatalf("expected 1 pane, got %d", len(newS.panes))
+	}
+	p1 := newS.panes[1]
+	if p1 == nil {
+		t.Fatal("pane 1 missing")
+	}
+	c0 := p1.grid.CellAt(0, 0)
+	if c0 == nil || c0.Content != "H" {
+		t.Fatalf("cell (0,0) = %+v, want 'H'", c0)
+	}
+	c6 := p1.grid.CellAt(6, 0)
+	if c6 == nil || c6.Content != "G" {
+		t.Fatalf("cell (6,0) = %+v, want 'G'", c6)
+	}
+	if c6.Style.IsZero() {
+		t.Fatalf("cell (6,0) style should not be zero")
 	}
 }
 

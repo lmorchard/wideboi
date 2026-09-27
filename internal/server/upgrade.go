@@ -1,8 +1,10 @@
 package server
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -219,19 +221,28 @@ func (s *Server) PrepareUpgrade(binPath string) (func() error, error) {
 			return err
 		}
 
-		f, err := os.CreateTemp("", "wideboi-upgrade-*.json")
+		f, err := os.CreateTemp("", "wideboi-upgrade-*.state")
 		if err != nil {
 			s.rollbackUpgradeLocked(modifiedFDs)
 			s.mu.Unlock()
 			return fmt.Errorf("creating state file: %w", err)
 		}
 
-		if err := json.NewEncoder(f).Encode(state); err != nil {
+		gw := gzip.NewWriter(f)
+		if err := json.NewEncoder(gw).Encode(state); err != nil {
+			_ = gw.Close()
 			f.Close()
 			_ = os.Remove(f.Name())
 			s.rollbackUpgradeLocked(modifiedFDs)
 			s.mu.Unlock()
 			return fmt.Errorf("serializing state: %w", err)
+		}
+		if err := gw.Close(); err != nil {
+			f.Close()
+			_ = os.Remove(f.Name())
+			s.rollbackUpgradeLocked(modifiedFDs)
+			s.mu.Unlock()
+			return fmt.Errorf("closing compressed state: %w", err)
 		}
 		f.Close()
 
@@ -266,8 +277,19 @@ func RestoreState(s *Server) error {
 	}
 	defer f.Close()
 
+	var r io.Reader = f
+	magic := make([]byte, 2)
+	if n, err := f.ReadAt(magic, 0); err == nil && n == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		gr, err := gzip.NewReader(f)
+		if err != nil {
+			return fmt.Errorf("reading compressed state: %w", err)
+		}
+		defer gr.Close()
+		r = gr
+	}
+
 	var state UpgradeState
-	if err := json.NewDecoder(f).Decode(&state); err != nil {
+	if err := json.NewDecoder(r).Decode(&state); err != nil {
 		return err
 	}
 
