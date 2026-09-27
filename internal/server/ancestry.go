@@ -87,6 +87,14 @@ func (s *Server) SetPeerPID(tp transport.Transport, pid uint32) {
 
 func (s *Server) setPeerPIDLocked(tp transport.Transport, pid uint32) {
 	s.clientLocked(tp).peerPID = pid
+	if s.expectedOwnerPID != 0 && pid == s.expectedOwnerPID && s.owner == nil {
+		s.owner = tp
+		s.expectedOwnerPID = 0
+	}
+	if s.expectedSizeOwnerPID != 0 && pid == s.expectedSizeOwnerPID && s.sizeOwner == nil {
+		s.sizeOwner = tp
+		s.expectedSizeOwnerPID = 0
+	}
 }
 
 // peerPID is tp's peer's pid, 0 if unknown.

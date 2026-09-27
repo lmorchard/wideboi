@@ -143,19 +143,22 @@ type Snapshotter interface {
 }
 
 type GridSnapshot struct {
-	Cols          int                 `json:"cols"`
-	Rows          int                 `json:"rows"`
-	CursorX       int                 `json:"cursor_x"`
-	CursorY       int                 `json:"cursor_y"`
-	CursorVisible bool                `json:"cursor_visible"`
-	MouseModes    uint32              `json:"mouse_modes"`
-	Status        int32               `json:"status"`
-	Title         string              `json:"title"`
-	CWD           string              `json:"cwd"`
-	UserVars      map[string]string   `json:"user_vars"`
-	ScrollOffset  int                 `json:"scroll_offset"`
-	Scrollback    []protocol.LineData `json:"scrollback"`
-	Screen        []protocol.LineData `json:"screen"`
+	Cols           int                 `json:"cols"`
+	Rows           int                 `json:"rows"`
+	CursorX        int                 `json:"cursor_x"`
+	CursorY        int                 `json:"cursor_y"`
+	CursorVisible  bool                `json:"cursor_visible"`
+	MouseModes     uint32              `json:"mouse_modes"`
+	Status         int32               `json:"status"`
+	Title          string              `json:"title"`
+	CWD            string              `json:"cwd"`
+	UserVars       map[string]string   `json:"user_vars"`
+	ScrollOffset   int                 `json:"scroll_offset"`
+	Scrollback     []protocol.LineData `json:"scrollback"`
+	Screen         []protocol.LineData `json:"screen"`
+	IsAltScreen    bool                `json:"is_alt_screen,omitempty"`
+	BracketedPaste bool                `json:"bracketed_paste,omitempty"`
+	CursorKeys     bool                `json:"cursor_keys,omitempty"`
 }
 
 // encodingMods are the modifiers that change how a key encodes as bytes
@@ -195,6 +198,8 @@ type vtGrid struct {
 	title                  atomic.Pointer[string]
 	cwd                    atomic.Pointer[string]
 	sawAuthoritativeStatus atomic.Bool
+	bracketedPaste         atomic.Bool
+	cursorKeys             atomic.Bool
 
 	userVarsMu sync.Mutex
 	userVars   map[string]string
@@ -277,8 +282,14 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 		// vt already honours these modes in SendMouse; wideboi needs
 		// them too, to know whether a click in this pane belongs to the
 		// child or to its own selection.
-		EnableMode:  func(m ansi.Mode) { g.trackMouseMode(m, true) },
-		DisableMode: func(m ansi.Mode) { g.trackMouseMode(m, false) },
+		EnableMode: func(m ansi.Mode) {
+			g.trackMouseMode(m, true)
+			g.trackTerminalMode(m, true)
+		},
+		DisableMode: func(m ansi.Mode) {
+			g.trackMouseMode(m, false)
+			g.trackTerminalMode(m, false)
+		},
 	})
 
 	g.em.RegisterOscHandler(133, func(data []byte) bool {
@@ -593,6 +604,19 @@ func (g *vtGrid) trackMouseMode(m ansi.Mode, on bool) {
 	}
 }
 
+func (g *vtGrid) trackTerminalMode(m ansi.Mode, on bool) {
+	dm, ok := m.(ansi.DECMode)
+	if !ok {
+		return
+	}
+	switch dm {
+	case ansi.ModeBracketedPaste:
+		g.bracketedPaste.Store(on)
+	case ansi.ModeCursorKeys:
+		g.cursorKeys.Store(on)
+	}
+}
+
 func (g *vtGrid) MouseTracking() bool { return g.mouseModes.Load() != 0 }
 
 func (g *vtGrid) SendMouse(m uv.MouseEvent) { g.em.SendMouse(m) }
@@ -840,19 +864,22 @@ func (g *vtGrid) ExportSnapshot() *GridSnapshot {
 
 	cp := g.em.CursorPosition()
 	snap := &GridSnapshot{
-		Cols:          cols,
-		Rows:          rows,
-		CursorX:       cp.X,
-		CursorY:       cp.Y,
-		CursorVisible: g.cursorVisible.Load(),
-		MouseModes:    g.mouseModes.Load(),
-		Status:        g.status.Load(),
-		Title:         g.Title(),
-		CWD:           g.CWD(),
-		UserVars:      g.UserVars(),
-		ScrollOffset:  int(g.scrollOffset.Load()),
-		Scrollback:    scrollback,
-		Screen:        screen,
+		Cols:           cols,
+		Rows:           rows,
+		CursorX:        cp.X,
+		CursorY:        cp.Y,
+		CursorVisible:  g.cursorVisible.Load(),
+		MouseModes:     g.mouseModes.Load(),
+		Status:         g.status.Load(),
+		Title:          g.Title(),
+		CWD:            g.CWD(),
+		UserVars:       g.UserVars(),
+		ScrollOffset:   int(g.scrollOffset.Load()),
+		Scrollback:     scrollback,
+		Screen:         screen,
+		IsAltScreen:    g.em.IsAltScreen(),
+		BracketedPaste: g.bracketedPaste.Load(),
+		CursorKeys:     g.cursorKeys.Load(),
 	}
 	return snap
 }
@@ -863,6 +890,12 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 	}
 	g.writeResizeMu.Lock()
 	defer g.writeResizeMu.Unlock()
+
+	// 0. Alt-screen must be entered before populating the visible screen buffer,
+	// so cells are placed into the alternate screen rather than the primary screen.
+	if snap.IsAltScreen {
+		_, _ = g.em.Write([]byte("\033[?1049h"))
+	}
 
 	// 1. Populate scrollback
 	sb := g.em.Scrollback()
@@ -923,6 +956,14 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 		}
 		modeSeq.WriteString("\033[?1006h") // SGR encoding
 		_, _ = g.em.Write([]byte(modeSeq.String()))
+	}
+	if snap.BracketedPaste {
+		g.bracketedPaste.Store(true)
+		_, _ = g.em.Write([]byte("\033[?2004h"))
+	}
+	if snap.CursorKeys {
+		g.cursorKeys.Store(true)
+		_, _ = g.em.Write([]byte("\033[?1h"))
 	}
 	g.status.Store(snap.Status)
 	if snap.Title != "" {

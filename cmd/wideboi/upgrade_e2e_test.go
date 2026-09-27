@@ -101,6 +101,12 @@ func TestUpgradeServerE2E(t *testing.T) {
 		t.Fatalf("capture before upgrade did not contain token: code=%d err=%s out=%s", capCode, capErr, capOut)
 	}
 
+	// Start web server dynamically before upgrade
+	webOut, webErr, webCode := runCLI("web", "start", "--disable-tls", "127.0.0.1:0")
+	if webCode != 0 {
+		t.Fatalf("web start failed: %s (stderr: %s)", webOut, webErr)
+	}
+
 	// 2. Perform the in-place upgrade
 	upOut, upErr, upCode := runCLI("upgrade-server", bin)
 	if upCode != 0 {
@@ -150,6 +156,13 @@ func TestUpgradeServerE2E(t *testing.T) {
 	if capFinalCode != 0 || !strings.Contains(capFinalOut, "post-upgrade-success") {
 		logData, _ := os.ReadFile(serverLogPath)
 		t.Fatalf("capture final missing post-upgrade output: code=%d err=%s out=%s\nserver log:\n%s", capFinalCode, capFinalErr, capFinalOut, string(logData))
+	}
+
+	// 7. Verify web server survived the upgrade and is still running
+	webStatusPost, _, webStatusCode := runCLI("web", "status", "--json")
+	if webStatusCode != 0 || !strings.Contains(webStatusPost, `"running": true`) {
+		logData, _ := os.ReadFile(serverLogPath)
+		t.Fatalf("web server did not survive upgrade: code=%d out=%s\nserver log:\n%s", webStatusCode, webStatusPost, string(logData))
 	}
 }
 

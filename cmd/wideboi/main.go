@@ -489,7 +489,38 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 		AssetFS:    distFS,
 	})
 
-	if cfg.Websocket != "" {
+	srv.ListenSocket(ctx, sl)
+
+	if restored {
+		if restoredWeb := srv.RestoredWebState(); restoredWeb.Running {
+			resp, err := srv.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+				Action:     protocol.WebServerActionStart,
+				Addr:       restoredWeb.Addr,
+				Token:      restoredWeb.Token,
+				DisableTLS: !restoredWeb.TLSEnabled,
+			})
+			if err != nil {
+				slog.Error("cannot restart web server after upgrade", "err", err)
+				return err
+			}
+			if resp.Warning != "" {
+				fmt.Fprintln(os.Stderr, resp.Warning)
+			}
+			if restoredWeb.Token != "" {
+				host := resp.Addr
+				if tcpAddr, err := net.ResolveTCPAddr("tcp", resp.Addr); err == nil && (tcpAddr.IP.IsLoopback() || tcpAddr.IP.IsUnspecified()) {
+					host = fmt.Sprintf("127.0.0.1:%d", tcpAddr.Port)
+				}
+				scheme := "https"
+				if !resp.TLSEnabled {
+					scheme = "http"
+				}
+				fmt.Fprintf(os.Stderr, "wideboi: web client resumed at %s://%s/ (token configured)\n", scheme, host)
+			} else {
+				fmt.Fprintf(os.Stderr, "wideboi: web client resumed at %s\n", resp.URL)
+			}
+		}
+	} else if cfg.Websocket != "" {
 		resp, err := srv.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
 			Action:     protocol.WebServerActionStart,
 			Addr:       cfg.Websocket,
@@ -518,7 +549,6 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 		}
 	}
 
-	srv.ListenSocket(ctx, sl)
 	err = srv.Run(ctx)
 
 	// Run returns as soon as Close begins, and the guard's Close is
@@ -642,15 +672,20 @@ const takenCeiling = 5 * time.Second
 const reapCeiling = 2 * time.Second
 
 // dialWithin dials socket until it answers or ceiling passes: a wait
-// for observed state, with the ceiling as the timeout.
+// for observed state, with the ceiling as the timeout. It retries with
+// backoff between attempts.
 func dialWithin(socket string, ceiling time.Duration) (net.Conn, error) {
 	deadline := time.Now().Add(ceiling)
+	delay := 20 * time.Millisecond
 	for {
 		conn, err := net.Dial("unix", socket)
 		if err == nil || time.Now().After(deadline) {
 			return conn, err
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(delay)
+		if delay < 100*time.Millisecond {
+			delay += 10 * time.Millisecond
+		}
 	}
 }
 

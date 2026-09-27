@@ -575,6 +575,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if err := eff.upgradeExecFn(); err != nil {
 			slog.Error("exec failed during upgrade", "err", err)
+			if tp != nil {
+				s.dropClient(ctx, tp)
+			}
 		}
 		return true
 	}
