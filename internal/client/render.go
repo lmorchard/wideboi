@@ -127,7 +127,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 
 			divider := "│"
 			style := c.theme.Divider
-			if p.PaneID == st.focusPaneID || adjacentFocused {
+			if adjacentFocused {
 				divider = "┃"
 				style = c.theme.FocusDivider
 			}
@@ -154,7 +154,7 @@ func (c *Client) composeFrameLocked(dst uv.Screen, st frameState) *protocol.Plac
 			// Additionally, the focused card is the top-most card, so its right edge is also fully visible.
 			if p.PaneID == st.focusPaneID && p.Dst.Max.X < c.cols {
 				for y := p.Dst.Min.Y; y < p.Dst.Max.Y; y++ {
-					compose.WriteStyled(dst, p.Dst.Max.X, y, "┃", c.theme.FocusDivider)
+					compose.WriteStyled(dst, p.Dst.Max.X, y, "│", c.theme.Divider)
 				}
 			}
 		}

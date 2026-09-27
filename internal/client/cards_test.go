@@ -557,3 +557,65 @@ func TestScrollModeStillDrawsDividers(t *testing.T) {
 		t.Errorf("scroll mode drew no divider:\n%s", whole)
 	}
 }
+
+func TestCardsHighlightOnlyLeftBorder(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := newCardClient(t, cols, rows, nil)
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr)
+
+	p2 := placementFor(cli, 2)
+	leftX := p2.Frame.Min.X
+	rightX := p2.Dst.Max.X
+	testY := p2.Dst.Min.Y
+
+	leftCell := scr.CellAt(leftX, testY)
+	if leftCell == nil || leftCell.Content != "┃" || leftCell.Style != cli.theme.FocusDivider {
+		t.Fatalf("left border at (%d, %d): got content %q, style %+v; want '┃' with FocusDivider %+v",
+			leftX, testY, leftCell.Content, leftCell.Style, cli.theme.FocusDivider)
+	}
+
+	rightCell := scr.CellAt(rightX, testY)
+	if rightCell == nil || rightCell.Content != "│" || rightCell.Style != cli.theme.Divider {
+		t.Fatalf("right border at (%d, %d): got content %q, style %+v; want '│' with Divider %+v",
+			rightX, testY, rightCell.Content, rightCell.Style, cli.theme.Divider)
+	}
+}
+
+func TestScrollModeHighlightOnlyLeftBorder(t *testing.T) {
+	const cols, rows = 120, 16
+	cli := NewClient(transport.NewInProcChannel(16), cols, rows, "C-b")
+	cli.SetLayoutMode(protocol.LayoutScroll)
+	cli.focusPaneID = 2
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 30, Height: 10},
+			{PaneID: 2, Width: 30, Height: 10},
+			{PaneID: 3, Width: 30, Height: 10},
+		},
+	})
+	cli.HandleServerMsg(paneUpdate(1, 30, 10, "CONTENT-ONE"))
+	cli.HandleServerMsg(paneUpdate(2, 30, 10, "CONTENT-TWO"))
+	cli.HandleServerMsg(paneUpdate(3, 30, 10, "CONTENT-THREE"))
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr)
+
+	p1 := placementFor(cli, 1)
+	p2 := placementFor(cli, 2)
+	leftX := p1.Dst.Max.X  // Left border of focused pane 2
+	rightX := p2.Dst.Max.X // Right border of focused pane 2
+	testY := p2.Dst.Min.Y
+
+	leftCell := scr.CellAt(leftX, testY)
+	if leftCell == nil || leftCell.Content != "┃" || leftCell.Style != cli.theme.FocusDivider {
+		t.Fatalf("left border at (%d, %d): got content %q, style %+v; want '┃' with FocusDivider %+v",
+			leftX, testY, leftCell.Content, leftCell.Style, cli.theme.FocusDivider)
+	}
+
+	rightCell := scr.CellAt(rightX, testY)
+	if rightCell == nil || rightCell.Content != "│" || rightCell.Style != cli.theme.Divider {
+		t.Fatalf("right border at (%d, %d): got content %q, style %+v; want '│' with Divider %+v",
+			rightX, testY, rightCell.Content, rightCell.Style, cli.theme.Divider)
+	}
+}
