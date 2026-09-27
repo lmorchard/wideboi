@@ -10,6 +10,7 @@ const namedCodes: Record<string, number> = {
 };
 
 import type { ClientMsg } from './client';
+import { MouseKind } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 export interface InputSender {
   send(msg: ClientMsg): void;
@@ -36,5 +37,27 @@ export function sendKeyboardInput(sender: InputSender, paneID: number, event: Ke
 export function sendTextInput(sender: InputSender, paneID: number, text: string): boolean {
   if (!text) return false;
   sender.send({ case: 'input', value: { paneId: paneID, data: new TextEncoder().encode(text) } });
+  return true;
+}
+
+export function sendWheelInput(
+  sender: InputSender,
+  paneID: number,
+  cell: { x: number; y: number },
+  event: WheelEvent
+): boolean {
+  if (event.deltaY === 0) return false;
+  const button = event.deltaY < 0 ? 4 : 5;
+  sender.send({
+    case: 'mouse',
+    value: {
+      paneId: paneID,
+      kind: MouseKind.WHEEL,
+      x: cell.x,
+      y: cell.y,
+      button,
+      mod: (event.shiftKey ? 1 : 0) | (event.altKey ? 2 : 0) | (event.ctrlKey ? 4 : 0),
+    },
+  });
   return true;
 }
