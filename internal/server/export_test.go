@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -39,4 +40,36 @@ func (s *Server) SizeOwner() transport.Transport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.sizeOwner
+}
+
+// SpawnPane adds a new pane and column to the layout strip.
+func (s *Server) SpawnPane() (int, error) {
+	s.mu.Lock()
+	p, err := s.spawnPaneLocked(0)
+	if err != nil {
+		s.mu.Unlock()
+		return 0, err
+	}
+	s.mu.Unlock()
+	s.broadcastLayout(context.Background())
+	return p.ID(), nil
+}
+
+// PaneSize reports pane id's current logical dimensions, as last set by
+// resizePanesLocked. ok is false if id is unknown.
+func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
+	s.mu.Lock()
+	p, ok := s.panes[id]
+	s.mu.Unlock()
+	if !ok {
+		return 0, 0, false
+	}
+	cols, rows = p.Size()
+	return cols, rows, true
+}
+
+// UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport at the
+// current scroll offset, with unread output marked false.
+func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
+	return p.UpdateMessageForOffset(p.ScrollOffset(), false)
 }

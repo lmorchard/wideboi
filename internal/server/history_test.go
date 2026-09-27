@@ -66,7 +66,7 @@ func TestHistoryRequestIsReadOnlyAndClientSpecific(t *testing.T) {
 	default:
 		t.Fatal("requester received no history")
 	}
-	if len(second.ServerSend) != 0 || len(s.clientScrollOffsets) != 0 {
+	if len(second.ServerSend) != 0 || (s.clients != nil && s.clients[first] != nil && len(s.clients[first].clientScrollOffsets) != 0) {
 		t.Fatal("history request affected another client or scroll state")
 	}
 }

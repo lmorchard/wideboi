@@ -287,3 +287,38 @@ func TestServerDashboardToggleAndNavigate(t *testing.T) {
 		t.Fatal("server did not shut down after all terminal panes closed")
 	}
 }
+
+func TestDashboardHandleInput(t *testing.T) {
+	db := NewDashboard()
+	db.panes = []PaneInfo{
+		{ID: 10, Status: protocol.StatusIdle, Title: "first"},
+		{ID: 20, Status: protocol.StatusIdle, Title: "second"},
+		{ID: 30, Status: protocol.StatusIdle, Title: "third"},
+	}
+
+	// 'j' moves down
+	target, handled := db.HandleInput(protocol.MsgInput{Data: []byte("j")})
+	if !handled || target != 0 || db.selected != 1 {
+		t.Errorf("HandleInput('j'): handled=%v, target=%d, selected=%d", handled, target, db.selected)
+	}
+
+	// 'k' moves up
+	target, handled = db.HandleInput(protocol.MsgInput{Data: []byte("k")})
+	if !handled || target != 0 || db.selected != 0 {
+		t.Errorf("HandleInput('k'): handled=%v, target=%d, selected=%d", handled, target, db.selected)
+	}
+
+	// '\r' activates current selection
+	target, handled = db.HandleInput(protocol.MsgInput{Data: []byte("\r")})
+	if !handled || target != 10 {
+		t.Errorf("HandleInput('\\r'): handled=%v, target=%d, want 10", handled, target)
+	}
+
+	// Key encoding
+	target, handled = db.HandleInput(protocol.MsgInput{
+		Key: protocol.EncodeKey(uv.KeyPressEvent{Code: 'j'}),
+	})
+	if !handled || db.selected != 1 {
+		t.Errorf("HandleInput(encoded 'j'): handled=%v, selected=%d", handled, db.selected)
+	}
+}
