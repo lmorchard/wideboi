@@ -6,7 +6,7 @@ import { WideboiClient } from './client';
 import { termSettings, measureCellWidth, PaneStore, selectionText, findUrlAt, type CellPoint } from './pane-state';
 import { WideboiPane } from './wideboi-pane';
 import { cardLayout } from './card-layout';
-import { sendKeyboardInput, sendTextInput } from './input';
+import { sendKeyboardInput, sendTextInput, sendWheelInput } from './input';
 import { KeyRouter, type KeyRouterAction } from './key-router';
 import { consumeLinkToken } from './token';
 import { RenderStats, formatSummary, statsEnabled } from './stats';
@@ -988,6 +988,14 @@ export class WideboiApp extends LitElement {
         // A short client scrolls within the live terminal grid. Alt+wheel
         // explicitly navigates terminal history instead.
         if (pane.hasVerticalOverflow && !e.altKey) return;
+
+        if (!e.altKey && !e.metaKey && (pane.paneId === this.focusedPaneId || !pane.cardMode) && this.panes.mouseTracking(pane.paneId)) {
+          if (sendWheelInput(this.client, pane.paneId, pane.cellAt(e.clientX, e.clientY), e)) {
+            e.preventDefault();
+            return;
+          }
+        }
+
         e.preventDefault();
         // e.deltaY > 0 means scrolling down (towards bottom/newer).
         // e.deltaY < 0 means scrolling up (towards top/older).
