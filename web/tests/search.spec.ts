@@ -1,28 +1,7 @@
-import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { test, expect, type Page } from '@playwright/test';
+import { installMockWebSocket } from './browser-fixture';
 
-function setupMockSocket(page) {
-  return page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.url = url;
-        this.protocols = protocols;
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
-}
-
-async function connectPage(page) {
+async function connectPage(page: Page) {
   await page.setViewportSize({ width: 600, height: 400 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -55,7 +34,7 @@ async function connectPage(page) {
 }
 
 test('browser search UI: triggers via prefix + /, toolbar, and Ctrl+F', async ({ page }) => {
-  await setupMockSocket(page);
+  await installMockWebSocket(page);
   await connectPage(page);
 
   const searchBar = page.locator('.status.search-bar');
@@ -90,7 +69,7 @@ test('browser search UI: triggers via prefix + /, toolbar, and Ctrl+F', async ({
 });
 
 test('query entry does not leak keystrokes to child, sends historyRequest on Enter, and navigates matches', async ({ page }) => {
-  await setupMockSocket(page);
+  await installMockWebSocket(page);
   await connectPage(page);
 
   const messages = () => page.evaluate(async () => {
@@ -203,7 +182,7 @@ test('query entry does not leak keystrokes to child, sends historyRequest on Ent
 });
 
 test('no match displays message and Escape restores prior offset', async ({ page }) => {
-  await setupMockSocket(page);
+  await installMockWebSocket(page);
   await connectPage(page);
 
   // Set initial scroll offset to 6
@@ -264,7 +243,7 @@ test('no match displays message and Escape restores prior offset', async ({ page
 });
 
 test('handles Unicode and soft-wrapped rows correctly', async ({ page }) => {
-  await setupMockSocket(page);
+  await installMockWebSocket(page);
   await connectPage(page);
 
   const messages = () => page.evaluate(async () => {
@@ -314,8 +293,8 @@ test('two independent browser clients maintain isolated search and scroll states
   const contextB = await browser.newContext();
   const pageB = await contextB.newPage();
 
-  await setupMockSocket(pageA);
-  await setupMockSocket(pageB);
+  await installMockWebSocket(pageA);
+  await installMockWebSocket(pageB);
 
   await connectPage(pageA);
   await connectPage(pageB);

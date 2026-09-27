@@ -1,25 +1,10 @@
-import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { test, expect, type Page } from '@playwright/test';
+import { installMockWebSocket } from './browser-fixture';
 
 test.use({ viewport: { width: 390, height: 700 }, hasTouch: true, isMobile: true });
 
-async function connect(page) {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(_url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+async function connect(page: Page) {
+  await installMockWebSocket(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
   await page.evaluate(() => window.testSockets[0].open());
@@ -41,7 +26,7 @@ async function connect(page) {
   });
 }
 
-async function sent(page) {
+async function sent(page: Page) {
   return page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
     return clientMessages(window.testSockets[0].sent).map(msg => ({
@@ -69,10 +54,10 @@ test('narrow view shows one pane and sends draft text followed by Enter', async 
   const afterSend = await sent(page);
   const inputs = afterSend.filter(msg => msg.case === 'input');
   expect(inputs).toHaveLength(2);
-  expect(inputs[0].value.paneId).toBe(2);
-  expect(new TextDecoder().decode(inputs[0].value.data)).toBe('echo hello');
-  expect(inputs[1].value.paneId).toBe(2);
-  expect(inputs[1].value.key.code).toBe(13);
+  expect((inputs[0].value as any).paneId).toBe(2);
+  expect(new TextDecoder().decode((inputs[0].value as any).data)).toBe('echo hello');
+  expect((inputs[1].value as any).paneId).toBe(2);
+  expect((inputs[1].value as any).key.code).toBe(13);
 });
 
 test('sending a mobile draft reveals the cursor after horizontal panning', async ({ page }) => {
@@ -95,7 +80,7 @@ test('touch pans without terminal mouse messages and keyboard-sized view does no
   const before = (await sent(page)).filter(msg => msg.case === 'resize').length;
   await viewport.tap();
   await expect(page.getByRole('textbox', { name: 'Command or response' })).toBeFocused();
-  const bounds = await viewport.boundingBox();
+  const bounds = (await viewport.boundingBox())!;
   const cdp = await page.context().newCDPSession(page);
   const y = bounds.y + Math.min(bounds.height / 2, 100);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bounds.x + 300, y, id: 1 }] });
@@ -106,7 +91,7 @@ test('touch pans without terminal mouse messages and keyboard-sized view does no
   expect((await sent(page)).filter(msg => msg.case === 'mouse')).toHaveLength(0);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 420 });
-    window.visualViewport.dispatchEvent(new Event('resize'));
+    window.visualViewport?.dispatchEvent(new Event('resize'));
   });
   await expect.poll(() => page.locator('wideboi-app').evaluate(el =>
     Math.round(el.getBoundingClientRect().height))).toBe(420);
@@ -120,7 +105,7 @@ test('touch pans without terminal mouse messages and keyboard-sized view does no
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(0);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 360 });
-    window.visualViewport.dispatchEvent(new Event('resize'));
+    window.visualViewport?.dispatchEvent(new Event('resize'));
   });
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(0);
   expect((await sent(page)).filter(msg => msg.case === 'resize')).toHaveLength(before);
@@ -151,8 +136,8 @@ test('terminal key buttons work and composing draft text stays in the draft', as
   await page.getByRole('button', { name: 'C key' }).click();
   await expect(sheet).toBeVisible();
   const inputs = (await sent(page)).filter(msg => msg.case === 'input');
-  expect(inputs.map(msg => msg.value.key.code)).toEqual([27, 99]);
-  expect(inputs[1].value.key.mod & 4).toBe(4);
+  expect(inputs.map(msg => (msg.value as any).key.code)).toEqual([27, 99]);
+  expect((inputs[1].value as any).key.mod & 4).toBe(4);
   await expect(page.getByRole('button', { name: 'Control modifier' })).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -167,8 +152,8 @@ test('Ctrl+R shortcut can be sent from on-screen controls', async ({ page }) => 
   await expect(sheet).toBeVisible();
   const inputs = (await sent(page)).filter(msg => msg.case === 'input');
   expect(inputs).toHaveLength(1);
-  expect(inputs[0].value.key.code).toBe(114);
-  expect(inputs[0].value.key.mod & 4).toBe(4);
+  expect((inputs[0].value as any).key.code).toBe(114);
+  expect((inputs[0].value as any).key.mod & 4).toBe(4);
   await expect(page.getByRole('button', { name: 'Control modifier' })).toHaveAttribute('aria-pressed', 'false');
 });
 
@@ -180,7 +165,7 @@ test('direct input mode forwards keystrokes immediately to the terminal', async 
   await directInput.press('q');
   const inputs = (await sent(page)).filter(msg => msg.case === 'input');
   expect(inputs).toHaveLength(1);
-  expect(inputs[0].value.key.code).toBe(113);
+  expect((inputs[0].value as any).key.code).toBe(113);
   await page.getByRole('button', { name: 'Draft mode' }).click();
   await expect(page.getByRole('textbox', { name: 'Command or response' })).toBeVisible();
 });
@@ -204,10 +189,10 @@ test('macro panel opens, shows macros with Enter indicators, and executes ordere
 
   const inputs = (await sent(page)).filter(msg => msg.case === 'input');
   expect(inputs).toHaveLength(2);
-  expect(inputs[0].value.paneId).toBe(1);
-  expect(new TextDecoder().decode(inputs[0].value.data)).toBe('git status');
-  expect(inputs[1].value.paneId).toBe(1);
-  expect(inputs[1].value.key.code).toBe(13);
+  expect((inputs[0].value as any).paneId).toBe(1);
+  expect(new TextDecoder().decode((inputs[0].value as any).data)).toBe('git status');
+  expect((inputs[1].value as any).paneId).toBe(1);
+  expect((inputs[1].value as any).key.code).toBe(13);
 });
 
 test('macro editor allows editing and saving macros to server', async ({ page }) => {
@@ -233,7 +218,7 @@ test('macro editor allows editing and saving macros to server', async ({ page })
 
   const saveMsgs = (await sent(page)).filter(msg => msg.case === 'saveMacros');
   expect(saveMsgs).toHaveLength(1);
-  expect(saveMsgs[0].value.macros.some(m => m.name === 'Test Echo')).toBe(true);
+  expect((saveMsgs[0].value as any).macros.some((m: any) => m.name === 'Test Echo')).toBe(true);
 });
 
 test('macro editor allows building multi-step sequences', async ({ page }) => {
@@ -264,7 +249,7 @@ test('macro editor allows building multi-step sequences', async ({ page }) => {
   await expect(dialog).toBeHidden();
 
   const saveMsgs = (await sent(page)).filter(msg => msg.case === 'saveMacros');
-  const vimMacro = saveMsgs[0]?.value.macros.find(m => m.name === 'Vim Force Quit');
+  const vimMacro = (saveMsgs[0]?.value as any).macros.find((m: any) => m.name === 'Vim Force Quit');
   expect(vimMacro).toBeDefined();
   expect(vimMacro.steps).toHaveLength(3);
   expect(vimMacro.steps[0].key).toBe('Escape');
@@ -352,7 +337,7 @@ test('two-finger pinch on viewport zooms terminal view without resizing PTY', as
 
   const beforeResize = (await sent(page)).filter(msg => msg.case === 'resize').length;
 
-  const bounds = await viewport.boundingBox();
+  const bounds = (await viewport.boundingBox())!;
   const cdp = await page.context().newCDPSession(page);
   const midX = bounds.x + bounds.width / 2;
   const midY = bounds.y + bounds.height / 2;
@@ -409,7 +394,7 @@ test('zoomed viewport supports pan reachability and preserves position across ke
   await viewport.evaluate(el => { el.scrollTop = el.scrollHeight; });
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 420 });
-    window.visualViewport.dispatchEvent(new Event('resize'));
+    window.visualViewport?.dispatchEvent(new Event('resize'));
   });
   await expect.poll(() => viewport.evaluate(el =>
     Math.abs(el.scrollHeight - el.clientHeight - el.scrollTop))).toBeLessThan(2);
@@ -422,7 +407,7 @@ test('zoomed viewport supports pan reachability and preserves position across ke
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(0);
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 360 });
-    window.visualViewport.dispatchEvent(new Event('resize'));
+    window.visualViewport?.dispatchEvent(new Event('resize'));
   });
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(0);
 

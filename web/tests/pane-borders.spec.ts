@@ -1,23 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { installMockWebSocket } from './browser-fixture';
 
 test('terminal canvas does not paint over pane borders in cards and scroll layouts', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  await installMockWebSocket(page);
   await page.setViewportSize({ width: 500, height: 400 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -36,6 +21,7 @@ test('terminal canvas does not paint over pane borders in cards and scroll layou
     window.testSockets[0].message(serverBytes({ case: 'paneUpdate', value: {
       paneId: 1, generation: 1n, cols: 40, rows: 20,
       lines: Array.from({ length: 20 }, () => ({ cells: Array.from({ length: 40 }, () => ({ content: ' ', width: 1 })) })),
+      mouseTracking: true,
     } }));
     // Pane 2 has cell background painted at column 0 to verify border stays visible
     window.testSockets[0].message(serverBytes({ case: 'paneUpdate', value: {
@@ -64,15 +50,15 @@ test('terminal canvas does not paint over pane borders in cards and scroll layou
       const c = document.createElement('canvas');
       c.width = img.width;
       c.height = img.height;
-      const ctx = c.getContext('2d');
+      const ctx = c.getContext('2d')!;
       ctx.drawImage(img, 0, 0);
 
-      const app = document.querySelector('wideboi-app');
+      const app = document.querySelector('wideboi-app') as any;
       const ps = app.shadowRoot.querySelectorAll('wideboi-pane');
       const p1Rect = ps[0].getBoundingClientRect();
       const p2Rect = ps[1].getBoundingClientRect();
 
-      const getPixel = (x, y) => Array.from(ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data);
+      const getPixel = (x: number, y: number) => Array.from(ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data);
 
       return {
         // Focused card 1: top border (y = p1Rect.top + 1), right border (x = p1Rect.right - 1)

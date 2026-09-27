@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import net from 'net';
 import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
-function getFreePort() {
+function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.listen(0, '127.0.0.1', () => {
@@ -18,10 +18,10 @@ function getFreePort() {
 }
 
 test.describe('Live Server Terminal & Input Parity', () => {
-  let port;
-  let token;
-  let sockPath;
-  let serverProc;
+  let port: number;
+  let token: string;
+  let sockPath: string;
+  let serverProc: ChildProcess;
 
   test.beforeAll(async () => {
     port = await getFreePort();
@@ -83,7 +83,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
   test.afterAll(async () => {
     if (serverProc && serverProc.exitCode === null) {
       serverProc.kill('SIGTERM');
-      await new Promise(r => {
+      await new Promise<void>(r => {
         const timeout = setTimeout(() => {
           serverProc.kill('SIGKILL');
           r();
@@ -108,7 +108,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
       window.drawnText = [];
       const original = CanvasRenderingContext2D.prototype.fillText;
       CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
-        window.drawnText.push(text);
+        window.drawnText?.push(text);
         return original.call(this, text, ...args);
       };
     });
@@ -122,7 +122,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
     await expect(panes).toHaveCount(2);
 
     // Wait for prompt to render on canvas
-    await expect.poll(() => page.evaluate(() => window.drawnText.join(''))).toContain('$');
+    await expect.poll(() => page.evaluate(() => window.drawnText?.join(''))).toContain('$');
 
     // Focus active canvas
     await page.locator('wideboi-pane canvas').first().focus();
@@ -130,7 +130,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
     // 1. Type a shell command and verify stdout reached canvas
     await page.keyboard.type('echo "WB_TEST_PARITY_148"');
     await page.keyboard.press('Enter');
-    await expect.poll(() => page.evaluate(() => window.drawnText.join(''))).toContain('WB_TEST_PARITY_148');
+    await expect.poll(() => page.evaluate(() => window.drawnText?.join(''))).toContain('WB_TEST_PARITY_148');
 
     // 2. Full-screen interactive application: run cat
     await page.keyboard.type('cat');
@@ -138,13 +138,13 @@ test.describe('Live Server Terminal & Input Parity', () => {
     // Type interactive lines in cat
     await page.keyboard.type('interactive_input_line');
     await page.keyboard.press('Enter');
-    await expect.poll(() => page.evaluate(() => window.drawnText.join(''))).toContain('interactive_input_line');
+    await expect.poll(() => page.evaluate(() => window.drawnText?.join(''))).toContain('interactive_input_line');
 
     // Exit cat using Ctrl+C
     await page.keyboard.press('Control+c');
     await page.keyboard.type('echo "POST_CAT_OK"');
     await page.keyboard.press('Enter');
-    await expect.poll(() => page.evaluate(() => window.drawnText.join(''))).toContain('POST_CAT_OK');
+    await expect.poll(() => page.evaluate(() => window.drawnText?.join(''))).toContain('POST_CAT_OK');
 
     // 3. Test Prefix Action: Column Jump
     // Currently focused on Pane 1

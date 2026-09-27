@@ -1,23 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { VERSION_PROTOCOL } from './browser-fixture';
+import { installMockWebSocket } from './browser-fixture';
 
 test('card layout overlaps persistent panes without resizing the terminal', async ({ page }) => {
-  await page.addInitScript((proto) => {
-    window.testSockets = [];
-    window.WebSocket = class {
-      static OPEN = 1;
-      constructor(url, protocols) {
-        this.protocol = proto;
-        this.readyState = 0;
-        this.sent = [];
-        if (protocols?.includes(proto)) window.testSockets.push(this);
-      }
-      send(data) { this.sent.push(new Uint8Array(data)); }
-      close() { this.readyState = 3; this.onclose?.(); }
-      open() { this.readyState = 1; this.onopen?.(); }
-      message(bytes) { this.onmessage?.({ data: bytes.buffer }); }
-    };
-  }, VERSION_PROTOCOL);
+  await installMockWebSocket(page);
   await page.setViewportSize({ width: 500, height: 420 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Connect' }).click();
@@ -31,7 +16,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   });
   await expect(page.locator('wideboi-pane')).toHaveCount(7);
   await page.evaluate(() => {
-    window.paneOne = document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane');
+    window.paneOne = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane');
   });
   const messages = () => page.evaluate(async () => {
     const { clientMessages } = await import('/tests/browser-fixture.ts');
@@ -46,14 +31,14 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await expect(panes).toHaveCount(7);
   await expect(panes.first()).toHaveAttribute('card-mode', '');
   await expect(panes.nth(1)).toHaveCSS('box-shadow', /rgb\(184, 184, 184\)/);
-  const labelPosition = await panes.nth(1).evaluate(pane => ({
+  const labelPosition = await panes.nth(1).evaluate((pane: any) => ({
     host: pane.getBoundingClientRect().left,
     label: pane.shadowRoot.querySelector('.card-label').getBoundingClientRect().left,
     position: getComputedStyle(pane).position,
   }));
   expect(labelPosition.position).toBe('absolute');
   expect(labelPosition.label).toBeCloseTo(labelPosition.host, 0);
-  expect(await page.evaluate(() => window.paneOne === document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane'))).toBe(true);
+  expect(await page.evaluate(() => window.paneOne === (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane'))).toBe(true);
   await expect(page.locator('.card-count.right')).toContainText('+');
   await settleLayout();
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(beforeResize);
@@ -82,7 +67,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await expect(panes.nth(6)).toHaveAttribute('focused', '');
   await expect(page.locator('.card-count.left')).toContainText('+');
   await expect(panes.nth(6)).toHaveCSS('visibility', 'visible');
-  expect(await page.evaluate(() => window.paneOne === document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane'))).toBe(true);
+  expect(await page.evaluate(() => window.paneOne === (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane'))).toBe(true);
   await settleLayout();
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(beforeResize);
 
@@ -90,13 +75,13 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await expect.poll(() => panes.nth(4).evaluate(element => element.getAnimations().length)).toBe(0);
   // Pause both directions and inspect the three adjacent cards mid-slide.
   await page.evaluate(() => {
-    window.pausedMoves = [];
-    window.originalAnimate = Element.prototype.animate;
+    (window as any).pausedMoves = [];
+    (window as any).originalAnimate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
-      const animation = window.originalAnimate.apply(this, args);
+      const animation = (window as any).originalAnimate.apply(this, args);
       if (this.matches?.('wideboi-pane')) {
         animation.pause();
-        window.pausedMoves.push(animation);
+        (window as any).pausedMoves.push(animation);
       }
       return animation;
     };
@@ -104,21 +89,21 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   const zOrder = () => panes.evaluateAll(elements => [3, 4, 5].map(index => Number(getComputedStyle(elements[index]).zIndex)));
   for (const target of ['4', '5']) {
     await page.locator(`.pane-tab[data-pane-id="${target}"]`).click();
-    await expect.poll(() => page.evaluate(() => window.pausedMoves.length)).toBeGreaterThan(0);
+    await expect.poll(() => page.evaluate(() => (window as any).pausedMoves.length)).toBeGreaterThan(0);
     const [left, middle, right] = await zOrder();
     expect(left).toBeLessThan(middle);
     expect(middle).toBeLessThan(right);
-    await page.evaluate(() => window.pausedMoves.splice(0).forEach(animation => animation.finish()));
+    await page.evaluate(() => (window as any).pausedMoves.splice(0).forEach((animation: any) => animation.finish()));
     const focusedIndex = Number(target) - 4;
     await expect.poll(async () => (await zOrder())[focusedIndex]).toBeGreaterThan(right);
   }
-  await page.evaluate(() => { Element.prototype.animate = window.originalAnimate; });
+  await page.evaluate(() => { Element.prototype.animate = (window as any).originalAnimate; });
 
   await page.locator('.toolbar .settings-btn').click();
   await page.locator('#settings-layout-mode').selectOption('scroll');
   await page.locator('.settings-dialog .close-btn').click();
   await expect(panes.first()).not.toHaveAttribute('card-mode', '');
-  expect(await page.evaluate(() => window.paneOne === document.querySelector('wideboi-app').shadowRoot.querySelector('wideboi-pane'))).toBe(true);
+  expect(await page.evaluate(() => window.paneOne === (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane'))).toBe(true);
   await settleLayout();
   expect((await messages()).filter(msg => msg.case === 'resize')).toHaveLength(beforeResize);
   await expect.poll(() => page.locator('.pane-strip').evaluate(element => element.scrollLeft)).toBeGreaterThan(0);
@@ -129,10 +114,10 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
   await expect.poll(() => panes.nth(6).evaluate(element => element.getAnimations().length)).toBe(0);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.evaluate(async () => {
-    window.cardAnimations = 0;
+    (window as any).cardAnimations = 0;
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
-      window.cardAnimations++;
+      (window as any).cardAnimations++;
       return animate.apply(this, args);
     };
     const { serverBytes } = await import('/tests/browser-fixture.ts');
@@ -140,40 +125,40 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
       columns: [7, 6, 5, 4, 3, 2, 1].map(paneId => ({ paneId, width: 40, height: 20 })),
     } }));
   });
-  await expect.poll(() => panes.evaluateAll(elements => elements.map(element => element.paneId)))
+  await expect.poll(() => panes.evaluateAll(elements => elements.map(element => (element as any).paneId)))
     .toEqual([7, 6, 5, 4, 3, 2, 1]);
-  expect(await page.evaluate(() => window.cardAnimations)).toBe(0);
-  expect(await page.evaluate(() => window.paneOne === [...document.querySelector('wideboi-app').shadowRoot.querySelectorAll('wideboi-pane')].at(-1))).toBe(true);
+  expect(await page.evaluate(() => (window as any).cardAnimations)).toBe(0);
+  expect(await page.evaluate(() => window.paneOne === [...(document.querySelector('wideboi-app') as any).shadowRoot.querySelectorAll('wideboi-pane')].at(-1))).toBe(true);
 
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(async () => {
-    window.closeAnimations = 0;
+    (window as any).closeAnimations = 0;
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
-      if (this.matches?.('wideboi-pane')) window.closeAnimations++;
+      if (this.matches?.('wideboi-pane')) (window as any).closeAnimations++;
       return animate.apply(this, args);
     };
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'paneClosed', value: { paneId: 4 } }));
   });
   await expect(panes).toHaveCount(6);
-  await expect.poll(() => page.evaluate(() => window.closeAnimations)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (window as any).closeAnimations)).toBeGreaterThan(0);
 
   await expect.poll(() => panes.evaluateAll(elements => elements.some(element => element.getAnimations().length))).toBe(false);
   await page.evaluate(() => {
-    window.pausedMoves = [];
+    (window as any).pausedMoves = [];
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
       const animation = animate.apply(this, args);
       if (this.matches?.('wideboi-pane')) {
         animation.pause();
-        window.pausedMoves.push(animation);
+        (window as any).pausedMoves.push(animation);
       }
       return animation;
     };
   });
   await page.locator('.pane-tab[data-pane-id="6"]').click();
-  await expect.poll(() => page.evaluate(() => window.pausedMoves.length)).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => (window as any).pausedMoves.length)).toBeGreaterThan(0);
   await page.evaluate(async () => {
     const { serverBytes } = await import('/tests/browser-fixture.ts');
     window.testSockets[0].message(serverBytes({ case: 'layoutSnapshot', value: {
@@ -181,7 +166,7 @@ test('card layout overlaps persistent panes without resizing the terminal', asyn
     } }));
   });
   await expect.poll(() => page.evaluate(() => {
-    const app = document.querySelector('wideboi-app');
+    const app = document.querySelector('wideboi-app') as any;
     return app.stackFocusId === app.focusedPaneId && app.stackFocusId !== null;
   })).toBe(true);
 });

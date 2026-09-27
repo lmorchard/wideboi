@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { executeMacro, macroEndsWithEnter, type Macro } from './macros';
+import { create } from '@bufbuild/protobuf';
+import { executeMacro, macroEndsWithEnter, wireToLocalMacro, localToWireMacro, type Macro } from './macros';
+import { MacroSchema } from './gen/internal/protocol/wirepb/wideboi_pb';
 import type { WideboiClient } from './client';
 
 describe('macros', () => {
@@ -67,5 +69,27 @@ describe('macros', () => {
   it('handles empty macros gracefully', () => {
     const mockClient = { send: vi.fn() } as unknown as WideboiClient;
     expect(executeMacro(mockClient, 1, { name: 'Empty', steps: [] })).toBe(false);
+  });
+
+  it('converts between wire and local macro representations round-trip', () => {
+    const local: Macro = {
+      name: 'Build and Test',
+      steps: [
+        { text: 'make test', ctrl: false, alt: false, shift: false },
+        { key: 'Enter', code: 'Enter', ctrl: true, alt: false, shift: true },
+      ],
+    };
+    const wire = localToWireMacro(local);
+    expect(wire.name).toBe('Build and Test');
+    expect(wire.steps?.[0].text).toBe('make test');
+    expect(wire.steps?.[1].ctrl).toBe(true);
+
+    const wireMsg = create(MacroSchema, wire);
+    const converted = wireToLocalMacro(wireMsg);
+    expect(converted.name).toBe('Build and Test');
+    expect(converted.steps[0].text).toBe('make test');
+    expect(converted.steps[1].key).toBe('Enter');
+    expect(converted.steps[1].ctrl).toBe(true);
+    expect(converted.steps[1].shift).toBe(true);
   });
 });
