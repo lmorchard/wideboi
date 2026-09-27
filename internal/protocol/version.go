@@ -31,4 +31,5 @@ package protocol
 // 14 adds web server start, stop, and status control requests/responses (#247).
 // 15 adds web server enable_tls option and unencrypted exposure warning (#261, #263).
 // 16 adds MsgConfigSnapshot for shipping server key bindings and width presets (#270).
-const Version uint32 = 16
+// 17 adds the attached client count to layout snapshots, for `wideboi ls`.
+const Version uint32 = 17

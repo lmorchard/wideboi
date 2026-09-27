@@ -187,8 +187,10 @@ func runSplit(cfg config.Config, globalArgs []string, args []string, stdout, std
 		// nothing to live for, so it goes too.
 		if err == nil && resp.Error == "" {
 			// Unacknowledged, our exit reads as the owner leaving without
-			// detaching, which ends the session and the pane just made.
-			if !hangUp(ctx, cc, protocol.MsgDetach{}, detachCeiling) {
+			// detaching. Kept on owner loss (the default), the session
+			// survives that anyway; otherwise it ends, and the pane just
+			// made with it.
+			if !hangUp(ctx, cc, protocol.MsgDetach{}, detachCeiling) && !cfg.KeepSessionOnOwnerLossEnabled {
 				return fmt.Errorf("started a wideboi server at %s but could not detach from it; its session ends with this command", cfg.Socket)
 			}
 		} else {

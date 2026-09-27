@@ -424,6 +424,75 @@ func TestLoadAutoCleanup(t *testing.T) {
 	}
 }
 
+func TestLoadKeepSessionOnOwnerLoss(t *testing.T) {
+	const env = "WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS"
+
+	// Defaults to true: a dropped connection must not lose work.
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.KeepSessionOnOwnerLossEnabled {
+		t.Error("KeepSessionOnOwnerLossEnabled = false by default, want true")
+	}
+
+	tomlFalse := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlFalse, []byte("keep_session_on_owner_loss = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlFalse}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.KeepSessionOnOwnerLossEnabled {
+		t.Error("KeepSessionOnOwnerLossEnabled = true with keep_session_on_owner_loss = false in TOML")
+	}
+
+	tomlTrue := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlTrue, []byte("keep_session_on_owner_loss = true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlTrue}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.KeepSessionOnOwnerLossEnabled {
+		t.Error("KeepSessionOnOwnerLossEnabled = false with keep_session_on_owner_loss = true in TOML")
+	}
+
+	for _, val := range []string{"false", "0", "no", "off", "FALSE"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{env: val}))
+		if err != nil {
+			t.Fatalf("Load() with %s=%q error: %v", env, val, err)
+		}
+		if cfg.KeepSessionOnOwnerLossEnabled {
+			t.Errorf("KeepSessionOnOwnerLossEnabled = true with %s=%q", env, val)
+		}
+	}
+
+	// The environment overrides the file.
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlFalse}, mockEnv(map[string]string{env: "true"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if !cfg.KeepSessionOnOwnerLossEnabled {
+		t.Errorf("KeepSessionOnOwnerLossEnabled = false when %s=true overrides TOML false", env)
+	}
+
+	if _, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{env: "bogus"})); err == nil {
+		t.Errorf("Load() want error for %s=bogus, got nil", env)
+	}
+
+	// The flag overrides both.
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlTrue, EndSessionOnOwnerLoss: true}, mockEnv(map[string]string{env: "true"}))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.KeepSessionOnOwnerLossEnabled {
+		t.Error("KeepSessionOnOwnerLossEnabled = true when EndSessionOnOwnerLoss flag is set")
+	}
+}
+
 func TestLoadTLS(t *testing.T) {
 	// 1. Defaults to true with empty cert and key
 	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))

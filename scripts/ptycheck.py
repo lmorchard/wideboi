@@ -30,6 +30,10 @@ and then asserts all of:
     tmux, so a job that opted out of it (nohup, setsid) is deliberately
     not asserted on.
 
+    Unless --expect-session-kept: a SIGHUP'd owner detaches by default
+    (keep_session_on_owner_loss), so its server and panes must *survive*
+    the signal, and then go with an explicit kill-session instead.
+
  4. No other process is running this binary. Not a pane-leak check -- a
     leaked pane is a shell -- but a wideboi outliving the one this script
     reaped would mean something (double-fork, a hung child of a panic)
@@ -43,6 +47,7 @@ a real hang still leaves the process table clean.
 Usage:
     scripts/ptycheck.py [--binary PATH] [--size COLSxROWS] [--signal SIG]
                          [--timeout SECONDS] [--startup-delay SECONDS]
+                         [--env KEY=VALUE ...] [--expect-session-kept]
 
     --size 0x0 means "leave the pty's winsize unset" (the no-winsize case
     that panicked before the width/height clamp fix), not a literal
@@ -60,8 +65,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptylib import (
     ALT_SCREEN_EXIT, Drainer, spawn_in_pty, pane_children, ps_rows, still_alive,
     server_child, wait_for_exit, force_cleanup, parse_size, parse_signal,
-    private_run_dir, run_main, harness_args,
+    private_run_dir, run_main, harness_args, pinned_env,
 )
+import subprocess
 
 def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
     """Looks for a process still running this binary that this run is
@@ -116,7 +122,8 @@ def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
 
 
 def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
-              startup_delay: float, timeout: float) -> bool:
+              startup_delay: float, timeout: float, extra_env: dict[str, str],
+              expect_kept: bool) -> bool:
     label = f"{cols}x{rows}" if set_winsize else f"{cols}x{rows} (no winsize set)"
     print(f"--- size={label} signal={signal.Signals(sig).name} ---")
 
@@ -130,8 +137,8 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     # file beside the socket, and that is never deleted.
     run_dir = private_run_dir("wideboi-ptycheck-")
     sock = os.path.join(run_dir, "s.sock")
-    pid, master_fd = spawn_in_pty(argv, cols, rows, set_winsize,
-                                  {"WIDEBOI_SOCK": sock})
+    child_env = {"WIDEBOI_SOCK": sock, **extra_env}
+    pid, master_fd = spawn_in_pty(argv, cols, rows, set_winsize, child_env)
 
     drainer = Drainer(master_fd)
     drainer.start()
@@ -224,6 +231,38 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
             ok = False
         else:
             print("OK: alt-screen exit sequence reached the pty before the process died")
+
+        if expect_kept:
+            # The owner detached rather than ending the session. The
+            # owner only dies once the server has acknowledged what it
+            # sent, so by now a shutdown would already have hung up the
+            # panes and closed the listener. A status round-trip is the
+            # positive evidence that the server is still serving.
+            st = subprocess.run(harness_args(os.path.abspath(binary), "status"),
+                                capture_output=True, timeout=15, env=pinned_env(child_env))
+            if st.returncode != 0:
+                print(f"FAIL: the kept session does not answer status: "
+                      f"{(st.stdout + st.stderr).decode(errors='replace').strip()!r}")
+                ok = False
+            pids = [t for t, _ in tracked]
+            if still_alive(pids, 0.0) != pids:
+                gone = sorted(set(pids) - set(still_alive(pids, 0.0)))
+                print(f"FAIL: the session did not survive the owner's {signal.Signals(sig).name}: "
+                      f"pid(s) {gone} gone")
+                ok = False
+            else:
+                print("OK: server and pane shells survived the owner's signal")
+            if not os.path.exists(sock):
+                print(f"FAIL: the kept session's socket is gone from {sock}")
+                ok = False
+            # Now end it explicitly; the checks below then hold it to the
+            # same everything-gone contract as a session the signal ended.
+            r = subprocess.run(harness_args(os.path.abspath(binary), "kill-session"),
+                               capture_output=True, timeout=15, env=pinned_env(child_env))
+            if r.returncode != 0:
+                print(f"FAIL: kill-session exited {r.returncode}: "
+                      f"{(r.stdout + r.stderr).decode(errors='replace').strip()!r}")
+                ok = False
     finally:
         try:
             os.kill(pid, 0)
@@ -284,7 +323,20 @@ def main() -> int:
                         help="ceiling on the wait for wideboi to spawn its panes before "
                              "signalling (default: 5); satisfied by observation, so a fast "
                              "run takes a fraction of it")
+    parser.add_argument("--env", action="append", default=[], metavar="KEY=VALUE",
+                        help="extra environment for the wideboi under test (repeatable); "
+                             "applied over the pinned environment")
+    parser.add_argument("--expect-session-kept", action="store_true",
+                        help="the signal detaches the owner: assert the server and panes "
+                             "survive it, then end the session with kill-session")
     args = parser.parse_args()
+
+    extra_env = {}
+    for kv in args.env:
+        key, sep, value = kv.partition("=")
+        if not sep or not key:
+            parser.error(f"--env wants KEY=VALUE, got {kv!r}")
+        extra_env[key] = value
 
     if not os.path.isfile(args.binary):
         print(f"FAIL: binary not found at {args.binary!r} -- build it first (make build)", file=sys.stderr)
@@ -294,7 +346,7 @@ def main() -> int:
     set_winsize = not (cols == 0 and rows == 0)
 
     ok = run_check(args.binary, cols, rows, set_winsize, args.signal,
-                    args.startup_delay, args.timeout)
+                   args.startup_delay, args.timeout, extra_env, args.expect_session_kept)
     return 0 if ok else 1
 
 

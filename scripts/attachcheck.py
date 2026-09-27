@@ -428,14 +428,15 @@ def case_signalled_attached_client_restores_and_detaches(fail):
         srv.stop()
 
 
-def owned_session(fail):
+def owned_session(fail, args=()):
     """Starts a plain wideboi with nothing listening, so it spawns and
     owns a server. Returns (client, server pid), or (client, None) after
-    failing if the server never showed up."""
+    failing if the server never showed up. args go to the plain wideboi,
+    and so to the server it spawns."""
     sock = socket_path()
     if os.path.exists(sock):
         os.remove(sock)
-    c = Client(plain=True)
+    c = Client(plain=True, args=args)
     deadline = time.monotonic() + 5.0
     srv = server_child(c.pid)
     while srv is None and time.monotonic() < deadline:
@@ -520,11 +521,12 @@ def case_plain_wideboi_detaches_and_the_session_survives(fail):
         reap_everything([srv, *kids])
 
 
-def case_sigkilled_owner_takes_the_session_with_it(fail):
+def case_sigkilled_owner_ends_the_session_when_configured(fail):
     """SIGKILL runs no code at all, so the owner cannot say anything.
-    The server must notice the owner's connection end with no detach
-    before it, and end the session itself."""
-    c, srv = owned_session(fail)
+    With keep_session_on_owner_loss off, the server must notice the
+    owner's connection end with no detach before it, and end the session
+    itself."""
+    c, srv = owned_session(fail, args=("--end-session-on-owner-loss",))
     if srv is None:
         c.kill()
         return
@@ -538,6 +540,62 @@ def case_sigkilled_owner_takes_the_session_with_it(fail):
             fail(f"a SIGKILLed owner left its session running: {left}")
         if os.path.exists(socket_path()):
             fail("the SIGKILLed owner's session left its socket behind")
+    finally:
+        reap_everything([srv, *kids])
+
+
+def case_sigkilled_owner_leaves_the_session_running(fail):
+    """By default an owner lost without a word -- SIGKILL here, a dropped
+    ssh connection in life -- leaves its session running, detached: a
+    later attach sees it, the loss is in exits.log, and kill-session
+    still ends it."""
+    c, srv = owned_session(fail)
+    if srv is None:
+        c.kill()
+        return
+    kids = []
+    try:
+        c.type(b"echo owned-marker\r")
+        if b"owned-marker" not in c.output():
+            fail("marker never rendered before the kill; the rest of this case is meaningless")
+        kids = [p for p, _ in descendants(srv)]
+        c.kill()
+        # The server records the loss once it has decided to keep the
+        # session: wait for that, not for a fixed interval.
+        exits_path = os.path.join(runtime_dir(), "exits.log")
+        exits = ""
+        deadline = time.monotonic() + 6.0
+        while time.monotonic() < deadline:
+            try:
+                with open(exits_path) as f:
+                    exits = f.read()
+            except OSError:
+                exits = ""
+            if 'msg="owner lost, session kept"' in exits:
+                break
+            time.sleep(0.05)
+        else:
+            fail(f"exits.log never recorded the kept session:\n{exits}")
+            return
+        if still_alive([srv], 0.0) != [srv]:
+            fail("a SIGKILLed owner took its session with it despite the default keep")
+            return
+        if not os.path.exists(socket_path()):
+            fail("the kept session's socket is gone")
+
+        second = Client(startup=SETTLE * 2)
+        if not second.wait_for(lambda out: b"owned-marker" in out):
+            fail("attaching after the owner was lost does not show its output")
+        second.kill()
+
+        r = kill_session()
+        if r.returncode != 0:
+            fail(f"kill-session exited {r.returncode}")
+        left = still_alive([srv, *kids], 2.0)
+        if left:
+            fail(f"kill-session left processes alive: {left}")
+        if os.path.exists(socket_path()):
+            fail("kill-session left the socket file behind")
     finally:
         reap_everything([srv, *kids])
 
@@ -630,8 +688,11 @@ def case_named_sessions_are_independent(fail):
         alpha = Server(args=("-L", "alpha"), env=env, sock=os.path.join(sdir, "alpha.sock"))
         beta = Server(args=("-L", "beta"), env=env, sock=os.path.join(sdir, "beta.sock"))
         ls = subprocess.run(harness_args(BIN, "ls"), capture_output=True, timeout=10, env=env)
-        if ls.returncode != 0 or ls.stdout.decode().split() != ["alpha", "beta"]:
+        rows = [line.split() for line in ls.stdout.decode().splitlines()]
+        if ls.returncode != 0 or [r[0] for r in rows] != ["alpha", "beta"]:
             fail(f"ls exited {ls.returncode} printing {ls.stdout!r}, want alpha and beta")
+        elif any(r[1:2] != ["detached"] for r in rows):
+            fail(f"ls printed {ls.stdout!r}, want both sessions detached: neither has a client")
         r = subprocess.run(harness_args(BIN, "-L", "alpha", "kill-session"),
                            capture_output=True, timeout=15, env=env)
         if r.returncode != 0:
@@ -644,7 +705,7 @@ def case_named_sessions_are_independent(fail):
         if not beta.alive():
             fail("ending alpha ended beta")
         ls = subprocess.run(harness_args(BIN, "ls"), capture_output=True, timeout=10, env=env)
-        if ls.stdout.decode().split() != ["beta"]:
+        if [line.split()[0] for line in ls.stdout.decode().splitlines()] != ["beta"]:
             fail(f"after the kill, ls printed {ls.stdout!r}, want beta")
     finally:
         for s in (alpha, beta):
@@ -1089,7 +1150,8 @@ CASES = [
     ("owner reports a signalled server", case_owner_reports_a_signalled_server),
     ("plain wideboi offers detach", case_plain_wideboi_offers_detach),
     ("plain wideboi detaches and the session survives", case_plain_wideboi_detaches_and_the_session_survives),
-    ("SIGKILLed owner takes the session with it", case_sigkilled_owner_takes_the_session_with_it),
+    ("SIGKILLed owner ends the session when configured", case_sigkilled_owner_ends_the_session_when_configured),
+    ("SIGKILLed owner leaves the session running", case_sigkilled_owner_leaves_the_session_running),
     ("plain wideboi attaches to a running server", case_plain_wideboi_attaches_to_a_running_server),
     ("two plain wideboi at once share one session", case_two_plain_wideboi_at_once_share_one_session),
     ("layout toggle affects only its own client", case_toggle_affects_only_its_own_client),

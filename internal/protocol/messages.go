@@ -327,6 +327,10 @@ type MsgLayoutSnapshot struct {
 	// PaneTitles is each pane's terminal title, for chrome that wants
 	// to say what a pane is doing rather than show a sliver of it.
 	PaneTitles map[int]string
+	// AttachedClients is how many clients are attached to the session,
+	// not counting connections that only query it, so `wideboi ls` can
+	// tell a detached session from one in use.
+	AttachedClients int
 }
 
 // MsgPaneCreated tells only the requesting client which pane its new-column

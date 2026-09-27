@@ -147,6 +147,12 @@ tidy:
 #      pane shells. Teardown is the pty hangup, so a nohup'd job in a
 #      pane is deliberately not asserted on.
 #
+# SIGHUP is the exception to 3. A hung-up terminal -- a dropped ssh
+# connection -- detaches the owner by default (keep_session_on_owner_loss),
+# so that case asserts the server and panes *survive*, then ends the
+# session with kill-session and holds it to 3. A second SIGHUP case with
+# the option off keeps the old end-with-the-terminal contract.
+#
 # The size matrix includes the no-winsize (0x0) case that used to panic
 # before main.go clamped width/height. The signal matrix covers the armed
 # set that can be delivered without a core dump; SIGQUIT is armed too but
@@ -156,10 +162,10 @@ tidy:
 # timeout), so this target fails loudly rather than wedging CI or a dev
 # machine.
 #
-# The six invocations are independent and run concurrently: each owns
+# The seven invocations are independent and run concurrently: each owns
 # its own wideboi, its own pty and its own socket path, and ptycheck's
 # stray scan is scoped by parentage so it no longer reports the other
-# five as leaks. 17.1s serial, ~4s fanned out.
+# six as leaks. 17.1s serial, ~4s fanned out.
 #
 # Every one of these is a background job, which is exactly why the
 # signal-disposition pin in ptylib.spawn_in_pty exists: POSIX has the
@@ -172,10 +178,13 @@ verify-exit: build
 		python3 scripts/ptycheck.py --size $$size --signal SIGTERM & \
 		pids="$$pids $$!"; \
 	done; \
-	for sig in SIGINT SIGHUP; do \
-		python3 scripts/ptycheck.py --size 80x24 --signal $$sig & \
-		pids="$$pids $$!"; \
-	done; \
+	python3 scripts/ptycheck.py --size 80x24 --signal SIGINT & \
+	pids="$$pids $$!"; \
+	python3 scripts/ptycheck.py --size 80x24 --signal SIGHUP --expect-session-kept & \
+	pids="$$pids $$!"; \
+	python3 scripts/ptycheck.py --size 80x24 --signal SIGHUP \
+		--env WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS=false & \
+	pids="$$pids $$!"; \
 	rc=0; for p in $$pids; do wait $$p || rc=1; done; exit $$rc
 
 # Regenerate the golden wire snapshot. Review the diff before committing.

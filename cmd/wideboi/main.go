@@ -84,6 +84,7 @@ func newFlagSet(opts *cliOptions) *flag.FlagSet {
 	fs.StringVar(&opts.flags.TLSKey, "tls-key", "", "path to TLS private key PEM file")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
+	fs.BoolVar(&opts.flags.EndSessionOnOwnerLoss, "end-session-on-owner-loss", false, "end the session when its owning terminal hangs up or the owner dies without detaching")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
 	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
@@ -204,6 +205,9 @@ Flags:
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
       --disable-auto-cleanup Disable automatic cleanup of logs and artifacts on clean exit
+      --end-session-on-owner-loss
+                         End the session when the terminal that started it
+                         hangs up (default: keep it running, detached)
   -v, --version          Print version and exit
   -h, --help             Show this help text and exit
 
@@ -220,6 +224,8 @@ Environment Variables:
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
   WIDEBOI_AUTO_CLEANUP   Clean dead session artifacts and logs on clean exit (default 1)
+  WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS
+                         Keep the session when its terminal hangs up (default 1)
   WIDEBOI_TRAFFIC_TIMING =1 to time server render, patch build and encode (status --traffic)
   WIDEBOI_CPUPROFILE     Path prefix for CPU profiles
                          (<prefix>.server|client.cpu.<pid>.pprof)
@@ -416,6 +422,10 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 		bindings = keys.Bindings
 	}
 	srv.SetBindings(keys.ToProtocolList(bindings))
+	srv.SetKeepSessionOnOwnerLoss(cfg.KeepSessionOnOwnerLossEnabled)
+	srv.SetOnOwnerLost(func() {
+		_ = logger.AppendExit(cfg.Socket, "server", "owner lost, session kept", "ownerPID", ownerPID)
+	})
 	if len(cfg.WidthPresets) > 0 {
 		srv.SetWidthPresets(cfg.WidthPresets)
 	}
@@ -789,23 +799,29 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	var guard *hostterm.Guard
 	guard = hostterm.NewGuard(func() error {
 		stopped.Store(true)
-		if sig := guard.Signal(); sig != nil {
+		sig := guard.Signal()
+		farewell, ceiling := ownerFarewell(sig, cfg.KeepSessionOnOwnerLossEnabled)
+		_, detaching := farewell.(protocol.MsgDetach)
+		if sig != nil {
 			_ = logger.AppendExit(cfg.Socket, "client", "client exit",
-				"reason", "signal", "signal", sig.String(), "owner", owner)
+				"reason", "signal", "signal", sig.String(), "owner", owner,
+				"detached", owner && detaching)
 		}
-		// An owner's session dies with it, unless the connection has
-		// already ended -- a detach, a quit, or the server hanging up.
-		// Shut it down *before* restoring the terminal, and wait: the
-		// panes are then hung up before this process re-raises, which
-		// is the order verify-exit asserts. If the ceiling passes,
-		// restore and exit anyway; the server still sees our EOF with
-		// no detach before it, and ends the session itself.
+		// An owner's session dies with it -- unless its terminal hung
+		// up and the session is kept, when it detaches instead -- or
+		// unless the connection has already ended: a detach, a quit,
+		// or the server hanging up. Say so *before* restoring the
+		// terminal, and wait: on a shutdown the panes are then hung up
+		// before this process re-raises, which is the order
+		// verify-exit asserts. If the ceiling passes, restore and exit
+		// anyway; the server still sees our EOF with no detach before
+		// it, and ends or keeps the session itself as configured.
 		var late bool
 		if owner && !hungUp.Load() {
 			cConnLock.Lock()
 			currentConn := cConn
 			cConnLock.Unlock()
-			late = !hangUp(ctx, currentConn, protocol.MsgShutdown{}, shutdownCeiling)
+			late = !hangUp(ctx, currentConn, farewell, ceiling)
 		}
 
 		var err error
@@ -822,7 +838,11 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		}
 
 		if late {
-			fmt.Fprintf(os.Stderr, "wideboi: server did not confirm shutdown within %s\n", shutdownCeiling)
+			what := "shutdown"
+			if detaching {
+				what = "detach"
+			}
+			fmt.Fprintf(os.Stderr, "wideboi: server did not confirm %s within %s\n", what, ceiling)
 		}
 		return err
 	})

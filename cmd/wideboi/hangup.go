@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"os"
+	"syscall"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -15,6 +18,19 @@ const shutdownCeiling = server.CloseGrace + signalExitMargin
 // detachCeiling bounds the wait for the server to acknowledge a detach,
 // which involves no reaping.
 const detachCeiling = 2 * time.Second
+
+// ownerFarewell is what an owning client tells its server when sig ends
+// it, and how long to wait for the acknowledgement. A hangup means the
+// terminal went away -- a dropped ssh connection, a closed window -- and
+// with keep set that leaves the session running, detached. Every other
+// signal is a deliberate stop and ends it, as does a teardown with no
+// signal at all.
+func ownerFarewell(sig os.Signal, keep bool) (msg transport.ClientMessage, ceiling time.Duration) {
+	if keep && sig == syscall.SIGHUP {
+		return protocol.MsgDetach{}, detachCeiling
+	}
+	return protocol.MsgShutdown{}, shutdownCeiling
+}
 
 // hangUp sends msg -- MsgDetach or MsgShutdown -- and waits for the
 // server to close the connection, which is its acknowledgement. It

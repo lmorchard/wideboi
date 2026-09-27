@@ -97,6 +97,12 @@ type Server struct {
 	// reattaching does not re-own, because nobody's terminal is tied to
 	// the session any more.
 	owner transport.Transport
+	// keepOnOwnerLoss keeps the session when the owner's connection ends
+	// with no MsgDetach before it, as if it had detached; off, that EOF
+	// ends the session. Set before Run.
+	keepOnOwnerLoss bool
+	// onOwnerLost runs when keepOnOwnerLoss kept the session.
+	onOwnerLost func()
 
 	// listener is the socket ListenSocket accepts on, if any. Close
 	// shuts it first, so nothing can attach to a session that is
@@ -287,13 +293,31 @@ func (s *Server) RestoredWebState() RestoredWebState {
 }
 
 // SetOwner marks tp -- already passed to NewServer -- as the owning
-// client's connection. If it closes without a MsgDetach first, the
-// session ends: that is how an owner killed by SIGKILL, which runs no
-// code at all, still takes its panes with it.
+// client's connection. If it closes without a MsgDetach first -- an
+// owner killed by SIGKILL runs no code at all -- the session ends,
+// unless SetKeepSessionOnOwnerLoss says to keep it.
 func (s *Server) SetOwner(tp transport.Transport) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.owner = tp
+}
+
+// SetKeepSessionOnOwnerLoss chooses what an owner's EOF without a
+// detach means: the session is kept, as if the owner had detached, or
+// ended. A dropped ssh connection must not lose work, so the configured
+// default is to keep it.
+func (s *Server) SetKeepSessionOnOwnerLoss(keep bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keepOnOwnerLoss = keep
+}
+
+// SetOnOwnerLost registers fn to run when an owner's EOF leaves the
+// session running, so the post-mortem trail records it.
+func (s *Server) SetOnOwnerLost(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onOwnerLost = fn
 }
 
 // SetTrafficTiming turns on render, patch-build and encode timing for
@@ -892,22 +916,38 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	return true
 }
 
+// layoutSnapshotLocked builds the session's current layout snapshot.
+// Must be called with s.mu held.
+func (s *Server) layoutSnapshotLocked() protocol.MsgLayoutSnapshot {
+	s.updateDashboardLocked()
+	return protocol.MsgLayoutSnapshot{
+		Columns:         layout.ToColumnData(s.strip.Columns()),
+		PaneStatuses:    s.statusGlyphsLocked(),
+		PaneTitles:      s.paneTitlesLocked(),
+		SessionCWD:      s.cwd,
+		AttachedClients: s.attachedCountLocked(),
+	}
+}
+
+// sendLayoutTo answers a status query with the layout, to the asker
+// alone. A broadcast would nudge every attached client into a layout
+// and pane-update round for someone else's question -- and `wideboi
+// ls` asks every session.
+func (s *Server) sendLayoutTo(ctx context.Context, tp transport.Transport) {
+	s.mu.Lock()
+	snapshot := s.layoutSnapshotLocked()
+	s.mu.Unlock()
+	tp.SendServer(ctx, snapshot)
+}
+
 func (s *Server) broadcastLayout(ctx context.Context) {
 	s.layoutSendMu.Lock()
 	defer s.layoutSendMu.Unlock()
 
 	s.mu.Lock()
-	s.updateDashboardLocked()
-	statuses := s.statusGlyphsLocked()
-	titles := s.paneTitlesLocked()
-	cols := layout.ToColumnData(s.strip.Columns())
+	snapshot := s.layoutSnapshotLocked()
+	statuses, titles, cols := snapshot.PaneStatuses, snapshot.PaneTitles, snapshot.Columns
 	columnsChanged := !sameColumnSetAndSizes(cols, s.lastColumns)
-	snapshot := protocol.MsgLayoutSnapshot{
-		Columns:      cols,
-		PaneStatuses: statuses,
-		PaneTitles:   titles,
-		SessionCWD:   s.cwd,
-	}
 	tps := append([]transport.Transport{}, s.transports...)
 	pending := make(map[transport.Transport][]int)
 	for tp, cs := range s.clients {
