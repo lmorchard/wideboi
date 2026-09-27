@@ -60,13 +60,13 @@ func (s *Server) clientLocked(tp transport.Transport) *clientState {
 	return cs
 }
 
-// isAttachedLocked reports whether tp has sent MsgAttach.
+// isAttachedLocked reports whether tp has sent MsgAttach or has client sizing.
 func (s *Server) isAttachedLocked(tp transport.Transport) bool {
 	if s.clients == nil || tp == nil {
 		return false
 	}
 	cs := s.clients[tp]
-	return cs != nil && cs.attached
+	return cs != nil && (cs.attached || cs.size.Cols > 0)
 }
 
 // attachedCountLocked returns the number of currently attached clients.

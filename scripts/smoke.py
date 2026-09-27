@@ -18,6 +18,7 @@ import os
 import re
 import signal
 import struct
+import subprocess
 import sys
 import tempfile
 import termios
@@ -140,6 +141,7 @@ class Session:
     def __init__(self, cols=100, rows=30, startup=4.0, env=None, args=None):
         with SPAWNED_LOCK:
             sock = os.path.join(RUNTIME_DIR, f"s{next(_SOCK_IDS)}.sock")
+        self.sock = sock
         env = {"WIDEBOI_SOCK": sock, **(env or {})}
         cmd = harness_args("./bin/wideboi", *(args or []))
         self.pid, self.fd = spawn_in_pty(cmd, cols, rows, True, env)
@@ -233,6 +235,17 @@ class Session:
         # reported a clean run.
         with SPAWNED_LOCK:
             SPAWNED.extend(kids)
+        if hasattr(self, "sock") and os.path.exists(self.sock):
+            try:
+                subprocess.run(
+                    harness_args("./bin/wideboi", "-s", self.sock, "kill-session"),
+                    timeout=3.0,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
         self.drainer.stop()
 
     def quit_and_reap(self, sig=signal.SIGTERM, timeout=8.0) -> int | None:
@@ -1121,6 +1134,29 @@ def case_command_prompt_and_palette(fail):
     s.close()
 
 
+def case_palette_detach(fail):
+    s = Session(cols=100, rows=30)
+    # Open palette
+    s.type("\x02 ", settle=1.0)
+    # Type detach and Enter
+    s.type("detach\r", settle=1.0)
+
+    status = wait_for_exit(s.pid, 5.0)
+    if status is None:
+        fail("palette detach did not exit client within timeout")
+        s.close()
+        return
+
+    if os.WEXITSTATUS(status) != 0:
+        fail(f"palette detach exited with status {os.WEXITSTATUS(status)}")
+
+    out = s.output()
+    if b"detached" not in out:
+        fail("detach notice missing from output after palette detach")
+
+    s.close()
+
+
 def case_idle_emits_no_bytes(fail):
     s = Session()
     if not settle_output(s.drainer, timeout=5.0):
@@ -1194,6 +1230,7 @@ CASES = [
     ("host resize resizes panes", case_host_resize_resizes_panes),
     ("partly clipped pane keeps full width", case_partly_clipped_pane_keeps_full_width),
     ("command prompt and palette", case_command_prompt_and_palette),
+    ("palette detach", case_palette_detach),
 ]
 
 
