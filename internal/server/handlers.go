@@ -508,7 +508,11 @@ func (s *Server) handleInputLocked(tp transport.Transport, m protocol.MsgInput) 
 			}
 		}
 		if len(m.Data) > 0 {
-			_, _ = p.Write(m.Data)
+			data := m.Data
+			if p.grid != nil && p.grid.BracketedPaste() {
+				data = append([]byte("\x1b[200~"), append(data, []byte("\x1b[201~")...)...)
+			}
+			p.SendBytes(data)
 		} else if !m.Key.IsZero() {
 			p.SendKey(m.Key.Decode())
 		}

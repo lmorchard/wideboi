@@ -66,6 +66,16 @@ func (c *Client) SearchEdit(text string, backspace bool) {
 	}
 }
 
+// SearchQuery reports the current search query text, or "" if not searching.
+func (c *Client) SearchQuery() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.search == nil {
+		return ""
+	}
+	return c.search.query
+}
+
 func (c *Client) SearchCommit(ctx context.Context) {
 	c.mu.Lock()
 	var paneID int

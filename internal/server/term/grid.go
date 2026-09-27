@@ -81,6 +81,9 @@ type Grid interface {
 	// mode callbacks, the same way CursorVisible is.
 	MouseTracking() bool
 
+	// BracketedPaste reports whether the child has requested bracketed paste mode (DEC 2004).
+	BracketedPaste() bool
+
 	// SendMouse encodes a mouse event in the child's requested mode and
 	// writes it to the child. Like SendKey it writes to an io.Pipe and
 	// blocks until something reads.
@@ -629,6 +632,8 @@ func (g *vtGrid) trackTerminalMode(m ansi.Mode, on bool) {
 }
 
 func (g *vtGrid) MouseTracking() bool { return g.mouseModes.Load() != 0 }
+
+func (g *vtGrid) BracketedPaste() bool { return g.bracketedPaste.Load() }
 
 func (g *vtGrid) SendMouse(m uv.MouseEvent) { g.em.SendMouse(m) }
 

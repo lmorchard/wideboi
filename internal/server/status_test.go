@@ -96,6 +96,7 @@ func (g *statusGrid) Read(p []byte) (int, error)             { return 0, nil }
 func (g *statusGrid) SendKey(uv.KeyEvent)                    {}
 func (g *statusGrid) SendText(string)                        {}
 func (g *statusGrid) MouseTracking() bool                    { return false }
+func (g *statusGrid) BracketedPaste() bool                   { return false }
 func (g *statusGrid) SendMouse(uv.MouseEvent)                {}
 func (g *statusGrid) CursorPosition() image.Point            { return image.Point{} }
 func (g *statusGrid) CursorVisible() bool                    { return false }
