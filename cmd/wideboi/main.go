@@ -61,44 +61,7 @@ type cliOptions struct {
 	ownerFD int
 }
 
-func parseCLI(args []string) (cliOptions, error) {
-	var opts cliOptions
-	var flagArgs []string
-	skipNext := false
-
-	for i := 0; i < len(args); i++ {
-		if skipNext {
-			flagArgs = append(flagArgs, args[i])
-			skipNext = false
-			continue
-		}
-		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette") {
-			opts.subcommand = arg
-			opts.subcommandArgs = args[i+1:]
-			opts.globalArgs = append([]string(nil), flagArgs...)
-			break
-		}
-		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help" || arg == "desktop") {
-			opts.subcommand = arg
-			continue
-		}
-		if opts.subcommand == "" && (arg == "ls" || arg == "list-sessions") {
-			opts.subcommand = "ls"
-			continue
-		}
-		flagArgs = append(flagArgs, arg)
-		if arg == "-c" || arg == "-config" || arg == "--config" ||
-			arg == "-l" || arg == "-layout" || arg == "--layout" ||
-			arg == "-p" || arg == "-prefix" || arg == "--prefix" ||
-			arg == "-s" || arg == "-socket" || arg == "--socket" ||
-			arg == "-L" || arg == "-session" || arg == "--session" ||
-			arg == "-shell" || arg == "--shell" ||
-			arg == "-owner-fd" || arg == "--owner-fd" {
-			skipNext = true
-		}
-	}
-
+func newFlagSet(opts *cliOptions) *flag.FlagSet {
 	fs := flag.NewFlagSet("wideboi", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
@@ -127,6 +90,51 @@ func parseCLI(args []string) (cliOptions, error) {
 	fs.BoolVar(&opts.showHelp, "help", false, "show help and usage information")
 	fs.BoolVar(&opts.jsonOut, "json", false, "output JSON instead of a table (status only)")
 	fs.BoolVar(&opts.trafficOut, "traffic", false, "show per-client pane traffic (status only)")
+	return fs
+}
+
+func parseCLI(args []string) (cliOptions, error) {
+	var opts cliOptions
+	fs := newFlagSet(&opts)
+
+	valueFlags := make(map[string]bool)
+	fs.VisitAll(func(f *flag.Flag) {
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && bf.IsBoolFlag() {
+			return
+		}
+		valueFlags["-"+f.Name] = true
+		valueFlags["--"+f.Name] = true
+	})
+
+	var flagArgs []string
+	skipNext := false
+
+	for i := 0; i < len(args); i++ {
+		if skipNext {
+			flagArgs = append(flagArgs, args[i])
+			skipNext = false
+			continue
+		}
+		arg := args[i]
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette") {
+			opts.subcommand = arg
+			opts.subcommandArgs = args[i+1:]
+			opts.globalArgs = append([]string(nil), flagArgs...)
+			break
+		}
+		if opts.subcommand == "" && (arg == "server" || arg == "attach" || arg == "kill-session" || arg == "status" || arg == "cleanup" || arg == "version" || arg == "help" || arg == "desktop") {
+			opts.subcommand = arg
+			continue
+		}
+		if opts.subcommand == "" && (arg == "ls" || arg == "list-sessions") {
+			opts.subcommand = "ls"
+			continue
+		}
+		flagArgs = append(flagArgs, arg)
+		if valueFlags[arg] {
+			skipNext = true
+		}
+	}
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return opts, err
