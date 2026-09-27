@@ -447,11 +447,22 @@ func BuildBindings(custom map[string][]string) ([]Binding, error) {
 
 	// 1. Validate custom action names and keys
 	normalized := make(map[string][]string, len(custom))
-	for act, ks := range custom {
+	configuredAct := make(map[string]string, len(custom))
+	customKeys := make([]string, 0, len(custom))
+	for act := range custom {
+		customKeys = append(customKeys, act)
+	}
+	slices.Sort(customKeys)
+	for _, act := range customKeys {
+		ks := custom[act]
 		canonical, ok := validActions[act]
 		if !ok {
 			return nil, fmt.Errorf("unknown action %q; valid actions include focus_left, pan_left, pan_right, follow_pty, cycle_width, claim_size, toggle_cards, help, detach, quit, exit", act)
 		}
+		if prevAct, exists := configuredAct[canonical]; exists {
+			return nil, fmt.Errorf("conflicting actions %q and %q both configure %q", prevAct, act, canonical)
+		}
+		configuredAct[canonical] = act
 		if canonical == ActionNameQuit && len(ks) == 0 {
 			return nil, fmt.Errorf("action %q cannot be unbound: it is the only way to end the session", act)
 		}
