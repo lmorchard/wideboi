@@ -31,9 +31,11 @@ export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewpor
     ? Math.floor(remaining / MIN_SLIVER_WIDTH) : others;
   const size = Math.min(budget, others) + 1;
   const margin = size >= 3 ? 1 : 0;
+  const lo = Math.max(focus - margin, 0);
+  const hi = Math.min(focus + margin, columns.length - 1);
   let first = Math.max(0, Math.min(previousFirst, columns.length - size));
-  if (focus - margin < first) first = focus - margin;
-  if (focus + margin >= first + size) first = focus + margin - size + 1;
+  if (lo < first) first = lo;
+  if (hi > first + size - 1) first = hi - size + 1;
   first = Math.max(0, Math.min(first, columns.length - size));
   const last = first + size - 1;
   const slivers = size - 1;

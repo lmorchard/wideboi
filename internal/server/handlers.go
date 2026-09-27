@@ -17,6 +17,7 @@ type msgEffects struct {
 	needPaneBroadcast   bool
 	sendMetadata        bool
 	sendMacros          bool
+	sendConfig          bool
 	needMacrosBroadcast bool
 	resyncPaneID        int
 	createdPaneID       int
@@ -318,6 +319,7 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 		needBroadcast: true,
 		sendMetadata:  true,
 		sendMacros:    true,
+		sendConfig:    true,
 	}
 }
 
@@ -671,6 +673,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 	}
 	if eff.sendMacros && tp != nil {
 		s.sendMacrosTo(ctx, tp)
+	}
+	if eff.sendConfig && tp != nil {
+		s.sendConfigTo(ctx, tp)
 	}
 	if eff.needMacrosBroadcast {
 		go s.broadcastMacros(ctx)

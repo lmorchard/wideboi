@@ -570,3 +570,31 @@ type MsgWebServerControlResponse struct {
 	Error      string `json:"error,omitempty"`
 	Warning    string `json:"warning,omitempty"`
 }
+
+// KeyBinding describes a control-mode binding shipped from server to client.
+type KeyBinding struct {
+	ActionName  string   `json:"action_name"`
+	Key         string   `json:"key"`
+	Aliases     []string `json:"aliases,omitempty"`
+	Action      int      `json:"action"`
+	Verb        VerbType `json:"verb,omitempty"`
+	Scroll      int      `json:"scroll,omitempty"`
+	Pan         int      `json:"pan,omitempty"`
+	Column      int      `json:"column,omitempty"`
+	BarGroup    string   `json:"bar_group,omitempty"`
+	Long        string   `json:"long,omitempty"`
+	HelpGroup   string   `json:"help_group,omitempty"`
+	HelpKey     string   `json:"help_key,omitempty"`
+	NeedsDetach bool     `json:"needs_detach,omitempty"`
+	Essential   bool     `json:"essential,omitempty"`
+	NoRepeat    bool     `json:"no_repeat,omitempty"`
+}
+
+// MsgConfigSnapshot is sent by the server to inform clients of server configuration
+// including key bindings and column width presets/limits.
+type MsgConfigSnapshot struct {
+	WidthPresets   []int        `json:"width_presets,omitempty"`
+	MinColumnWidth int          `json:"min_column_width,omitempty"`
+	MaxColumnWidth int          `json:"max_column_width,omitempty"`
+	Bindings       []KeyBinding `json:"bindings,omitempty"`
+}

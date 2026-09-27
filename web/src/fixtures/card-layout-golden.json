@@ -1,0 +1,957 @@
+[
+  {
+    "name": "single column fits viewport",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 40
+      }
+    ],
+    "focusedPaneId": 1,
+    "viewportWidth": 80,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 2
+      }
+    ]
+  },
+  {
+    "name": "single column clamped by viewport",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 60
+      }
+    ],
+    "focusedPaneId": 1,
+    "viewportWidth": 30,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 2
+      }
+    ]
+  },
+  {
+    "name": "two columns wide viewport",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 40
+      },
+      {
+        "paneId": 2,
+        "width": 40
+      }
+    ],
+    "focusedPaneId": 1,
+    "viewportWidth": 100,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 2,
+        "left": 40,
+        "visible": true,
+        "z": 2
+      }
+    ]
+  },
+  {
+    "name": "two columns focused second",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 40
+      },
+      {
+        "paneId": 2,
+        "width": 40
+      }
+    ],
+    "focusedPaneId": 2,
+    "viewportWidth": 100,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 1
+      },
+      {
+        "paneId": 2,
+        "left": 40,
+        "visible": true,
+        "z": 3
+      }
+    ]
+  },
+  {
+    "name": "two columns narrow viewport",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 40
+      },
+      {
+        "paneId": 2,
+        "width": 40
+      }
+    ],
+    "focusedPaneId": 1,
+    "viewportWidth": 42,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 1,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 2,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      }
+    ]
+  },
+  {
+    "name": "three columns center focus",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 40
+      },
+      {
+        "paneId": 2,
+        "width": 40
+      },
+      {
+        "paneId": 3,
+        "width": 40
+      }
+    ],
+    "focusedPaneId": 2,
+    "viewportWidth": 80,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 1
+      },
+      {
+        "paneId": 2,
+        "left": 20,
+        "visible": true,
+        "z": 4
+      },
+      {
+        "paneId": 3,
+        "left": 60,
+        "visible": true,
+        "z": 3
+      }
+    ]
+  },
+  {
+    "name": "three columns right focus",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 40
+      },
+      {
+        "paneId": 2,
+        "width": 40
+      },
+      {
+        "paneId": 3,
+        "width": 40
+      }
+    ],
+    "focusedPaneId": 3,
+    "viewportWidth": 80,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 1
+      },
+      {
+        "paneId": 2,
+        "left": 20,
+        "visible": true,
+        "z": 2
+      },
+      {
+        "paneId": 3,
+        "left": 40,
+        "visible": true,
+        "z": 4
+      }
+    ]
+  },
+  {
+    "name": "six columns focus 3 in 42 cols",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 30
+      },
+      {
+        "paneId": 2,
+        "width": 30
+      },
+      {
+        "paneId": 3,
+        "width": 30
+      },
+      {
+        "paneId": 4,
+        "width": 30
+      },
+      {
+        "paneId": 5,
+        "width": 30
+      },
+      {
+        "paneId": 6,
+        "width": 30
+      }
+    ],
+    "focusedPaneId": 3,
+    "viewportWidth": 42,
+    "previousFirst": 0,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 2,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 1
+      },
+      {
+        "paneId": 2,
+        "left": 4,
+        "visible": true,
+        "z": 2
+      },
+      {
+        "paneId": 3,
+        "left": 8,
+        "visible": true,
+        "z": 7
+      },
+      {
+        "paneId": 4,
+        "left": 38,
+        "visible": true,
+        "z": 4
+      },
+      {
+        "paneId": 5,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 6,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      }
+    ]
+  },
+  {
+    "name": "six columns focus 6 window scroll",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 30
+      },
+      {
+        "paneId": 2,
+        "width": 30
+      },
+      {
+        "paneId": 3,
+        "width": 30
+      },
+      {
+        "paneId": 4,
+        "width": 30
+      },
+      {
+        "paneId": 5,
+        "width": 30
+      },
+      {
+        "paneId": 6,
+        "width": 30
+      }
+    ],
+    "focusedPaneId": 6,
+    "viewportWidth": 42,
+    "previousFirst": 0,
+    "first": 2,
+    "hiddenLeft": 2,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 2,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 3,
+        "left": 0,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 4,
+        "left": 4,
+        "visible": true,
+        "z": 4
+      },
+      {
+        "paneId": 5,
+        "left": 8,
+        "visible": true,
+        "z": 5
+      },
+      {
+        "paneId": 6,
+        "left": 12,
+        "visible": true,
+        "z": 7
+      }
+    ]
+  },
+  {
+    "name": "six columns focus 5 narrow viewport fills card",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 30
+      },
+      {
+        "paneId": 2,
+        "width": 30
+      },
+      {
+        "paneId": 3,
+        "width": 30
+      },
+      {
+        "paneId": 4,
+        "width": 30
+      },
+      {
+        "paneId": 5,
+        "width": 30
+      },
+      {
+        "paneId": 6,
+        "width": 30
+      }
+    ],
+    "focusedPaneId": 5,
+    "viewportWidth": 25,
+    "previousFirst": 0,
+    "first": 4,
+    "hiddenLeft": 4,
+    "hiddenRight": 1,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 2,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 3,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 4,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 5,
+        "left": 0,
+        "visible": true,
+        "z": 7
+      },
+      {
+        "paneId": 6,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      }
+    ]
+  },
+  {
+    "name": "six columns focus 4 with previousFirst 2",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 30
+      },
+      {
+        "paneId": 2,
+        "width": 30
+      },
+      {
+        "paneId": 3,
+        "width": 30
+      },
+      {
+        "paneId": 4,
+        "width": 30
+      },
+      {
+        "paneId": 5,
+        "width": 30
+      },
+      {
+        "paneId": 6,
+        "width": 30
+      }
+    ],
+    "focusedPaneId": 4,
+    "viewportWidth": 42,
+    "previousFirst": 2,
+    "first": 2,
+    "hiddenLeft": 2,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 2,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 3,
+        "left": 0,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 4,
+        "left": 4,
+        "visible": true,
+        "z": 7
+      },
+      {
+        "paneId": 5,
+        "left": 34,
+        "visible": true,
+        "z": 5
+      },
+      {
+        "paneId": 6,
+        "left": 38,
+        "visible": true,
+        "z": 6
+      }
+    ]
+  },
+  {
+    "name": "ten columns wide viewport with large window",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 50
+      },
+      {
+        "paneId": 2,
+        "width": 60
+      },
+      {
+        "paneId": 3,
+        "width": 40
+      },
+      {
+        "paneId": 4,
+        "width": 80
+      },
+      {
+        "paneId": 5,
+        "width": 50
+      },
+      {
+        "paneId": 6,
+        "width": 60
+      },
+      {
+        "paneId": 7,
+        "width": 70
+      },
+      {
+        "paneId": 8,
+        "width": 40
+      },
+      {
+        "paneId": 9,
+        "width": 50
+      },
+      {
+        "paneId": 10,
+        "width": 60
+      }
+    ],
+    "focusedPaneId": 7,
+    "viewportWidth": 150,
+    "previousFirst": 3,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 1
+      },
+      {
+        "paneId": 2,
+        "left": 9,
+        "visible": true,
+        "z": 2
+      },
+      {
+        "paneId": 3,
+        "left": 18,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 4,
+        "left": 27,
+        "visible": true,
+        "z": 4
+      },
+      {
+        "paneId": 5,
+        "left": 36,
+        "visible": true,
+        "z": 5
+      },
+      {
+        "paneId": 6,
+        "left": 45,
+        "visible": true,
+        "z": 6
+      },
+      {
+        "paneId": 7,
+        "left": 54,
+        "visible": true,
+        "z": 11
+      },
+      {
+        "paneId": 8,
+        "left": 124,
+        "visible": true,
+        "z": 8
+      },
+      {
+        "paneId": 9,
+        "left": 133,
+        "visible": true,
+        "z": 9
+      },
+      {
+        "paneId": 10,
+        "left": 142,
+        "visible": true,
+        "z": 10
+      }
+    ]
+  },
+  {
+    "name": "ten columns focus at right edge keeps window stable",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 30
+      },
+      {
+        "paneId": 2,
+        "width": 30
+      },
+      {
+        "paneId": 3,
+        "width": 30
+      },
+      {
+        "paneId": 4,
+        "width": 30
+      },
+      {
+        "paneId": 5,
+        "width": 30
+      },
+      {
+        "paneId": 6,
+        "width": 30
+      },
+      {
+        "paneId": 7,
+        "width": 30
+      },
+      {
+        "paneId": 8,
+        "width": 30
+      },
+      {
+        "paneId": 9,
+        "width": 30
+      },
+      {
+        "paneId": 10,
+        "width": 30
+      }
+    ],
+    "focusedPaneId": 10,
+    "viewportWidth": 60,
+    "previousFirst": 5,
+    "first": 2,
+    "hiddenLeft": 2,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 2,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 3,
+        "left": 0,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 4,
+        "left": 5,
+        "visible": true,
+        "z": 4
+      },
+      {
+        "paneId": 5,
+        "left": 10,
+        "visible": true,
+        "z": 5
+      },
+      {
+        "paneId": 6,
+        "left": 14,
+        "visible": true,
+        "z": 6
+      },
+      {
+        "paneId": 7,
+        "left": 18,
+        "visible": true,
+        "z": 7
+      },
+      {
+        "paneId": 8,
+        "left": 22,
+        "visible": true,
+        "z": 8
+      },
+      {
+        "paneId": 9,
+        "left": 26,
+        "visible": true,
+        "z": 9
+      },
+      {
+        "paneId": 10,
+        "left": 30,
+        "visible": true,
+        "z": 11
+      }
+    ]
+  },
+  {
+    "name": "ten columns focus at left edge scrolls back",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 30
+      },
+      {
+        "paneId": 2,
+        "width": 30
+      },
+      {
+        "paneId": 3,
+        "width": 30
+      },
+      {
+        "paneId": 4,
+        "width": 30
+      },
+      {
+        "paneId": 5,
+        "width": 30
+      },
+      {
+        "paneId": 6,
+        "width": 30
+      },
+      {
+        "paneId": 7,
+        "width": 30
+      },
+      {
+        "paneId": 8,
+        "width": 30
+      },
+      {
+        "paneId": 9,
+        "width": 30
+      },
+      {
+        "paneId": 10,
+        "width": 30
+      }
+    ],
+    "focusedPaneId": 1,
+    "viewportWidth": 60,
+    "previousFirst": 5,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 2,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 11
+      },
+      {
+        "paneId": 2,
+        "left": 30,
+        "visible": true,
+        "z": 2
+      },
+      {
+        "paneId": 3,
+        "left": 35,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 4,
+        "left": 40,
+        "visible": true,
+        "z": 4
+      },
+      {
+        "paneId": 5,
+        "left": 44,
+        "visible": true,
+        "z": 5
+      },
+      {
+        "paneId": 6,
+        "left": 48,
+        "visible": true,
+        "z": 6
+      },
+      {
+        "paneId": 7,
+        "left": 52,
+        "visible": true,
+        "z": 7
+      },
+      {
+        "paneId": 8,
+        "left": 56,
+        "visible": true,
+        "z": 8
+      },
+      {
+        "paneId": 9,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      },
+      {
+        "paneId": 10,
+        "left": 0,
+        "visible": false,
+        "z": 0
+      }
+    ]
+  },
+  {
+    "name": "eight columns uneven remaining width shares",
+    "columns": [
+      {
+        "paneId": 1,
+        "width": 35
+      },
+      {
+        "paneId": 2,
+        "width": 45
+      },
+      {
+        "paneId": 3,
+        "width": 55
+      },
+      {
+        "paneId": 4,
+        "width": 65
+      },
+      {
+        "paneId": 5,
+        "width": 35
+      },
+      {
+        "paneId": 6,
+        "width": 45
+      },
+      {
+        "paneId": 7,
+        "width": 55
+      },
+      {
+        "paneId": 8,
+        "width": 65
+      }
+    ],
+    "focusedPaneId": 4,
+    "viewportWidth": 95,
+    "previousFirst": 1,
+    "first": 0,
+    "hiddenLeft": 0,
+    "hiddenRight": 0,
+    "placements": [
+      {
+        "paneId": 1,
+        "left": 0,
+        "visible": true,
+        "z": 1
+      },
+      {
+        "paneId": 2,
+        "left": 5,
+        "visible": true,
+        "z": 2
+      },
+      {
+        "paneId": 3,
+        "left": 10,
+        "visible": true,
+        "z": 3
+      },
+      {
+        "paneId": 4,
+        "left": 14,
+        "visible": true,
+        "z": 9
+      },
+      {
+        "paneId": 5,
+        "left": 79,
+        "visible": true,
+        "z": 5
+      },
+      {
+        "paneId": 6,
+        "left": 83,
+        "visible": true,
+        "z": 6
+      },
+      {
+        "paneId": 7,
+        "left": 87,
+        "visible": true,
+        "z": 7
+      },
+      {
+        "paneId": 8,
+        "left": 91,
+        "visible": true,
+        "z": 8
+      }
+    ]
+  }
+]

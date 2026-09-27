@@ -267,6 +267,19 @@ func MarshalServer(msg any) ([]byte, error) {
 				Warning:    validUTF8(m.Warning),
 			},
 		}
+	case MsgConfigSnapshot:
+		presets := make([]int32, len(m.WidthPresets))
+		for i, p := range m.WidthPresets {
+			presets[i] = int32(p)
+		}
+		env.Msg = &wirepb.ServerMessage_ConfigSnapshot{
+			ConfigSnapshot: &wirepb.MsgConfigSnapshot{
+				WidthPresets:   presets,
+				MinColumnWidth: int32(m.MinColumnWidth),
+				MaxColumnWidth: int32(m.MaxColumnWidth),
+				Bindings:       encodeKeyBindings(m.Bindings),
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -391,6 +404,17 @@ func UnmarshalServer(data []byte) (any, error) {
 			Token:      m.WebServerControlResponse.Token,
 			Error:      m.WebServerControlResponse.Error,
 			Warning:    m.WebServerControlResponse.Warning,
+		}, nil
+	case *wirepb.ServerMessage_ConfigSnapshot:
+		presets := make([]int, len(m.ConfigSnapshot.WidthPresets))
+		for i, p := range m.ConfigSnapshot.WidthPresets {
+			presets[i] = int(p)
+		}
+		return MsgConfigSnapshot{
+			WidthPresets:   presets,
+			MinColumnWidth: int(m.ConfigSnapshot.MinColumnWidth),
+			MaxColumnWidth: int(m.ConfigSnapshot.MaxColumnWidth),
+			Bindings:       decodeKeyBindings(m.ConfigSnapshot.Bindings),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
@@ -545,4 +569,58 @@ func decodeClientTraffic(c *wirepb.ClientTraffic) ClientTraffic {
 		ResyncRequests: c.ResyncRequests, SendFailures: c.SendFailures,
 		Messages: c.Messages, PayloadBytes: c.PayloadBytes, PanePayloadBytes: c.PanePayloadBytes, WireBytes: c.WireBytes,
 		Encode: decodeTiming(c.Encode)}
+}
+
+func encodeKeyBindings(bindings []KeyBinding) []*wirepb.KeyBindingData {
+	out := make([]*wirepb.KeyBindingData, 0, len(bindings))
+	for _, b := range bindings {
+		aliases := make([]string, len(b.Aliases))
+		for i, a := range b.Aliases {
+			aliases[i] = validUTF8(a)
+		}
+		out = append(out, &wirepb.KeyBindingData{
+			ActionName:  validUTF8(b.ActionName),
+			Key:         validUTF8(b.Key),
+			Aliases:     aliases,
+			Action:      int32(b.Action),
+			Verb:        wirepb.VerbType(b.Verb),
+			Scroll:      int32(b.Scroll),
+			Pan:         int32(b.Pan),
+			Column:      int32(b.Column),
+			BarGroup:    validUTF8(b.BarGroup),
+			Long:        validUTF8(b.Long),
+			HelpGroup:   validUTF8(b.HelpGroup),
+			HelpKey:     validUTF8(b.HelpKey),
+			NeedsDetach: b.NeedsDetach,
+			Essential:   b.Essential,
+			NoRepeat:    b.NoRepeat,
+		})
+	}
+	return out
+}
+
+func decodeKeyBindings(bindings []*wirepb.KeyBindingData) []KeyBinding {
+	out := make([]KeyBinding, 0, len(bindings))
+	for _, b := range bindings {
+		aliases := make([]string, len(b.Aliases))
+		copy(aliases, b.Aliases)
+		out = append(out, KeyBinding{
+			ActionName:  b.ActionName,
+			Key:         b.Key,
+			Aliases:     aliases,
+			Action:      int(b.Action),
+			Verb:        VerbType(b.Verb),
+			Scroll:      int(b.Scroll),
+			Pan:         int(b.Pan),
+			Column:      int(b.Column),
+			BarGroup:    b.BarGroup,
+			Long:        b.Long,
+			HelpGroup:   b.HelpGroup,
+			HelpKey:     b.HelpKey,
+			NeedsDetach: b.NeedsDetach,
+			Essential:   b.Essential,
+			NoRepeat:    b.NoRepeat,
+		})
+	}
+	return out
 }

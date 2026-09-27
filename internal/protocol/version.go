@@ -30,4 +30,5 @@ package protocol
 // 13 adds the session's startup directory to layout snapshots (#123).
 // 14 adds web server start, stop, and status control requests/responses (#247).
 // 15 adds web server enable_tls option and unencrypted exposure warning (#261, #263).
-const Version uint32 = 15
+// 16 adds MsgConfigSnapshot for shipping server key bindings and width presets (#270).
+const Version uint32 = 16

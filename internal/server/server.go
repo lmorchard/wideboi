@@ -130,6 +130,8 @@ type Server struct {
 	saveMacrosStop bool
 	saveMacrosDone chan struct{}
 
+	bindings []protocol.KeyBinding
+
 	// startedTransports tracks which transports have had handleClientConnLoop
 	// started, preventing double-reader races when clients connect before Run().
 	startedTransports map[transport.Transport]bool
@@ -215,6 +217,36 @@ func (s *Server) Macros() []protocol.Macro {
 	out := make([]protocol.Macro, len(s.macros))
 	copy(out, s.macros)
 	return out
+}
+
+// SetBindings configures the key bindings for the server.
+func (s *Server) SetBindings(bindings []protocol.KeyBinding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bindings = append([]protocol.KeyBinding(nil), bindings...)
+}
+
+// Bindings returns a copy of the current key bindings.
+func (s *Server) Bindings() []protocol.KeyBinding {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]protocol.KeyBinding, len(s.bindings))
+	copy(out, s.bindings)
+	return out
+}
+
+func (s *Server) sendConfigTo(ctx context.Context, tp transport.Transport) {
+	s.mu.Lock()
+	presets := s.strip.WidthPresets()
+	bindings := make([]protocol.KeyBinding, len(s.bindings))
+	copy(bindings, s.bindings)
+	s.mu.Unlock()
+	_ = tp.SendServer(ctx, protocol.MsgConfigSnapshot{
+		WidthPresets:   presets,
+		MinColumnWidth: layout.MinColumnWidth,
+		MaxColumnWidth: layout.MaxColumnWidth,
+		Bindings:       bindings,
+	})
 }
 
 func (s *Server) sendMacrosTo(ctx context.Context, tp transport.Transport) {

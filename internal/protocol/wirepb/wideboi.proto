@@ -167,6 +167,7 @@ message ServerMessage {
     MsgMacrosSnapshot macros_snapshot = 15;
     MsgUpgradeResponse upgrade_response = 16;
     MsgWebServerControlResponse web_server_control_response = 17;
+    MsgConfigSnapshot config_snapshot = 18;
   }
 }
 
@@ -419,5 +420,31 @@ message MsgWebServerControlResponse {
   string error = 6;
   string warning = 7;
 }
+
+message KeyBindingData {
+  string action_name = 1;
+  string key = 2;
+  repeated string aliases = 3;
+  int32 action = 4;
+  VerbType verb = 5;
+  int32 scroll = 6;
+  int32 pan = 7;
+  int32 column = 8;
+  string bar_group = 9;
+  string long = 10;
+  string help_group = 11;
+  string help_key = 12;
+  bool needs_detach = 13;
+  bool essential = 14;
+  bool no_repeat = 15;
+}
+
+message MsgConfigSnapshot {
+  repeated int32 width_presets = 1;
+  int32 min_column_width = 2;
+  int32 max_column_width = 3;
+  repeated KeyBindingData bindings = 4;
+}
+
 
 
