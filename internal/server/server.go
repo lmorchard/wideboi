@@ -169,6 +169,10 @@ type Server struct {
 	// startedTransports tracks which transports have had handleClientConnLoop
 	// started, preventing double-reader races when clients connect before Run().
 	startedTransports map[transport.Transport]bool
+
+	// remoteTransports tracks which transports are remote (such as WebSocket
+	// connections), restricting access to privileged session-control messages.
+	remoteTransports map[transport.Transport]bool
 }
 
 // StartupPane is a pane created on the first attach to a new session.
@@ -325,6 +329,7 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		pendingCreationSnapshot: make(map[transport.Transport]bool),
 		attachedTransports:      make(map[transport.Transport]bool),
 		startedTransports:       make(map[transport.Transport]bool),
+		remoteTransports:        make(map[transport.Transport]bool),
 		stopCh:                  make(chan struct{}),
 		started:                 time.Now(),
 	}
@@ -401,6 +406,51 @@ func (s *Server) startTransportLoopLocked(ctx context.Context, tp transport.Tran
 	go s.handleClientConnLoop(ctx, tp)
 }
 
+// IsRemoteTransport reports whether tp is marked as a remote transport.
+func (s *Server) IsRemoteTransport(tp transport.Transport) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.remoteTransports[tp]
+}
+
+// SetRemoteTransport marks or unmarks tp as a remote transport.
+func (s *Server) SetRemoteTransport(tp transport.Transport, remote bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.remoteTransports == nil {
+		s.remoteTransports = make(map[transport.Transport]bool)
+	}
+	if remote {
+		s.remoteTransports[tp] = true
+	} else {
+		delete(s.remoteTransports, tp)
+	}
+}
+
+// rejectRemoteClientMsg checks whether msg is a session-control message
+// restricted to local peers. If tp is remote and msg is restricted, it emits
+// a warning, sends an error response if the message supports one, and returns true.
+func (s *Server) rejectRemoteClientMsg(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) bool {
+	if !s.IsRemoteTransport(tp) {
+		return false
+	}
+	pid := s.peerPID(tp)
+	switch msg.(type) {
+	case protocol.MsgShutdown, *protocol.MsgShutdown:
+		slog.Warn("refusing MsgShutdown from remote peer", "peerPID", pid)
+		return true
+	case protocol.MsgUpgradeRequest, *protocol.MsgUpgradeRequest:
+		slog.Warn("refusing MsgUpgradeRequest from remote peer", "peerPID", pid)
+		tp.SendServer(ctx, protocol.MsgUpgradeResponse{Error: "upgrade is restricted to local peers"})
+		return true
+	case protocol.MsgWebServerControlRequest, *protocol.MsgWebServerControlRequest:
+		slog.Warn("refusing MsgWebServerControlRequest from remote peer", "peerPID", pid)
+		tp.SendServer(ctx, protocol.MsgWebServerControlResponse{Error: "web server control is restricted to local peers"})
+		return true
+	}
+	return false
+}
+
 func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transport) {
 	for {
 		select {
@@ -413,6 +463,9 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 					_ = s.CloseFor(ReasonOwnerLeft)
 				}
 				return
+			}
+			if s.rejectRemoteClientMsg(ctx, tp, msg) {
+				continue
 			}
 			if _, ok := msg.(protocol.MsgShutdown); ok {
 				// Close hangs up on every transport, this one
@@ -439,7 +492,7 @@ func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transpor
 				execFn, err := s.PrepareUpgrade(req.BinPath)
 				if err != nil {
 					tp.SendServer(ctx, protocol.MsgUpgradeResponse{Error: err.Error()})
-					return
+					continue
 				}
 				tp.SendServer(ctx, protocol.MsgUpgradeResponse{})
 				if d, ok := tp.(interface{ Drain(time.Duration) bool }); ok {
@@ -513,6 +566,7 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	delete(s.attachedTransports, tp)
 	delete(s.peerPIDs, tp)
 	delete(s.startedTransports, tp)
+	delete(s.remoteTransports, tp)
 	s.forgetTrafficLocked(tp)
 	if s.sizeOwner == tp {
 		s.sizeOwner = nil
@@ -2359,6 +2413,7 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 			return
 		}
 		s.transports = append(s.transports, sConn)
+		s.remoteTransports[sConn] = true
 		s.startTransportLoopLocked(ctx, sConn)
 		s.mu.Unlock()
 	})

@@ -41,7 +41,9 @@ Each envelope is a protobuf `oneof`. It holds exactly one message.
 | `MsgStatusRequest` | Asks for a layout snapshot. `wideboi status` uses it. |
 | `MsgTrafficRequest` | Asks for traffic counters. `wideboi status --traffic` uses it. See section 7. |
 | `MsgDetach` | Disconnects this client. The session continues. |
-| `MsgShutdown` | Stops the session. |
+| `MsgShutdown` | Stops the session. Local peers only. |
+| `MsgUpgradeRequest` | Asks the server to exec an upgrade binary. Local peers only. |
+| `MsgWebServerControlRequest` | Queries or controls the web server. Local peers only. |
 
 ### 3.2 Server to client
 
@@ -92,6 +94,16 @@ it is never selected as the negotiated protocol.
 
 If a web client sends a message that is larger than 1 MiB, the server closes
 the connection. The server sends a ping each 30 seconds.
+
+### 4.3 Remote peer restrictions
+
+Remote WebSocket peers are restricted from privileged session-control operations:
+
+- `MsgShutdown` is refused and ignored with a warning log.
+- `MsgUpgradeRequest` is refused with an error in `MsgUpgradeResponse`.
+- `MsgWebServerControlRequest` is refused with an error in `MsgWebServerControlResponse`.
+
+These operations are permitted only for local peers connected over the Unix socket.
 
 ## 5. Pane updates and patches
 
