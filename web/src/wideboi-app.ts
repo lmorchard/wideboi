@@ -20,6 +20,8 @@ import { getTheme, listThemes, getThemeCSSVariables, type Theme } from './themes
 import './components/settings-dialog';
 import type { WideboiSettings } from './components/settings-dialog';
 import './components/mobile-bar';
+import './components/command-menu';
+import type { WideboiCommandMenu } from './components/command-menu';
 
 const desktopSession = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('session') : null;
 const STATS_REPORT_MS = 5000;
@@ -94,6 +96,9 @@ export class WideboiApp extends LitElement {
 
   @state()
   private showSettings = false;
+
+  @state()
+  private showCommandMenu = false;
 
   @state()
   private themeId = getPref('theme');
@@ -459,6 +464,7 @@ export class WideboiApp extends LitElement {
     this.mobileInputMode = 'draft';
     this.showMacros = false;
     this.showMacroEditor = false;
+    this.showCommandMenu = false;
     this.paneZooms.clear();
     this.panes = new PaneStore(this.stats);
     this.selectedPane = undefined;
@@ -635,6 +641,13 @@ export class WideboiApp extends LitElement {
         }
         return;
       }
+      if (this.showCommandMenu) {
+        if (e.key === 'Escape' || (e.ctrlKey && e.key === 'c')) {
+          this.closeCommandMenu();
+          e.preventDefault();
+        }
+        return;
+      }
       if (fromFormControl(e)) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
         e.preventDefault();
@@ -696,21 +709,31 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  private openPrompt() {
+    if (!this.client || !this.focusedPaneId) return;
+    this.client.send({
+      case: 'splitRequest',
+      value: { command: `wideboi prompt --caller-pane=${this.focusedPaneId}`, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
+    });
+  }
+
+  private openPalette() {
+    if (!this.client || !this.focusedPaneId) return;
+    this.client.send({
+      case: 'splitRequest',
+      value: { command: `wideboi palette --caller-pane=${this.focusedPaneId}`, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
+    });
+  }
+
   private keyActionHandlers: { [K in KeyRouterAction['type']]: (action: Extract<KeyRouterAction, { type: K }>, e: KeyboardEvent) => void } = {
     ignore: (_action, e) => { e.preventDefault(); },
     search: (_action, e) => { this.startSearch(); e.preventDefault(); },
     prompt: (_action, e) => {
-      this.client?.send({
-        case: 'splitRequest',
-        value: { command: `wideboi prompt --caller-pane=${this.focusedPaneId}`, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
-      });
+      this.openPrompt();
       e.preventDefault();
     },
     palette: (_action, e) => {
-      this.client?.send({
-        case: 'splitRequest',
-        value: { command: `wideboi palette --caller-pane=${this.focusedPaneId}`, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
-      });
+      this.openPalette();
       e.preventDefault();
     },
     send_literal_key: (_action, e) => this.forwardKeyEvent(e),
@@ -1089,6 +1112,7 @@ export class WideboiApp extends LitElement {
   private openHelp() {
     this.showHelp = true;
     this.showSettings = false;
+    this.showCommandMenu = false;
     void this.updateComplete.then(() => {
       this.renderRoot.querySelector<HTMLButtonElement>('.help-dialog .close-btn')?.focus();
     });
@@ -1112,6 +1136,7 @@ export class WideboiApp extends LitElement {
   private openSettings() {
     this.showSettings = true;
     this.showHelp = false;
+    this.showCommandMenu = false;
     void this.updateComplete.then(() => {
       const settingsEl = this.renderRoot.querySelector<WideboiSettings>('wideboi-settings');
       if (settingsEl) {
@@ -1134,6 +1159,66 @@ export class WideboiApp extends LitElement {
       this.closeSettings();
     } else {
       this.openSettings();
+    }
+  }
+
+  private openCommandMenu() {
+    this.showCommandMenu = true;
+    this.showHelp = false;
+    this.showSettings = false;
+    void this.updateComplete.then(() => {
+      const menuEl = this.renderRoot.querySelector<WideboiCommandMenu>('wideboi-command-menu');
+      if (menuEl) {
+        void menuEl.updateComplete.then(() => {
+          menuEl.focusFirstItem();
+        });
+      }
+    });
+  }
+
+  private closeCommandMenu() {
+    this.showCommandMenu = false;
+    void this.updateComplete.then(() => {
+      if (!this.mobile) {
+        this.focusedPane()?.focusInput();
+      } else {
+        const mobileBar = this.renderRoot.querySelector<LitElement>('wideboi-mobile-bar');
+        (mobileBar?.renderRoot as ShadowRoot | undefined)?.querySelector<HTMLElement>('.mobile-cmd-btn')?.focus();
+      }
+    });
+  }
+
+  private handleCommandMenuAction(cmd: string) {
+    this.closeCommandMenu();
+    switch (cmd) {
+      case 'palette':
+        this.openPalette();
+        break;
+      case 'prompt':
+        this.openPrompt();
+        break;
+      case 'new-pane':
+        this.handleVerbAction(VerbType.NEW_COLUMN);
+        break;
+      case 'close-pane':
+        this.handleVerbAction(VerbType.KILL_PANE);
+        break;
+      case 'search':
+        this.startSearch();
+        break;
+      case 'toggle-cards':
+        this.setLayoutMode(this.layoutMode === 'cards' ? 'scroll' : 'cards');
+        break;
+      case 'toggle-follow-pty':
+        this.followPTY = !this.followPTY;
+        if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width]));
+        break;
+      case 'settings':
+        this.openSettings();
+        break;
+      case 'help':
+        this.openHelp();
+        break;
     }
   }
 
@@ -1417,6 +1502,7 @@ export class WideboiApp extends LitElement {
           @pane-select=${this.handlePaneSelect}
           @zoom-step=${(e: CustomEvent<number>) => this.stepZoom(e.detail)}
           @zoom-reset=${() => this.resetZoom()}
+          @open-command-menu=${() => this.openCommandMenu()}
           @open-settings=${this.toggleSettings}
         ></wideboi-mobile-bar>
         <div class="mobile-dock">
@@ -1680,6 +1766,16 @@ export class WideboiApp extends LitElement {
           @font-size-step=${(e: CustomEvent<number>) => this.stepFontSize(e.detail)}
           @font-size-reset=${() => this.resetFontSize()}
         ></wideboi-settings>
+      ` : ''}
+      ${this.showCommandMenu ? html`
+        <wideboi-command-menu
+          .open=${this.showCommandMenu}
+          .prefixLabel=${this.keyRouter.prefixLabel}
+          .layoutMode=${this.layoutMode}
+          .followPTY=${this.followPTY}
+          @close=${() => this.closeCommandMenu()}
+          @command=${(e: CustomEvent<string>) => this.handleCommandMenuAction(e.detail)}
+        ></wideboi-command-menu>
       ` : ''}
       ${!this.connected ? html`
         <div class="overlay">

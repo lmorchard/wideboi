@@ -50,6 +50,10 @@ export class WideboiMobileBar extends LitElement {
     this.dispatchEvent(new CustomEvent('open-settings', { bubbles: true, composed: true }));
   };
 
+  private handleCommandMenu = () => {
+    this.dispatchEvent(new CustomEvent('open-command-menu', { bubbles: true, composed: true }));
+  };
+
   render() {
     const currentIndex = this.activePanes.indexOf(this.focusedPaneId);
     return html`
@@ -71,6 +75,7 @@ export class WideboiMobileBar extends LitElement {
         </div>
         <button aria-label="Next pane" ?disabled=${currentIndex >= this.activePanes.length - 1}
           @click=${this.handleNext}>›</button>
+        <button class="mobile-cmd-btn" aria-label="Command menu" title="Command menu" @click=${this.handleCommandMenu}>⌘</button>
         <button class="mobile-settings-btn" aria-label="Settings" title="Settings" @click=${this.handleSettings}>⚙</button>
       </div>
     `;

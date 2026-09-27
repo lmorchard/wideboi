@@ -252,19 +252,19 @@ export const wideboiAppStyles = css`
     .mobile-bar, .mobile-dock { display: none; }
     .mobile-bar {
       align-items: center;
-      gap: 0.4rem;
-      padding: 0.35rem;
+      gap: 0.25rem;
+      padding: 0.25rem;
       background: var(--wb-bg-toolbar, #252526);
       color: var(--wb-fg-primary, #ccc);
       font: 13px sans-serif;
       border-top: 1px solid var(--wb-border, #3c3c3c);
     }
-    .mobile-bar select { flex: 1; min-width: 0; }
+    .mobile-bar select { flex: 1; min-width: 60px; }
     .mobile-bar button {
-      min-width: 52px;
-      font-size: 20px;
+      min-width: 30px;
+      font-size: 16px;
       line-height: 1;
-      padding: 0 0.8rem;
+      padding: 0 0.35rem;
     }
     .mobile-bar button, .mobile-dock button, .mobile-bar select {
       min-height: 40px;
@@ -286,15 +286,16 @@ export const wideboiAppStyles = css`
     .mobile-zoom {
       display: flex;
       align-items: center;
-      gap: 0.2rem;
+      gap: 0.15rem;
     }
     .mobile-zoom button {
-      min-width: 32px;
-      padding: 0 0.35rem;
+      min-width: 26px;
+      padding: 0;
     }
     .mobile-zoom .zoom-reset {
-      min-width: 48px;
-      font-size: 12px;
+      min-width: 38px;
+      font-size: 11px;
+      padding: 0;
     }
     .mobile-dock {
       flex-direction: column;
@@ -804,19 +805,20 @@ export const wideboiAppStyles = css`
       background: #444;
       color: #fff;
     }
-    .mobile-settings-btn {
-      background: #252526;
-      border: 1px solid #3c3c3c;
-      color: #ccc;
+    .mobile-settings-btn, .mobile-cmd-btn {
+      background: var(--wb-bg-toolbar, #252526);
+      border: 1px solid var(--wb-border, #3c3c3c);
+      color: var(--wb-fg-primary, #ccc);
       border-radius: 4px;
-      padding: 0.25rem 0.6rem;
-      font-size: 14px;
+      padding: 0 0.35rem;
+      min-width: 30px;
+      font-size: 15px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    .mobile-settings-btn:hover {
+    .mobile-settings-btn:hover, .mobile-cmd-btn:hover {
       background: var(--wb-bg-btn-hover, #333);
       color: #fff;
     }
@@ -940,5 +942,146 @@ export const wideboiAppStyles = css`
       color: #f14c4c;
       font-size: 0.9rem;
       margin-top: -0.5rem;
+    }
+    .command-menu-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 1rem;
+    }
+    .command-menu-dialog {
+      background: var(--wb-bg-toolbar, #252526);
+      border: 1px solid var(--wb-border, #3c3c3c);
+      border-radius: 8px;
+      width: 100%;
+      max-width: 440px;
+      max-height: 85vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      color: var(--wb-fg-primary, #eee);
+    }
+    .command-menu-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
+    }
+    .command-menu-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: baseline;
+      gap: 0.6rem;
+    }
+    .command-menu-prefix-tip {
+      font-size: 11px;
+      font-weight: normal;
+      color: var(--wb-fg-muted, #888);
+    }
+    .command-menu-header .close-btn {
+      background: transparent;
+      border: none;
+      color: var(--wb-fg-primary, #eee);
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+    }
+    .command-menu-header .close-btn:hover {
+      background: var(--wb-bg-btn, #3c3c3c);
+    }
+    .command-menu-list {
+      display: flex;
+      flex-direction: column;
+      padding: 0.5rem;
+      gap: 0.35rem;
+      overflow-y: auto;
+    }
+    .command-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 0.75rem;
+      background: var(--wb-bg-btn, #333);
+      border: 1px solid var(--wb-border-divider, #444);
+      border-radius: 6px;
+      color: var(--wb-fg-primary, #eee);
+      font-size: 14px;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      min-height: 44px;
+      box-sizing: border-box;
+    }
+    .command-menu-item:hover, .command-menu-item:focus-visible {
+      background: var(--wb-focus, #0e639c);
+      border-color: #1177bb;
+      color: #fff;
+    }
+    .command-menu-item:active {
+      transform: translateY(1px);
+    }
+    .command-menu-item.primary-action {
+      background: #1b2e3e;
+      border-color: #0e639c;
+    }
+    .command-menu-icon {
+      font-size: 18px;
+      flex-shrink: 0;
+      width: 24px;
+      text-align: center;
+    }
+    .command-menu-info {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+    }
+    .command-menu-label {
+      font-weight: 500;
+      line-height: 1.2;
+    }
+    .command-menu-desc {
+      font-size: 11px;
+      color: var(--wb-fg-muted, #999);
+      margin-top: 2px;
+    }
+    .command-menu-item:hover .command-menu-desc {
+      color: #ddd;
+    }
+    .command-menu-shortcut {
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 0.2rem 0.45rem;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--wb-focus, #79c0ff);
+      flex-shrink: 0;
+    }
+    .command-menu-item:hover .command-menu-shortcut {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+    @media (max-width: 480px) {
+      .command-menu-overlay {
+        align-items: flex-end;
+        padding: 0;
+      }
+      .command-menu-dialog {
+        max-width: 100%;
+        border-radius: 12px 12px 0 0;
+        border-bottom: none;
+        max-height: 75vh;
+        padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+      }
     }
 `;
