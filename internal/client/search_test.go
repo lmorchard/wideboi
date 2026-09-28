@@ -176,3 +176,30 @@ func TestFindHistoryMatchesPhysicalRowsAndUnicode(t *testing.T) {
 		t.Fatalf("matched across physical rows: %+v", got)
 	}
 }
+
+func TestSearchEditSanitizesNewlines(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "single line untouched", input: "needle", want: "needle"},
+		{name: "trailing newline stripped", input: "needle\n", want: "needle"},
+		{name: "trailing crlf stripped", input: "needle\r\n", want: "needle"},
+		{name: "multiline truncated to first line", input: "needle\nsecond line", want: "needle"},
+		{name: "multiline crlf truncated", input: "needle\r\nsecond line", want: "needle"},
+		{name: "leading newlines trimmed", input: "\n\nneedle\nmore", want: "needle"},
+		{name: "only newlines results in empty", input: "\r\n\n", want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := searchClient(t, 0, 0)
+			c.StartSearch()
+			c.SearchEdit(tc.input, false)
+			if got := c.SearchQuery(); got != tc.want {
+				t.Fatalf("SearchQuery() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
