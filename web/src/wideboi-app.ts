@@ -6,7 +6,7 @@ import { WideboiClient } from './client';
 import { termSettings, measureCellWidth, PaneStore, selectionText, findUrlAt, type CellPoint } from './pane-state';
 import { WideboiPane } from './wideboi-pane';
 import { cardLayout } from './card-layout';
-import { sendKeyboardInput, sendTextInput, sendWheelInput } from './input';
+import { sendKeyboardInput, sendPasteInput, sendTextInput, sendWheelInput } from './input';
 import { KeyRouter, type KeyRouterAction } from './key-router';
 import { consumeLinkToken } from './token';
 import { RenderStats, formatSummary, statsEnabled } from './stats';
@@ -713,7 +713,7 @@ export class WideboiApp extends LitElement {
           if (navigator.clipboard?.readText) {
             navigator.clipboard.readText().then(text => {
               if (text && this.client) {
-                sendTextInput(this.client, this.focusedPaneId, text);
+                sendPasteInput(this.client, this.focusedPaneId, text);
                 this.pendingReveal.add(this.focusedPaneId);
                 this.focusedPane()?.revealCursor();
               }
@@ -749,7 +749,7 @@ export class WideboiApp extends LitElement {
     document.addEventListener('paste', (e) => {
       if (!this.connected || !this.client || fromFormControl(e)) return;
       const value = e.clipboardData?.getData('text/plain') || '';
-      if (!sendTextInput(this.client, this.focusedPaneId, value)) return;
+      if (!sendPasteInput(this.client, this.focusedPaneId, value)) return;
       this.pendingReveal.add(this.focusedPaneId);
       this.focusedPane()?.revealCursor();
       e.preventDefault();

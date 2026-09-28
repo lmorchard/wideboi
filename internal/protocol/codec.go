@@ -35,7 +35,7 @@ func MarshalClient(msg any) ([]byte, error) {
 	case MsgMouse:
 		env.Msg = &wirepb.ClientMessage_Mouse{Mouse: &wirepb.MsgMouse{PaneId: int32(m.PaneID), Kind: wirepb.MouseKind(m.Kind), X: int32(m.X), Y: int32(m.Y), Button: int32(m.Button), Mod: int32(m.Mod)}}
 	case MsgInput:
-		env.Msg = &wirepb.ClientMessage_Input{Input: &wirepb.MsgInput{PaneId: int32(m.PaneID), Key: encodeKey(m.Key), Data: m.Data}}
+		env.Msg = &wirepb.ClientMessage_Input{Input: &wirepb.MsgInput{PaneId: int32(m.PaneID), Key: encodeKey(m.Key), Data: m.Data, Paste: m.Paste}}
 	case MsgResize:
 		env.Msg = &wirepb.ClientMessage_Resize{Resize: &wirepb.MsgResize{Cols: int32(m.Cols), Rows: int32(m.Rows)}}
 	case MsgScroll:
@@ -105,7 +105,7 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_Mouse:
 		return MsgMouse{PaneID: int(m.Mouse.PaneId), Kind: MouseKind(m.Mouse.Kind), X: int(m.Mouse.X), Y: int(m.Mouse.Y), Button: int(m.Mouse.Button), Mod: int(m.Mouse.Mod)}, nil
 	case *wirepb.ClientMessage_Input:
-		return MsgInput{PaneID: int(m.Input.PaneId), Key: decodeKey(m.Input.Key), Data: m.Input.Data}, nil
+		return MsgInput{PaneID: int(m.Input.PaneId), Key: decodeKey(m.Input.Key), Data: m.Input.Data, Paste: m.Input.Paste}, nil
 	case *wirepb.ClientMessage_Resize:
 		return MsgResize{Cols: int(m.Resize.Cols), Rows: int(m.Resize.Rows)}, nil
 	case *wirepb.ClientMessage_Scroll:

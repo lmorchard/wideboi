@@ -1253,7 +1253,7 @@ func handlePaste(ctx context.Context, cli *client.Client, rt *router, ev uv.Past
 	if rt.search == 2 {
 		return
 	}
-	cli.SendInput(ctx, []byte(ev.Content))
+	cli.SendPaste(ctx, []byte(ev.Content))
 }
 
 // enableMouse asks the host terminal to report presses, releases and

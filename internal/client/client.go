@@ -635,7 +635,7 @@ func (c *Client) SendKey(ctx context.Context, k uv.KeyEvent) {
 	}
 }
 
-// SendInput forwards raw input bytes (e.g. paste) for the focused pane to the server.
+// SendInput forwards raw input bytes (e.g. typed text) for the focused pane to the server.
 func (c *Client) SendInput(ctx context.Context, data []byte) {
 	c.mu.Lock()
 	focusedID := c.focusPaneID
@@ -644,7 +644,20 @@ func (c *Client) SendInput(ctx context.Context, data []byte) {
 	c.mu.Unlock()
 
 	if focusedID > 0 {
-		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Data: data})
+		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Data: data, Paste: false})
+	}
+}
+
+// SendPaste forwards raw pasted bytes for the focused pane to the server with bracketed paste intent.
+func (c *Client) SendPaste(ctx context.Context, data []byte) {
+	c.mu.Lock()
+	focusedID := c.focusPaneID
+	c.pendingReveal[focusedID] = true
+	c.revealCursorLocked(focusedID)
+	c.mu.Unlock()
+
+	if focusedID > 0 {
+		c.transport.SendClient(ctx, protocol.MsgInput{PaneID: focusedID, Data: data, Paste: true})
 	}
 }
 

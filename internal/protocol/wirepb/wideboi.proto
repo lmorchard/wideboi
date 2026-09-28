@@ -217,6 +217,7 @@ message MsgInput {
   int32 pane_id = 1;
   KeyData key = 2;
   bytes data = 3;
+  bool paste = 4;
 }
 
 message MsgResize {

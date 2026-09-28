@@ -30,8 +30,8 @@ func TestHandleInputBracketedPaste(t *testing.T) {
 
 	tp := transport.NewInProcChannel(16)
 
-	// 1. Unbracketed pane receives raw bytes
-	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 1, Data: []byte("echo hi\n")})
+	// 1. Unbracketed pane receives raw bytes even with Paste: true
+	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 1, Data: []byte("echo hi\n"), Paste: true})
 	select {
 	case ev := <-pane1.input:
 		rb, ok := ev.(RawBytes)
@@ -45,8 +45,23 @@ func TestHandleInputBracketedPaste(t *testing.T) {
 		t.Fatal("expected input queued on pane 1, got none")
 	}
 
-	// 2. Bracketed pane receives bracketed paste wrapped bytes
-	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 2, Data: []byte("echo hi\n")})
+	// 2. Bracketed pane receives raw bytes when Paste is false (e.g. macro or IME)
+	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 2, Data: []byte("echo hi\n"), Paste: false})
+	select {
+	case ev := <-pane2.input:
+		rb, ok := ev.(RawBytes)
+		if !ok {
+			t.Fatalf("expected RawBytes, got %T", ev)
+		}
+		if string(rb) != "echo hi\n" {
+			t.Errorf("got %q, want %q", string(rb), "echo hi\n")
+		}
+	default:
+		t.Fatal("expected input queued on pane 2, got none")
+	}
+
+	// 3. Bracketed pane receives bracketed paste wrapped bytes when Paste is true
+	s.handleClientMsg(ctx, tp, protocol.MsgInput{PaneID: 2, Data: []byte("echo hi\n"), Paste: true})
 	select {
 	case ev := <-pane2.input:
 		rb, ok := ev.(RawBytes)

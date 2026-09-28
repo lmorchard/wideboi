@@ -20,7 +20,7 @@ func TestHandlePaste(t *testing.T) {
 
 	rt := &router{prefix: "ctrl+b"}
 
-	// 1. Regular paste forwards via SendInput
+	// 1. Regular paste forwards via SendPaste with Paste: true
 	handlePaste(ctx, cli, rt, uv.PasteEvent{Content: "hello world\n"})
 	select {
 	case msg := <-ch.ClientSendChan():
@@ -30,6 +30,27 @@ func TestHandlePaste(t *testing.T) {
 		}
 		if string(in.Data) != "hello world\n" {
 			t.Errorf("got data %q, want %q", string(in.Data), "hello world\n")
+		}
+		if !in.Paste {
+			t.Errorf("expected Paste to be true, got false")
+		}
+	default:
+		t.Fatal("expected message on ClientSendChan, got none")
+	}
+
+	// 1b. SendInput forwards raw input with Paste: false
+	cli.SendInput(ctx, []byte("typed"))
+	select {
+	case msg := <-ch.ClientSendChan():
+		in, ok := msg.(protocol.MsgInput)
+		if !ok {
+			t.Fatalf("expected MsgInput, got %T", msg)
+		}
+		if string(in.Data) != "typed" {
+			t.Errorf("got data %q, want %q", string(in.Data), "typed")
+		}
+		if in.Paste {
+			t.Errorf("expected Paste to be false for SendInput, got true")
 		}
 	default:
 		t.Fatal("expected message on ClientSendChan, got none")
