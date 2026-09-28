@@ -50,6 +50,8 @@ export class WideboiCommandMenu extends LitElement {
   };
 
   private handleKeyDown = (e: KeyboardEvent) => {
+    if (!this.open) return;
+
     if (e.key === 'Escape') {
       this.handleClose();
       e.stopPropagation();
