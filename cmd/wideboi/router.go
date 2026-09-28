@@ -51,7 +51,14 @@ const (
 	routeSearchAccept
 	routeSearchLive
 	routePrompt
+	routePromptEdit
+	routePromptCommit
+	routePromptCancel
 	routePalette
+	routePaletteEdit
+	routePaletteNavigate
+	routePaletteCommit
+	routePaletteCancel
 )
 
 // route is what the router decided about one key event. It describes an
@@ -91,8 +98,10 @@ type router struct {
 	// main mirrors it to the client after every key exactly as it does
 	// with control, so the bar, the overlay and the router cannot
 	// disagree about which mode is active.
-	help   bool
-	search int // 0: off, 1: query input, 2: match navigation
+	help    bool
+	search  int // 0: off, 1: query input, 2: match navigation
+	prompt  bool
+	palette bool
 	// bindings is the active set of control mode bindings. If empty or nil,
 	// defaults to keys.Bindings.
 	bindings []keys.Binding
@@ -101,6 +110,60 @@ type router struct {
 // route decides what to do with one key press, updating the mode as a
 // side effect.
 func (r *router) route(ev uv.KeyPressEvent) route {
+	if r.prompt {
+		if ev.MatchString("esc") || ev.MatchString("ctrl+c") {
+			r.prompt = false
+			return route{Kind: routePromptCancel}
+		}
+		if ev.MatchString("enter") {
+			r.prompt = false
+			return route{Kind: routePromptCommit}
+		}
+		if ev.MatchString("backspace") {
+			return route{Kind: routePromptEdit, Backspace: true}
+		}
+		if ev.Mod == 0 || ev.Mod == uv.ModShift {
+			value := ev.Text
+			if value == "" && ev.Code >= 32 && ev.Code < 127 {
+				value = string(ev.Code)
+			}
+			if value != "" {
+				return route{Kind: routePromptEdit, Text: value}
+			}
+		}
+		return route{Kind: routeIgnore}
+	}
+
+	if r.palette {
+		if ev.MatchString("esc") || ev.MatchString("ctrl+c") {
+			r.palette = false
+			return route{Kind: routePaletteCancel}
+		}
+		if ev.MatchString("enter") {
+			r.palette = false
+			return route{Kind: routePaletteCommit}
+		}
+		if ev.MatchString("up") || ev.MatchString("ctrl+p") {
+			return route{Kind: routePaletteNavigate, Direction: -1}
+		}
+		if ev.MatchString("down") || ev.MatchString("ctrl+n") {
+			return route{Kind: routePaletteNavigate, Direction: 1}
+		}
+		if ev.MatchString("backspace") {
+			return route{Kind: routePaletteEdit, Backspace: true}
+		}
+		if ev.Mod == 0 || ev.Mod == uv.ModShift {
+			value := ev.Text
+			if value == "" && ev.Code >= 32 && ev.Code < 127 {
+				value = string(ev.Code)
+			}
+			if value != "" {
+				return route{Kind: routePaletteEdit, Text: value}
+			}
+		}
+		return route{Kind: routeIgnore}
+	}
+
 	if r.search != 0 {
 		if ev.MatchString("esc") {
 			r.search = 0
@@ -219,9 +282,11 @@ func (r *router) fire(b keys.Binding, sticky bool) route {
 		return route{Kind: routeSearchStart}
 	case keys.ActionPrompt:
 		r.control = false
+		r.prompt = true
 		return route{Kind: routePrompt}
 	case keys.ActionPalette:
 		r.control = false
+		r.palette = true
 		return route{Kind: routePalette}
 	case keys.ActionQuit:
 		// ctrl+q is exactly q: "quit but stay in control mode" is not a

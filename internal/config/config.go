@@ -185,7 +185,14 @@ func SessionName(socket string) (string, bool) {
 func applySessionLayer(cfg *Config, layer, session, socket string) error {
 	switch {
 	case session != "" && socket != "":
-		return fmt.Errorf("%s sets both a session name (%q) and a socket path (%q); set one, not both", layer, session, socket)
+		if socket != SessionSocketPath(session) {
+			return fmt.Errorf("%s sets both a session name (%q) and a socket path (%q); set one, not both", layer, session, socket)
+		}
+		if err := validateSessionName(session); err != nil {
+			return fmt.Errorf("%s: %w", layer, err)
+		}
+		cfg.Socket = socket
+		cfg.Session = session
 	case session != "":
 		if err := validateSessionName(session); err != nil {
 			return fmt.Errorf("%s: %w", layer, err)

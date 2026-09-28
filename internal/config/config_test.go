@@ -818,6 +818,7 @@ func TestSessionAndSocketLayering(t *testing.T) {
 		{name: "env session", env: map[string]string{"WIDEBOI_SESSION": "a"}, want: config.SessionSocketPath("a"), session: "a"},
 		{name: "both flags", flags: config.ConfigFlags{Session: "b", Socket: "/tmp/y.sock"}, wantErr: "not both"},
 		{name: "both env", env: map[string]string{"WIDEBOI_SESSION": "a", "WIDEBOI_SOCK": "/tmp/x.sock"}, wantErr: "not both"},
+		{name: "both env matching", env: map[string]string{"WIDEBOI_SESSION": "a", "WIDEBOI_SOCK": config.SessionSocketPath("a")}, want: config.SessionSocketPath("a"), session: "a"},
 		{name: "both toml", toml: "session = \"a\"\nsocket = \"/tmp/x.sock\"", wantErr: "not both"},
 		{name: "bad name", flags: config.ConfigFlags{Session: "../up"}, wantErr: "session name"},
 	}

@@ -27,6 +27,8 @@ type Server struct {
 	rows            int
 	shell           string
 	cwd             string
+	session         string
+	socket          string
 	startup         []StartupPane
 	startupLaunched bool
 	startupComplete bool
@@ -369,10 +371,32 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 	return srv
 }
 
+// SetSession records the session name and socket path for child environments.
+func (s *Server) SetSession(session, socket string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.session = session
+	s.socket = socket
+}
+
+func (s *Server) paneEnvLocked() []string {
+	var env []string
+	if s.socket != "" {
+		env = append(env, "WIDEBOI_SOCK="+s.socket)
+	}
+	if s.session != "" {
+		env = append(env, "WIDEBOI_SESSION="+s.session)
+	}
+	return env
+}
+
 // ListenSocket starts accepting socket connections on sl.
 func (s *Server) ListenSocket(ctx context.Context, sl *transport.SocketListener) {
 	s.mu.Lock()
 	s.listener = sl
+	if s.socket == "" && sl != nil {
+		s.socket = sl.Path()
+	}
 	s.mu.Unlock()
 	go func() {
 		for {
@@ -494,7 +518,7 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	if spec.Dir != "" {
 		cwd = spec.Dir
 	}
-	p, err := NewPane(id, argv, paneCols, paneRows, cwd)
+	p, err := NewPane(id, argv, paneCols, paneRows, cwd, s.paneEnvLocked()...)
 	if err != nil {
 		return nil, err
 	}

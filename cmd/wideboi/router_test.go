@@ -439,3 +439,65 @@ func TestPromptAndPaletteRoutes(t *testing.T) {
 		t.Errorf("' ' key in control mode: got %+v, control=%v, want routePalette and control=false", got, r.control)
 	}
 }
+
+func TestPromptModeRouting(t *testing.T) {
+	r := &router{prefix: "ctrl+b", control: true}
+	if got := r.route(key(':')); got.Kind != routePrompt {
+		t.Fatalf("expected routePrompt, got %+v", got)
+	}
+	if !r.prompt {
+		t.Fatal("expected r.prompt to be true")
+	}
+
+	if got := r.route(key('n')); got.Kind != routePromptEdit || got.Text != "n" {
+		t.Fatalf("expected routePromptEdit 'n', got %+v", got)
+	}
+
+	if got := r.route(key(uv.KeyBackspace)); got.Kind != routePromptEdit || !got.Backspace {
+		t.Fatalf("expected routePromptEdit backspace, got %+v", got)
+	}
+
+	if got := r.route(key(uv.KeyEnter)); got.Kind != routePromptCommit || r.prompt {
+		t.Fatalf("expected routePromptCommit and r.prompt=false, got %+v", got)
+	}
+
+	// Test Esc cancels prompt
+	r = &router{prefix: "ctrl+b", control: true}
+	r.route(key(':'))
+	if got := r.route(key(uv.KeyEscape)); got.Kind != routePromptCancel || r.prompt {
+		t.Fatalf("expected routePromptCancel and r.prompt=false, got %+v", got)
+	}
+}
+
+func TestPaletteModeRouting(t *testing.T) {
+	r := &router{prefix: "ctrl+b", control: true}
+	if got := r.route(key(' ')); got.Kind != routePalette {
+		t.Fatalf("expected routePalette, got %+v", got)
+	}
+	if !r.palette {
+		t.Fatal("expected r.palette to be true")
+	}
+
+	if got := r.route(key('s')); got.Kind != routePaletteEdit || got.Text != "s" {
+		t.Fatalf("expected routePaletteEdit 's', got %+v", got)
+	}
+
+	if got := r.route(key(uv.KeyDown)); got.Kind != routePaletteNavigate || got.Direction != 1 {
+		t.Fatalf("expected routePaletteNavigate +1, got %+v", got)
+	}
+
+	if got := r.route(key(uv.KeyUp)); got.Kind != routePaletteNavigate || got.Direction != -1 {
+		t.Fatalf("expected routePaletteNavigate -1, got %+v", got)
+	}
+
+	if got := r.route(key(uv.KeyEnter)); got.Kind != routePaletteCommit || r.palette {
+		t.Fatalf("expected routePaletteCommit and r.palette=false, got %+v", got)
+	}
+
+	// Test Esc cancels palette
+	r = &router{prefix: "ctrl+b", control: true}
+	r.route(key(' '))
+	if got := r.route(key(uv.KeyEscape)); got.Kind != routePaletteCancel || r.palette {
+		t.Fatalf("expected routePaletteCancel and r.palette=false, got %+v", got)
+	}
+}

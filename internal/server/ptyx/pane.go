@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -113,16 +114,36 @@ func Adopt(pid int, fd int, name string, alreadyExited bool, exitCode int) (*Pan
 	return p, nil
 }
 
+func cleanEnv(base []string, removeKeys ...string) []string {
+	var out []string
+	for _, entry := range base {
+		drop := false
+		for _, key := range removeKeys {
+			if strings.HasPrefix(entry, key+"=") {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 // Spawn starts argv on a new PTY sized cols x rows, with dir as its
-// working directory.
-func Spawn(argv []string, cols, rows int, dir string) (*Pane, error) {
+// working directory. Any extraEnv entries are appended to the child
+// environment, with any inherited WIDEBOI_SOCK and WIDEBOI_SESSION stripped first.
+func Spawn(argv []string, cols, rows int, dir string, extraEnv ...string) (*Pane, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("ptyx: empty argv")
 	}
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	baseEnv := cleanEnv(os.Environ(), "WIDEBOI_SOCK", "WIDEBOI_SESSION")
+	cmd.Env = append(baseEnv, "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid:  true,
 		Setctty: true,

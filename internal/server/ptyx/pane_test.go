@@ -36,6 +36,21 @@ func TestSpawnRunsCommandAndEchoesOutput(t *testing.T) {
 	}
 }
 
+func TestSpawnInjectsEnvironmentAndStripsStaleSession(t *testing.T) {
+	t.Setenv("WIDEBOI_SOCK", "/stale/path.sock")
+	t.Setenv("WIDEBOI_SESSION", "stale-session")
+
+	p, err := ptyx.Spawn([]string{"/bin/sh", "-c", "echo WS=$WIDEBOI_SOCK:WESS=$WIDEBOI_SESSION"}, 40, 10, t.TempDir(), "WIDEBOI_SOCK=/fresh/path.sock", "WIDEBOI_SESSION=fresh-session")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { p.Hangup(testGrace) })
+
+	if !readUntil(t, p.Master, "WS=/fresh/path.sock:WESS=fresh-session", 5*time.Second) {
+		t.Fatal("expected WIDEBOI_SOCK and WIDEBOI_SESSION in output")
+	}
+}
+
 func TestSpawnReportsWindowSizeToChild(t *testing.T) {
 	p, err := ptyx.Spawn([]string{"/bin/sh"}, 73, 11, t.TempDir())
 	if err != nil {
