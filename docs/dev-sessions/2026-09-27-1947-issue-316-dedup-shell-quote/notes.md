@@ -11,4 +11,5 @@
 - Removed duplicate private implementations of `shellQuote` and `shellJoin` from `cmd/wideboi/control.go`.
 - Updated callers in `cmd/wideboi/control.go`, `cmd/wideboi/main.go`, and `internal/commands/registry.go` to use `commands.ShellQuote` and `commands.ShellJoin`.
 - Added unit tests for `ShellQuote` and `ShellJoin` (including single-argument pass-through and `/bin/sh -c` round-tripping) in `internal/commands/registry_test.go` and updated `cmd/wideboi/control_test.go`.
-- Verified entire test suite with `make check`.
+- Fixed `TestWriteBoundedConcurrent` in `internal/server/ptyx/pane_test.go` to disable PTY echo (`stty -echo`) before spawning `cat`, preventing kernel PTY input echo from racing and interleaving with `cat`'s stdout in Linux CI.
+- Verified entire test suite with `make check` and Linux container tests via `make linux-test`.
