@@ -49,9 +49,10 @@ describe('macros', () => {
 
     expect(sentMessages).toHaveLength(3);
 
-    // Step 1: text sent without implicit Enter
+    // Step 1: text sent without implicit Enter and with paste false
     expect(sentMessages[0].case).toBe('input');
     expect(sentMessages[0].value.paneId).toBe(7);
+    expect(sentMessages[0].value.paste).toBe(false);
     expect(new TextDecoder().decode(sentMessages[0].value.data)).toBe('npm run test');
 
     // Step 2: Enter key

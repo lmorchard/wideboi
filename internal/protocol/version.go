@@ -32,4 +32,5 @@ package protocol
 // 15 adds web server enable_tls option and unencrypted exposure warning (#261, #263).
 // 16 adds MsgConfigSnapshot for shipping server key bindings and width presets (#270).
 // 17 adds the attached client count to layout snapshots, for `wideboi ls`.
-const Version uint32 = 17
+// 18 adds paste boolean flag to MsgInput (#312).
+const Version uint32 = 18

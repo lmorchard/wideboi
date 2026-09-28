@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { sendKeyboardInput, sendTextInput, sendWheelInput } from './input';
+import { sendKeyboardInput, sendPasteInput, sendTextInput, sendWheelInput } from './input';
 import { MouseKind } from './gen/internal/protocol/wirepb/wideboi_pb';
 
 function key(key: string, code: string, mods: Partial<KeyboardEvent> = {}): KeyboardEvent {
@@ -23,11 +23,19 @@ it('emits terminal key messages for Unicode, shifted, modified and navigation ke
   expect(sendKeyboardInput(sender, 7, key('Process', 'KeyA', { isComposing: true }))).toBe(false);
 });
 
-it('sends pasted and composed text as UTF-8 bytes', () => {
+it('sends composed/raw text as UTF-8 bytes with paste false', () => {
   const send = vi.fn();
   sendTextInput({ send }, 3, 'é界');
   expect(send).toHaveBeenCalledWith({ case: 'input', value: {
-    paneId: 3, data: new TextEncoder().encode('é界')
+    paneId: 3, data: new TextEncoder().encode('é界'), paste: false
+  } });
+});
+
+it('sends pasted text as UTF-8 bytes with paste true', () => {
+  const send = vi.fn();
+  sendPasteInput({ send }, 3, 'clipboard content');
+  expect(send).toHaveBeenCalledWith({ case: 'input', value: {
+    paneId: 3, data: new TextEncoder().encode('clipboard content'), paste: true
   } });
 });
 

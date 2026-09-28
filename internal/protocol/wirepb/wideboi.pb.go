@@ -1946,6 +1946,7 @@ type MsgInput struct {
 	PaneId        int32                  `protobuf:"varint,1,opt,name=pane_id,json=paneId,proto3" json:"pane_id,omitempty"`
 	Key           *KeyData               `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
 	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	Paste         bool                   `protobuf:"varint,4,opt,name=paste,proto3" json:"paste,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1999,6 +2000,13 @@ func (x *MsgInput) GetData() []byte {
 		return x.Data
 	}
 	return nil
+}
+
+func (x *MsgInput) GetPaste() bool {
+	if x != nil {
+		return x.Paste
+	}
+	return false
 }
 
 type MsgResize struct {
@@ -4514,11 +4522,12 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x04code\x18\x03 \x01(\x05R\x04code\x12!\n" +
 	"\fshifted_code\x18\x04 \x01(\x05R\vshiftedCode\x12\x1b\n" +
 	"\tbase_code\x18\x05 \x01(\x05R\bbaseCode\x12\x1b\n" +
-	"\tis_repeat\x18\x06 \x01(\bR\bisRepeat\"d\n" +
+	"\tis_repeat\x18\x06 \x01(\bR\bisRepeat\"z\n" +
 	"\bMsgInput\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12+\n" +
 	"\x03key\x18\x02 \x01(\v2\x19.wideboi.protocol.KeyDataR\x03key\x12\x12\n" +
-	"\x04data\x18\x03 \x01(\fR\x04data\"3\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\x12\x14\n" +
+	"\x05paste\x18\x04 \x01(\bR\x05paste\"3\n" +
 	"\tMsgResize\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\x05R\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\x05R\x04rows\"\xbd\x01\n" +

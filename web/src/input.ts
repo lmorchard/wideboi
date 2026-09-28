@@ -36,7 +36,13 @@ export function sendKeyboardInput(sender: InputSender, paneID: number, event: Ke
 
 export function sendTextInput(sender: InputSender, paneID: number, text: string): boolean {
   if (!text) return false;
-  sender.send({ case: 'input', value: { paneId: paneID, data: new TextEncoder().encode(text) } });
+  sender.send({ case: 'input', value: { paneId: paneID, data: new TextEncoder().encode(text), paste: false } });
+  return true;
+}
+
+export function sendPasteInput(sender: InputSender, paneID: number, text: string): boolean {
+  if (!text) return false;
+  sender.send({ case: 'input', value: { paneId: paneID, data: new TextEncoder().encode(text), paste: true } });
   return true;
 }
 

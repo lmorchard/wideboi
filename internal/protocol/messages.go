@@ -245,6 +245,7 @@ type MsgInput struct {
 	PaneID int
 	Key    KeyData
 	Data   []byte
+	Paste  bool
 }
 
 // MsgResize reports a change in host terminal window dimensions.
