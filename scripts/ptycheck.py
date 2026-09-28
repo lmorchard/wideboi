@@ -69,7 +69,22 @@ from ptylib import (
 )
 import subprocess
 
-def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
+def pre_existing_wideboi(binary_path: str) -> set[int]:
+    """Returns the set of PIDs matching binary_path that already exist before
+    the harness spawns its child.
+    """
+    rows = ps_rows()
+    if not rows:
+        return set()
+    found = set()
+    for pid, _, command in rows:
+        argv0 = command.split(" ", 1)[0] if command else ""
+        if argv0 == binary_path:
+            found.add(pid)
+    return found
+
+
+def find_stray_wideboi(binary_path: str, own_pid: int, ignore_pids: set[int] | None = None) -> list[str]:
     """Looks for a process still running this binary that this run is
     responsible for.
 
@@ -87,6 +102,8 @@ def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
     A copy this run leaked is either still our child, or orphaned onto
     init when its parent died. A copy belonging to another run still has
     that run's live harness as its parent, so it is not ours to report.
+    Pre-existing server processes alive before this run started are also
+    ignored via ignore_pids (#315).
     """
     rows = ps_rows()
     if not rows:
@@ -96,10 +113,11 @@ def find_stray_wideboi(binary_path: str, own_pid: int) -> list[str]:
         # assertion 4 pass silently, which is what the old ps shell-out
         # deliberately avoided.
         return ["<could not read the process table to check for strays>"]
+    ignore = set(ignore_pids or ())
     live = {pid for pid, _, _ in rows}
     strays = []
     for pid, ppid, command in rows:
-        if pid == own_pid:
+        if pid == own_pid or pid in ignore:
             continue
         argv0 = command.split(" ", 1)[0] if command else ""
         if argv0 != binary_path:
@@ -128,6 +146,7 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     print(f"--- size={label} signal={signal.Signals(sig).name} ---")
 
     argv = harness_args(os.path.abspath(binary))
+    pre_existing = pre_existing_wideboi(argv[0])
     # Private to this run. A plain wideboi attaches to whatever answers
     # its socket, and an unrelated server on the default path would
     # leave this child with no session of its own. Nothing is listening
@@ -303,7 +322,7 @@ def run_check(binary: str, cols: int, rows: int, set_winsize: bool, sig: int,
     else:
         print("OK: the server removed its socket")
 
-    strays = find_stray_wideboi(argv[0], own_pid=pid)
+    strays = find_stray_wideboi(argv[0], own_pid=pid, ignore_pids=pre_existing)
     if strays:
         print(f"FAIL: {len(strays)} stray wideboi process(es) left behind:")
         for s in strays:

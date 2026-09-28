@@ -209,11 +209,11 @@ Without that pin, panes used the developer's themed login shell. Its prompt
 had no `$`, startup could drop typed text, and attach tests became slow and
 intermittent.
 
-`verify-exit` reports any checkout `bin/wideboi` process parented by PID 1
-as a stray. A previously detached session server fits that description. If
-all exit cases report the same PID, compare its start time with the run. End
-an older session and rerun; keep the PID 1 check because it catches real
-orphans.
+`verify-exit` previously reported any checkout `bin/wideboi` process parented
+by PID 1 as a stray, which falsely flagged an active or detached session server
+hosting the developer or agent (#315). `ptycheck.py` now snapshots
+pre-existing wideboi processes at startup and filters them out while still
+checking for strays spawned during the run.
 
 ## Keep desktop manager controls stable between polls
 
