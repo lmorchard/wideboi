@@ -521,3 +521,26 @@ func TestDrainInputWaitsForPtyWrite(t *testing.T) {
 		t.Fatalf("drainInput returned with %d of %d key bytes written to the pty", got, keys)
 	}
 }
+
+func TestDrainInputWaitsForRawBytesPtyWrite(t *testing.T) {
+	p, err := NewPane(1, []string{"/bin/cat"}, 40, 10, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written atomic.Int64
+	p.ptyWritten = func(n int) {
+		time.Sleep(20 * time.Millisecond) // slow hop under test
+		written.Add(int64(n))
+	}
+	p.Start(func() {})
+	t.Cleanup(func() { _ = p.Close() })
+
+	const pasteLen = 10
+	p.SendBytes([]byte("0123456789"))
+	if !p.drainInput(5 * time.Second) {
+		t.Fatal("drainInput timed out")
+	}
+	if got := written.Load(); got != pasteLen {
+		t.Fatalf("drainInput returned with %d of %d bytes written to the pty", got, pasteLen)
+	}
+}

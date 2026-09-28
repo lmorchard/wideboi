@@ -3,10 +3,12 @@ package ptyx_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -148,6 +150,88 @@ func TestWriteBoundedDeadline(t *testing.T) {
 	}
 	if elapsed < 35*time.Millisecond || elapsed > 1*time.Second {
 		t.Fatalf("write returned in %v, expected ~50ms", elapsed)
+	}
+}
+
+func TestWriteBoundedConcurrent(t *testing.T) {
+	p, err := ptyx.Spawn([]string{"/bin/cat"}, 40, 10, t.TempDir())
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	t.Cleanup(func() { p.Hangup(testGrace) })
+
+	const lines = 20
+	errs := make(chan error, lines)
+
+	// Reader goroutine drains p.Master and records complete lines until all are seen.
+	readDone := make(chan struct{}, 1)
+	seen := make(map[string]int)
+	var seenMu sync.Mutex
+
+	go func() {
+		buf := make([]byte, 1024)
+		var cur []byte
+		for {
+			n, err := p.Master.Read(buf)
+			if n > 0 {
+				seenMu.Lock()
+				for _, b := range buf[:n] {
+					if b == '\n' || b == '\r' {
+						if len(cur) > 0 {
+							seen[string(cur)]++
+							cur = cur[:0]
+						}
+					} else {
+						cur = append(cur, b)
+					}
+				}
+				if len(seen) >= lines {
+					seenMu.Unlock()
+					readDone <- struct{}{}
+					return
+				}
+				seenMu.Unlock()
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < lines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			data := []byte(fmt.Sprintf("line-%02d\n", idx))
+			n, err := p.WriteBounded(data, 2*time.Second)
+			if err != nil {
+				errs <- fmt.Errorf("write %d failed: %w", idx, err)
+			} else if n != len(data) {
+				errs <- fmt.Errorf("write %d short: %d != %d", idx, n, len(data))
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent write: %v", err)
+	}
+
+	select {
+	case <-readDone:
+		seenMu.Lock()
+		defer seenMu.Unlock()
+		for i := 0; i < lines; i++ {
+			want := fmt.Sprintf("line-%02d", i)
+			if count := seen[want]; count == 0 {
+				t.Errorf("line %q was corrupted or missing (seen=%v)", want, seen)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		seenMu.Lock()
+		defer seenMu.Unlock()
+		t.Fatalf("timed out waiting for pty output drain (seen %d/%d lines: %v)", len(seen), lines, seen)
 	}
 }
 

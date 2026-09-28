@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,10 @@ import (
 type Pane struct {
 	Master *os.File
 	Cmd    *exec.Cmd
+
+	// writeMu serializes calls to WriteBounded so concurrent callers cannot
+	// clobber each other's deadlines or interleave writes to Master.
+	writeMu sync.Mutex
 
 	// done closes when the child has been reaped. Exactly one goroutine
 	// ever calls Wait, because a second call fails.
@@ -210,7 +215,12 @@ func (p *Pane) Resize(cols, rows int) error {
 // so that a child that has stopped reading stdin cannot block the write
 // indefinitely. When the deadline expires, it returns an error matching
 // os.ErrDeadlineExceeded.
+//
+// Writes are serialized under writeMu so concurrent callers cannot clobber
+// each other's deadlines or interleave bytes on Master.
 func (p *Pane) WriteBounded(b []byte, timeout time.Duration) (int, error) {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
 	if timeout > 0 {
 		_ = p.Master.SetWriteDeadline(time.Now().Add(timeout))
 		defer func() { _ = p.Master.SetWriteDeadline(time.Time{}) }()

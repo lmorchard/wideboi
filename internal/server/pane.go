@@ -220,7 +220,11 @@ func (p *Pane) Start(onExit func()) {
 				case uv.MouseEvent:
 					p.grid.SendMouse(ev)
 				case RawBytes:
-					_, _ = p.Write(ev)
+					if p.grid != nil {
+						p.grid.SendText(string(ev))
+					} else {
+						_, _ = p.Write(ev)
+					}
 				case inputFlush:
 					// Everything queued before this is with vt or the
 					// pty. An empty send still waits for the pty-writer's
@@ -357,6 +361,9 @@ func (p *Pane) Write(b []byte) (int, error) {
 		return len(b), nil
 	}
 	n, err := p.pty.WriteBounded(b, ptyWriteTimeout)
+	if p.ptyWritten != nil && n > 0 {
+		p.ptyWritten(n)
+	}
 	if errors.Is(err, os.ErrDeadlineExceeded) && n < len(b) {
 		p.dropped.Add(uint64(len(b) - n))
 	}
