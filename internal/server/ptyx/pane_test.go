@@ -169,7 +169,7 @@ func TestWriteBoundedDeadline(t *testing.T) {
 }
 
 func TestWriteBoundedConcurrent(t *testing.T) {
-	p, err := ptyx.Spawn([]string{"/bin/cat"}, 40, 10, t.TempDir())
+	p, err := ptyx.Spawn([]string{"/bin/sh", "-c", "stty -echo; echo READY; exec cat"}, 40, 10, t.TempDir())
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -179,6 +179,7 @@ func TestWriteBoundedConcurrent(t *testing.T) {
 	errs := make(chan error, lines)
 
 	// Reader goroutine drains p.Master and records complete lines until all are seen.
+	ready := make(chan struct{}, 1)
 	readDone := make(chan struct{}, 1)
 	seen := make(map[string]int)
 	var seenMu sync.Mutex
@@ -186,6 +187,7 @@ func TestWriteBoundedConcurrent(t *testing.T) {
 	go func() {
 		buf := make([]byte, 1024)
 		var cur []byte
+		var readySignaled bool
 		for {
 			n, err := p.Master.Read(buf)
 			if n > 0 {
@@ -193,7 +195,15 @@ func TestWriteBoundedConcurrent(t *testing.T) {
 				for _, b := range buf[:n] {
 					if b == '\n' || b == '\r' {
 						if len(cur) > 0 {
-							seen[string(cur)]++
+							line := string(cur)
+							if line == "READY" {
+								if !readySignaled {
+									readySignaled = true
+									ready <- struct{}{}
+								}
+							} else {
+								seen[line]++
+							}
 							cur = cur[:0]
 						}
 					} else {
@@ -212,6 +222,12 @@ func TestWriteBoundedConcurrent(t *testing.T) {
 			}
 		}
 	}()
+
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for child ready")
+	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < lines; i++ {
