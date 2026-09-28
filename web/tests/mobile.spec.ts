@@ -505,20 +505,22 @@ test('mobile command menu summons command palette and command prompt', async ({ 
   // 1. Summon Command Palette
   await page.getByRole('button', { name: 'Command menu' }).click();
   await page.getByRole('menuitem', { name: 'Command Palette' }).click();
-  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+  await expect(page.locator('#command-palette-title')).toBeVisible();
+  await expect(page.locator('#command-palette-title')).toContainText('Command Palette');
 
-  let splitMsgs = (await sent(page)).filter(msg => msg.case === 'splitRequest');
-  expect(splitMsgs).toHaveLength(1);
-  expect((splitMsgs[0].value as any).command).toBe('wideboi palette --caller-pane=1');
+  // Dismiss palette
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#command-palette-title')).toHaveCount(0);
 
   // 2. Summon Command Prompt
   await page.getByRole('button', { name: 'Command menu' }).click();
   await page.getByRole('menuitem', { name: 'Command Prompt' }).click();
-  await expect(page.locator('.command-menu-dialog')).toHaveCount(0);
+  await expect(page.locator('#command-palette-title')).toBeVisible();
+  await expect(page.locator('#command-palette-title')).toContainText('Command Prompt');
 
-  splitMsgs = (await sent(page)).filter(msg => msg.case === 'splitRequest');
-  expect(splitMsgs).toHaveLength(2);
-  expect((splitMsgs[1].value as any).command).toBe('wideboi prompt --caller-pane=1');
+  // Dismiss prompt
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#command-palette-title')).toHaveCount(0);
 });
 
 test('mobile command menu triggers new pane and dismisses on Escape or backdrop click', async ({ page }) => {

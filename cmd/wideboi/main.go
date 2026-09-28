@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -19,6 +19,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/client"
+	"github.com/lmorchard/wideboi/internal/commands"
 	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/hostterm"
 	"github.com/lmorchard/wideboi/internal/keys"
@@ -393,6 +394,7 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 	}
 
 	srv := server.NewServer(ownerConn, cfg.Shell, cwd)
+	srv.SetSession(cfg.Session, cfg.Socket)
 	// Sampled first: RestoreState unsets it.
 	restored := os.Getenv("WIDEBOI_RESTORE_STATE") != ""
 	if err := server.RestoreState(srv); err != nil {
@@ -902,29 +904,6 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	var events <-chan uv.Event
 	var frameC <-chan time.Time
 
-	var detachTriggerDir string
-	var detachTriggerFile string
-	defer func() {
-		if detachTriggerDir != "" {
-			_ = os.RemoveAll(detachTriggerDir)
-		}
-	}()
-
-	createDetachTrigger := func() string {
-		if detachTriggerDir != "" {
-			_ = os.RemoveAll(detachTriggerDir)
-			detachTriggerDir = ""
-			detachTriggerFile = ""
-		}
-		dir, err := os.MkdirTemp("", "wb-detach-*")
-		if err != nil {
-			return ""
-		}
-		detachTriggerDir = dir
-		detachTriggerFile = filepath.Join(dir, "trigger")
-		return detachTriggerFile
-	}
-
 	performDetach := func() error {
 		slog.Info("client detaching")
 		cConnLock.Lock()
@@ -942,21 +921,6 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 		}
 		endReason = "detached"
 		return nil
-	}
-
-	checkDetachTrigger := func() bool {
-		if detachTriggerFile == "" {
-			return false
-		}
-		if _, err := os.Stat(detachTriggerFile); err == nil {
-			if detachTriggerDir != "" {
-				_ = os.RemoveAll(detachTriggerDir)
-				detachTriggerDir = ""
-			}
-			detachTriggerFile = ""
-			return true
-		}
-		return false
 	}
 
 	for {
@@ -1084,9 +1048,6 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				screenLock.Unlock()
 			}
 			cli.HandleServerMsg(msg)
-			if checkDetachTrigger() {
-				return performDetach()
-			}
 
 		case ev := <-events:
 			switch ev := ev.(type) {
@@ -1145,27 +1106,51 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 				case routeFocusColumn:
 					cli.FocusColumn(ctx, act.Column)
 				case routePrompt:
-					exe, err := os.Executable()
-					if err == nil {
-						triggerPath := createDetachTrigger()
-						cmd := fmt.Sprintf("%s prompt --caller-pane=%d --socket=%s",
-							shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
-						if triggerPath != "" {
-							cmd += fmt.Sprintf(" --detach-file=%s", shellQuote(triggerPath))
-						}
-						cli.SendSplit(ctx, cmd, "", cli.FocusedPaneID(), false)
+					cli.StartPrompt()
+				case routePromptEdit:
+					cli.PromptEdit(act.Text, act.Backspace)
+				case routePromptCommit:
+					q := strings.TrimSpace(cli.PromptQuery())
+					if q == "detach" || q == "d" {
+						cli.PromptCancel()
+						return performDetach()
 					}
+					inv := commands.Invocation{
+						Cfg:          cfg,
+						Socket:       cfg.Socket,
+						CallerPaneID: cli.FocusedPaneID(),
+					}
+					go func() {
+						if err := cli.PromptCommit(ctx, inv); err != nil {
+							slog.Warn("prompt command failed", "err", err)
+						}
+					}()
+				case routePromptCancel:
+					cli.PromptCancel()
+
 				case routePalette:
-					exe, err := os.Executable()
-					if err == nil {
-						triggerPath := createDetachTrigger()
-						cmd := fmt.Sprintf("%s palette --caller-pane=%d --socket=%s",
-							shellQuote(exe), cli.FocusedPaneID(), shellQuote(cfg.Socket))
-						if triggerPath != "" {
-							cmd += fmt.Sprintf(" --detach-file=%s", shellQuote(triggerPath))
-						}
-						cli.SendSplit(ctx, cmd, "", cli.FocusedPaneID(), false)
+					cli.StartPalette()
+				case routePaletteEdit:
+					cli.PaletteEdit(act.Text, act.Backspace)
+				case routePaletteNavigate:
+					cli.PaletteNavigate(act.Direction)
+				case routePaletteCommit:
+					if cli.SelectedPaletteCommand() == "detach" {
+						cli.PaletteCancel()
+						return performDetach()
 					}
+					inv := commands.Invocation{
+						Cfg:          cfg,
+						Socket:       cfg.Socket,
+						CallerPaneID: cli.FocusedPaneID(),
+					}
+					go func() {
+						if err := cli.PaletteCommit(ctx, inv); err != nil {
+							slog.Warn("palette command failed", "err", err)
+						}
+					}()
+				case routePaletteCancel:
+					cli.PaletteCancel()
 				case routeForward:
 					cli.SendKey(ctx, uv.KeyEvent(ev))
 				case routeIgnore:
@@ -1187,9 +1172,6 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 			}
 
 		case <-frameC:
-			if checkDetachTrigger() {
-				return performDetach()
-			}
 			screenLock.Lock()
 			if !stopped.Load() {
 				if cli.Draw(scr) {

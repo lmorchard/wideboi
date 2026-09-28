@@ -72,6 +72,12 @@ func (c *Client) drawStatusBarLocked(scr uv.Screen) {
 		return
 	}
 
+	if c.prompt != nil {
+		statusText := truncateRunes(c.promptStatusLocked(), budget)
+		compose.WriteStyled(scr, 0, y, statusText, uv.Style{Attrs: uv.AttrReverse})
+		return
+	}
+
 	if c.controlMode {
 		if c.rows >= 3 {
 			c.drawControlHintsLocked(scr, budget, c.rows-2)

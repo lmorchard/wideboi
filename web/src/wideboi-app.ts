@@ -22,6 +22,8 @@ import type { WideboiSettings } from './components/settings-dialog';
 import './components/mobile-bar';
 import './components/command-menu';
 import type { WideboiCommandMenu } from './components/command-menu';
+import './components/command-palette';
+import type { WideboiCommandPalette } from './components/command-palette';
 
 const desktopSession = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('session') : null;
 const STATS_REPORT_MS = 5000;
@@ -109,6 +111,10 @@ export class WideboiApp extends LitElement {
 
   @state()
   private showCommandMenu = false;
+
+  @state()
+  private showCommandPalette = false;
+  private commandPaletteInitialQuery = '';
 
   @state()
   private themeId = getPref('theme');
@@ -673,6 +679,13 @@ export class WideboiApp extends LitElement {
         }
         return;
       }
+      if (this.showCommandPalette) {
+        if (e.key === 'Escape' || (e.ctrlKey && e.key === 'c')) {
+          this.closeCommandPalette();
+          e.preventDefault();
+        }
+        return;
+      }
       if (this.showCommandMenu) {
         if (e.key === 'Escape' || (e.ctrlKey && e.key === 'c')) {
           this.closeCommandMenu();
@@ -791,19 +804,11 @@ export class WideboiApp extends LitElement {
   }
 
   private openPrompt() {
-    if (!this.client || !this.focusedPaneId) return;
-    this.client.send({
-      case: 'splitRequest',
-      value: { command: `wideboi prompt --caller-pane=${this.focusedPaneId}`, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
-    });
+    this.openCommandPalette(':');
   }
 
   private openPalette() {
-    if (!this.client || !this.focusedPaneId) return;
-    this.client.send({
-      case: 'splitRequest',
-      value: { command: `wideboi palette --caller-pane=${this.focusedPaneId}`, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
-    });
+    this.openCommandPalette();
   }
 
   private keyActionHandlers: { [K in KeyRouterAction['type']]: (action: Extract<KeyRouterAction, { type: K }>, e: KeyboardEvent) => void } = {
@@ -1319,6 +1324,7 @@ export class WideboiApp extends LitElement {
 
   private openCommandMenu() {
     this.showCommandMenu = true;
+    this.showCommandPalette = false;
     this.showHelp = false;
     this.showSettings = false;
     void this.updateComplete.then(() => {
@@ -1342,17 +1348,169 @@ export class WideboiApp extends LitElement {
     });
   }
 
+  private openCommandPalette(initialQuery = '') {
+    this.commandPaletteInitialQuery = initialQuery;
+    this.showCommandPalette = true;
+    this.showCommandMenu = false;
+    this.showHelp = false;
+    this.showSettings = false;
+    void this.updateComplete.then(() => {
+      const paletteEl = this.renderRoot.querySelector<WideboiCommandPalette>('wideboi-command-palette');
+      if (paletteEl) {
+        void paletteEl.updateComplete.then(() => {
+          paletteEl.focusInput();
+        });
+      }
+    });
+  }
+
+  private closeCommandPalette() {
+    this.showCommandPalette = false;
+    this.commandPaletteInitialQuery = '';
+    void this.updateComplete.then(() => {
+      if (!this.mobile) {
+        this.focusedPane()?.focusInput();
+      } else {
+        this.renderRoot.querySelector<HTMLElement>('.mobile-input-bar .mobile-cmd-btn')?.focus();
+      }
+    });
+  }
+
+  private handlePromptCommand(line: string) {
+    line = line.trim();
+    if (!line) return;
+    const parts = line.split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const rest = line.slice(parts[0].length).trim();
+
+    switch (cmd) {
+      case 'new':
+      case 'n':
+      case 'new-column':
+        this.client?.send({
+          case: 'splitRequest',
+          value: { command: rest, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
+        });
+        break;
+      case 'split':
+        this.client?.send({
+          case: 'splitRequest',
+          value: { command: rest, afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
+        });
+        break;
+      case 'run':
+      case 'sh':
+      case '!':
+      case 'exec':
+        this.client?.send({
+          case: 'splitRequest',
+          value: { command: rest, afterPaneId: this.focusedPaneId, keep: true, cwd: '' },
+        });
+        break;
+      case 'close':
+      case 'kill':
+      case 'kill-pane':
+      case 'x':
+        if (parts[1]) {
+          const id = parseInt(parts[1], 10);
+          if (!isNaN(id)) {
+            this.client?.send({ case: 'closePaneRequest', value: { paneId: id } });
+            break;
+          }
+        }
+        this.handleVerbAction(VerbType.KILL_PANE);
+        break;
+      case 'width':
+      case 'set-width': {
+        const w = parseInt(parts[1], 10);
+        if (!isNaN(w) && this.focusedPaneId) {
+          this.client?.send({ case: 'setPaneWidth', value: { paneId: this.focusedPaneId, width: w } });
+        }
+        break;
+      }
+      case 'cards':
+        this.setLayoutMode('cards');
+        break;
+      case 'scroll':
+        this.setLayoutMode('scroll');
+        break;
+      case 'search':
+        this.startSearch();
+        break;
+      case 'help':
+        this.openHelp();
+        break;
+      case 'settings':
+        this.openSettings();
+        break;
+      case 'quit':
+      case 'q':
+        this.client?.send({ case: 'shutdown', value: {} });
+        break;
+      case 'detach':
+      case 'd':
+        this.client?.send({ case: 'detach', value: {} });
+        break;
+      case 'move-left':
+      case 'ml':
+        this.handleVerbAction(VerbType.MOVE_LEFT);
+        break;
+      case 'move-right':
+      case 'mr':
+        this.handleVerbAction(VerbType.MOVE_RIGHT);
+        break;
+      case 'focus-left':
+      case 'h':
+        this.handleVerbAction(VerbType.FOCUS_LEFT);
+        break;
+      case 'focus-right':
+      case 'l':
+        this.handleVerbAction(VerbType.FOCUS_RIGHT);
+        break;
+      case 'smart-jump':
+      case 'j':
+        this.handleVerbAction(VerbType.SMART_JUMP);
+        break;
+      case 'toggle-status':
+      case 'status':
+      case 's':
+        this.handleVerbAction(VerbType.TOGGLE_STATUS);
+        break;
+      case 'grow-width':
+      case '+':
+        this.cycleWidth(VerbType.GROW_WIDTH);
+        break;
+      case 'shrink-width':
+      case '-':
+        this.cycleWidth(VerbType.SHRINK_WIDTH);
+        break;
+      case 'cycle-width':
+      case 'w':
+        this.cycleWidth(VerbType.CYCLE_WIDTH);
+        break;
+      default:
+        console.warn(`[wideboi] unknown prompt command: ${cmd}`);
+        break;
+    }
+  }
+
   private handleCommandMenuAction(cmd: string) {
     this.closeCommandMenu();
     switch (cmd) {
       case 'palette':
-        this.openPalette();
+        this.openCommandPalette();
         break;
       case 'prompt':
-        this.openPrompt();
+        this.openCommandPalette(':');
         break;
       case 'new-pane':
         this.handleVerbAction(VerbType.NEW_COLUMN);
+        break;
+      case 'split':
+        this.client?.send({
+          case: 'splitRequest',
+          value: { command: '', afterPaneId: this.focusedPaneId, keep: false, cwd: '' },
+        });
         break;
       case 'close-pane':
         this.handleVerbAction(VerbType.KILL_PANE);
@@ -1366,6 +1524,30 @@ export class WideboiApp extends LitElement {
       case 'toggle-follow-pty':
         this.followPTY = !this.followPTY;
         if (this.followPTY) this.displayWidths = Object.fromEntries(this.columns.map(column => [column.paneId, column.width]));
+        break;
+      case 'grow-width':
+        this.cycleWidth(VerbType.GROW_WIDTH);
+        break;
+      case 'shrink-width':
+        this.cycleWidth(VerbType.SHRINK_WIDTH);
+        break;
+      case 'cycle-width':
+        this.cycleWidth(VerbType.CYCLE_WIDTH);
+        break;
+      case 'move-left':
+        this.handleVerbAction(VerbType.MOVE_LEFT);
+        break;
+      case 'move-right':
+        this.handleVerbAction(VerbType.MOVE_RIGHT);
+        break;
+      case 'focus-left':
+        this.handleVerbAction(VerbType.FOCUS_LEFT);
+        break;
+      case 'focus-right':
+        this.handleVerbAction(VerbType.FOCUS_RIGHT);
+        break;
+      case 'smart-jump':
+        this.handleVerbAction(VerbType.SMART_JUMP);
         break;
       case 'settings':
         this.openSettings();
@@ -1920,6 +2102,18 @@ export class WideboiApp extends LitElement {
           @close=${() => this.closeCommandMenu()}
           @command=${(e: CustomEvent<string>) => this.handleCommandMenuAction(e.detail)}
         ></wideboi-command-menu>
+      ` : ''}
+      ${this.showCommandPalette ? html`
+        <wideboi-command-palette
+          .open=${this.showCommandPalette}
+          .initialQuery=${this.commandPaletteInitialQuery}
+          .prefixLabel=${this.keyRouter.prefixLabel}
+          .layoutMode=${this.layoutMode}
+          .followPTY=${this.followPTY}
+          @close=${() => this.closeCommandPalette()}
+          @command=${(e: CustomEvent<string>) => this.handleCommandMenuAction(e.detail)}
+          @execute-prompt=${(e: CustomEvent<string>) => this.handlePromptCommand(e.detail)}
+        ></wideboi-command-palette>
       ` : ''}
       ${!this.connected ? html`
         <div class="overlay">

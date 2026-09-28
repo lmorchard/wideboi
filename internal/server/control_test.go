@@ -452,6 +452,39 @@ func TestWaitRequest(t *testing.T) {
 	}
 }
 
+func TestServerPaneInheritsSessionEnvironment(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	s := &Server{
+		panes:      make(map[int]*Pane),
+		cols:       80,
+		rows:       24,
+		stopCh:     make(chan struct{}),
+		shell:      "/bin/sh",
+		cwd:        t.TempDir(),
+		closeGrace: 10 * time.Millisecond,
+		strip:      layout.NewStrip(),
+	}
+	s.SetSession("test-session", "/tmp/test.sock")
+
+	tp := transport.NewInProcChannel(64)
+	s.transports = append(s.transports, tp)
+
+	paneID := splitPane(t, ctx, s, tp, protocol.MsgSplitRequest{
+		Command: "echo S=$WIDEBOI_SOCK:N=$WIDEBOI_SESSION; exit 0",
+		Keep:    true,
+	})
+	s.handleClientMsg(ctx, tp, protocol.MsgWaitRequest{PaneID: paneID})
+	_ = takeResponseWithin[protocol.MsgWaitResponse](t, tp, 5*time.Second)
+
+	s.handleClientMsg(ctx, tp, protocol.MsgCaptureRequest{PaneID: paneID})
+	capResp := takeResponse[protocol.MsgCaptureResponse](t, tp)
+	if !strings.Contains(capResp.Text, "S=/tmp/test.sock:N=test-session") {
+		t.Fatalf("pane output %q does not contain expected session env", capResp.Text)
+	}
+}
+
 // takeResponseWithin is takeResponse with a caller-chosen ceiling, for
 // answers that wait on a child process.
 func takeResponseWithin[T any](t *testing.T, tp *transport.InProcChannel, ceiling time.Duration) T {

@@ -95,8 +95,8 @@ func (p *Pane) graceOrDefault() time.Duration {
 }
 
 // NewPane spawns argv on a PTY sized cols x rows for the given pane id.
-func NewPane(id int, argv []string, cols, rows int, dir string) (*Pane, error) {
-	p, err := ptyx.Spawn(argv, cols, rows, dir)
+func NewPane(id int, argv []string, cols, rows int, dir string, env ...string) (*Pane, error) {
+	p, err := ptyx.Spawn(argv, cols, rows, dir, env...)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +180,9 @@ func (p *Pane) Start(onExit func()) {
 		defer func() {
 			if r := recover(); r != nil {
 				p.panicked("pty-writer", r)
+			}
+			if p.grid != nil {
+				_ = p.grid.Close()
 			}
 		}()
 		buf := make([]byte, 4096)

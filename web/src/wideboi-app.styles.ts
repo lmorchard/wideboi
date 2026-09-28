@@ -1007,6 +1007,59 @@ export const wideboiAppStyles = css`
     .command-menu-header .close-btn:hover {
       background: var(--wb-bg-btn, #3c3c3c);
     }
+    .command-palette-search-box {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--wb-border, #3c3c3c);
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .command-palette-search-icon {
+      font-size: 15px;
+      color: var(--wb-fg-muted, #888);
+      flex-shrink: 0;
+    }
+    .command-palette-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--wb-fg-primary, #eee);
+      font-size: 15px;
+      font-family: inherit;
+    }
+    .command-palette-input::placeholder {
+      color: var(--wb-fg-muted, #777);
+      font-size: 13px;
+    }
+    .command-prompt-preview {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: #1b2e3e;
+      border: 1px solid #0e639c;
+      border-radius: 6px;
+      color: var(--wb-fg-primary, #eee);
+    }
+    .command-prompt-preview code {
+      font-family: monospace;
+      color: var(--wb-focus, #79c0ff);
+      background: rgba(0, 0, 0, 0.3);
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+    }
+    .command-palette-no-results {
+      padding: 1.5rem 1rem;
+      text-align: center;
+      color: var(--wb-fg-muted, #888);
+      font-size: 13px;
+    }
+    .command-palette-no-results code {
+      font-family: monospace;
+      color: var(--wb-focus, #79c0ff);
+    }
     .command-menu-list {
       display: flex;
       flex-direction: column;
@@ -1030,10 +1083,17 @@ export const wideboiAppStyles = css`
       min-height: 44px;
       box-sizing: border-box;
     }
-    .command-menu-item:hover, .command-menu-item:focus-visible {
+    .command-menu-item:hover, .command-menu-item:focus-visible, .command-menu-item.selected {
       background: var(--wb-focus, #0e639c);
       border-color: #1177bb;
       color: #fff;
+    }
+    .command-menu-item.selected .command-menu-desc {
+      color: #ddd;
+    }
+    .command-menu-item.selected .command-menu-shortcut {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.3);
     }
     .command-menu-item:active {
       transform: translateY(1px);

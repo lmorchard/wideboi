@@ -57,6 +57,8 @@ type Client struct {
 	controlMode        bool
 	helpVisible        bool
 	search             *searchState
+	prompt             *promptState
+	palette            *paletteState
 	detachable         bool
 	bindings           []keys.Binding
 	motion             *motion
@@ -272,6 +274,7 @@ type drawLayer int
 const (
 	layerPanes drawLayer = iota
 	layerHelp
+	layerPalette
 )
 
 // layerLocked reports which layer owns this frame. c.mu must be held.
@@ -281,6 +284,9 @@ const (
 func (c *Client) layerLocked() drawLayer {
 	if c.helpVisible {
 		return layerHelp
+	}
+	if c.palette != nil {
+		return layerPalette
 	}
 	return layerPanes
 }
@@ -317,6 +323,11 @@ func (c *Client) Draw(scr HostScreen) bool {
 func (c *Client) drawToScreenLocked(scr HostScreen) {
 	if c.layerLocked() == layerHelp {
 		drawHelpOverlay(scr, c.cols, c.rows, c.prefixLabel, c.detachable, c.bindings)
+		scr.HideCursor()
+		return
+	}
+	if c.layerLocked() == layerPalette {
+		drawPaletteOverlay(scr, c.cols, c.rows, c.palette)
 		scr.HideCursor()
 		return
 	}
