@@ -120,8 +120,11 @@ func init() {
 	registerBuiltins(DefaultRegistry)
 }
 
-// shellQuote quotes a string for safe execution in a POSIX shell.
-func shellQuote(s string) string {
+// ShellQuote quotes a string for safe execution in a POSIX shell.
+// Inside single quotes nothing is special except the quote itself, which is
+// closed, escaped, and reopened. Strings without shell metacharacters are
+// returned unchanged; empty strings are quoted as ”.
+func ShellQuote(s string) string {
 	if s == "" {
 		return "''"
 	}
@@ -131,11 +134,16 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// shellJoin joins shell arguments, quoting any that contain special characters.
-func shellJoin(args []string) string {
+// ShellJoin turns command operands into the string handed to $SHELL -c.
+// One operand is already a shell command and passes through verbatim;
+// several are argv, so each is quoted and the words survive intact.
+func ShellJoin(args []string) string {
+	if len(args) == 1 {
+		return args[0]
+	}
 	quoted := make([]string, len(args))
 	for i, a := range args {
-		quoted[i] = shellQuote(a)
+		quoted[i] = ShellQuote(a)
 	}
 	return strings.Join(quoted, " ")
 }
@@ -148,7 +156,7 @@ func registerBuiltins(r *Registry) {
 		Category:    "Layout",
 		ArgsUsage:   "[command...]",
 		Run: func(ctx context.Context, inv Invocation) error {
-			cmd := shellJoin(inv.Args)
+			cmd := ShellJoin(inv.Args)
 			req := protocol.MsgSplitRequest{
 				Command:     cmd,
 				AfterPaneID: inv.CallerPaneID,
@@ -184,7 +192,7 @@ func registerBuiltins(r *Registry) {
 			if err := fs.Parse(inv.Args); err != nil {
 				return err
 			}
-			cmd := shellJoin(fs.Args())
+			cmd := ShellJoin(fs.Args())
 			req := protocol.MsgSplitRequest{
 				Command:     cmd,
 				Cwd:         cwd,
@@ -224,7 +232,7 @@ func registerBuiltins(r *Registry) {
 			if len(args) == 0 {
 				return fmt.Errorf("usage: :run [-keep] <command...>")
 			}
-			cmd := shellJoin(args)
+			cmd := ShellJoin(args)
 			req := protocol.MsgSplitRequest{
 				Command:     cmd,
 				Keep:        keep,

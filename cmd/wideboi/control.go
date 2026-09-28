@@ -155,7 +155,7 @@ func runSplit(cfg config.Config, globalArgs []string, args []string, stdout, std
 
 	var command string
 	if len(fs.Args()) > 0 {
-		command = shellJoin(fs.Args())
+		command = commands.ShellJoin(fs.Args())
 	}
 
 	req := protocol.MsgSplitRequest{
@@ -206,27 +206,6 @@ func runSplit(cfg config.Config, globalArgs []string, args []string, stdout, std
 
 	fmt.Fprintf(stdout, "%d\n", resp.PaneID)
 	return nil
-}
-
-// shellJoin turns split's operands into the string handed to $SHELL -c.
-// One operand is already a shell command and passes through verbatim;
-// several are argv, so each is quoted and the words survive intact.
-func shellJoin(args []string) string {
-	if len(args) == 1 {
-		return args[0]
-	}
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = shellQuote(a)
-	}
-	return strings.Join(quoted, " ")
-}
-
-// shellQuote single-quotes s for a POSIX shell. Inside single quotes
-// nothing is special except the quote itself, which is closed, escaped,
-// and reopened.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // runSend sends input text to a pane.

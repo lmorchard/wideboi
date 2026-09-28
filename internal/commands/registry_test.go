@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"os/exec"
 	"testing"
 )
 
@@ -127,9 +128,9 @@ func TestShellQuote(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := shellQuote(tt.input)
+			got := ShellQuote(tt.input)
 			if got != tt.want {
-				t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("ShellQuote(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -142,19 +143,38 @@ func TestShellJoin(t *testing.T) {
 	}{
 		{nil, ""},
 		{[]string{}, ""},
+		{[]string{""}, ""},
 		{[]string{"ls"}, "ls"},
+		{[]string{"make test && echo ok"}, "make test && echo ok"},
+		{[]string{"grep 'a b' f"}, "grep 'a b' f"},
 		{[]string{"ls", "-la"}, "ls -la"},
+		{[]string{"grep", "a b", "f"}, "grep 'a b' f"},
 		{[]string{"echo", "hello world"}, "echo 'hello world'"},
+		{[]string{"echo", "it's"}, "echo 'it'\\''s'"},
+		{[]string{"printf", ""}, "printf ''"},
 		{[]string{"git", "commit", "-m", "hello 'friend'"}, "git commit -m 'hello '\\''friend'\\'''"},
 		{[]string{"sh", "-c", "echo $FOO"}, "sh -c 'echo $FOO'"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := shellJoin(tt.args)
+			got := ShellJoin(tt.args)
 			if got != tt.want {
-				t.Errorf("shellJoin(%v) = %q, want %q", tt.args, got, tt.want)
+				t.Errorf("ShellJoin(%v) = %q, want %q", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestShellJoinRoundTrips runs the joined command through a real shell:
+// every operand must arrive as exactly one argument, byte for byte.
+func TestShellJoinRoundTrips(t *testing.T) {
+	args := []string{"printf", "%s|", "a b", "c'd", `$HOME`, "*", ""}
+	out, err := exec.Command("/bin/sh", "-c", ShellJoin(args)).Output()
+	if err != nil {
+		t.Fatalf("sh -c %q: %v", ShellJoin(args), err)
+	}
+	if want := `a b|c'd|$HOME|*||`; string(out) != want {
+		t.Errorf("round trip = %q, want %q", out, want)
 	}
 }

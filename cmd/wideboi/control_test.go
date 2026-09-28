@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lmorchard/wideboi/internal/commands"
 	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -142,13 +143,13 @@ func TestShellJoin(t *testing.T) {
 		want string
 	}{
 		{[]string{"make test && echo ok"}, "make test && echo ok"},
-		{[]string{"grep", "a b", "f"}, `'grep' 'a b' 'f'`},
-		{[]string{"echo", "it's"}, `'echo' 'it'\''s'`},
-		{[]string{"printf", ""}, `'printf' ''`},
+		{[]string{"grep", "a b", "f"}, `grep 'a b' f`},
+		{[]string{"echo", "it's"}, `echo 'it'\''s'`},
+		{[]string{"printf", ""}, `printf ''`},
 	}
 	for _, c := range cases {
-		if got := shellJoin(c.in); got != c.want {
-			t.Errorf("shellJoin(%q) = %q, want %q", c.in, got, c.want)
+		if got := commands.ShellJoin(c.in); got != c.want {
+			t.Errorf("commands.ShellJoin(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -157,9 +158,9 @@ func TestShellJoin(t *testing.T) {
 // every operand must arrive as exactly one argument, byte for byte.
 func TestShellJoinRoundTrips(t *testing.T) {
 	args := []string{"printf", "%s|", "a b", "c'd", `$HOME`, "*", ""}
-	out, err := exec.Command("/bin/sh", "-c", shellJoin(args)).Output()
+	out, err := exec.Command("/bin/sh", "-c", commands.ShellJoin(args)).Output()
 	if err != nil {
-		t.Fatalf("sh -c %q: %v", shellJoin(args), err)
+		t.Fatalf("sh -c %q: %v", commands.ShellJoin(args), err)
 	}
 	if want := `a b|c'd|$HOME|*||`; string(out) != want {
 		t.Errorf("round trip = %q, want %q", out, want)
