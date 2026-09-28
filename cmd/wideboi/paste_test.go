@@ -78,4 +78,10 @@ func TestHandlePaste(t *testing.T) {
 	if got := cli.SearchQuery(); got != "query" {
 		t.Errorf("got search query %q, want %q", got, "query")
 	}
+
+	// 4. Paste during search input sanitizes newlines
+	handlePaste(ctx, cli, rt, uv.PasteEvent{Content: "\nfoo\nbar\n"})
+	if got := cli.SearchQuery(); got != "queryfoo" {
+		t.Errorf("got search query %q, want %q", got, "queryfoo")
+	}
 }

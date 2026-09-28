@@ -53,6 +53,14 @@ func (c *Client) StartSearch() {
 		priorHistoryLen: pu.ScrollbackLen, input: true, selected: -1}
 }
 
+func sanitizeSearchText(text string) string {
+	text = strings.TrimLeft(text, "\r\n")
+	if idx := strings.IndexAny(text, "\r\n"); idx >= 0 {
+		text = text[:idx]
+	}
+	return text
+}
+
 func (c *Client) SearchEdit(text string, backspace bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -61,7 +69,7 @@ func (c *Client) SearchEdit(text string, backspace bool) {
 			_, n := utf8.DecodeLastRuneInString(s.query)
 			s.query = s.query[:len(s.query)-n]
 		} else if !backspace {
-			s.query += text
+			s.query += sanitizeSearchText(text)
 		}
 	}
 }
