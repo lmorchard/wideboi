@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/logger"
@@ -140,6 +142,90 @@ func DefaultConfigPath(getenv func(string) string) string {
 // and logs.
 func SessionDir() string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("wideboi-%d", os.Getuid()))
+}
+
+// EnsureSecureSessionDir validates ownership, type, symlinks, and permissions
+// of the managed session directory, creating or securing it as needed.
+func EnsureSecureSessionDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				return fmt.Errorf("creating session directory %s: %w", dir, err)
+			}
+			fi, err = os.Lstat(dir)
+			if err != nil {
+				return fmt.Errorf("inspecting created session directory %s: %w", dir, err)
+			}
+		} else {
+			return fmt.Errorf("inspecting session directory %s: %w", dir, err)
+		}
+	}
+
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("session directory %s is a symlink", dir)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("session directory %s is not a directory", dir)
+	}
+
+	if err := checkDirOwner(dir, fi); err != nil {
+		return err
+	}
+
+	if fi.Mode().Perm()&0077 != 0 {
+		if err := os.Chmod(dir, 0700); err != nil {
+			return fmt.Errorf("securing session directory %s: %w", dir, err)
+		}
+		fi, err = os.Lstat(dir)
+		if err != nil {
+			return fmt.Errorf("inspecting session directory %s after chmod: %w", dir, err)
+		}
+		if fi.Mode().Perm()&0077 != 0 {
+			return fmt.Errorf("session directory %s has insecure permissions %04o", dir, fi.Mode().Perm())
+		}
+	}
+
+	return nil
+}
+
+// ValidateCustomSocketDir verifies that a user-specified custom socket directory
+// is a real directory and not insecurely accessible by other users.
+func ValidateCustomSocketDir(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				return fmt.Errorf("creating custom socket directory %s: %w", dir, err)
+			}
+			return nil
+		}
+		return fmt.Errorf("inspecting custom socket directory %s: %w", dir, err)
+	}
+
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("custom socket directory %s is a symlink", dir)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("custom socket directory %s is not a directory", dir)
+	}
+
+	// Disallow world-writable directory without sticky bit owned by someone else
+	if fi.Mode().Perm()&0002 != 0 && fi.Mode()&os.ModeSticky == 0 {
+		if err := checkDirOwner(dir, fi); err != nil {
+			return fmt.Errorf("custom socket directory %s is world-writable without sticky bit and owned by another user: %w", dir, err)
+		}
+	}
+
+	return nil
+}
+
+func checkDirOwner(dir string, fi os.FileInfo) error {
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if ok && stat.Uid != uint32(os.Getuid()) {
+		return fmt.Errorf("directory %s is owned by uid %d, want %d", dir, stat.Uid, os.Getuid())
+	}
+	return nil
 }
 
 // SessionSocketPath is where the session called name listens.
@@ -499,8 +585,15 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if cfg.Socket == "" {
 		cfg.Socket = DefaultSocketPath()
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.Socket), 0700); err != nil {
-		return Config{}, nil, fmt.Errorf("ensuring socket directory: %w", err)
+	socketDir := filepath.Dir(cfg.Socket)
+	if socketDir == SessionDir() {
+		if err := EnsureSecureSessionDir(socketDir); err != nil {
+			return Config{}, nil, fmt.Errorf("ensuring session directory: %w", err)
+		}
+	} else {
+		if err := ValidateCustomSocketDir(socketDir); err != nil {
+			return Config{}, nil, fmt.Errorf("validating socket directory: %w", err)
+		}
 	}
 
 	// Shell

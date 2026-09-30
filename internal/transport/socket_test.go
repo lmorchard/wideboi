@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -328,5 +329,93 @@ func TestServerSocketConnDrain(t *testing.T) {
 	_ = sc.Close()
 	if sc.Drain(time.Second) {
 		t.Error("Drain reported drained on a closed connection")
+	}
+}
+
+func TestSocketCreatedWithRestrictedPermissionsUnderPermissiveUmask(t *testing.T) {
+	oldUmask := syscall.Umask(0000)
+	defer syscall.Umask(oldUmask)
+
+	path := filepath.Join(shortTempDir(t), "umask-test.sock")
+	sl, err := transport.NewSocketListener(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sl.Close()
+
+	fi, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm()&0077 != 0 {
+		t.Fatalf("expected socket permissions without group/other access, got %04o", fi.Mode().Perm())
+	}
+
+	lockFi, err := os.Lstat(path + ".lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lockFi.Mode().Perm()&0077 != 0 {
+		t.Fatalf("expected lock permissions without group/other access, got %04o", lockFi.Mode().Perm())
+	}
+}
+
+func TestSocketListenerRejectsSymlinks(t *testing.T) {
+	dir := shortTempDir(t)
+	target := filepath.Join(dir, "target.sock")
+	symlinkPath := filepath.Join(dir, "symlink.sock")
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	sl, err := transport.NewSocketListener(symlinkPath)
+	if err == nil {
+		sl.Close()
+		t.Fatal("expected NewSocketListener to fail on symlink socket path, got nil")
+	}
+
+	// Also test symlink in socket directory
+	symlinkDir := filepath.Join(dir, "symlink-dir")
+	if err := os.Symlink(dir, symlinkDir); err != nil {
+		t.Fatal(err)
+	}
+	sl2, err := transport.NewSocketListener(filepath.Join(symlinkDir, "sub.sock"))
+	if err == nil {
+		sl2.Close()
+		t.Fatal("expected NewSocketListener to fail in symlink directory, got nil")
+	}
+}
+
+func TestVerifyPeerCredentialsOnUnixSocket(t *testing.T) {
+	path := filepath.Join(shortTempDir(t), "peercred.sock")
+	sl, err := transport.NewSocketListener(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sl.Close()
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, err := sl.Accept()
+		if err == nil {
+			accepted <- c
+		}
+	}()
+
+	client, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	serverConn := <-accepted
+	defer serverConn.Close()
+
+	// Both client and server verify peer credentials of the same user
+	if err := transport.VerifyPeerCredentials(client); err != nil {
+		t.Fatalf("client verify server cred: %v", err)
+	}
+	if err := transport.VerifyPeerCredentials(serverConn); err != nil {
+		t.Fatalf("server verify client cred: %v", err)
 	}
 }

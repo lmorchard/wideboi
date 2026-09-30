@@ -1064,3 +1064,85 @@ steps = [
 		t.Errorf("unexpected UserMacrosPath: %q", macrosPath)
 	}
 }
+
+func TestEnsureSecureSessionDir(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. Fresh directory creation
+	freshDir := filepath.Join(tmp, "fresh-session-dir")
+	if err := config.EnsureSecureSessionDir(freshDir); err != nil {
+		t.Fatalf("ensure fresh dir: %v", err)
+	}
+	fi, err := os.Lstat(freshDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0700 {
+		t.Fatalf("expected 0700 perm, got %04o", fi.Mode().Perm())
+	}
+
+	// 2. Pre-created insecure directory (0777) gets secured to 0700
+	insecureDir := filepath.Join(tmp, "insecure-session-dir")
+	if err := os.Mkdir(insecureDir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.EnsureSecureSessionDir(insecureDir); err != nil {
+		t.Fatalf("ensure insecure dir: %v", err)
+	}
+	fi, err = os.Lstat(insecureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm()&0077 != 0 {
+		t.Fatalf("expected secured permissions without group/other, got %04o", fi.Mode().Perm())
+	}
+
+	// 3. Symlink directory is rejected
+	realDir := filepath.Join(tmp, "real-target")
+	if err := os.Mkdir(realDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	symlinkDir := filepath.Join(tmp, "symlink-session-dir")
+	if err := os.Symlink(realDir, symlinkDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.EnsureSecureSessionDir(symlinkDir); err == nil {
+		t.Fatal("expected symlink session directory to be rejected, got nil")
+	}
+
+	// 4. Regular file instead of directory is rejected
+	filePath := filepath.Join(tmp, "file-not-dir")
+	if err := os.WriteFile(filePath, []byte("data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.EnsureSecureSessionDir(filePath); err == nil {
+		t.Fatal("expected regular file session directory to be rejected, got nil")
+	}
+}
+
+func TestValidateCustomSocketDir(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. Valid custom directory
+	validDir := filepath.Join(tmp, "custom-dir")
+	if err := os.Mkdir(validDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ValidateCustomSocketDir(validDir); err != nil {
+		t.Fatalf("valid custom dir failed: %v", err)
+	}
+	// Does not modify custom directory permissions
+	fi, _ := os.Lstat(validDir)
+	if fi.Mode().Perm() != 0755 {
+		t.Fatalf("custom directory permissions were modified: %04o", fi.Mode().Perm())
+	}
+
+	// 2. Symlink custom directory is rejected
+	symlinkCustom := filepath.Join(tmp, "symlink-custom")
+	if err := os.Symlink(validDir, symlinkCustom); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ValidateCustomSocketDir(symlinkCustom); err == nil {
+		t.Fatal("expected symlink custom directory to be rejected, got nil")
+	}
+}
