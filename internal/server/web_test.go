@@ -573,6 +573,244 @@ func TestWebServerInFlightHandshakeInvalidatedOnTokenChange(t *testing.T) {
 	}
 }
 
+func TestWebServerPartialHeadersTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	s.InitWebServer(server.WebServerConfig{
+		ReadHeaderTimeout: 150 * time.Millisecond,
+		TLSEnabled:        false,
+	})
+	resp, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	conn, err := net.Dial("tcp", resp.Addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Write partial request without ending CRLF
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n"))
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Wait for server to close connection due to ReadHeaderTimeout
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err == nil && n > 0 {
+		_, err = conn.Read(buf)
+	}
+	if err == nil {
+		t.Fatal("expected connection to be closed on partial header timeout")
+	}
+}
+
+func TestWebServerIdleHTTPConnectionTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	s.InitWebServer(server.WebServerConfig{
+		IdleTimeout: 150 * time.Millisecond,
+		TLSEnabled:  false,
+	})
+	resp, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	conn, err := net.Dial("tcp", resp.Addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Send a full HTTP request with keep-alive
+	req := "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n"
+	if _, err := conn.Write([]byte(req)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Read response
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		t.Fatalf("expected HTTP response, got n=%d err=%v", n, err)
+	}
+
+	// Now remain idle. The server should close connection after IdleTimeout (~150ms).
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		_, err := conn.Read(buf)
+		if err != nil {
+			break // connection closed as expected
+		}
+	}
+}
+
+func TestWebServerHealthyWebSocketSessionStaysAlive(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	// Short timeouts that would kill an un-upgraded connection
+	s.InitWebServer(server.WebServerConfig{
+		ReadHeaderTimeout: 100 * time.Millisecond,
+		IdleTimeout:       100 * time.Millisecond,
+		TLSEnabled:        false,
+	})
+	resp, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	dialer := websocket.Dialer{
+		Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+	}
+	u := fmt.Sprintf("ws://%s/ws?token=%s", resp.Addr, resp.Token)
+	ws, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer ws.Close()
+
+	// Sleep longer than ReadHeaderTimeout and IdleTimeout
+	time.Sleep(250 * time.Millisecond)
+
+	// Connection must remain alive and responsive
+	attachMsg, _ := protocol.MarshalClient(protocol.MsgAttach{Cols: 80, Rows: 24})
+	if err := ws.WriteMessage(websocket.BinaryMessage, attachMsg); err != nil {
+		t.Fatalf("websocket died despite being upgraded: %v", err)
+	}
+}
+
+func TestWebServerBoundsOutstandingConnections(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	s.InitWebServer(server.WebServerConfig{
+		MaxConnections: 2,
+		TLSEnabled:     false,
+	})
+	resp, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	// Connect 2 clients to reach limit
+	c1, err := net.Dial("tcp", resp.Addr)
+	if err != nil {
+		t.Fatalf("dial 1: %v", err)
+	}
+	defer c1.Close()
+
+	c2, err := net.Dial("tcp", resp.Addr)
+	if err != nil {
+		t.Fatalf("dial 2: %v", err)
+	}
+	defer c2.Close()
+
+	// Both can complete a request
+	req := "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"
+	_, _ = c1.Write([]byte(req))
+	_, _ = c2.Write([]byte(req))
+
+	// Dial third client: since maxConnections is 2, the server limit listener blocks accepting it
+	c3, err := net.Dial("tcp", resp.Addr)
+	if err != nil {
+		t.Fatalf("dial 3: %v", err)
+	}
+	defer c3.Close()
+
+	// c3 will not receive a response while c1 and c2 hold slots
+	_ = c3.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	buf := make([]byte, 1024)
+	_, err = c3.Read(buf)
+	if err == nil {
+		t.Fatal("expected third connection to wait on connection limit")
+	}
+
+	// Closing c1 allows c3 to be processed
+	c1.Close()
+	_, _ = c3.Write([]byte(req))
+	_ = c3.SetReadDeadline(time.Now().Add(time.Second))
+	n, err := c3.Read(buf)
+	if err != nil || n == 0 {
+		t.Fatalf("expected c3 to be served after c1 closed, got n=%d err=%v", n, err)
+	}
+}
+
+func TestWebServerSlowHandshakeTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	s.InitWebServer(server.WebServerConfig{
+		HandshakeTimeout: 150 * time.Millisecond,
+		TLSEnabled:       false,
+	})
+	resp, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	conn, err := net.Dial("tcp", resp.Addr)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	handshakeReq := fmt.Sprintf("GET /ws?token=%s HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Protocol: wideboi.v%d\r\n\r\n", resp.Token, protocol.Version)
+	if _, err := conn.Write([]byte(handshakeReq)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 || !strings.Contains(string(buf[:n]), "101") {
+		t.Fatalf("expected 101 Switching Protocols, got n=%d err=%v buf=%s", n, err, string(buf[:n]))
+	}
+}
+
 func TestWebServerControlRPC(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

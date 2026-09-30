@@ -405,6 +405,8 @@ Stopping the web server disconnects connected browser clients and unlinks the `.
 - **Custom Certificates:** Provide your own certificate and key with `--tls-cert <path> --tls-key <path>` (or `tls_cert` and `tls_key` in the config file).
 - **Disabling TLS:** Use `--disable-tls` or `tls = false` in the configuration file if running behind a trusted reverse proxy that terminates TLS.
 - **Loopback vs Network Binding:** Binding to `127.0.0.1:8080` is restricted to local access. When binding to a network address such as `:8080` or `0.0.0.0:8080` with TLS disabled, wideboi prints a security warning about unencrypted network access.
+- **Direct Exposure Protections:** Wideboi bounds HTTP request headers (`ReadHeaderTimeout: 5s`, `MaxHeaderBytes: 1MB`), idle keep-alive connections (`IdleTimeout: 60s`), WebSocket upgrade handshakes (`HandshakeTimeout: 10s`), and simultaneous connection counts (128 concurrent connections) to protect against unauthenticated resource exhaustion and Slowloris attacks. Upgraded WebSocket sessions maintain persistent ping/pong keep-alives.
+- **Reverse Proxy Expectations:** For production remote access over untrusted networks, running wideboi on loopback (`127.0.0.1:<port>`) behind an HTTPS reverse proxy (such as Caddy, Nginx, or Traefik) is recommended. The reverse proxy should terminate TLS, handle external authentication/rate-limiting, and forward WebSockets (`Upgrade: websocket`) to wideboi.
 - **Generated Token:** If you do not specify a token, wideboi generates a secure random token at startup.
 - **Token File:** The server writes the current token to an owner-readable file at `$TMPDIR/wideboi-<uid>/<session-name>.web-token`. For the default session, view it with:
   ```bash
