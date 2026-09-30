@@ -69,6 +69,7 @@ export const wideboiAppStyles = css`
       height: 18px;
       line-height: 16px;
       font-size: 11px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       border-radius: 2px;
       cursor: pointer;
     }
@@ -128,6 +129,12 @@ export const wideboiAppStyles = css`
       flex: none;
       z-index: 5;
       font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .toolbar button,
+    .toolbar select,
+    .toolbar input {
+      font-family: inherit;
     }
     .pane-tabs-wrapper {
       position: relative;
@@ -165,11 +172,14 @@ export const wideboiAppStyles = css`
       border-radius: 3px;
       padding: 0.2rem 0.5rem;
       font-size: 12px;
-      font-family: inherit;
+      font-family: monospace;
       cursor: pointer;
       white-space: nowrap;
       user-select: none;
       flex: 0 0 auto;
+    }
+    .toolbar .pane-tab {
+      font-family: monospace;
     }
     .pane-tab:hover {
       background: var(--wb-bg-btn-hover, #4c4c4c);
@@ -279,6 +289,7 @@ export const wideboiAppStyles = css`
       background: var(--wb-bg-btn, #3c3c3c);
       color: var(--wb-fg-primary, #eee);
       font-size: 14px;
+      font-family: inherit;
     }
     .mobile-theme-select {
       background: var(--wb-bg-btn, #3c3c3c);

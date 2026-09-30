@@ -320,6 +320,14 @@ test('toolbar pane selector tabs display title, status glyphs, and focus state',
   await expect(tab1).toHaveAttribute('aria-selected', 'true');
   await expect(tab1).toHaveAttribute('aria-label', 'Pane 1: editor');
 
+  // Toolbar uses sans-serif while tab selector buttons use monospace
+  const toolbarFont = await page.locator('.toolbar').evaluate(el => getComputedStyle(el).fontFamily);
+  expect(toolbarFont.toLowerCase()).toContain('sans-serif');
+  const tabFont = await tab1.evaluate(el => getComputedStyle(el).fontFamily);
+  expect(tabFont.toLowerCase()).toContain('monospace');
+  const btnFont = await page.locator('.toolbar .settings-btn').evaluate(el => getComputedStyle(el).fontFamily);
+  expect(btnFont.toLowerCase()).toContain('sans-serif');
+
   await expect(tab2).toContainText('build');
   await expect(tab2.locator('.tab-status.working')).toHaveText('»');
   await expect(tab2).toHaveAttribute('aria-selected', 'false');
