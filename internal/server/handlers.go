@@ -266,6 +266,14 @@ func (s *Server) handleClosePaneRequestLocked(tp transport.Transport, m protocol
 	return eff
 }
 
+func (s *Server) totalWaitersLocked() int {
+	total := 0
+	for _, ws := range s.waiters {
+		total += len(ws)
+	}
+	return total
+}
+
 func (s *Server) handleWaitRequestLocked(tp transport.Transport, m protocol.MsgWaitRequest) msgEffects {
 	var eff msgEffects
 	p, ok := s.panes[m.PaneID]
@@ -279,6 +287,18 @@ func (s *Server) handleWaitRequestLocked(tp transport.Transport, m protocol.MsgW
 	}
 	if s.waiters == nil {
 		s.waiters = make(map[int][]transport.Transport)
+	}
+	for _, existing := range s.waiters[m.PaneID] {
+		if existing == tp {
+			return eff
+		}
+	}
+	if len(s.waiters[m.PaneID]) >= maxWaitersPerPane || s.totalWaitersLocked() >= maxTotalWaiters {
+		eff.waitResp = &protocol.MsgWaitResponse{
+			PaneID: m.PaneID,
+			Error:  "wait registration limit exceeded",
+		}
+		return eff
 	}
 	s.waiters[m.PaneID] = append(s.waiters[m.PaneID], tp)
 	return eff
@@ -310,7 +330,7 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 	s.startupComplete = true
 	s.markAttachedLocked(tp)
 	cs := s.clientLocked(tp)
-	if m.Cols > 0 && m.Rows > 0 {
+	if validGeometry(m.Cols, m.Rows) {
 		cs.size = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
 		if s.sizeOwner == nil && s.rows == 0 {
 			s.sizeOwner = tp
@@ -352,7 +372,7 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 
 func (s *Server) handleResizeLocked(tp transport.Transport, m protocol.MsgResize) msgEffects {
 	var eff msgEffects
-	if m.Cols > 0 && m.Rows > 0 {
+	if validGeometry(m.Cols, m.Rows) {
 		cs := s.clientLocked(tp)
 		cs.size = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
 		if s.sizeOwner == nil && s.rows == 0 {
@@ -456,7 +476,7 @@ func (s *Server) handleVerbLocked(tp transport.Transport, m protocol.MsgVerb) ms
 			s.strip.SetColumnWidth(id, width)
 		}
 		cs := s.clientLocked(tp)
-		if cs.size.Cols > 0 && cs.size.Rows > 0 {
+		if validGeometry(cs.size.Cols, cs.size.Rows) {
 			oldCols, oldRows := s.cols, s.rows
 			s.cols, s.rows = cs.size.Cols, cs.size.Rows
 			if s.cols != oldCols || s.rows != oldRows || len(m.Widths) > 0 {
@@ -576,12 +596,20 @@ func (s *Server) handleScrollLocked(tp transport.Transport, m protocol.MsgScroll
 }
 
 func (s *Server) handleSaveMacrosLocked(tp transport.Transport, m protocol.MsgSaveMacros) msgEffects {
+	if !validMacros(m.Macros) {
+		slog.Warn("rejecting invalid or oversized macro save", "count", len(m.Macros))
+		return msgEffects{}
+	}
 	s.macros = append([]protocol.Macro(nil), m.Macros...)
 	macrosCopy := append([]protocol.Macro(nil), m.Macros...)
 	s.saveMacrosMu.Lock()
 	if !s.saveMacrosStop {
 		s.ensureSaveMacrosWorkerLocked()
-		s.saveMacrosQ = append(s.saveMacrosQ, macrosCopy)
+		if len(s.saveMacrosQ) >= maxMacroQueue {
+			s.saveMacrosQ[len(s.saveMacrosQ)-1] = macrosCopy
+		} else {
+			s.saveMacrosQ = append(s.saveMacrosQ, macrosCopy)
+		}
 		s.saveMacrosCond.Signal()
 	}
 	s.saveMacrosMu.Unlock()
