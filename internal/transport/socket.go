@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -95,7 +96,22 @@ type SocketListener struct {
 // O_CLOEXEC, so pane processes never inherit the lock and cannot keep
 // the name taken after the server has gone.
 func NewSocketListener(path string) (*SocketListener, error) {
-	lock, err := os.OpenFile(path+".lock", os.O_RDWR|os.O_CREATE, 0600)
+	dir := filepath.Dir(path)
+	if fi, err := os.Lstat(dir); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("refusing to bind socket in symlink directory %s", dir)
+		}
+		if !fi.IsDir() {
+			return nil, fmt.Errorf("socket directory %s is not a directory", dir)
+		}
+		if fi.Mode().Perm()&0002 != 0 && fi.Mode()&os.ModeSticky == 0 {
+			if stat, ok := fi.Sys().(*syscall.Stat_t); ok && stat.Uid != uint32(os.Getuid()) {
+				return nil, fmt.Errorf("socket directory %s is world-writable without sticky bit and owned by uid %d", dir, stat.Uid)
+			}
+		}
+	}
+
+	lock, err := os.OpenFile(path+".lock", os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("opening lock for %s: %w", path, err)
 	}
@@ -136,6 +152,9 @@ func NewSocketListener(path string) (*SocketListener, error) {
 // into data loss.
 func bindHeld(path string) (net.Listener, error) {
 	if fi, serr := os.Lstat(path); serr == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("refusing to bind socket %s: it is a symlink", path)
+		}
 		if fi.Mode()&os.ModeSocket == 0 {
 			return nil, fmt.Errorf("refusing to remove %s: it exists and is not a socket", path)
 		}
@@ -145,10 +164,14 @@ func bindHeld(path string) (net.Listener, error) {
 	} else if !errors.Is(serr, os.ErrNotExist) {
 		return nil, fmt.Errorf("inspecting %s: %w", path, serr)
 	}
+
+	oldUmask := syscall.Umask(0077)
 	l, err := net.Listen("unix", path)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		return nil, fmt.Errorf("listen unix socket %s: %w", path, err)
 	}
+	_ = os.Chmod(path, 0600)
 	return l, nil
 }
 

@@ -71,6 +71,9 @@ func Handshake(conn net.Conn) (Hello, error) {
 // its state after an in-place upgrade accepts connections before it is
 // ready to say hello.
 func HandshakeWithin(conn net.Conn, ceiling time.Duration) (Hello, error) {
+	if err := VerifyPeerCredentials(conn); err != nil {
+		return Hello{}, fmt.Errorf("peer credential verification failed: %w", err)
+	}
 	_ = conn.SetDeadline(time.Now().Add(ceiling))
 	defer conn.SetDeadline(time.Time{})
 
