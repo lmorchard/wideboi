@@ -80,7 +80,9 @@ type Server struct {
 	// client can claim size ownership with VerbClaimSize (#184).
 	sizeOwner transport.Transport
 
-	webServer *webServerManager
+	webServer     *webServerManager
+	webToken      string
+	webTokenEpoch uint64
 
 	// paneSendMu serializes broadcastPaneUpdates. The Run loop, every
 	// client's message loop (via broadcastLayout) and onPaneExit all

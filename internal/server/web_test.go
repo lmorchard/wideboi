@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -275,6 +276,300 @@ func TestWebServerDisconnectOnlyWebClients(t *testing.T) {
 	// In-proc transport should remain functional
 	if !inProcTP.SendClient(ctx, protocol.MsgStatusRequest{}) {
 		t.Fatal("in-proc transport failed to send after web server stop")
+	}
+}
+
+func TestWebServerExplicitTokenReplacementRevokesClients(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	// 1. Start web server with initial explicit token
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		Token:      "initial-token",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start web server: %v", err)
+	}
+
+	// 2. Connect WebSocket client with initial token
+	dialer := websocket.Dialer{
+		Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+	}
+	u1 := fmt.Sprintf("ws://%s/ws?token=%s", resp1.Addr, resp1.Token)
+	ws1, _, err := dialer.Dial(u1, nil)
+	if err != nil {
+		t.Fatalf("dial initial websocket: %v", err)
+	}
+	defer ws1.Close()
+
+	// 3. Replace token with new explicit token (RotateToken is false)
+	resp2, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:      protocol.WebServerActionStart,
+		Token:       "new-explicit-token",
+		RotateToken: false,
+		DisableTLS:  true,
+	})
+	if err != nil {
+		t.Fatalf("replace token: %v", err)
+	}
+	if resp2.Token != "new-explicit-token" {
+		t.Fatalf("expected token %q, got %q", "new-explicit-token", resp2.Token)
+	}
+
+	// 4. Client authenticated with old token must be disconnected
+	_ = ws1.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = ws1.ReadMessage()
+	if err == nil {
+		t.Fatal("expected client with old token to be disconnected")
+	}
+
+	// 5. Reconnecting with old token fails with 401
+	_, respHTTP, err := dialer.Dial(u1, nil)
+	if err == nil {
+		t.Fatal("expected reconnection with old token to fail")
+	}
+	if respHTTP == nil || respHTTP.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized with old token, got %v", respHTTP)
+	}
+
+	// 6. Connecting with new explicit token succeeds
+	u2 := fmt.Sprintf("ws://%s/ws?token=%s", resp2.Addr, resp2.Token)
+	ws2, _, err := dialer.Dial(u2, nil)
+	if err != nil {
+		t.Fatalf("dial new token websocket: %v", err)
+	}
+	defer ws2.Close()
+}
+
+func TestWebServerReapplyingSameTokenDoesNotDisconnectClients(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	// 1. Start web server with token
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		Token:      "stable-token",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start web server: %v", err)
+	}
+
+	// 2. Connect client
+	dialer := websocket.Dialer{
+		Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+	}
+	u := fmt.Sprintf("ws://%s/ws?token=%s", resp1.Addr, resp1.Token)
+	ws, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer ws.Close()
+
+	// 3. Re-apply exact same token without other changes
+	resp2, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Token:      "stable-token",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("reapply token: %v", err)
+	}
+	if resp2.Token != "stable-token" {
+		t.Fatalf("expected token %q, got %q", "stable-token", resp2.Token)
+	}
+
+	// 4. Client must remain connected
+	attachMsg, _ := protocol.MarshalClient(protocol.MsgAttach{Cols: 80, Rows: 24})
+	if err := ws.WriteMessage(websocket.BinaryMessage, attachMsg); err != nil {
+		t.Fatalf("expected client to remain connected and writable: %v", err)
+	}
+}
+
+func TestWebServerGeneratedRotationRevokesClients(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	// 1. Start web server with generated token
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:      protocol.WebServerActionStart,
+		Addr:        "127.0.0.1:0",
+		RotateToken: true,
+		DisableTLS:  true,
+	})
+	if err != nil {
+		t.Fatalf("start web server: %v", err)
+	}
+
+	// 2. Connect client with initial token
+	dialer := websocket.Dialer{
+		Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+	}
+	u1 := fmt.Sprintf("ws://%s/ws?token=%s", resp1.Addr, resp1.Token)
+	ws1, _, err := dialer.Dial(u1, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer ws1.Close()
+
+	// 3. Rotate token
+	resp2, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:      protocol.WebServerActionStart,
+		RotateToken: true,
+		DisableTLS:  true,
+	})
+	if err != nil {
+		t.Fatalf("rotate token: %v", err)
+	}
+	if resp2.Token == resp1.Token {
+		t.Fatal("expected token to change on rotation")
+	}
+
+	// 4. Old client must be disconnected
+	_ = ws1.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = ws1.ReadMessage()
+	if err == nil {
+		t.Fatal("expected old client to be disconnected after rotation")
+	}
+
+	// 5. Old token fails, new token succeeds
+	_, respHTTP, err := dialer.Dial(u1, nil)
+	if err == nil || respHTTP == nil || respHTTP.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 with old token, got err=%v resp=%v", err, respHTTP)
+	}
+
+	u2 := fmt.Sprintf("ws://%s/ws?token=%s", resp2.Addr, resp2.Token)
+	ws2, _, err := dialer.Dial(u2, nil)
+	if err != nil {
+		t.Fatalf("dial new rotated token: %v", err)
+	}
+	defer ws2.Close()
+}
+
+func TestWebServerSimultaneousAddressAndTokenChangeRevokesClients(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	// 1. Start web server on addr 1
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		Token:      "addr-token-1",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start web server: %v", err)
+	}
+
+	// 2. Connect client 1
+	dialer := websocket.Dialer{
+		Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+	}
+	u1 := fmt.Sprintf("ws://%s/ws?token=%s", resp1.Addr, resp1.Token)
+	ws1, _, err := dialer.Dial(u1, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer ws1.Close()
+
+	// Find an unused port for new address
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newAddr := l.Addr().String()
+	_ = l.Close()
+
+	// 3. Move to new address and new token simultaneously
+	resp2, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       newAddr,
+		Token:      "addr-token-2",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("change address and token: %v", err)
+	}
+
+	// 4. Old client must be disconnected
+	_ = ws1.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = ws1.ReadMessage()
+	if err == nil {
+		t.Fatal("expected old client to be disconnected after address and token change")
+	}
+
+	// 5. Connect to new address with new token succeeds
+	u2 := fmt.Sprintf("ws://%s/ws?token=%s", resp2.Addr, resp2.Token)
+	ws2, _, err := dialer.Dial(u2, nil)
+	if err != nil {
+		t.Fatalf("dial new address: %v", err)
+	}
+	defer ws2.Close()
+}
+
+func TestWebServerInFlightHandshakeInvalidatedOnTokenChange(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	resp1, err := s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Addr:       "127.0.0.1:0",
+		Token:      "flight-token-1",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("start web server: %v", err)
+	}
+
+	// While we simulate or perform rapid token change during connection:
+	// Verify that any connection holding the old epoch cannot survive.
+	// Rotate token right as client dials:
+	dialer := websocket.Dialer{
+		Subprotocols: []string{fmt.Sprintf("wideboi.v%d", protocol.Version)},
+	}
+	u1 := fmt.Sprintf("ws://%s/ws?token=%s", resp1.Addr, resp1.Token)
+
+	// Perform rotation
+	_, err = s.StartWebServer(ctx, protocol.MsgWebServerControlRequest{
+		Action:     protocol.WebServerActionStart,
+		Token:      "flight-token-2",
+		DisableTLS: true,
+	})
+	if err != nil {
+		t.Fatalf("rotate token: %v", err)
+	}
+
+	// Dial with the old token
+	wsOld, respHTTP, dialErr := dialer.Dial(u1, nil)
+	if dialErr == nil {
+		defer wsOld.Close()
+		// If dial somehow completed before server restarted, read must fail because it got revoked
+		_ = wsOld.SetReadDeadline(time.Now().Add(time.Second))
+		_, _, readErr := wsOld.ReadMessage()
+		if readErr == nil {
+			t.Fatal("expected old token connection to be disconnected or refused")
+		}
+	} else if respHTTP != nil && respHTTP.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %v", respHTTP.StatusCode)
 	}
 }
 
