@@ -189,7 +189,7 @@ The manual covers:
 - Mouse controls and OSC 52 clipboard sharing
 - Multi-client geometry ownership and viewer anchoring
 - Secure remote access and HTTPS reverse proxy configurations
-- Configuration files (`.wideboi.toml` and user configs) and startup loadouts
+- Configuration files (`.wideboi.toml` and user configs), project trust (`wideboi trust`), and startup loadouts
 - CLI flags and environment variables reference
 
 ---

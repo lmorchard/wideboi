@@ -40,6 +40,8 @@ func TestParseCLISubcommands(t *testing.T) {
 		{args: []string{"help"}, wantSub: "help", wantHelp: true},
 		{args: []string{"--help"}, wantHelp: true},
 		{args: []string{"-h"}, wantHelp: true},
+		{args: []string{"trust"}, wantSub: "trust"},
+		{args: []string{"untrust"}, wantSub: "untrust"},
 	}
 
 	for _, tc := range cases {
@@ -67,11 +69,15 @@ func TestParseCLIFlags(t *testing.T) {
 		"-p", "ctrl+space",
 		"-s", "/tmp/custom.sock",
 		"--shell", "/bin/zsh",
+		"--trust-project",
 		"--json",
 	}
 	opts, err := parseCLI(args)
 	if err != nil {
 		t.Fatalf("parseCLI(%v) error: %v", args, err)
+	}
+	if !opts.flags.TrustProject {
+		t.Errorf("TrustProject = %v, want true", opts.flags.TrustProject)
 	}
 	if opts.flags.ConfigFile != "test.toml" {
 		t.Errorf("ConfigFile = %q, want test.toml", opts.flags.ConfigFile)

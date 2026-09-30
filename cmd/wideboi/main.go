@@ -86,6 +86,7 @@ func newFlagSet(opts *cliOptions) *flag.FlagSet {
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
 	fs.BoolVar(&opts.flags.EndSessionOnOwnerLoss, "end-session-on-owner-loss", false, "end the session when its owning terminal hangs up or the owner dies without detaching")
+	fs.BoolVar(&opts.flags.TrustProject, "trust-project", false, "trust project configuration (.wideboi.toml) to execute commands and security settings")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
 	fs.BoolVar(&opts.showVer, "version", false, "display version and build information")
@@ -119,7 +120,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -308,6 +309,22 @@ func main() {
 		os.Exit(code)
 	case "web":
 		fatal(runWeb(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
+	case "trust":
+		path := ".wideboi.toml"
+		if len(opts.subcommandArgs) > 0 {
+			path = opts.subcommandArgs[0]
+		}
+		absPath, hash, err := config.TrustProject(path, os.Getenv)
+		fatal(err)
+		fmt.Printf("trusted %s (%s)\n", absPath, hash)
+	case "untrust":
+		path := ".wideboi.toml"
+		if len(opts.subcommandArgs) > 0 {
+			path = opts.subcommandArgs[0]
+		}
+		absPath, err := config.UntrustProject(path, os.Getenv)
+		fatal(err)
+		fmt.Printf("untrusted %s\n", absPath)
 	default:
 		fatal(run(cfg, bindings))
 	}
