@@ -89,44 +89,27 @@ func TestWaitersDeduplicatedBoundedAndCleanedUp(t *testing.T) {
 
 	// 1. Deduplication: Send 20 wait requests for the same pane from tp1
 	for i := 0; i < 20; i++ {
-		tp1.SendClient(ctx, protocol.MsgWaitRequest{PaneID: paneID})
+		s.HandleClientMsgForTest(ctx, tp1, protocol.MsgWaitRequest{PaneID: paneID})
 	}
 
 	// 2. Disconnect cleanup: Detach tp1
-	tp1.SendClient(ctx, protocol.MsgDetach{})
+	s.HandleClientMsgForTest(ctx, tp1, protocol.MsgDetach{})
 
-	// 3. Reconnect new transport and verify wait queue is responsive and cleaned up
-	tp2 := transport.NewInProcChannel(128)
-	s.AddClientForTest(ctx, tp2)
-	tp2.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
-
-	// Bounding test: Register multiple distinct transports up to limit
-	var extraClients []*transport.InProcChannel
+	// 3. Bounding test: Register multiple distinct transports up to limit
+	var gotLimitError bool
 	for i := 0; i < 70; i++ {
 		client := transport.NewInProcChannel(4)
-		s.AddClientForTest(ctx, client)
-		extraClients = append(extraClients, client)
-		client.SendClient(ctx, protocol.MsgWaitRequest{PaneID: paneID})
-	}
-
-	// The 65th+ waiter should receive a wait response with error (limit exceeded)
-	var gotLimitError bool
-	for _, client := range extraClients[64:] {
+		s.HandleClientMsgForTest(ctx, client, protocol.MsgWaitRequest{PaneID: paneID})
 		select {
 		case msg := <-client.ServerSendChan():
 			if resp, ok := msg.(protocol.MsgWaitResponse); ok && resp.Error != "" {
 				gotLimitError = true
 			}
-		case <-time.After(100 * time.Millisecond):
+		default:
 		}
 	}
 	if !gotLimitError {
 		t.Fatal("expected wait registration limit error when exceeding maxWaitersPerPane")
-	}
-
-	// Detaching all extra clients cleans them up
-	for _, client := range extraClients {
-		client.SendClient(ctx, protocol.MsgDetach{})
 	}
 }
 

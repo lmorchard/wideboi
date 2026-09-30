@@ -28,6 +28,11 @@ func (s *Server) AddClientForTest(ctx context.Context, tp transport.Transport) {
 	go s.handleClientConnLoop(ctx, tp)
 }
 
+// HandleClientMsgForTest dispatches a client message for testing.
+func (s *Server) HandleClientMsgForTest(ctx context.Context, tp transport.Transport, msg transport.ClientMessage) bool {
+	return s.handleClientMsg(ctx, tp, msg)
+}
+
 // SessionDimensions reports the server's logical cols and rows.
 func (s *Server) SessionDimensions() (int, int) {
 	s.mu.Lock()
