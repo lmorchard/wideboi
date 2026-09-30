@@ -1766,6 +1766,7 @@ export class WideboiApp extends LitElement {
                     data-pane-id=${id}
                     aria-selected=${isFocused ? 'true' : 'false'}
                     aria-label=${ariaLabel}
+                    title=${title}
                     tabindex=${isFocused ? 0 : -1}
                     @click=${() => this.focusPane(id)}
                     @keydown=${(e: KeyboardEvent) => this.handleTabKeydown(e, id)}
