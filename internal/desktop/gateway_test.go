@@ -122,6 +122,9 @@ func TestGatewayRejectsMissingToken(t *testing.T) {
 }
 
 func TestGatewayRejectsOversizedDecompressedMessage(t *testing.T) {
+	if err := os.MkdirAll(config.SessionDir(), 0700); err != nil {
+		t.Fatal(err)
+	}
 	name := fmt.Sprintf("dt-over-%d-%d", os.Getpid(), time.Now().UnixNano()%1000000)
 	path := config.SessionSocketPath(name)
 	listener, err := net.Listen("unix", path)
@@ -156,11 +159,14 @@ func TestGatewayRejectsOversizedDecompressedMessage(t *testing.T) {
 		EnableCompression: true,
 	}
 	header := http.Header{"Origin": []string{httpServer.URL}}
-	ws, _, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws?session="+name, header)
+	ws, resp, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws?session="+name, header)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ws.Close()
+	if !strings.Contains(resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate") {
+		t.Fatalf("expected permessage-deflate extension negotiated, got %q", resp.Header.Get("Sec-Websocket-Extensions"))
+	}
 
 	var session *transport.ServerSocketConn
 	select {
@@ -189,15 +195,17 @@ func TestGatewayRejectsOversizedDecompressedMessage(t *testing.T) {
 		// Expected: message did not reach session
 	}
 
-	// Verify WebSocket connection was closed
+	// Verify WebSocket connection was closed with CloseMessageTooBig
 	_ = ws.SetReadDeadline(time.Now().Add(time.Second))
 	_, _, err = ws.ReadMessage()
 	if err == nil {
 		t.Fatal("expected read error on client after oversized input, got nil")
 	}
-	if closeErr, ok := err.(*websocket.CloseError); ok {
-		if closeErr.Code != websocket.CloseMessageTooBig {
-			t.Errorf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
-		}
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("expected *websocket.CloseError, got %T (%v)", err, err)
+	}
+	if closeErr.Code != websocket.CloseMessageTooBig {
+		t.Fatalf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
 	}
 }

@@ -310,11 +310,15 @@ func TestWebSocketRejectsDecompressedOversizedInput(t *testing.T) {
 	dialer := websocket.Dialer{
 		EnableCompression: true,
 	}
-	client, _, err := dialer.Dial(u, nil)
+	// Verify permessage-deflate was negotiated
+	ws, resp, err := dialer.Dial(u, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
+	defer ws.Close()
+	if !strings.Contains(resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate") {
+		t.Fatalf("expected permessage-deflate extension negotiated, got %q", resp.Header.Get("Sec-Websocket-Extensions"))
+	}
 	serverConn := <-conns
 
 	// Create a 2 MiB payload of repeated data. Highly compressible (<10KB on wire).
@@ -324,8 +328,8 @@ func TestWebSocketRejectsDecompressedOversizedInput(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	client.EnableWriteCompression(true)
-	_ = client.WriteMessage(websocket.BinaryMessage, payload)
+	ws.EnableWriteCompression(true)
+	_ = ws.WriteMessage(websocket.BinaryMessage, payload)
 
 	select {
 	case msg, ok := <-serverConn.ClientSendChan():
@@ -336,16 +340,146 @@ func TestWebSocketRejectsDecompressedOversizedInput(t *testing.T) {
 		t.Fatal("decompressed oversized input did not close reader")
 	}
 
-	// Verify client observes CloseMessageTooBig or closed connection
-	_ = client.SetReadDeadline(time.Now().Add(time.Second))
-	_, _, err = client.ReadMessage()
+	// Verify client observes CloseMessageTooBig
+	_ = ws.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = ws.ReadMessage()
 	if err == nil {
 		t.Fatal("expected read error on client after oversized input, got nil")
 	}
-	if closeErr, ok := err.(*websocket.CloseError); ok {
-		if closeErr.Code != websocket.CloseMessageTooBig {
-			t.Errorf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("expected *websocket.CloseError, got %T (%v)", err, err)
+	}
+	if closeErr.Code != websocket.CloseMessageTooBig {
+		t.Fatalf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
+	}
+}
+
+func makeMarshaledMsgOfSize(t *testing.T, targetLen int) []byte {
+	t.Helper()
+	dataLen := targetLen - 10
+	for {
+		msg := protocol.MsgInput{Data: make([]byte, dataLen)}
+		payload, err := protocol.MarshalClient(msg)
+		if err != nil {
+			t.Fatal(err)
 		}
+		if len(payload) == targetLen {
+			return payload
+		}
+		if len(payload) < targetLen {
+			dataLen++
+		} else {
+			dataLen--
+		}
+	}
+}
+
+func TestWebSocketBoundaryPayloads(t *testing.T) {
+	for _, compress := range []bool{false, true} {
+		name := "uncompressed"
+		if compress {
+			name = "compressed"
+		}
+		t.Run(name, func(t *testing.T) {
+			upgrader := websocket.Upgrader{
+				EnableCompression: compress,
+			}
+			conns := make(chan *transport.WebSocketServerConn, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				c, err := upgrader.Upgrade(w, r, nil)
+				if err == nil {
+					serverConn := transport.NewWebSocketServerConn(c, 16, nil)
+					serverConn.RunPumps(ctx)
+					conns <- serverConn
+				}
+			}))
+			defer s.Close()
+
+			u := "ws" + strings.TrimPrefix(s.URL, "http")
+			dialer := websocket.Dialer{
+				EnableCompression: compress,
+			}
+			client, resp, err := dialer.Dial(u, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if compress && !strings.Contains(resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate") {
+				t.Fatalf("expected permessage-deflate negotiated, got %q", resp.Header.Get("Sec-Websocket-Extensions"))
+			}
+			serverConn := <-conns
+
+			// 1. Valid small message arrives
+			smallMsg := protocol.MsgInput{Data: []byte("valid-message")}
+			sendClient(t, client, smallMsg)
+			select {
+			case msg, ok := <-serverConn.ClientSendChan():
+				if !ok {
+					t.Fatal("channel closed prematurely")
+				}
+				got, ok := msg.(protocol.MsgInput)
+				if !ok || string(got.Data) != "valid-message" {
+					t.Fatalf("unexpected message: %#v", msg)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for small message")
+			}
+
+			// 2. Exact 1 MiB boundary payload is delivered
+			exactPayload := makeMarshaledMsgOfSize(t, 1<<20)
+			if len(exactPayload) != 1<<20 {
+				t.Fatalf("exact payload len %d != %d", len(exactPayload), 1<<20)
+			}
+			if compress {
+				client.EnableWriteCompression(true)
+			}
+			if err := client.WriteMessage(websocket.BinaryMessage, exactPayload); err != nil {
+				t.Fatalf("write exact payload: %v", err)
+			}
+			select {
+			case msg, ok := <-serverConn.ClientSendChan():
+				if !ok {
+					t.Fatal("channel closed on exact 1 MiB boundary")
+				}
+				if _, ok := msg.(protocol.MsgInput); !ok {
+					t.Fatalf("unexpected message type on boundary: %T", msg)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for 1 MiB boundary message")
+			}
+
+			// 3. Payload of (1 MiB + 1) is rejected with CloseMessageTooBig
+			overPayload := makeMarshaledMsgOfSize(t, (1<<20)+1)
+			if len(overPayload) != (1<<20)+1 {
+				t.Fatalf("over payload len %d != %d", len(overPayload), (1<<20)+1)
+			}
+			_ = client.WriteMessage(websocket.BinaryMessage, overPayload)
+			select {
+			case msg, ok := <-serverConn.ClientSendChan():
+				if ok {
+					t.Fatalf("oversized 1 MiB + 1 payload reached server: %T", msg)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("oversized 1 MiB + 1 payload did not close reader")
+			}
+
+			_ = client.SetReadDeadline(time.Now().Add(time.Second))
+			_, _, err = client.ReadMessage()
+			if err == nil {
+				t.Fatal("expected read error on client after oversized input, got nil")
+			}
+			closeErr, ok := err.(*websocket.CloseError)
+			if !ok {
+				t.Fatalf("expected *websocket.CloseError, got %T (%v)", err, err)
+			}
+			if closeErr.Code != websocket.CloseMessageTooBig {
+				t.Fatalf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
+			}
+		})
 	}
 }
 
