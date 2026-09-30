@@ -905,6 +905,7 @@ func TestLoadProjectConfig(t *testing.T) {
 		"XDG_CONFIG_HOME": xdgDir,
 	}
 
+	// Without trust: layout is overridden from .wideboi.toml, but startup commands are ignored
 	cfg, _, err := config.Load(config.ConfigFlags{}, mockEnv(env))
 	if err != nil {
 		t.Fatal(err)
@@ -916,8 +917,23 @@ func TestLoadProjectConfig(t *testing.T) {
 	if cfg.Prefix != "ctrl+j" {
 		t.Errorf("Prefix = %q, want 'ctrl+j' from XDG (not overridden)", cfg.Prefix)
 	}
-	if len(cfg.Startup) != 1 || cfg.Startup[0].Command != "nvim" {
-		t.Errorf("Startup = %+v, want project loadout replacing global loadout", cfg.Startup)
+	// Untrusted project startup commands must NOT replace global loadout
+	if len(cfg.Startup) != 2 || cfg.Startup[0].Command != "htop" {
+		t.Errorf("Startup = %+v, want global loadout preserved when project untrusted", cfg.Startup)
+	}
+
+	// Trust the project config
+	if _, _, err := config.TrustProject(".wideboi.toml", mockEnv(env)); err != nil {
+		t.Fatalf("trust: %v", err)
+	}
+
+	// With trust: project startup command replaces global loadout
+	cfgTrusted, _, err := config.Load(config.ConfigFlags{}, mockEnv(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfgTrusted.Startup) != 1 || cfgTrusted.Startup[0].Command != "nvim" {
+		t.Errorf("Startup = %+v, want project loadout replacing global loadout when trusted", cfgTrusted.Startup)
 	}
 }
 

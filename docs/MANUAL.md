@@ -361,6 +361,20 @@ wideboi web start --rotate-token
 # Stop the web server and disconnect web clients (session and terminal clients remain running)
 wideboi web stop
 ```
+#### `trust` and `untrust`
+Manage project configuration trust for implicit `.wideboi.toml` files:
+
+```bash
+# Trust the current directory's .wideboi.toml to run startup commands and security settings
+wideboi trust
+
+# Trust a specific project configuration file
+wideboi trust /path/to/project/.wideboi.toml
+
+# Revoke trust for the current directory's .wideboi.toml
+wideboi untrust
+```
+
 For agent skill specifications, refer to [`docs/skills/wideboi-control/SKILL.md`](skills/wideboi-control/SKILL.md).
 
 ---
@@ -466,6 +480,16 @@ wideboi searches for configuration files in the following order:
 3. User configuration: `$XDG_CONFIG_HOME/wideboi/config.toml` (defaults to `~/.config/wideboi/config.toml`).
 
 A `.wideboi.toml` file in your repository overrides global settings in user configuration.
+
+### Project Configuration Trust Boundary
+
+To prevent untrusted checkouts from executing arbitrary startup commands or exposing unwanted network listeners:
+- **Untrusted Projects:** By default, `.wideboi.toml` only loads safe appearance, layout, and key settings (`layout`, `width_presets`, `pan_step`, `theme`, `mouse`, `auto_cleanup`, `keep_session_on_owner_loss`, `log_level`, `keys`, `prefix`). Sensitive settings (`startup`, `shell`, `socket`, `session`, `websocket`, `websocket_token`, `tls`, `macros`) are ignored.
+- **Explicit Trust:** Run `wideboi trust` in a project directory to trust its `.wideboi.toml`. This records the canonical path and SHA256 digest in `~/.config/wideboi/trusted.toml`.
+- **Content Tampering:** If `.wideboi.toml` is modified, the SHA256 checksum changes and wideboi automatically reverts to untrusted mode until `wideboi trust` is run again.
+- **Revoking Trust:** Run `wideboi untrust` to remove a project from `trusted.toml`.
+- **One-off Trust:** Pass `--trust-project` or set `WIDEBOI_TRUST_PROJECT=true` for a one-off run without modifying `trusted.toml`.
+- **User Configuration:** User-owned global configuration (`~/.config/wideboi/config.toml`) and files explicitly chosen via `--config <path>` are always fully trusted.
 
 ### Configuration Format (TOML)
 

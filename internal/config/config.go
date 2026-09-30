@@ -62,10 +62,11 @@ type Config struct {
 	TLSCert    string `toml:"tls_cert"`
 	TLSKey     string `toml:"tls_key"`
 	// LogLevelName is what was configured; LogLevel is it resolved.
-	LogLevelName string        `toml:"log_level"`
-	LogLevel     slog.Level    `toml:"-"`
-	ConfigFile   string        `toml:"-"`
-	Macros       []MacroConfig `toml:"macros"`
+	LogLevelName   string        `toml:"log_level"`
+	LogLevel       slog.Level    `toml:"-"`
+	ConfigFile     string        `toml:"-"`
+	ProjectTrusted bool          `toml:"-"`
+	Macros         []MacroConfig `toml:"macros"`
 }
 
 // MacroStepConfig describes one step in a configured input macro.
@@ -121,6 +122,7 @@ type ConfigFlags struct {
 	TLS                   bool
 	TLSCert               string
 	TLSKey                string
+	TrustProject          bool
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -317,8 +319,15 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		cfg.Shell = "/bin/sh"
 	}
 
+	// Environment variable for project trust
+	if envTrust := getenv("WIDEBOI_TRUST_PROJECT"); envTrust != "" {
+		if v, err := parseBoolEnv("WIDEBOI_TRUST_PROJECT", envTrust); err == nil && v {
+			flags.TrustProject = true
+		}
+	}
+
 	// 2. Discover or read TOML config files
-	applyFile := func(cfgFile string, explicit bool) error {
+	applyFile := func(cfgFile string, explicit bool, trusted bool) error {
 		if cfgFile == "" {
 			return nil
 		}
@@ -340,17 +349,13 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if err := toml.Unmarshal(data, &panSetting); err != nil {
 			return err
 		}
+
+		// Always apply safe appearance and layout settings
 		if fileCfg.Layout != "" {
 			cfg.Layout = fileCfg.Layout
 		}
 		if fileCfg.Prefix != "" {
 			cfg.Prefix = fileCfg.Prefix
-		}
-		if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
-			return err
-		}
-		if fileCfg.Shell != "" {
-			cfg.Shell = fileCfg.Shell
 		}
 		if len(fileCfg.Keys) > 0 {
 			if cfg.Keys == nil {
@@ -359,18 +364,6 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 			for k, v := range fileCfg.Keys {
 				cfg.Keys[k] = v
 			}
-		}
-		if fileCfg.Layout != "" {
-			cfg.Layout = fileCfg.Layout
-		}
-		if fileCfg.Prefix != "" {
-			cfg.Prefix = fileCfg.Prefix
-		}
-		if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
-			return err
-		}
-		if fileCfg.Shell != "" {
-			cfg.Shell = fileCfg.Shell
 		}
 		if fileCfg.Mouse != nil {
 			cfg.Mouse = fileCfg.Mouse
@@ -387,32 +380,57 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if panSetting.PanStep != nil {
 			cfg.PanStep = *panSetting.PanStep
 		}
-		if fileCfg.Startup != nil {
-			cfg.Startup = fileCfg.Startup
-		}
-		if fileCfg.Websocket != "" {
-			cfg.Websocket = fileCfg.Websocket
-		}
-		if fileCfg.WebsocketToken != "" {
-			cfg.WebsocketToken = fileCfg.WebsocketToken
-		}
-		if fileCfg.TLS != nil {
-			cfg.TLS = fileCfg.TLS
-		}
-		if fileCfg.TLSCert != "" {
-			cfg.TLSCert = fileCfg.TLSCert
-		}
-		if fileCfg.TLSKey != "" {
-			cfg.TLSKey = fileCfg.TLSKey
-		}
 		if fileCfg.LogLevelName != "" {
 			cfg.LogLevelName = fileCfg.LogLevelName
 		}
 		if fileCfg.Theme != (ThemeConfig{}) {
 			cfg.Theme = fileCfg.Theme
 		}
-		if len(fileCfg.Macros) > 0 {
-			cfg.Macros = fileCfg.Macros
+
+		if !trusted {
+			hasSensitive := fileCfg.Startup != nil ||
+				fileCfg.Shell != "" ||
+				fileCfg.Session != "" ||
+				fileCfg.Socket != "" ||
+				fileCfg.Websocket != "" ||
+				fileCfg.WebsocketToken != "" ||
+				fileCfg.TLS != nil ||
+				fileCfg.TLSCert != "" ||
+				fileCfg.TLSKey != "" ||
+				len(fileCfg.Macros) > 0
+
+			if hasSensitive {
+				slog.Warn("ignoring sensitive settings from untrusted project configuration; run 'wideboi trust' to enable", "path", cfgFile)
+			}
+		} else {
+			// Apply sensitive settings for trusted configurations
+			if err := applySessionLayer(&cfg, "config file "+cfgFile, fileCfg.Session, fileCfg.Socket); err != nil {
+				return err
+			}
+			if fileCfg.Shell != "" {
+				cfg.Shell = fileCfg.Shell
+			}
+			if fileCfg.Startup != nil {
+				cfg.Startup = fileCfg.Startup
+			}
+			if fileCfg.Websocket != "" {
+				cfg.Websocket = fileCfg.Websocket
+			}
+			if fileCfg.WebsocketToken != "" {
+				cfg.WebsocketToken = fileCfg.WebsocketToken
+			}
+			if fileCfg.TLS != nil {
+				cfg.TLS = fileCfg.TLS
+			}
+			if fileCfg.TLSCert != "" {
+				cfg.TLSCert = fileCfg.TLSCert
+			}
+			if fileCfg.TLSKey != "" {
+				cfg.TLSKey = fileCfg.TLSKey
+			}
+			if len(fileCfg.Macros) > 0 {
+				cfg.Macros = fileCfg.Macros
+			}
 		}
 
 		if cfg.ConfigFile == "" {
@@ -424,14 +442,23 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 
 	if flags.ConfigFile != "" {
-		if err := applyFile(flags.ConfigFile, true); err != nil {
+		cfg.ProjectTrusted = true
+		if err := applyFile(flags.ConfigFile, true, true); err != nil {
 			return Config{}, nil, err
 		}
 	} else {
-		if err := applyFile(DefaultConfigPath(getenv), false); err != nil {
+		if err := applyFile(DefaultConfigPath(getenv), false, true); err != nil {
 			return Config{}, nil, err
 		}
-		if err := applyFile(".wideboi.toml", false); err != nil {
+		projectFile := ".wideboi.toml"
+		trusted := flags.TrustProject
+		if !trusted {
+			if data, err := os.ReadFile(projectFile); err == nil {
+				trusted = IsProjectTrusted(projectFile, data, getenv)
+			}
+		}
+		cfg.ProjectTrusted = trusted
+		if err := applyFile(projectFile, false, trusted); err != nil {
 			return Config{}, nil, err
 		}
 	}
