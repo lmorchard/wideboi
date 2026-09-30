@@ -319,6 +319,7 @@ test('toolbar pane selector tabs display title, status glyphs, and focus state',
   await expect(tab1).toContainText('editor');
   await expect(tab1).toHaveAttribute('aria-selected', 'true');
   await expect(tab1).toHaveAttribute('aria-label', 'Pane 1: editor');
+  await expect(tab1).toHaveAttribute('title', 'editor');
 
   // Toolbar uses sans-serif while tab selector buttons use monospace
   const toolbarFont = await page.locator('.toolbar').evaluate(el => getComputedStyle(el).fontFamily);
@@ -332,14 +333,17 @@ test('toolbar pane selector tabs display title, status glyphs, and focus state',
   await expect(tab2.locator('.tab-status.working')).toHaveText('»');
   await expect(tab2).toHaveAttribute('aria-selected', 'false');
   await expect(tab2).toHaveAttribute('aria-label', 'Pane 2: build, working');
+  await expect(tab2).toHaveAttribute('title', 'build');
 
   await expect(tab3).toContainText('prompt');
   await expect(tab3.locator('.tab-status.needs-input')).toHaveText('!');
   await expect(tab3).toHaveAttribute('aria-label', 'Pane 3: prompt, needs input');
+  await expect(tab3).toHaveAttribute('title', 'prompt');
 
   await expect(tab4).toContainText('lint');
   await expect(tab4.locator('.tab-status.failed')).toHaveText('✗');
   await expect(tab4).toHaveAttribute('aria-label', 'Pane 4: lint, failed');
+  await expect(tab4).toHaveAttribute('title', 'lint');
 
   // Click tab 3 to focus
   await tab3.click();
