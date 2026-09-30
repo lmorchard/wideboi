@@ -120,3 +120,84 @@ func TestGatewayRejectsMissingToken(t *testing.T) {
 		t.Fatalf("response = %v, want 401", response)
 	}
 }
+
+func TestGatewayRejectsOversizedDecompressedMessage(t *testing.T) {
+	name := fmt.Sprintf("dt-over-%d-%d", os.Getpid(), time.Now().UnixNano()%1000000)
+	path := config.SessionSocketPath(name)
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close(); os.Remove(path) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverReady := make(chan *transport.ServerSocketConn, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		if _, err := transport.Handshake(conn); err != nil {
+			conn.Close()
+			return
+		}
+		server := transport.NewServerSocketConn(conn, 8)
+		server.RunPumps(ctx)
+		serverReady <- server
+	}()
+
+	httpServer := httptest.NewServer(&Gateway{Token: "local-secret"})
+	defer httpServer.Close()
+	version := fmt.Sprintf("wideboi.v%d", protocol.Version)
+	token := "wideboi-token." + base64.RawURLEncoding.EncodeToString([]byte("local-secret"))
+	dialer := websocket.Dialer{
+		Subprotocols:      []string{version, token},
+		EnableCompression: true,
+	}
+	header := http.Header{"Origin": []string{httpServer.URL}}
+	ws, _, err := dialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http")+"/ws?session="+name, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+
+	var session *transport.ServerSocketConn
+	select {
+	case session = <-serverReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("gateway did not handshake with session")
+	}
+	defer session.Close()
+
+	// Send 2 MiB decompressed payload compressed on the wire
+	hugeMsg := protocol.MsgInput{Data: []byte(strings.Repeat("B", 2<<20))}
+	payload, err := protocol.MarshalClient(hugeMsg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ws.EnableWriteCompression(true)
+	_ = ws.WriteMessage(websocket.BinaryMessage, payload)
+
+	select {
+	case msg, ok := <-session.ClientSendChan():
+		if ok {
+			t.Fatalf("session received oversized message through gateway: %#v", msg)
+		}
+	case <-time.After(time.Second):
+		// Expected: message did not reach session
+	}
+
+	// Verify WebSocket connection was closed
+	_ = ws.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = ws.ReadMessage()
+	if err == nil {
+		t.Fatal("expected read error on client after oversized input, got nil")
+	}
+	if closeErr, ok := err.(*websocket.CloseError); ok {
+		if closeErr.Code != websocket.CloseMessageTooBig {
+			t.Errorf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
+		}
+	}
+}
