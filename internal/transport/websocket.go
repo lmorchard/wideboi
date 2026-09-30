@@ -1,10 +1,13 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -158,11 +161,44 @@ func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			kind, payload, err := wsConn.conn.ReadMessage()
+			kind, r, err := wsConn.conn.NextReader()
 			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				if errors.Is(err, websocket.ErrReadLimit) {
+					wsConn.set("reading websocket", err)
+					wsConn.mu.Lock()
+					_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
+					_ = wsConn.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "message too large"))
+					wsConn.mu.Unlock()
+				} else if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					wsConn.set("reading websocket", err)
 				}
+				return
+			}
+
+			// Enforce decompressed byte limit before buffering or decoding.
+			// LimitReader stops reading after webSocketReadLimit+1 bytes,
+			// bounding memory even for highly compressed payloads.
+			var buf bytes.Buffer
+			n, err := buf.ReadFrom(io.LimitReader(r, webSocketReadLimit+1))
+			if err != nil {
+				if errors.Is(err, websocket.ErrReadLimit) {
+					wsConn.set("reading websocket", err)
+					wsConn.mu.Lock()
+					_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
+					_ = wsConn.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "message too large"))
+					wsConn.mu.Unlock()
+				} else if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					wsConn.set("reading websocket payload", err)
+				}
+				return
+			}
+
+			if n > webSocketReadLimit {
+				wsConn.set("reading websocket", fmt.Errorf("decompressed message exceeds read limit of %d bytes", webSocketReadLimit))
+				wsConn.mu.Lock()
+				_ = wsConn.conn.SetWriteDeadline(time.Now().Add(webSocketWriteTimeout))
+				_ = wsConn.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseMessageTooBig, "message too large"))
+				wsConn.mu.Unlock()
 				return
 			}
 
@@ -172,7 +208,7 @@ func (wsConn *WebSocketServerConn) readLoop(ctx context.Context) {
 				slog.Warn("WebSocket received non-binary frame", "type", kind)
 				continue
 			}
-			msg, err := protocol.UnmarshalClient(payload)
+			msg, err := protocol.UnmarshalClient(buf.Bytes())
 			if err != nil {
 				slog.Warn("WebSocket failed to decode client message", "err", err)
 				continue

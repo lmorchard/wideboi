@@ -288,6 +288,322 @@ func TestWebSocketRejectsOversizedInput(t *testing.T) {
 	}
 }
 
+func TestWebSocketRejectsDecompressedOversizedInput(t *testing.T) {
+	upgrader := websocket.Upgrader{
+		EnableCompression: true,
+	}
+	conns := make(chan *transport.WebSocketServerConn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			serverConn := transport.NewWebSocketServerConn(c, 1, nil)
+			serverConn.RunPumps(ctx)
+			conns <- serverConn
+		}
+	}))
+	defer s.Close()
+
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	dialer := websocket.Dialer{
+		EnableCompression: true,
+	}
+	// Verify permessage-deflate was negotiated
+	ws, resp, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if !strings.Contains(resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate") {
+		t.Fatalf("expected permessage-deflate extension negotiated, got %q", resp.Header.Get("Sec-Websocket-Extensions"))
+	}
+	serverConn := <-conns
+
+	// Create a 2 MiB payload of repeated data. Highly compressible (<10KB on wire).
+	hugeMsg := protocol.MsgInput{Data: []byte(strings.Repeat("A", 2<<20))}
+	payload, err := protocol.MarshalClient(hugeMsg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	ws.EnableWriteCompression(true)
+	_ = ws.WriteMessage(websocket.BinaryMessage, payload)
+
+	select {
+	case msg, ok := <-serverConn.ClientSendChan():
+		if ok {
+			t.Fatalf("decompressed oversized input reached server: %T", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("decompressed oversized input did not close reader")
+	}
+
+	// Verify client observes CloseMessageTooBig
+	_ = ws.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err = ws.ReadMessage()
+	if err == nil {
+		t.Fatal("expected read error on client after oversized input, got nil")
+	}
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("expected *websocket.CloseError, got %T (%v)", err, err)
+	}
+	if closeErr.Code != websocket.CloseMessageTooBig {
+		t.Fatalf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
+	}
+}
+
+func makeMarshaledMsgOfSize(t *testing.T, targetLen int) []byte {
+	t.Helper()
+	dataLen := targetLen - 10
+	for {
+		msg := protocol.MsgInput{Data: make([]byte, dataLen)}
+		payload, err := protocol.MarshalClient(msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(payload) == targetLen {
+			return payload
+		}
+		if len(payload) < targetLen {
+			dataLen++
+		} else {
+			dataLen--
+		}
+	}
+}
+
+func TestWebSocketBoundaryPayloads(t *testing.T) {
+	for _, compress := range []bool{false, true} {
+		name := "uncompressed"
+		if compress {
+			name = "compressed"
+		}
+		t.Run(name, func(t *testing.T) {
+			upgrader := websocket.Upgrader{
+				EnableCompression: compress,
+			}
+			conns := make(chan *transport.WebSocketServerConn, 1)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				c, err := upgrader.Upgrade(w, r, nil)
+				if err == nil {
+					serverConn := transport.NewWebSocketServerConn(c, 16, nil)
+					serverConn.RunPumps(ctx)
+					conns <- serverConn
+				}
+			}))
+			defer s.Close()
+
+			u := "ws" + strings.TrimPrefix(s.URL, "http")
+			dialer := websocket.Dialer{
+				EnableCompression: compress,
+			}
+			client, resp, err := dialer.Dial(u, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if compress && !strings.Contains(resp.Header.Get("Sec-Websocket-Extensions"), "permessage-deflate") {
+				t.Fatalf("expected permessage-deflate negotiated, got %q", resp.Header.Get("Sec-Websocket-Extensions"))
+			}
+			serverConn := <-conns
+
+			// 1. Valid small message arrives
+			smallMsg := protocol.MsgInput{Data: []byte("valid-message")}
+			sendClient(t, client, smallMsg)
+			select {
+			case msg, ok := <-serverConn.ClientSendChan():
+				if !ok {
+					t.Fatal("channel closed prematurely")
+				}
+				got, ok := msg.(protocol.MsgInput)
+				if !ok || string(got.Data) != "valid-message" {
+					t.Fatalf("unexpected message: %#v", msg)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for small message")
+			}
+
+			// 2. Exact 1 MiB boundary payload is delivered
+			exactPayload := makeMarshaledMsgOfSize(t, 1<<20)
+			if len(exactPayload) != 1<<20 {
+				t.Fatalf("exact payload len %d != %d", len(exactPayload), 1<<20)
+			}
+			if compress {
+				client.EnableWriteCompression(true)
+			}
+			if err := client.WriteMessage(websocket.BinaryMessage, exactPayload); err != nil {
+				t.Fatalf("write exact payload: %v", err)
+			}
+			select {
+			case msg, ok := <-serverConn.ClientSendChan():
+				if !ok {
+					t.Fatal("channel closed on exact 1 MiB boundary")
+				}
+				if _, ok := msg.(protocol.MsgInput); !ok {
+					t.Fatalf("unexpected message type on boundary: %T", msg)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for 1 MiB boundary message")
+			}
+
+			// 3. Payload of (1 MiB + 1) is rejected with CloseMessageTooBig
+			overPayload := makeMarshaledMsgOfSize(t, (1<<20)+1)
+			if len(overPayload) != (1<<20)+1 {
+				t.Fatalf("over payload len %d != %d", len(overPayload), (1<<20)+1)
+			}
+			_ = client.WriteMessage(websocket.BinaryMessage, overPayload)
+			select {
+			case msg, ok := <-serverConn.ClientSendChan():
+				if ok {
+					t.Fatalf("oversized 1 MiB + 1 payload reached server: %T", msg)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("oversized 1 MiB + 1 payload did not close reader")
+			}
+
+			_ = client.SetReadDeadline(time.Now().Add(time.Second))
+			_, _, err = client.ReadMessage()
+			if err == nil {
+				t.Fatal("expected read error on client after oversized input, got nil")
+			}
+			closeErr, ok := err.(*websocket.CloseError)
+			if !ok {
+				t.Fatalf("expected *websocket.CloseError, got %T (%v)", err, err)
+			}
+			if closeErr.Code != websocket.CloseMessageTooBig {
+				t.Fatalf("got close code %d, want %d (CloseMessageTooBig)", closeErr.Code, websocket.CloseMessageTooBig)
+			}
+		})
+	}
+}
+
+func TestWebSocketFragmentedMessage(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	conns := make(chan *transport.WebSocketServerConn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			serverConn := transport.NewWebSocketServerConn(c, 1, nil)
+			serverConn.RunPumps(ctx)
+			conns <- serverConn
+		}
+	}))
+	defer s.Close()
+
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	// Using a small WriteBufferSize forces Gorilla to split a message across multiple frames.
+	dialer := websocket.Dialer{
+		WriteBufferSize: 512,
+	}
+	client, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	serverConn := <-conns
+
+	// 2048 bytes of valid client message
+	chunk := strings.Repeat("hello world wideboi ", 100)
+	msg := protocol.MsgInput{Data: []byte(chunk)}
+	payload, err := protocol.MarshalClient(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if len(payload) <= 512 {
+		t.Fatalf("payload size %d not large enough to fragment with 512-byte buffer", len(payload))
+	}
+
+	// Writing payload via NextWriter with small write buffer sends multiple frames
+	w, err := client.NextWriter(websocket.BinaryMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case received, ok := <-serverConn.ClientSendChan():
+		if !ok {
+			t.Fatal("channel closed unexpectedly")
+		}
+		got, ok := received.(protocol.MsgInput)
+		if !ok {
+			t.Fatalf("got %T, want MsgInput", received)
+		}
+		if string(got.Data) != chunk {
+			t.Fatalf("fragmented payload content mismatch: len got %d, want %d", len(got.Data), len(chunk))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fragmented message")
+	}
+}
+
+func TestWebSocketFragmentedOversizedInput(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	conns := make(chan *transport.WebSocketServerConn, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err == nil {
+			serverConn := transport.NewWebSocketServerConn(c, 1, nil)
+			serverConn.RunPumps(ctx)
+			conns <- serverConn
+		}
+	}))
+	defer s.Close()
+
+	u := "ws" + strings.TrimPrefix(s.URL, "http")
+	dialer := websocket.Dialer{
+		WriteBufferSize: 1024,
+	}
+	client, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	serverConn := <-conns
+
+	// Stream >1 MiB across multiple fragments
+	w, err := client.NextWriter(websocket.BinaryMessage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 64*1024)
+	total := 0
+	for total < (1<<20)+4096 {
+		n, err := w.Write(chunk)
+		if err != nil {
+			break
+		}
+		total += n
+	}
+	_ = w.Close()
+
+	select {
+	case msg, ok := <-serverConn.ClientSendChan():
+		if ok {
+			t.Fatalf("oversized fragmented message reached server: %T", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("oversized fragmented input did not close reader")
+	}
+}
+
 // The WebSocket twin of TestServerWritePumpSkipsAnUnencodableMessage.
 func TestWebSocketWritePumpSkipsAnUnencodableMessage(t *testing.T) {
 	upgrader := websocket.Upgrader{}
