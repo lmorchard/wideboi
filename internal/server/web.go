@@ -129,9 +129,17 @@ func (s *Server) getOrCreateWebManager() *webServerManager {
 	return s.webServer
 }
 
-// disconnectWebSocketClients closes all connected websocket transports.
+// disconnectWebSocketClients closes all connected websocket transports and invalidates in-flight handshakes.
 func (s *Server) disconnectWebSocketClients() {
+	s.revokeWebSocketClients("")
+}
+
+// revokeWebSocketClients updates the expected web token, invalidates in-flight handshakes,
+// and closes all connected websocket transports.
+func (s *Server) revokeWebSocketClients(newToken string) {
 	s.mu.Lock()
+	s.webToken = newToken
+	s.webTokenEpoch++
 	var toClose []io.Closer
 	for _, tp := range s.transports {
 		if transportKind(tp) == "websocket" {
@@ -144,6 +152,16 @@ func (s *Server) disconnectWebSocketClients() {
 
 	for _, cl := range toClose {
 		_ = cl.Close()
+	}
+}
+
+// setWebToken sets the expected web token if it differs, bumping the token epoch.
+func (s *Server) setWebToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.webToken != token {
+		s.webToken = token
+		s.webTokenEpoch++
 	}
 }
 
@@ -218,6 +236,9 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 		isGenerated = w.isGenerated
 	}
 
+	tokenChanged := w.running && (token != w.token)
+	credChanged := tokenChanged || req.RotateToken || tlsChanged
+
 	reusingAddr := w.running && (req.Addr == "" || targetAddr == w.boundAddr || targetAddr == w.addr || sameTCPAddr(targetAddr, w.boundAddr))
 
 	if reusingAddr {
@@ -231,8 +252,8 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 			_ = w.listener.Close()
 			w.listener = nil
 		}
-		if (req.RotateToken || tlsChanged) && s != nil {
-			s.disconnectWebSocketClients()
+		if (credChanged || addrChanged) && s != nil {
+			s.revokeWebSocketClients(token)
 		}
 	}
 
@@ -312,8 +333,8 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 		if w.listener != nil {
 			_ = w.listener.Close()
 		}
-		if (req.RotateToken || tlsChanged) && s != nil {
-			s.disconnectWebSocketClients()
+		if (credChanged || addrChanged) && s != nil {
+			s.revokeWebSocketClients(token)
 		}
 	}
 
@@ -424,6 +445,7 @@ func websocketProtocolToken(r *http.Request) string {
 
 // ListenWebSocket starts accepting WebSocket connections via the provided http.ServeMux.
 func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
+	s.setWebToken(token)
 	versionProtocol := transport.WebSocketSubprotocol()
 	upgrader := &websocket.Upgrader{
 		ReadBufferSize:    4096,
@@ -434,10 +456,26 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 	}
 
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		admitEpoch := s.webTokenEpoch
+		expectedTok := s.webToken
+		stopping := s.stoppingLocked()
+		s.mu.Unlock()
+
+		if stopping {
+			http.Error(w, "Server shutting down", http.StatusServiceUnavailable)
+			return
+		}
+
 		if token != "" {
 			reqToken := r.URL.Query().Get("token")
 			if reqToken != token && websocketProtocolToken(r) != token {
 				slog.Warn("websocket connection rejected: invalid token", "remote", r.RemoteAddr)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if expectedTok != "" && expectedTok != token {
+				slog.Warn("websocket connection rejected: token expired during handshake", "remote", r.RemoteAddr)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -467,7 +505,7 @@ func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token 
 		sConn.RunPumps(ctx)
 
 		s.mu.Lock()
-		if s.stoppingLocked() {
+		if s.stoppingLocked() || s.webTokenEpoch != admitEpoch || (token != "" && s.webToken != token) {
 			s.mu.Unlock()
 			_ = sConn.Close()
 			return
