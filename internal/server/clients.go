@@ -131,6 +131,19 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	if s.sizeOwner == tp {
 		s.sizeOwner = nil
 	}
+	for paneID, ws := range s.waiters {
+		filtered := ws[:0]
+		for _, w := range ws {
+			if w != tp {
+				filtered = append(filtered, w)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(s.waiters, paneID)
+		} else {
+			s.waiters[paneID] = filtered
+		}
+	}
 }
 
 // dropClient removes tp from the broadcast set and closes it. It reports
