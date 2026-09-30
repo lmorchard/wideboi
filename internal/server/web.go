@@ -51,26 +51,34 @@ func WriteWebToken(socket, token string) error {
 
 // WebServerConfig contains startup settings for the session's web server.
 type WebServerConfig struct {
-	SocketPath string
-	ListenAddr string
-	Token      string
-	TLSEnabled bool
-	TLSCert    string
-	TLSKey     string
-	AssetFS    http.FileSystem
+	SocketPath        string
+	ListenAddr        string
+	Token             string
+	TLSEnabled        bool
+	TLSCert           string
+	TLSKey            string
+	AssetFS           http.FileSystem
+	ReadHeaderTimeout time.Duration
+	IdleTimeout       time.Duration
+	HandshakeTimeout  time.Duration
+	MaxConnections    int
 }
 
 type webServerManager struct {
 	mu sync.Mutex
 
-	socketPath string
-	addr       string
-	token      string
-	tlsEnabled bool
-	tlsCert    string
-	tlsKey     string
-	assetFS    http.FileSystem
-	closed     bool
+	socketPath        string
+	addr              string
+	token             string
+	tlsEnabled        bool
+	tlsCert           string
+	tlsKey            string
+	assetFS           http.FileSystem
+	closed            bool
+	readHeaderTimeout time.Duration
+	idleTimeout       time.Duration
+	handshakeTimeout  time.Duration
+	maxConnections    int
 
 	running     bool
 	boundAddr   string
@@ -82,14 +90,35 @@ type webServerManager struct {
 }
 
 func newWebServerManager(cfg WebServerConfig) *webServerManager {
+	readHeaderTimeout := cfg.ReadHeaderTimeout
+	if readHeaderTimeout <= 0 {
+		readHeaderTimeout = 5 * time.Second
+	}
+	idleTimeout := cfg.IdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = 60 * time.Second
+	}
+	handshakeTimeout := cfg.HandshakeTimeout
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = 10 * time.Second
+	}
+	maxConns := cfg.MaxConnections
+	if maxConns <= 0 {
+		maxConns = 128
+	}
+
 	return &webServerManager{
-		socketPath: cfg.SocketPath,
-		addr:       cfg.ListenAddr,
-		token:      cfg.Token,
-		tlsEnabled: cfg.TLSEnabled,
-		tlsCert:    cfg.TLSCert,
-		tlsKey:     cfg.TLSKey,
-		assetFS:    cfg.AssetFS,
+		socketPath:        cfg.SocketPath,
+		addr:              cfg.ListenAddr,
+		token:             cfg.Token,
+		tlsEnabled:        cfg.TLSEnabled,
+		tlsCert:           cfg.TLSCert,
+		tlsKey:            cfg.TLSKey,
+		assetFS:           cfg.AssetFS,
+		readHeaderTimeout: readHeaderTimeout,
+		idleTimeout:       idleTimeout,
+		handshakeTimeout:  handshakeTimeout,
+		maxConnections:    maxConns,
 	}
 }
 
@@ -284,6 +313,7 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 		}
 		l = tls.NewListener(l, tlsConfig)
 	}
+	l = transport.LimitListener(l, w.maxConnections)
 
 	mux := http.NewServeMux()
 	if s != nil {
@@ -294,7 +324,12 @@ func (w *webServerManager) Start(ctx context.Context, s *Server, req protocol.Ms
 		mux.Handle("/", http.FileServer(w.assetFS))
 	}
 
-	httpSrv := &http.Server{Handler: mux}
+	httpSrv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: w.readHeaderTimeout,
+		IdleTimeout:       w.idleTimeout,
+		MaxHeaderBytes:    1 << 20,
+	}
 
 	if w.socketPath != "" {
 		if err := WriteWebToken(w.socketPath, token); err != nil {
@@ -447,7 +482,14 @@ func websocketProtocolToken(r *http.Request) string {
 func (s *Server) ListenWebSocket(ctx context.Context, mux *http.ServeMux, token string) {
 	s.setWebToken(token)
 	versionProtocol := transport.WebSocketSubprotocol()
+	handshakeTimeout := 10 * time.Second
+	s.mu.Lock()
+	if s.webServer != nil && s.webServer.handshakeTimeout > 0 {
+		handshakeTimeout = s.webServer.handshakeTimeout
+	}
+	s.mu.Unlock()
 	upgrader := &websocket.Upgrader{
+		HandshakeTimeout:  handshakeTimeout,
 		ReadBufferSize:    4096,
 		WriteBufferSize:   4096,
 		Subprotocols:      []string{versionProtocol},

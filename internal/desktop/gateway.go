@@ -64,6 +64,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	upgrader := websocket.Upgrader{
+		HandshakeTimeout:  10 * time.Second,
 		Subprotocols:      []string{version},
 		CheckOrigin:       sameOrigin,
 		EnableCompression: true,

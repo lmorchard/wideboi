@@ -93,8 +93,14 @@ func runDesktop() error {
 		return err
 	}
 	mux.Handle("/", http.FileServer(dist))
-	d.server = &http.Server{Handler: mux}
-	go func() { _ = d.server.Serve(listener) }()
+	d.server = &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
+	}
+	limitedListener := transport.LimitListener(listener, 64)
+	go func() { _ = d.server.Serve(limitedListener) }()
 	defer d.server.Close()
 
 	menu := application.NewMenu()

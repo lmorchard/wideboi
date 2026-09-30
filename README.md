@@ -116,7 +116,7 @@ Open the HTTPS link printed on startup (which contains the security token) in yo
 https://127.0.0.1:8080/#token=<generated-token>
 ```
 
-By default, wideboi generates an in-memory ephemeral self-signed TLS certificate. You can provide custom certificates with `--tls-cert <path> --tls-key <path>`, or disable TLS with `--disable-tls` if running behind a reverse proxy.
+By default, wideboi generates an in-memory ephemeral self-signed TLS certificate. You can provide custom certificates with `--tls-cert <path> --tls-key <path>`, or disable TLS with `--disable-tls` if running behind a reverse proxy. For direct exposure, wideboi bounds HTTP header, idle, and handshake timeouts, plus concurrent connections (128). For remote access over untrusted networks, running wideboi on loopback behind an HTTPS reverse proxy (such as Caddy or Nginx) is recommended.
 
 You can also start, stop, or query the web server on a running session at any time with `wideboi web start`, `wideboi web stop`, and `wideboi web status`.
 
