@@ -73,6 +73,7 @@ func TestPaneUpdateSurvivesEveryColorKind(t *testing.T) {
 			msg := protocol.MsgPaneUpdate{
 				PaneID: 7, Cols: 1, Rows: 1,
 				Lines:         []protocol.LineData{{{Content: "x", Width: 1, Style: style}}},
+				WrappedLines:  []bool{false},
 				CursorX:       0,
 				CursorY:       0,
 				CursorVisible: true,
@@ -173,6 +174,7 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 			Lines: []protocol.LineData{{
 				{Content: "世", Width: 2, Style: protocol.EncodeStyle(uv.Style{Fg: ansi.BasicColor(4)})},
 			}},
+			WrappedLines: []bool{false},
 		},
 		protocol.MsgPanePatch{PaneID: 1, Cols: 2, Rows: 2, BaseGeneration: 3, Generation: 4,
 			ChangedRows: []protocol.PaneRow{{Y: 0, Cells: protocol.LineData{{Content: "世", Width: 2}}}}},

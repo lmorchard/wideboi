@@ -770,6 +770,26 @@ func TestDragAcrossSoftWrappedRowJoinsLines(t *testing.T) {
 	}
 }
 
+func TestDragUsesWrappedLinesMetadata(t *testing.T) {
+	cli, _ := newMouseClient(t)
+	update := paneLines(1, 40, 22,
+		"FIRST LINE",
+		"SECOND LINE")
+	update.WrappedLines = make([]bool, 22)
+	update.WrappedLines[0] = true // Row 0 wraps into Row 1 even though row 0 isn't 40 chars
+	cli.HandleServerMsg(update)
+
+	scr := newFakeHostScreen(100, 24)
+	cli.Draw(scr)
+	d := placementFor(cli, 1).Dst
+
+	got := drag(cli, image.Pt(d.Min.X, d.Min.Y), image.Pt(d.Min.X+5, d.Min.Y+1))
+	want := "FIRST LINESECOND"
+	if got != want {
+		t.Errorf("copied %q, want %q", got, want)
+	}
+}
+
 func TestClickOnStatusBarBadgeFocuses(t *testing.T) {
 	cli, ch := newMouseClient(t)
 	_ = ch

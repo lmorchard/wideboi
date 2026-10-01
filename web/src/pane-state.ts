@@ -83,7 +83,7 @@ export class PaneStore {
         return false;
       }
       seen.add(row.y);
-      lines[row.y] = create(LineDataSchema, { cells: row.cells });
+      lines[row.y] = create(LineDataSchema, { cells: row.cells, wrapped: row.wrapped });
     }
     if (lines.some(line => line === undefined || line.cells.length !== base.cols)) {
       this.close(patch.paneId);
@@ -123,7 +123,18 @@ export function selectionText(pane: MsgPaneUpdate | undefined, start: CellPoint,
     }
     rows.push(text.trimEnd());
   }
-  return rows.join('\n');
+  let result = '';
+  for (let i = 0; i < rows.length; i++) {
+    result += rows[i];
+    if (i < rows.length - 1) {
+      const lineY = a.y + i;
+      const wrapped = pane.lines[lineY]?.wrapped ?? false;
+      if (!wrapped) {
+        result += '\n';
+      }
+    }
+  }
+  return result;
 }
 
 export interface DetectedUrl {

@@ -70,6 +70,7 @@ message CellData {
 
 message LineData {
   repeated CellData cells = 1;
+  bool wrapped = 2;
 }
 
 // Generations arrive in the browser as bigint (protobuf-es ignores
@@ -95,6 +96,7 @@ message MsgPaneUpdate {
 message PaneRow {
   int32 y = 1;
   repeated CellData cells = 2;
+  bool wrapped = 3;
 }
 
 // MsgPanePatch changes a pane relative to an exact client baseline. Its

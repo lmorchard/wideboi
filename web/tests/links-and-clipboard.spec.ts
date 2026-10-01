@@ -288,3 +288,62 @@ test('rejects unsafe javascript: and data: URLs in OSC 8 hyperlinks', async ({ p
   await expect(canvas).not.toHaveCSS('cursor', 'pointer');
   expect(await canvas.getAttribute('title')).toBe('');
 });
+
+test('soft-wrapped rows copy without intermediate newline', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await installMockWebSocket(page);
+  await page.setViewportSize({ width: 700, height: 400 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({
+      case: 'layoutSnapshot',
+      value: { columns: [{ paneId: 1, width: 80, height: 24 }] },
+    }));
+
+    const textRow22 = 'Line 1 long text wrapping'.split('').map(c => ({ content: c, width: 1 }));
+    const textRow23 = 'continuation text here'.split('').map(c => ({ content: c, width: 1 }));
+    const emptyRow = () => ({ cells: Array.from({ length: 80 }, () => ({ content: ' ', width: 1 })) });
+
+    const lines = Array.from({ length: 22 }, emptyRow);
+    lines.push({ cells: textRow22, wrapped: true });
+    lines.push({ cells: textRow23, wrapped: false });
+
+    window.testSockets[0].message(serverBytes({
+      case: 'paneUpdate',
+      value: {
+        paneId: 1, cols: 80, rows: 24, generation: 1n,
+        scrollOffset: 0, scrollbackLen: 0, lines,
+      },
+    }));
+  });
+
+  const coords = await page.evaluate(() => {
+    const pane = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane');
+    const rect = pane.canvas.getBoundingClientRect();
+    const cellW = pane.cellWidth * pane.zoom;
+    const cellH = 16.8 * pane.zoom;
+    return {
+      startX: rect.left + 0.5 * cellW,
+      startY: rect.top + 22 * cellH + cellH / 2,
+      endX: rect.left + 22.5 * cellW,
+      endY: rect.top + 23 * cellH + cellH / 2,
+    };
+  });
+
+  // Drag select from row 22 start to row 23 end
+  await page.mouse.move(coords.startX, coords.startY);
+  await page.mouse.down();
+  await page.mouse.move(coords.endX, coords.endY);
+  await page.mouse.up();
+
+  const selected = await page.evaluate(() => {
+    const pane = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane');
+    return pane.selectedText();
+  });
+
+  expect(selected).toBe('Line 1 long text wrappingcontinuation text here');
+});

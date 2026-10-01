@@ -69,6 +69,19 @@ describe('pane mirrors', () => {
     expect(selectionText(pane, { x: 0, y: 0 }, { x: 2, y: 0 })).toBe('界B');
   });
 
+  it('omits newlines between soft-wrapped rows during selectionText', () => {
+    const pane = create(MsgPaneUpdateSchema, {
+      paneId: 1, cols: 20, rows: 3,
+      lines: [
+        { cells: 'Row 1 wrapped'.split('').map(cell), wrapped: true },
+        { cells: 'continuation row'.split('').map(cell), wrapped: false },
+        { cells: 'hard newline row'.split('').map(cell), wrapped: false },
+      ],
+    });
+    const text = selectionText(pane, { x: 0, y: 0 }, { x: 15, y: 2 });
+    expect(text).toBe('Row 1 wrappedcontinuation row\nhard newline row');
+  });
+
   describe('findUrlAt', () => {
     it('detects URL at clicked point', () => {
       const text = 'Check https://example.com/docs for info';
