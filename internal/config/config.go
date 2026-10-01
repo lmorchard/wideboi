@@ -123,6 +123,7 @@ type ConfigFlags struct {
 	TLSCert               string
 	TLSKey                string
 	TrustProject          bool
+	AllowNested           bool
 	PromptTrust           func(path string, hasSensitive bool) bool
 }
 
@@ -322,7 +323,7 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 
 	// Environment variable for project trust
 	if envTrust := getenv("WIDEBOI_TRUST_PROJECT"); envTrust != "" {
-		if v, err := parseBoolEnv("WIDEBOI_TRUST_PROJECT", envTrust); err == nil && v {
+		if v, err := ParseBoolEnv("WIDEBOI_TRUST_PROJECT", envTrust); err == nil && v {
 			flags.TrustProject = true
 		}
 	}
@@ -520,14 +521,14 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		cfg.LogLevelName = envLevel
 	}
 	if envAutoCleanup := getenv("WIDEBOI_AUTO_CLEANUP"); envAutoCleanup != "" {
-		v, err := parseBoolEnv("WIDEBOI_AUTO_CLEANUP", envAutoCleanup)
+		v, err := ParseBoolEnv("WIDEBOI_AUTO_CLEANUP", envAutoCleanup)
 		if err != nil {
 			return Config{}, nil, err
 		}
 		cfg.AutoCleanup = &v
 	}
 	if envKeep := getenv("WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS"); envKeep != "" {
-		v, err := parseBoolEnv("WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS", envKeep)
+		v, err := ParseBoolEnv("WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS", envKeep)
 		if err != nil {
 			return Config{}, nil, err
 		}
@@ -538,14 +539,14 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if envTLS != "" || envDisableTLS != "" {
 		var tlsVal *bool
 		if envTLS != "" {
-			v, err := parseBoolEnv("WIDEBOI_TLS", envTLS)
+			v, err := ParseBoolEnv("WIDEBOI_TLS", envTLS)
 			if err != nil {
 				return Config{}, nil, err
 			}
 			tlsVal = &v
 		}
 		if envDisableTLS != "" {
-			v, err := parseBoolEnv("WIDEBOI_DISABLE_TLS", envDisableTLS)
+			v, err := ParseBoolEnv("WIDEBOI_DISABLE_TLS", envDisableTLS)
 			if err != nil {
 				return Config{}, nil, err
 			}
@@ -785,8 +786,8 @@ func DefaultMacros() []protocol.Macro {
 	}
 }
 
-// parseBoolEnv parses a boolean environment variable value.
-func parseBoolEnv(name, val string) (bool, error) {
+// ParseBoolEnv parses a boolean environment variable value.
+func ParseBoolEnv(name, val string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(val)) {
 	case "1", "true", "yes", "on":
 		return true, nil

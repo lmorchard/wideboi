@@ -88,6 +88,7 @@ func newFlagSet(opts *cliOptions) *flag.FlagSet {
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
 	fs.BoolVar(&opts.flags.EndSessionOnOwnerLoss, "end-session-on-owner-loss", false, "end the session when its owning terminal hangs up or the owner dies without detaching")
+	fs.BoolVar(&opts.flags.AllowNested, "allow-nested", false, "allow running nested wideboi sessions inside an existing session")
 	fs.BoolVar(&opts.flags.TrustProject, "trust-project", false, "trust project configuration (.wideboi.toml) to execute commands and security settings")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
@@ -212,6 +213,7 @@ Flags:
       --end-session-on-owner-loss
                          End the session when the terminal that started it
                          hangs up (default: keep it running, detached)
+      --allow-nested     Allow running nested wideboi sessions inside an existing session
   -v, --version          Print version and exit
   -h, --help             Show this help text and exit
 
@@ -219,6 +221,7 @@ Environment Variables:
   WIDEBOI_LAYOUT         Starting layout for this client ("cards" or "scroll")
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SESSION        Session name override
+  WIDEBOI_ALLOW_NESTED   =1 to allow running nested wideboi sessions inside an existing session
   WIDEBOI_WEBSOCKET      Address for WebSocket server (e.g. "127.0.0.1:8080")
   WIDEBOI_TLS            Enable TLS/HTTPS for web server (default true)
   WIDEBOI_DISABLE_TLS    Disable TLS/HTTPS for web server
@@ -243,6 +246,40 @@ Environment Variables:
 `)
 }
 
+func isNestedSession(getenv func(string) string) bool {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	return getenv("WIDEBOI") != "" ||
+		getenv("LC_WIDEBOI") != "" ||
+		getenv("TERM_PROGRAM") == "wideboi" ||
+		getenv("WIDEBOI_PANE_ID") != ""
+}
+
+func isAllowNested(getenv func(string) string) bool {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	v := getenv("WIDEBOI_ALLOW_NESTED")
+	if v == "" {
+		return false
+	}
+	b, err := config.ParseBoolEnv("WIDEBOI_ALLOW_NESTED", v)
+	return err == nil && b
+}
+
+func checkNestedSession(opts cliOptions, getenv func(string) string) error {
+	if opts.subcommand == "" || opts.subcommand == "attach" || (opts.subcommand == "server" && opts.ownerFD == -1) || opts.subcommand == "desktop" {
+		if opts.flags.AllowNested || isAllowNested(getenv) {
+			return nil
+		}
+		if isNestedSession(getenv) {
+			return errors.New("already running inside a wideboi session (refusing to nest sessions; use --allow-nested or unset WIDEBOI to force)")
+		}
+	}
+	return nil
+}
+
 func main() {
 	opts, err := parseCLI(os.Args[1:])
 	if err != nil {
@@ -255,6 +292,9 @@ func main() {
 	if opts.showHelp {
 		printHelp(os.Stdout)
 		return
+	}
+	if err := checkNestedSession(opts, os.Getenv); err != nil {
+		fatal(err)
 	}
 	if opts.subcommand == "desktop" || opts.subcommand == "" && desktopBuild {
 		fatal(runDesktop())

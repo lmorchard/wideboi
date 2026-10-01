@@ -131,6 +131,16 @@ Session naming rules:
 - To specify an explicit socket file path, pass `-s <path>`. You cannot combine `-L` and `-s`.
 - The `ls` command lists sessions stored in the default runtime directory.
 
+### Nested Sessions (Wideboi-in-Wideboi)
+
+By default, wideboi detects attempts to run an interactive wideboi session or server inside an existing wideboi session (including over SSH sessions spawned from a wideboi pane) and refuses to run to avoid control key interception conflicts.
+
+To explicitly allow running a nested session, pass `--allow-nested` or set `WIDEBOI_ALLOW_NESTED=1`:
+
+```bash
+wideboi --allow-nested
+```
+
 ---
 
 ## 4. Terminal Client and Key Bindings
@@ -575,6 +585,7 @@ You can remap control-mode action keys in the `[keys]` table:
 | `WIDEBOI_LOG_LEVEL` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
 | `WIDEBOI_AUTO_CLEANUP` | Remove sockets and logs on clean exit (`1` or `0`) |
 | `WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS` | Keep the session running when its terminal hangs up (`1` or `0`, default `1`) |
+| `WIDEBOI_ALLOW_NESTED` | Allow running nested wideboi sessions inside an existing session (`1` or `0`) |
 | `SHELL` | Default fallback shell path |
 
 ### Logging and Cleanup

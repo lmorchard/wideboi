@@ -25,7 +25,7 @@ func TestSuiteIsIsolatedFromRealSessions(t *testing.T) {
 	if got := config.DefaultSocketPath(); !strings.HasPrefix(got, dir) {
 		t.Errorf("DefaultSocketPath = %q, want it under the private %q", got, dir)
 	}
-	for _, v := range []string{"WIDEBOI_SOCK", "WIDEBOI_SESSION"} {
+	for _, v := range []string{"WIDEBOI_SOCK", "WIDEBOI_SESSION", "WIDEBOI", "LC_WIDEBOI", "WIDEBOI_PANE_ID"} {
 		if os.Getenv(v) != "" {
 			t.Errorf("%s is set; a test could reach the session it names", v)
 		}

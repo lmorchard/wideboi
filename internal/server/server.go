@@ -381,8 +381,12 @@ func (s *Server) SetSession(session, socket string) {
 	s.socket = socket
 }
 
-func (s *Server) paneEnvLocked() []string {
+func (s *Server) paneEnvLocked(paneID int) []string {
 	var env []string
+	env = append(env, "WIDEBOI=1", "LC_WIDEBOI=1", "TERM_PROGRAM=wideboi")
+	if paneID > 0 {
+		env = append(env, fmt.Sprintf("WIDEBOI_PANE_ID=%d", paneID))
+	}
 	if s.socket != "" {
 		env = append(env, "WIDEBOI_SOCK="+s.socket)
 	}
@@ -520,7 +524,7 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	if spec.Dir != "" {
 		cwd = spec.Dir
 	}
-	p, err := NewPane(id, argv, paneCols, paneRows, cwd, s.paneEnvLocked()...)
+	p, err := NewPane(id, argv, paneCols, paneRows, cwd, s.paneEnvLocked(id)...)
 	if err != nil {
 		return nil, err
 	}
