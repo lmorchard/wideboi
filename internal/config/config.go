@@ -123,6 +123,7 @@ type ConfigFlags struct {
 	TLSCert               string
 	TLSKey                string
 	TrustProject          bool
+	PromptTrust           func(path string, hasSensitive bool) bool
 }
 
 // DefaultConfigPath returns the standard XDG path for the wideboi config file.
@@ -455,6 +456,27 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if !trusted {
 			if data, err := os.ReadFile(projectFile); err == nil {
 				trusted = IsProjectTrusted(projectFile, data, getenv)
+				if !trusted && flags.PromptTrust != nil {
+					var testCfg Config
+					if err := toml.Unmarshal(data, &testCfg); err == nil {
+						hasSensitive := testCfg.Startup != nil ||
+							testCfg.Shell != "" ||
+							testCfg.Session != "" ||
+							testCfg.Socket != "" ||
+							testCfg.Websocket != "" ||
+							testCfg.WebsocketToken != "" ||
+							testCfg.TLS != nil ||
+							testCfg.TLSCert != "" ||
+							testCfg.TLSKey != "" ||
+							len(testCfg.Macros) > 0
+
+						if hasSensitive && flags.PromptTrust(projectFile, true) {
+							if _, _, err := TrustProject(projectFile, getenv); err == nil {
+								trusted = true
+							}
+						}
+					}
+				}
 			}
 		}
 		cfg.ProjectTrusted = trusted

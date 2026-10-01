@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -18,6 +19,7 @@ import (
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/term"
 	"github.com/lmorchard/wideboi/internal/client"
 	"github.com/lmorchard/wideboi/internal/commands"
 	"github.com/lmorchard/wideboi/internal/config"
@@ -259,6 +261,10 @@ func main() {
 		return
 	}
 
+	if opts.flags.PromptTrust == nil && (opts.subcommand == "" || opts.subcommand == "server" || opts.subcommand == "desktop") {
+		opts.flags.PromptTrust = defaultPromptTrust(os.Stdin, os.Stderr)
+	}
+
 	cfg, bindings, err := config.Load(opts.flags, os.Getenv)
 	if err != nil {
 		fatal(err)
@@ -327,6 +333,26 @@ func main() {
 		fmt.Printf("untrusted %s\n", absPath)
 	default:
 		fatal(run(cfg, bindings))
+	}
+}
+
+func defaultPromptTrust(stdin io.Reader, stderr io.Writer) func(string, bool) bool {
+	return func(path string, hasSensitive bool) bool {
+		if !hasSensitive {
+			return false
+		}
+		if file, isFile := stdin.(*os.File); isFile && !term.IsTerminal(file.Fd()) {
+			return false
+		}
+		fmt.Fprintf(stderr, "Project configuration %q contains sensitive settings (startup commands, shell, or network listeners).\n", path)
+		fmt.Fprintf(stderr, "Trust and execute this project configuration? [y/N]: ")
+		reader := bufio.NewReader(stdin)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return false
+		}
+		ans := strings.TrimSpace(strings.ToLower(line))
+		return ans == "y" || ans == "yes"
 	}
 }
 
