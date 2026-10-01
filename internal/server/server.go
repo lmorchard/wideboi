@@ -117,6 +117,7 @@ type Server struct {
 	// Entries are made on first use, so a Server literal works too.
 	// departed sums attached clients that have left, and started is
 	// when NewServer ran, for uptime. All under s.mu.
+	queryTheme   QueryTheme
 	traffic      map[transport.Transport]*clientTraffic
 	nextClientID int
 	departed     protocol.ClientTraffic
@@ -363,6 +364,7 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 		remoteTransports:  make(map[transport.Transport]bool),
 		stopCh:            make(chan struct{}),
 		started:           time.Now(),
+		queryTheme:        defaultQueryTheme(),
 	}
 	srv.saveMacrosMu.Lock()
 	srv.ensureSaveMacrosWorkerLocked()
@@ -379,6 +381,16 @@ func (s *Server) SetSession(session, socket string) {
 	defer s.mu.Unlock()
 	s.session = session
 	s.socket = socket
+}
+
+// SetQueryTheme configures synthesized colors for environment queries across all panes.
+func (s *Server) SetQueryTheme(t QueryTheme) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queryTheme = t
+	for _, p := range s.panes {
+		p.SetQueryTheme(t)
+	}
 }
 
 func (s *Server) paneEnvLocked(paneID int) []string {
@@ -530,6 +542,7 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	}
 	p.closeGrace = s.closeGrace
 	p.keep = spec.Keep
+	p.SetQueryTheme(s.queryTheme)
 	p.SetOnBell(func() {
 		s.onPaneBell(id)
 	})
