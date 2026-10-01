@@ -130,13 +130,15 @@ type MsgPaneUpdate struct {
 	ScrollbackLen int
 	UnreadOutput  bool
 	Links         []string
+	WrappedLines  []bool
 }
 
 // PaneRow replaces one complete row. Complete rows keep wide glyph
 // continuation cells and all style fields together.
 type PaneRow struct {
-	Y     int
-	Cells LineData
+	Y       int
+	Cells   LineData
+	Wrapped bool
 }
 
 // MsgPanePatch changes a pane relative to an exact client baseline.

@@ -526,6 +526,29 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 		p.links = nil
 	}
 
+	wrappedLines := make([]bool, rows)
+	for y := 0; y < rows-1; y++ {
+		lastCell := buf.CellAt(cols-1, y)
+		isOccupied := lastCell != nil && lastCell.Content != "" && lastCell.Content != " "
+		if !isOccupied && cols >= 2 {
+			prevCell := buf.CellAt(cols-2, y)
+			if prevCell != nil && prevCell.Width > 1 {
+				isOccupied = true
+			}
+		}
+		if isOccupied {
+			nextHasContent := false
+			for nx := 0; nx < cols; nx++ {
+				nc := buf.CellAt(nx, y+1)
+				if nc != nil && nc.Content != "" && nc.Content != " " {
+					nextHasContent = true
+					break
+				}
+			}
+			wrappedLines[y] = nextHasContent
+		}
+	}
+
 	cp := p.CursorPosition()
 	cursorVisible := p.CursorVisible()
 	if offset > 0 {
@@ -544,6 +567,7 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 		ScrollbackLen: p.ScrollbackLen(),
 		UnreadOutput:  unreadOutput,
 		Links:         append([]string(nil), p.links...),
+		WrappedLines:  wrappedLines,
 	}, true
 }
 

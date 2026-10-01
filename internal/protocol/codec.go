@@ -194,8 +194,12 @@ func MarshalServer(msg any) ([]byte, error) {
 			UnreadOutput:  m.UnreadOutput,
 			Links:         sanitizeLinks(m.Links),
 		}
-		for _, line := range m.Lines {
-			update.Lines = append(update.Lines, &wirepb.LineData{Cells: encodeLine(line)})
+		for i, line := range m.Lines {
+			wrapped := false
+			if i < len(m.WrappedLines) {
+				wrapped = m.WrappedLines[i]
+			}
+			update.Lines = append(update.Lines, &wirepb.LineData{Cells: encodeLine(line), Wrapped: wrapped})
 		}
 		env.Msg = &wirepb.ServerMessage_PaneUpdate{PaneUpdate: update}
 	case MsgPanePatch:
@@ -216,7 +220,11 @@ func MarshalServer(msg any) ([]byte, error) {
 			Links:          sanitizeLinks(m.Links),
 		}
 		for _, row := range m.ChangedRows {
-			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{Y: int32(row.Y), Cells: encodeLine(row.Cells)})
+			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{
+				Y:       int32(row.Y),
+				Cells:   encodeLine(row.Cells),
+				Wrapped: row.Wrapped,
+			})
 		}
 		env.Msg = &wirepb.ServerMessage_PanePatch{PanePatch: patch}
 	case MsgPaneClosed:
@@ -335,8 +343,11 @@ func UnmarshalServer(data []byte) (any, error) {
 		if len(src.Links) > 0 {
 			update.Links = src.Links
 		}
-		for _, row := range src.Lines {
+		update.Lines = make([]LineData, 0, len(src.Lines))
+		update.WrappedLines = make([]bool, len(src.Lines))
+		for i, row := range src.Lines {
 			update.Lines = append(update.Lines, decodeLine(row.Cells))
+			update.WrappedLines[i] = row.Wrapped
 		}
 		return update, nil
 	case *wirepb.ServerMessage_PanePatch:
@@ -360,7 +371,11 @@ func UnmarshalServer(data []byte) (any, error) {
 			patch.Links = src.Links
 		}
 		for _, row := range src.ChangedRows {
-			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: int(row.Y), Cells: decodeLine(row.Cells)})
+			patch.ChangedRows = append(patch.ChangedRows, PaneRow{
+				Y:       int(row.Y),
+				Cells:   decodeLine(row.Cells),
+				Wrapped: row.Wrapped,
+			})
 		}
 		return patch, nil
 	case *wirepb.ServerMessage_PaneClosed:

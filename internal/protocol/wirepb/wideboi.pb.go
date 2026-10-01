@@ -548,6 +548,7 @@ func (x *CellData) GetLinkId() uint32 {
 type LineData struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Cells         []*CellData            `protobuf:"bytes,1,rep,name=cells,proto3" json:"cells,omitempty"`
+	Wrapped       bool                   `protobuf:"varint,2,opt,name=wrapped,proto3" json:"wrapped,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -587,6 +588,13 @@ func (x *LineData) GetCells() []*CellData {
 		return x.Cells
 	}
 	return nil
+}
+
+func (x *LineData) GetWrapped() bool {
+	if x != nil {
+		return x.Wrapped
+	}
+	return false
 }
 
 // Generations arrive in the browser as bigint (protobuf-es ignores
@@ -737,6 +745,7 @@ type PaneRow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Y             int32                  `protobuf:"varint,1,opt,name=y,proto3" json:"y,omitempty"`
 	Cells         []*CellData            `protobuf:"bytes,2,rep,name=cells,proto3" json:"cells,omitempty"`
+	Wrapped       bool                   `protobuf:"varint,3,opt,name=wrapped,proto3" json:"wrapped,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -783,6 +792,13 @@ func (x *PaneRow) GetCells() []*CellData {
 		return x.Cells
 	}
 	return nil
+}
+
+func (x *PaneRow) GetWrapped() bool {
+	if x != nil {
+		return x.Wrapped
+	}
+	return false
 }
 
 // MsgPanePatch changes a pane relative to an exact client baseline. Its
@@ -4420,9 +4436,10 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x14\n" +
 	"\x05width\x18\x02 \x01(\x05R\x05width\x121\n" +
 	"\x05style\x18\x03 \x01(\v2\x1b.wideboi.protocol.StyleDataR\x05style\x12\x17\n" +
-	"\alink_id\x18\x04 \x01(\rR\x06linkId\"<\n" +
+	"\alink_id\x18\x04 \x01(\rR\x06linkId\"V\n" +
 	"\bLineData\x120\n" +
-	"\x05cells\x18\x01 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\xad\x03\n" +
+	"\x05cells\x18\x01 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\x12\x18\n" +
+	"\awrapped\x18\x02 \x01(\bR\awrapped\"\xad\x03\n" +
 	"\rMsgPaneUpdate\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x1e\n" +
 	"\n" +
@@ -4439,10 +4456,11 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	" \x01(\x05R\fscrollOffset\x12%\n" +
 	"\x0escrollback_len\x18\v \x01(\x05R\rscrollbackLen\x12#\n" +
 	"\runread_output\x18\f \x01(\bR\funreadOutput\x12\x14\n" +
-	"\x05links\x18\r \x03(\tR\x05links\"I\n" +
+	"\x05links\x18\r \x03(\tR\x05links\"c\n" +
 	"\aPaneRow\x12\f\n" +
 	"\x01y\x18\x01 \x01(\x05R\x01y\x120\n" +
-	"\x05cells\x18\x02 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\x80\x04\n" +
+	"\x05cells\x18\x02 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\x12\x18\n" +
+	"\awrapped\x18\x03 \x01(\bR\awrapped\"\x80\x04\n" +
 	"\fMsgPanePatch\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x12\n" +
 	"\x04cols\x18\x02 \x01(\x05R\x04cols\x12\x12\n" +

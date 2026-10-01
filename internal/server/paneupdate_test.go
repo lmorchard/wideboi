@@ -763,3 +763,38 @@ func TestPaneUpdatePreservesLinkIDAcrossScroll(t *testing.T) {
 		t.Errorf("reconstructed.Links = %v, want %v", reconstructed.Links, msg2.Links)
 	}
 }
+
+func TestPaneUpdateDetectsWrappedLinesWithWideGlyphs(t *testing.T) {
+	grid := term.NewVT(10, 4)
+	t.Cleanup(func() { _ = grid.Close() })
+
+	// Row 0: 10 ascii chars -> fills cols 0..9 and wraps to Row 1
+	// Row 1: "abcdefgh" (8 chars) + wide glyph "界" (width 2, occupies cols 8 and 9) -> wraps to Row 2
+	// Row 2: "short" + newline -> does NOT fill cols 0..9, does not wrap
+	// Row 3: "bottom"
+	_, _ = grid.Write([]byte("0123456789"))
+	_, _ = grid.Write([]byte("abcdefgh界"))
+	_, _ = grid.Write([]byte("short\r\n"))
+	_, _ = grid.Write([]byte("bottom"))
+
+	pane := &Pane{id: 1, grid: grid, cols: 10, rows: 4}
+	msg, ok := pane.UpdateMessageForOffset(0, false)
+	if !ok {
+		t.Fatal("UpdateMessageForOffset failed")
+	}
+	if len(msg.WrappedLines) != 4 {
+		t.Fatalf("len(WrappedLines) = %d, want 4", len(msg.WrappedLines))
+	}
+	if !msg.WrappedLines[0] {
+		t.Errorf("row 0 should be marked wrapped")
+	}
+	if !msg.WrappedLines[1] {
+		t.Errorf("row 1 with wide glyph at margin should be marked wrapped")
+	}
+	if msg.WrappedLines[2] {
+		t.Errorf("row 2 with short line followed by newline must NOT be marked wrapped")
+	}
+	if msg.WrappedLines[3] {
+		t.Errorf("bottom row 3 must not wrap beyond bottom")
+	}
+}
