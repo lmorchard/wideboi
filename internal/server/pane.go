@@ -70,6 +70,7 @@ type Pane struct {
 
 	dead atomic.Bool
 
+	queryTheme  atomic.Pointer[QueryTheme]
 	keep        bool
 	isDashboard bool
 
@@ -168,10 +169,21 @@ func (p *Pane) Start(onExit func()) {
 			onExit()
 		}()
 		buf := make([]byte, 4096)
+		qs := newQueryScanner()
 		for {
 			n, err := p.pty.Master.Read(buf)
 			if n > 0 {
-				_, _ = p.grid.Write(buf[:n])
+				if t := p.queryTheme.Load(); t != nil {
+					qs.SetTheme(*t)
+				}
+				cols, rows := p.Size()
+				cleaned, replies := qs.process(buf[:n], cols, rows)
+				if len(replies) > 0 {
+					_, _ = p.pty.WriteBounded(replies, ptyWriteTimeout)
+				}
+				if len(cleaned) > 0 {
+					_, _ = p.grid.Write(cleaned)
+				}
 			}
 			if err != nil {
 				return
@@ -452,6 +464,11 @@ func (p *Pane) SetOnBell(fn func()) {
 	if p.grid != nil {
 		p.grid.OnBell(fn)
 	}
+}
+
+// SetQueryTheme configures synthesized colors for environment queries.
+func (p *Pane) SetQueryTheme(t QueryTheme) {
+	p.queryTheme.Store(&t)
 }
 
 // reapedExitCode is the child's exit status if it has been reaped.

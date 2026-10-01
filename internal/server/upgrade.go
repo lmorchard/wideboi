@@ -348,6 +348,7 @@ func RestoreState(s *Server) error {
 				}
 			}
 			s.panes[id] = p
+			p.SetQueryTheme(s.queryTheme)
 			p.SetOnBell(func() {
 				s.onPaneBell(id)
 			})
