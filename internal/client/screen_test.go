@@ -476,3 +476,55 @@ func TestResizeColumnDoesNotBlankOnSubsequentSnapshot(t *testing.T) {
 		t.Fatalf("pane content blanked out after snapshot:\n%s", got)
 	}
 }
+
+func TestOSC8HyperlinkPreservedInMirrorAndHostScreen(t *testing.T) {
+	ch := transport.NewInProcChannel(64)
+	cli := NewClient(ch, 100, 24, "C-b")
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+		},
+	})
+
+	line := make(protocol.LineData, 40)
+	for i := range line {
+		line[i] = protocol.CellData{Content: " ", Width: 1}
+	}
+	// "Link" at cols 2..5 with LinkID 1
+	for i, c := range "Link" {
+		line[2+i] = protocol.CellData{Content: string(c), Width: 1, LinkID: 1}
+	}
+
+	lines := make([]protocol.LineData, 22)
+	for i := range lines {
+		lines[i] = make(protocol.LineData, 40)
+		for j := range lines[i] {
+			lines[i][j] = protocol.CellData{Content: " ", Width: 1}
+		}
+	}
+	lines[0] = line
+
+	cli.HandleServerMsg(protocol.MsgPaneUpdate{
+		PaneID: 1, Cols: 40, Rows: 22, Generation: 1,
+		Lines: lines,
+		Links: []string{"https://example.com/test"},
+	})
+
+	scr := newFakeHostScreen(100, 24)
+	cli.Draw(scr)
+
+	// In pane 1, content row 0 is drawn at screen Y = 1 (after header at Y = 0)
+	cell := scr.CellAt(2, 1)
+	if cell == nil || cell.Content != "L" {
+		t.Fatalf("cell at (2, 1) = %v, want 'L'", cell)
+	}
+	if cell.Link.URL != "https://example.com/test" {
+		t.Errorf("cell.Link.URL = %q, want https://example.com/test", cell.Link.URL)
+	}
+
+	// Outside pane boundary (e.g. col 45), must NOT have link
+	outsideCell := scr.CellAt(45, 1)
+	if outsideCell != nil && outsideCell.Link.URL != "" {
+		t.Errorf("outside cell has Link.URL = %q, want empty", outsideCell.Link.URL)
+	}
+}

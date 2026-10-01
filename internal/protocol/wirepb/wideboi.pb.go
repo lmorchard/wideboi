@@ -482,6 +482,7 @@ type CellData struct {
 	Content       string                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
 	Width         int32                  `protobuf:"varint,2,opt,name=width,proto3" json:"width,omitempty"`
 	Style         *StyleData             `protobuf:"bytes,3,opt,name=style,proto3" json:"style,omitempty"`
+	LinkId        uint32                 `protobuf:"varint,4,opt,name=link_id,json=linkId,proto3" json:"link_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -535,6 +536,13 @@ func (x *CellData) GetStyle() *StyleData {
 		return x.Style
 	}
 	return nil
+}
+
+func (x *CellData) GetLinkId() uint32 {
+	if x != nil {
+		return x.LinkId
+	}
+	return 0
 }
 
 type LineData struct {
@@ -597,6 +605,7 @@ type MsgPaneUpdate struct {
 	ScrollOffset  int32                  `protobuf:"varint,10,opt,name=scroll_offset,json=scrollOffset,proto3" json:"scroll_offset,omitempty"`
 	ScrollbackLen int32                  `protobuf:"varint,11,opt,name=scrollback_len,json=scrollbackLen,proto3" json:"scrollback_len,omitempty"`
 	UnreadOutput  bool                   `protobuf:"varint,12,opt,name=unread_output,json=unreadOutput,proto3" json:"unread_output,omitempty"`
+	Links         []string               `protobuf:"bytes,13,rep,name=links,proto3" json:"links,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -715,6 +724,13 @@ func (x *MsgPaneUpdate) GetUnreadOutput() bool {
 	return false
 }
 
+func (x *MsgPaneUpdate) GetLinks() []string {
+	if x != nil {
+		return x.Links
+	}
+	return nil
+}
+
 // PaneRow replaces one complete row, style and wide-glyph continuations
 // included.
 type PaneRow struct {
@@ -787,6 +803,7 @@ type MsgPanePatch struct {
 	ScrollOffset   int32                  `protobuf:"varint,12,opt,name=scroll_offset,json=scrollOffset,proto3" json:"scroll_offset,omitempty"`
 	ScrollbackLen  int32                  `protobuf:"varint,13,opt,name=scrollback_len,json=scrollbackLen,proto3" json:"scrollback_len,omitempty"`
 	UnreadOutput   bool                   `protobuf:"varint,14,opt,name=unread_output,json=unreadOutput,proto3" json:"unread_output,omitempty"`
+	Links          []string               `protobuf:"bytes,15,rep,name=links,proto3" json:"links,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -917,6 +934,13 @@ func (x *MsgPanePatch) GetUnreadOutput() bool {
 		return x.UnreadOutput
 	}
 	return false
+}
+
+func (x *MsgPanePatch) GetLinks() []string {
+	if x != nil {
+		return x.Links
+	}
+	return nil
 }
 
 type ColumnData struct {
@@ -4391,13 +4415,14 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x02bg\x18\x02 \x01(\v2\x1b.wideboi.protocol.ColorDataR\x02bg\x12D\n" +
 	"\x0funderline_color\x18\x03 \x01(\v2\x1b.wideboi.protocol.ColorDataR\x0eunderlineColor\x12\x1c\n" +
 	"\tunderline\x18\x04 \x01(\rR\tunderline\x12\x14\n" +
-	"\x05attrs\x18\x05 \x01(\rR\x05attrs\"m\n" +
+	"\x05attrs\x18\x05 \x01(\rR\x05attrs\"\x86\x01\n" +
 	"\bCellData\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x14\n" +
 	"\x05width\x18\x02 \x01(\x05R\x05width\x121\n" +
-	"\x05style\x18\x03 \x01(\v2\x1b.wideboi.protocol.StyleDataR\x05style\"<\n" +
+	"\x05style\x18\x03 \x01(\v2\x1b.wideboi.protocol.StyleDataR\x05style\x12\x17\n" +
+	"\alink_id\x18\x04 \x01(\rR\x06linkId\"<\n" +
 	"\bLineData\x120\n" +
-	"\x05cells\x18\x01 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\x97\x03\n" +
+	"\x05cells\x18\x01 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\xad\x03\n" +
 	"\rMsgPaneUpdate\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x1e\n" +
 	"\n" +
@@ -4413,10 +4438,11 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\rscroll_offset\x18\n" +
 	" \x01(\x05R\fscrollOffset\x12%\n" +
 	"\x0escrollback_len\x18\v \x01(\x05R\rscrollbackLen\x12#\n" +
-	"\runread_output\x18\f \x01(\bR\funreadOutput\"I\n" +
+	"\runread_output\x18\f \x01(\bR\funreadOutput\x12\x14\n" +
+	"\x05links\x18\r \x03(\tR\x05links\"I\n" +
 	"\aPaneRow\x12\f\n" +
 	"\x01y\x18\x01 \x01(\x05R\x01y\x120\n" +
-	"\x05cells\x18\x02 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\xea\x03\n" +
+	"\x05cells\x18\x02 \x03(\v2\x1a.wideboi.protocol.CellDataR\x05cells\"\x80\x04\n" +
 	"\fMsgPanePatch\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x12\n" +
 	"\x04cols\x18\x02 \x01(\x05R\x04cols\x12\x12\n" +
@@ -4435,7 +4461,8 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"shift_rows\x18\v \x01(\x05R\tshiftRows\x12#\n" +
 	"\rscroll_offset\x18\f \x01(\x05R\fscrollOffset\x12%\n" +
 	"\x0escrollback_len\x18\r \x01(\x05R\rscrollbackLen\x12#\n" +
-	"\runread_output\x18\x0e \x01(\bR\funreadOutput\"S\n" +
+	"\runread_output\x18\x0e \x01(\bR\funreadOutput\x12\x14\n" +
+	"\x05links\x18\x0f \x03(\tR\x05links\"S\n" +
 	"\n" +
 	"ColumnData\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x14\n" +

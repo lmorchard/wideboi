@@ -65,6 +65,7 @@ message CellData {
   string content = 1;
   int32 width = 2;
   StyleData style = 3;
+  uint32 link_id = 4;
 }
 
 message LineData {
@@ -86,6 +87,7 @@ message MsgPaneUpdate {
   int32 scroll_offset = 10;
   int32 scrollback_len = 11;
   bool unread_output = 12;
+  repeated string links = 13;
 }
 
 // PaneRow replaces one complete row, style and wide-glyph continuations
@@ -112,6 +114,7 @@ message MsgPanePatch {
   int32 scroll_offset = 12;
   int32 scrollback_len = 13;
   bool unread_output = 14;
+  repeated string links = 15;
 }
 
 message ColumnData {

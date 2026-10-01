@@ -96,6 +96,7 @@ export class PaneStore {
       cursorVisible: patch.cursorVisible, mouseTracking: patch.mouseTracking,
       scrollOffset: patch.scrollOffset, scrollbackLen: patch.scrollbackLen,
       unreadOutput: patch.unreadOutput,
+      links: patch.links ?? [],
     });
     return true;
   }
@@ -131,6 +132,15 @@ export interface DetectedUrl {
   end: CellPoint;
 }
 
+function isSafeUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return ['http:', 'https:', 'mailto:', 'ssh:', 'git:', 'gemini:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
 function cleanUrl(raw: string): string {
   let url = raw;
   while (url.length > 0) {
@@ -155,6 +165,30 @@ function cleanUrl(raw: string): string {
 
 export function findUrlAt(pane: MsgPaneUpdate | undefined, point: CellPoint): DetectedUrl | undefined {
   if (!pane || point.y < 0 || point.y >= pane.lines.length) return undefined;
+
+  // 1. Explicit OSC 8 hyperlink on cell
+  const targetCell = pane.lines[point.y]?.cells?.[point.x];
+  if (targetCell && targetCell.linkId > 0 && pane.links && pane.links.length >= targetCell.linkId) {
+    const linkId = targetCell.linkId;
+    const url = pane.links[linkId - 1];
+    if (isSafeUrl(url)) {
+      let startX = point.x;
+      while (startX > 0 && pane.lines[point.y]?.cells?.[startX - 1]?.linkId === linkId) {
+        startX--;
+      }
+      let endX = point.x;
+      while (endX < pane.cols - 1 && pane.lines[point.y]?.cells?.[endX + 1]?.linkId === linkId) {
+        endX++;
+      }
+      return {
+        url,
+        start: { x: startX, y: point.y },
+        end: { x: endX, y: point.y },
+      };
+    }
+  }
+
+  // 2. Plaintext URL autolinking fallback
 
   let startY = point.y;
   while (startY > 0) {

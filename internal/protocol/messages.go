@@ -103,6 +103,7 @@ type CellData struct {
 	Content string
 	Width   int
 	Style   StyleData
+	LinkID  uint32
 }
 
 // LineData represents a horizontal row indexed by terminal column. A wide
@@ -128,6 +129,7 @@ type MsgPaneUpdate struct {
 	ScrollOffset  int
 	ScrollbackLen int
 	UnreadOutput  bool
+	Links         []string
 }
 
 // PaneRow replaces one complete row. Complete rows keep wide glyph
@@ -155,6 +157,7 @@ type MsgPanePatch struct {
 	ScrollOffset  int
 	ScrollbackLen int
 	UnreadOutput  bool
+	Links         []string
 }
 
 // MsgPaneResync asks for a full snapshot after a missing or stale patch.
