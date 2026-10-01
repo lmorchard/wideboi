@@ -62,14 +62,40 @@ func paletteColor(index int) string {
 	return "0000/0000/0000"
 }
 
+// QueryTheme configures synthesized colors for environment queries.
+type QueryTheme struct {
+	FgColor string
+	BgColor string
+	IsDark  bool
+}
+
+func defaultQueryTheme() QueryTheme {
+	return QueryTheme{
+		FgColor: defaultFgColor,
+		BgColor: defaultBgColor,
+		IsDark:  true,
+	}
+}
+
 // queryScanner tracks state across byte chunks to detect terminal queries
 // and synthesize responses.
 type queryScanner struct {
-	buf []byte
+	buf   []byte
+	theme QueryTheme
 }
 
 func newQueryScanner() *queryScanner {
-	return &queryScanner{}
+	return &queryScanner{theme: defaultQueryTheme()}
+}
+
+func (qs *queryScanner) SetTheme(t QueryTheme) {
+	if t.FgColor == "" {
+		t.FgColor = defaultFgColor
+	}
+	if t.BgColor == "" {
+		t.BgColor = defaultBgColor
+	}
+	qs.theme = t
 }
 
 // process scans chunk for terminal queries, returns:
@@ -95,7 +121,7 @@ func (qs *queryScanner) process(chunk []byte, cols, rows int) (cleaned []byte, r
 		}
 
 		// Potential escape sequence starting at index i
-		consumed, reply, partial := matchQuery(data[i:], cols, rows)
+		consumed, reply, partial := matchQuery(data[i:], cols, rows, qs.theme)
 		if partial {
 			// Sequence is in-flight; keep from i to end in qs.buf
 			qs.buf = append([]byte(nil), data[i:]...)
@@ -120,7 +146,7 @@ func (qs *queryScanner) process(chunk []byte, cols, rows int) (cleaned []byte, r
 
 // matchQuery inspects a slice starting with ESC (0x1b).
 // Returns (consumedLength, replyBytes, isPartial).
-func matchQuery(b []byte, cols, rows int) (int, []byte, bool) {
+func matchQuery(b []byte, cols, rows int, theme QueryTheme) (int, []byte, bool) {
 	if len(b) < 2 {
 		return 0, nil, true
 	}
@@ -144,9 +170,13 @@ func matchQuery(b []byte, cols, rows int) (int, []byte, bool) {
 			reply := []byte(fmt.Sprintf("\x1b[8;%d;%dt", max(rows, 1), max(cols, 1)))
 			return len("\x1b[18t"), reply, false
 		}
-		// CSI ? 996 n -> light/dark mode query (1=dark, 2=light)
+		// CSI ? 996 n -> light/dark mode query (responded with DSR 997: 1=dark, 2=light)
 		if bytes.HasPrefix(b, []byte("\x1b[?996n")) {
-			reply := []byte("\x1b[?996;1n")
+			mode := 1
+			if !theme.IsDark {
+				mode = 2
+			}
+			reply := []byte(fmt.Sprintf("\x1b[?997;%dn", mode))
 			return len("\x1b[?996n"), reply, false
 		}
 
@@ -202,12 +232,20 @@ func matchQuery(b []byte, cols, rows int) (int, []byte, bool) {
 
 		// OSC 10;? -> query foreground
 		if payload == "10;?" {
-			reply := []byte(fmt.Sprintf("\x1b]10;rgb:%s%s", defaultFgColor, termSeq))
+			fg := theme.FgColor
+			if fg == "" {
+				fg = defaultFgColor
+			}
+			reply := []byte(fmt.Sprintf("\x1b]10;rgb:%s%s", fg, termSeq))
 			return totalLen, reply, false
 		}
 		// OSC 11;? -> query background
 		if payload == "11;?" {
-			reply := []byte(fmt.Sprintf("\x1b]11;rgb:%s%s", defaultBgColor, termSeq))
+			bg := theme.BgColor
+			if bg == "" {
+				bg = defaultBgColor
+			}
+			reply := []byte(fmt.Sprintf("\x1b]11;rgb:%s%s", bg, termSeq))
 			return totalLen, reply, false
 		}
 		// OSC 4;index;? -> query palette color

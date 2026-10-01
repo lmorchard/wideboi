@@ -143,6 +143,15 @@ export interface DetectedUrl {
   end: CellPoint;
 }
 
+function isSafeUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return ['http:', 'https:', 'mailto:', 'ssh:', 'git:', 'gemini:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
 function cleanUrl(raw: string): string {
   let url = raw;
   while (url.length > 0) {
@@ -173,19 +182,21 @@ export function findUrlAt(pane: MsgPaneUpdate | undefined, point: CellPoint): De
   if (targetCell && targetCell.linkId > 0 && pane.links && pane.links.length >= targetCell.linkId) {
     const linkId = targetCell.linkId;
     const url = pane.links[linkId - 1];
-    let startX = point.x;
-    while (startX > 0 && pane.lines[point.y]?.cells?.[startX - 1]?.linkId === linkId) {
-      startX--;
+    if (isSafeUrl(url)) {
+      let startX = point.x;
+      while (startX > 0 && pane.lines[point.y]?.cells?.[startX - 1]?.linkId === linkId) {
+        startX--;
+      }
+      let endX = point.x;
+      while (endX < pane.cols - 1 && pane.lines[point.y]?.cells?.[endX + 1]?.linkId === linkId) {
+        endX++;
+      }
+      return {
+        url,
+        start: { x: startX, y: point.y },
+        end: { x: endX, y: point.y },
+      };
     }
-    let endX = point.x;
-    while (endX < pane.cols - 1 && pane.lines[point.y]?.cells?.[endX + 1]?.linkId === linkId) {
-      endX++;
-    }
-    return {
-      url,
-      start: { x: startX, y: point.y },
-      end: { x: endX, y: point.y },
-    };
   }
 
   // 2. Plaintext URL autolinking fallback

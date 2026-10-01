@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +42,9 @@ func rpcOn[Resp any](ctx context.Context, cc *transport.ClientSocketConn, req tr
 func connectOrSpawn(cfg config.Config, serverFlags []string) (conn net.Conn, spawned bool, err error) {
 	if conn, err := net.Dial("unix", cfg.Socket); err == nil {
 		return conn, false, handshakeServer(conn, cfg.Socket)
+	}
+	if isNestedSession(os.Getenv) && !isAllowNested(os.Getenv) {
+		return nil, false, errors.New("already running inside a wideboi session (refusing to spawn a nested session; use --allow-nested or WIDEBOI_ALLOW_NESTED=1 to force)")
 	}
 	conn, exited, err := spawnServer(cfg.Socket, serverFlags)
 	if err != nil {

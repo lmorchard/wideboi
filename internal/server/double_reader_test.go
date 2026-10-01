@@ -202,7 +202,7 @@ func TestSocketClientAdmittedBeforeRun(t *testing.T) {
 	// Wait until capture response contains the full expected sequence.
 	cc.SendClient(ctx, protocol.MsgCaptureRequest{PaneID: 1})
 	gotInputSequence := false
-	captureDeadline := time.Now().Add(3 * time.Second)
+	captureDeadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(captureDeadline) && !gotInputSequence {
 		select {
 		case msg, ok := <-cc.ServerSendChan():

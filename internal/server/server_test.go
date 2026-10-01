@@ -519,17 +519,24 @@ func TestServerSpawnsPanesWithWideboiEnvironment(t *testing.T) {
 	for {
 		if data, err := os.ReadFile(envFile); err == nil && len(data) > 0 {
 			envStr := string(data)
+			lines := strings.Split(envStr, "\n")
+			lineSet := make(map[string]bool)
+			for _, l := range lines {
+				lineSet[l] = true
+			}
 			for _, want := range []string{
-				"WIDEBOI=1\n",
-				"LC_WIDEBOI=1\n",
-				"TERM_PROGRAM=wideboi\n",
-				"WIDEBOI_PANE_ID=1\n",
-				"WIDEBOI_SESSION=test-session\n",
-				"WIDEBOI_SOCK=/tmp/test.sock\n",
+				"WIDEBOI=1",
+				"LC_WIDEBOI=1",
+				"WIDEBOI_PANE_ID=1",
+				"WIDEBOI_SESSION=test-session",
+				"WIDEBOI_SOCK=/tmp/test.sock",
 			} {
-				if !strings.Contains(envStr, want) {
+				if !lineSet[want] {
 					t.Errorf("pane env missing %q, got:\n%s", want, envStr)
 				}
+			}
+			if lineSet["TERM_PROGRAM=wideboi"] {
+				t.Errorf("pane env must not overwrite TERM_PROGRAM with wideboi")
 			}
 			break
 		} else if time.Now().After(deadline) {

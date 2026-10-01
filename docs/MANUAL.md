@@ -133,7 +133,7 @@ Session naming rules:
 
 ### Nested Sessions (Wideboi-in-Wideboi)
 
-By default, wideboi detects attempts to run an interactive wideboi session or server inside an existing wideboi session (including over SSH sessions spawned from a wideboi pane) and refuses to run to avoid control key interception conflicts.
+By default, wideboi detects attempts to run an interactive wideboi session or server inside an existing wideboi session and refuses to run to avoid control key interception conflicts. This also works across remote SSH sessions when the client and server are configured to forward locale environment variables (the default `SendEnv LC_*` in OpenSSH client and `AcceptEnv LC_*` in `sshd_config`), propagating `LC_WIDEBOI=1`.
 
 To explicitly allow running a nested session, pass `--allow-nested` or set `WIDEBOI_ALLOW_NESTED=1`:
 

@@ -56,6 +56,12 @@ func BuildPanePatch(base, next MsgPaneUpdate) (MsgPanePatch, bool) {
 						matches = false
 						break
 					}
+					if len(base.WrappedLines) == next.Rows && len(next.WrappedLines) == next.Rows {
+						if base.WrappedLines[y-candidate] != next.WrappedLines[y] {
+							matches = false
+							break
+						}
+					}
 				}
 				if matches {
 					if replaced == 0 || band < replaced {

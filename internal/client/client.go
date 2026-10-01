@@ -319,11 +319,16 @@ func (c *Client) emitNotificationLocked(title, msg string) {
 }
 
 func emitHostNotification(mode, title, msg string) {
-	switch mode {
-	case "off":
+	if mode == "off" {
 		return
-	case "bell":
+	}
+	if mode == "bell" {
 		_, _ = os.Stdout.WriteString("\a")
+		return
+	}
+	title = sanitizeNotificationText(title)
+	msg = sanitizeNotificationText(msg)
+	switch mode {
 	case "osc9":
 		_, _ = os.Stdout.WriteString(fmt.Sprintf("\x1b]9;%s: %s\x07", title, msg))
 	case "osc99":
@@ -336,6 +341,18 @@ func emitHostNotification(mode, title, msg string) {
 			_, _ = os.Stdout.WriteString(fmt.Sprintf("\x1b]9;%s: %s\x07", title, msg))
 		}
 	}
+}
+
+func sanitizeNotificationText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // drawLayer names what Draw paints this frame.

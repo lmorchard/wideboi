@@ -87,6 +87,9 @@ type Grid interface {
 	// OnBell registers a callback invoked when the emulator receives a BEL character.
 	OnBell(fn func())
 
+	// LineWrapped reports whether line y soft-wrapped onto line y+1.
+	LineWrapped(y int) bool
+
 	// SendMouse encodes a mouse event in the child's requested mode and
 	// writes it to the child. Like SendKey it writes to an io.Pipe and
 	// blocks until something reads.
@@ -248,6 +251,8 @@ type vtGrid struct {
 	userVarsMu sync.Mutex
 	userVars   map[string]string
 	onBell     func()
+	wrapMu     sync.Mutex
+	wrapped    map[int]bool
 
 	// osc repairs OSC strings x/ansi would cut at a 0x9C byte (#175).
 	// Only Write touches it, under writeResizeMu.
@@ -312,15 +317,30 @@ func NewVT(cols, rows int) Grid {
 // Widening NewVT itself would touch its ~20 existing call sites to serve
 // one test.
 func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
-	g := &vtGrid{em: vt.NewSafeEmulator(cols, rows), idleTimeout: idle}
+	g := &vtGrid{
+		em:          vt.NewSafeEmulator(cols, rows),
+		idleTimeout: idle,
+		wrapped:     make(map[int]bool),
+	}
 	g.cursorVisible.Store(true)
 	g.status.Store(int32(protocol.StatusIdle))
 
+	var prevOld uv.Position
 	g.em.SetCallbacks(vt.Callbacks{
 		Bell: func() {
 			if g.onBell != nil {
 				g.onBell()
 			}
+		},
+		CursorPosition: func(old, new uv.Position) {
+			if prevOld.X >= cols-1 && old.X >= cols-1 && new.X > 0 && new.Y == old.Y {
+				if prevOld.Y >= 0 && prevOld.Y < rows {
+					g.wrapMu.Lock()
+					g.wrapped[prevOld.Y] = true
+					g.wrapMu.Unlock()
+				}
+			}
+			prevOld = old
 		},
 		CursorVisibility: func(visible bool) { g.cursorVisible.Store(visible) },
 		// x/vt has parsed OSC 0/1/2 into a title all along; nobody
@@ -674,6 +694,12 @@ func (g *vtGrid) MouseTracking() bool { return g.mouseModes.Load() != 0 }
 func (g *vtGrid) BracketedPaste() bool { return g.bracketedPaste.Load() }
 
 func (g *vtGrid) OnBell(fn func()) { g.onBell = fn }
+
+func (g *vtGrid) LineWrapped(y int) bool {
+	g.wrapMu.Lock()
+	defer g.wrapMu.Unlock()
+	return g.wrapped[y]
+}
 
 func (g *vtGrid) SendMouse(m uv.MouseEvent) { g.em.SendMouse(m) }
 

@@ -85,14 +85,25 @@ func TestQueryScannerSynthesizesCSISizes(t *testing.T) {
 		t.Errorf("resp = %q, want %q", resp, wantResp)
 	}
 
-	// CSI ? 996 n (dark mode query)
+	// CSI ? 996 n (dark mode query -> responds with DSR 997;1n for dark)
 	cleaned, resp = qs.process([]byte("\x1b[?996n"), 80, 24)
 	if len(cleaned) != 0 {
 		t.Errorf("cleaned = %q, want empty", cleaned)
 	}
-	wantResp = "\x1b[?996;1n"
+	wantResp = "\x1b[?997;1n"
 	if string(resp) != wantResp {
 		t.Errorf("resp = %q, want %q", resp, wantResp)
+	}
+
+	// Light theme query -> responds with DSR 997;2n for light
+	qs.SetTheme(QueryTheme{FgColor: "0000/0000/0000", BgColor: "ffff/ffff/ffff", IsDark: false})
+	cleaned, resp = qs.process([]byte("\x1b[?996n"), 80, 24)
+	if string(resp) != "\x1b[?997;2n" {
+		t.Errorf("light theme resp = %q, want \\x1b[?997;2n", resp)
+	}
+	_, resp = qs.process([]byte("\x1b]11;?\x07"), 80, 24)
+	if string(resp) != "\x1b]11;rgb:ffff/ffff/ffff\x07" {
+		t.Errorf("light theme bg resp = %q, want \\x1b]11;rgb:ffff/ffff/ffff\\x07", resp)
 	}
 }
 

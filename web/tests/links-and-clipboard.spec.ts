@@ -282,3 +282,49 @@ test('soft-wrapped rows copy without intermediate newline', async ({ page }) => 
 
   expect(selected).toBe('Line 1 long text wrappingcontinuation text here');
 });
+
+test('rejects unsafe javascript: and data: URLs in OSC 8 hyperlinks', async ({ page }) => {
+  await installMockWebSocket(page);
+  await page.setViewportSize({ width: 700, height: 400 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({
+      case: 'layoutSnapshot',
+      value: { columns: [{ paneId: 1, width: 80, height: 24 }] },
+    }));
+
+    const anchorText = 'Evil Link'.split('').map(c => ({ content: c, width: 1, linkId: 1 }));
+    const emptyRow = () => ({ cells: Array.from({ length: 80 }, () => ({ content: ' ', width: 1 })) });
+    const lines = Array.from({ length: 23 }, emptyRow);
+    lines.push({ cells: anchorText });
+
+    window.testSockets[0].message(serverBytes({
+      case: 'paneUpdate',
+      value: {
+        paneId: 1, cols: 80, rows: 24, generation: 1n,
+        scrollOffset: 0, scrollbackLen: 0, lines,
+        links: ['javascript:alert(1)'],
+      },
+    }));
+  });
+
+  const canvas = page.locator('wideboi-pane canvas');
+  const coords = await page.evaluate(() => {
+    const pane = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane');
+    const rect = pane.canvas.getBoundingClientRect();
+    const cellW = pane.cellWidth * pane.zoom;
+    const cellH = 16.8 * pane.zoom;
+    return {
+      x: rect.left + 3 * cellW,
+      y: rect.top + 23 * cellH + cellH / 2,
+    };
+  });
+
+  await page.mouse.move(coords.x, coords.y);
+  await expect(canvas).not.toHaveCSS('cursor', 'pointer');
+  expect(await canvas.getAttribute('title')).toBe('');
+});

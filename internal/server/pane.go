@@ -168,9 +168,7 @@ func (p *Pane) Start(onExit func()) {
 		for {
 			n, err := p.pty.Master.Read(buf)
 			if n > 0 {
-				p.renderMu.RLock()
-				cols, rows := p.cols, p.rows
-				p.renderMu.RUnlock()
+				cols, rows := p.Size()
 				cleaned, replies := qs.process(buf[:n], cols, rows)
 				if len(replies) > 0 {
 					_, _ = p.pty.WriteBounded(replies, ptyWriteTimeout)
@@ -527,19 +525,8 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 		}
 		lines[y] = line
 
-		if y < rows-1 {
-			lastCell := buf.CellAt(cols-1, y)
-			if lastCell != nil && lastCell.Content != "" && lastCell.Content != " " {
-				nextHasContent := false
-				for nx := 0; nx < cols; nx++ {
-					nc := buf.CellAt(nx, y+1)
-					if nc != nil && nc.Content != "" && nc.Content != " " {
-						nextHasContent = true
-						break
-					}
-				}
-				wrappedLines[y] = nextHasContent
-			}
+		if p.grid != nil {
+			wrappedLines[y] = p.grid.LineWrapped(y)
 		}
 	}
 

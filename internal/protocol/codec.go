@@ -347,22 +347,11 @@ func UnmarshalServer(data []byte) (any, error) {
 		if len(src.Links) > 0 {
 			update.Links = src.Links
 		}
-		hasWrapped := false
-		for _, row := range src.Lines {
-			if row.Wrapped {
-				hasWrapped = true
-				break
-			}
-		}
 		update.Lines = make([]LineData, 0, len(src.Lines))
-		if hasWrapped {
-			update.WrappedLines = make([]bool, len(src.Lines))
-		}
+		update.WrappedLines = make([]bool, len(src.Lines))
 		for i, row := range src.Lines {
 			update.Lines = append(update.Lines, decodeLine(row.Cells))
-			if hasWrapped {
-				update.WrappedLines[i] = row.Wrapped
-			}
+			update.WrappedLines[i] = row.Wrapped
 		}
 		return update, nil
 	case *wirepb.ServerMessage_PanePatch:

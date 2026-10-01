@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -494,7 +495,6 @@ func TestCheckNestedSession(t *testing.T) {
 	}{
 		{"WIDEBOI", map[string]string{"WIDEBOI": "1"}},
 		{"LC_WIDEBOI", map[string]string{"LC_WIDEBOI": "1"}},
-		{"TERM_PROGRAM", map[string]string{"TERM_PROGRAM": "wideboi"}},
 		{"WIDEBOI_PANE_ID", map[string]string{"WIDEBOI_PANE_ID": "2"}},
 	}
 
@@ -564,4 +564,19 @@ func TestCheckNestedSession(t *testing.T) {
 			t.Errorf("checkNestedSession() in clean environment want nil, got: %v", err)
 		}
 	})
+}
+
+func TestConnectOrSpawnRefusesNestedServerSpawn(t *testing.T) {
+	t.Setenv("WIDEBOI", "1")
+	cfg := config.Config{Socket: filepath.Join(t.TempDir(), "nonexistent.sock")}
+	_, _, err := connectOrSpawn(cfg, nil)
+	if err == nil || !strings.Contains(err.Error(), "refusing to spawn a nested session") {
+		t.Errorf("connectOrSpawn want refusal to spawn nested session, got: %v", err)
+	}
+
+	t.Setenv("WIDEBOI_ALLOW_NESTED", "1")
+	_, _, err = connectOrSpawn(cfg, nil)
+	if err != nil && strings.Contains(err.Error(), "refusing to spawn a nested session") {
+		t.Errorf("connectOrSpawn with WIDEBOI_ALLOW_NESTED=1 should not be rejected by nested guard, got: %v", err)
+	}
 }

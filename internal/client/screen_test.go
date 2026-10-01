@@ -528,4 +528,3 @@ func TestOSC8HyperlinkPreservedInMirrorAndHostScreen(t *testing.T) {
 		t.Errorf("outside cell has Link.URL = %q, want empty", outsideCell.Link.URL)
 	}
 }
-}

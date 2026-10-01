@@ -256,7 +256,6 @@ func isNestedSession(getenv func(string) string) bool {
 	}
 	return getenv("WIDEBOI") != "" ||
 		getenv("LC_WIDEBOI") != "" ||
-		getenv("TERM_PROGRAM") == "wideboi" ||
 		getenv("WIDEBOI_PANE_ID") != ""
 }
 
@@ -278,7 +277,7 @@ func checkNestedSession(opts cliOptions, getenv func(string) string) error {
 			return nil
 		}
 		if isNestedSession(getenv) {
-			return errors.New("already running inside a wideboi session (refusing to nest sessions; use --allow-nested or unset WIDEBOI to force)")
+			return errors.New("already running inside a wideboi session (refusing to nest sessions; use --allow-nested or WIDEBOI_ALLOW_NESTED=1 to force)")
 		}
 	}
 	return nil
