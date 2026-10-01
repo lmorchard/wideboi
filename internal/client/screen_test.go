@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"image"
 	"strings"
 	"testing"
@@ -451,5 +452,27 @@ func TestTopHeaderDoubleWidthTitleDoesNotOverrunFrame(t *testing.T) {
 	p2HeaderStart := scr.CellAt(15, 0)
 	if p2HeaderStart != nil && (p2HeaderStart.Content == "界" || p2HeaderStart.Content == "ト" || p2HeaderStart.Content == "テ") {
 		t.Errorf("wide character leaked past frame boundary into column 15: %q", p2HeaderStart.Content)
+	}
+}
+
+func TestResizeColumnDoesNotBlankOnSubsequentSnapshot(t *testing.T) {
+	const cols, rows = 60, 12
+	cli := newTestClientWithTwoPanes(t, cols, rows)
+	ctx := context.Background()
+
+	// Grow focused column width
+	cli.SendVerb(ctx, protocol.VerbGrowWidth)
+
+	// An idle status broadcast or layout snapshot arrives
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: twoColumns(),
+	})
+
+	scr := newFakeHostScreen(cols, rows)
+	cli.Draw(scr)
+
+	got := strings.Join(scr.text(), "\n")
+	if !strings.Contains(got, "PANE-ONE") {
+		t.Fatalf("pane content blanked out after snapshot:\n%s", got)
 	}
 }

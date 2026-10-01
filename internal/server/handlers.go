@@ -332,7 +332,7 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 	cs := s.clientLocked(tp)
 	if validGeometry(m.Cols, m.Rows) {
 		cs.size = protocol.MsgResize{Cols: m.Cols, Rows: m.Rows}
-		if s.sizeOwner == nil && s.rows == 0 {
+		if s.sizeOwner == nil && (s.rows == 0 || s.attachedCountLocked() == 1) {
 			s.sizeOwner = tp
 			s.cols = m.Cols
 			s.rows = m.Rows
@@ -382,7 +382,7 @@ func (s *Server) handleResizeLocked(tp transport.Transport, m protocol.MsgResize
 			s.resizePanesLocked()
 			eff.needBroadcast = true
 		} else {
-			if s.sizeOwner == nil && s.attachedCountLocked() == 0 && len(s.transports) <= 1 {
+			if s.sizeOwner == nil && s.attachedCountLocked() <= 1 && len(s.transports) <= 1 {
 				s.sizeOwner = tp
 			}
 			if s.sizeOwner == tp {
@@ -422,16 +422,19 @@ func (s *Server) handleVerbLocked(tp transport.Transport, m protocol.MsgVerb) ms
 		if tp == s.sizeOwner {
 			s.strip.CycleWidth(m.PaneID)
 			s.resizePanesLocked()
+			eff.needBroadcast = true
 		}
 	case protocol.VerbGrowWidth:
 		if tp == s.sizeOwner {
 			s.strip.GrowWidth(m.PaneID, 10)
 			s.resizePanesLocked()
+			eff.needBroadcast = true
 		}
 	case protocol.VerbShrinkWidth:
 		if tp == s.sizeOwner {
 			s.strip.ShrinkWidth(m.PaneID, 10)
 			s.resizePanesLocked()
+			eff.needBroadcast = true
 		}
 	case protocol.VerbMoveLeft:
 		s.strip.MoveLeft(m.PaneID)

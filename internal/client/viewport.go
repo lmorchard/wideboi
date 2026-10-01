@@ -86,9 +86,21 @@ func (c *Client) ensureMirrorLocked(paneID, cols, rows int) *PaneMirror {
 		if h <= 0 {
 			h = 20
 		}
+		newSurf := compose.NewSurface(w, h)
+		if ok && mirror.Cols > 0 && mirror.Rows > 0 {
+			minW := min(w, mirror.Cols)
+			minH := min(h, mirror.Rows)
+			for y := 0; y < minH; y++ {
+				for x := 0; x < minW; x++ {
+					if cell := mirror.Surface.CellAt(x, y); cell != nil {
+						newSurf.SetCell(x, y, cell)
+					}
+				}
+			}
+		}
 		mirror = &PaneMirror{
 			ID:      paneID,
-			Surface: compose.NewSurface(w, h),
+			Surface: newSurf,
 			Cols:    w,
 			Rows:    h,
 		}
@@ -137,16 +149,10 @@ func (c *Client) applySnapshotLocked(m protocol.MsgLayoutSnapshot) {
 	}
 
 	for _, p := range c.placements {
-		m, ok := c.mirrors[p.PaneID]
-		if !ok || p.Src.Dx() > m.Cols || p.Src.Dy() > m.Rows {
+		if _, ok := c.mirrors[p.PaneID]; !ok {
 			w := max(p.Src.Dx(), 40)
 			h := max(p.Src.Dy(), 20)
-			if ok {
-				w = max(m.Cols, p.Src.Dx())
-				h = max(m.Rows, p.Src.Dy())
-			}
 			c.ensureMirrorLocked(p.PaneID, w, h)
-			delete(c.paneUpdates, p.PaneID)
 		}
 	}
 
