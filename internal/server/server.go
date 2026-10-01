@@ -383,7 +383,7 @@ func (s *Server) SetSession(session, socket string) {
 
 func (s *Server) paneEnvLocked(paneID int) []string {
 	var env []string
-	env = append(env, "WIDEBOI=1", "LC_WIDEBOI=1", "TERM_PROGRAM=wideboi")
+	env = append(env, "WIDEBOI=1", "LC_WIDEBOI=1")
 	if paneID > 0 {
 		env = append(env, fmt.Sprintf("WIDEBOI_PANE_ID=%d", paneID))
 	}
