@@ -166,3 +166,48 @@ func TestTransientZeroAttachFollowedByValidResizeEstablishesSize(t *testing.T) {
 		t.Fatalf("sizeOwner = %p, want %p", srv.SizeOwner(), tp)
 	}
 }
+
+func TestReattachingClientBecomesSizeOwner(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tp1 := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp1, "/bin/sh", "")
+	defer srv.Close()
+
+	go func() { _ = srv.Run(ctx) }()
+
+	// First client attaches
+	tp1.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, tp1.ServerSend, 2*time.Second)
+
+	// First client disconnects
+	close(tp1.ClientSend)
+	deadline := time.Now().Add(2 * time.Second)
+	for srv.SizeOwner() != nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if srv.SizeOwner() != nil {
+		t.Fatal("timed out waiting for tp1 disconnect to clear sizeOwner")
+	}
+
+	// Second client attaches to the running detached session
+	tp2 := transport.NewInProcChannel(32)
+	srv.AddClientForTest(ctx, tp2)
+	tp2.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp2.ServerSend, 2*time.Second)
+
+	// Second client should be sizeOwner
+	if srv.SizeOwner() != tp2 {
+		t.Fatalf("sizeOwner = %p, want tp2 (%p)", srv.SizeOwner(), tp2)
+	}
+
+	// Second client sets pane width
+	paneID := snap.Columns[0].PaneID
+	drainChannel(tp2.ServerSend)
+	tp2.SendClient(ctx, protocol.MsgSetPaneWidth{PaneID: paneID, Width: 60})
+	snap2 := recvLayoutSnapshot(t, tp2.ServerSend, 2*time.Second)
+	if snap2.Columns[0].Width != 60 {
+		t.Fatalf("column width after SetPaneWidth = %d, want 60", snap2.Columns[0].Width)
+	}
+}
