@@ -194,3 +194,88 @@ steps = [{ text = "rm -rf /" }]
 		t.Error("expected explicit ConfigFile to load startup commands")
 	}
 }
+
+func TestPromptProjectTrust(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+
+	env := mockEnv(map[string]string{
+		"HOME": tmp,
+	})
+
+	projectTOML := `
+[[startup]]
+command = "echo prompted"
+width = 80
+`
+	if err := os.WriteFile(".wideboi.toml", []byte(projectTOML), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. User declines prompt: remains untrusted
+	var prompted bool
+	declinePrompt := func(path string, hasSensitive bool) bool {
+		prompted = true
+		return false
+	}
+	cfgDeclined, _, err := config.Load(config.ConfigFlags{PromptTrust: declinePrompt}, env)
+	if err != nil {
+		t.Fatalf("load declined: %v", err)
+	}
+	if !prompted {
+		t.Fatal("expected prompt to be called")
+	}
+	if cfgDeclined.ProjectTrusted {
+		t.Error("expected ProjectTrusted to be false when user declines")
+	}
+	if len(cfgDeclined.Startup) > 0 {
+		t.Error("startup commands should not be loaded when user declines")
+	}
+
+	// 2. User approves prompt: trusted, persisted to trusted.toml
+	prompted = false
+	acceptPrompt := func(path string, hasSensitive bool) bool {
+		prompted = true
+		return true
+	}
+	cfgAccepted, _, err := config.Load(config.ConfigFlags{PromptTrust: acceptPrompt}, env)
+	if err != nil {
+		t.Fatalf("load accepted: %v", err)
+	}
+	if !prompted {
+		t.Fatal("expected prompt to be called")
+	}
+	if !cfgAccepted.ProjectTrusted {
+		t.Error("expected ProjectTrusted to be true when user accepts")
+	}
+	if len(cfgAccepted.Startup) == 0 || cfgAccepted.Startup[0].Command != "echo prompted" {
+		t.Errorf("expected startup commands loaded, got %+v", cfgAccepted.Startup)
+	}
+
+	// 3. Subsequent load without prompt is now automatically trusted because 'y' was persisted
+	prompted = false
+	cfgSubsequent, _, err := config.Load(config.ConfigFlags{PromptTrust: func(string, bool) bool {
+		prompted = true
+		return false
+	}}, env)
+	if err != nil {
+		t.Fatalf("load subsequent: %v", err)
+	}
+	if prompted {
+		t.Error("expected no prompt on subsequent load of already-trusted project")
+	}
+	if !cfgSubsequent.ProjectTrusted {
+		t.Error("expected subsequent load to be trusted from persisted trusted.toml")
+	}
+	if len(cfgSubsequent.Startup) == 0 {
+		t.Error("expected startup commands on subsequent load")
+	}
+}

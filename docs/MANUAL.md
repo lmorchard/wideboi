@@ -486,6 +486,7 @@ A `.wideboi.toml` file in your repository overrides global settings in user conf
 
 To prevent untrusted checkouts from executing arbitrary startup commands or exposing unwanted network listeners:
 - **Untrusted Projects:** By default, `.wideboi.toml` only loads safe appearance, layout, and key settings (`layout`, `width_presets`, `pan_step`, `theme`, `mouse`, `auto_cleanup`, `keep_session_on_owner_loss`, `log_level`, `keys`, `prefix`). Sensitive settings (`startup`, `shell`, `socket`, `session`, `websocket`, `websocket_token`, `tls`, `macros`) are ignored.
+- **Interactive First-Run Prompt:** When launching wideboi interactively in a terminal with an untrusted `.wideboi.toml` that contains sensitive settings, wideboi prompts: `Trust and execute this project configuration? [y/N]: `. Answering `y` trusts the project and persists its checksum to `trusted.toml`. Answering `n` (or pressing Enter) proceeds untrusted for that session. Non-interactive environments default to untrusted.
 - **Explicit Trust:** Run `wideboi trust` in a project directory to trust its `.wideboi.toml`. This records the canonical path and SHA256 digest in `~/.config/wideboi/trusted.toml`.
 - **Content Tampering:** If `.wideboi.toml` is modified, the SHA256 checksum changes and wideboi automatically reverts to untrusted mode until `wideboi trust` is run again.
 - **Revoking Trust:** Run `wideboi untrust` to remove a project from `trusted.toml`.
