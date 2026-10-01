@@ -66,6 +66,7 @@ type Config struct {
 	LogLevel       slog.Level    `toml:"-"`
 	ConfigFile     string        `toml:"-"`
 	ProjectTrusted bool          `toml:"-"`
+	Notifications  string        `toml:"notifications"`
 	Macros         []MacroConfig `toml:"macros"`
 }
 
@@ -124,6 +125,7 @@ type ConfigFlags struct {
 	TLSKey                string
 	TrustProject          bool
 	AllowNested           bool
+	Notifications         string
 	PromptTrust           func(path string, hasSensitive bool) bool
 }
 
@@ -388,6 +390,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if fileCfg.Theme != (ThemeConfig{}) {
 			cfg.Theme = fileCfg.Theme
 		}
+		if fileCfg.Notifications != "" {
+			cfg.Notifications = fileCfg.Notifications
+		}
 
 		if !trusted {
 			hasSensitive := fileCfg.Startup != nil ||
@@ -520,6 +525,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if envLevel := getenv("WIDEBOI_LOG_LEVEL"); envLevel != "" {
 		cfg.LogLevelName = envLevel
 	}
+	if envNotifications := getenv("WIDEBOI_NOTIFICATIONS"); envNotifications != "" {
+		cfg.Notifications = envNotifications
+	}
 	if envAutoCleanup := getenv("WIDEBOI_AUTO_CLEANUP"); envAutoCleanup != "" {
 		v, err := ParseBoolEnv("WIDEBOI_AUTO_CLEANUP", envAutoCleanup)
 		if err != nil {
@@ -583,6 +591,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	}
 	if flags.Shell != "" {
 		cfg.Shell = flags.Shell
+	}
+	if flags.Notifications != "" {
+		cfg.Notifications = flags.Notifications
 	}
 	if flags.DisableAutoCleanup {
 		v := false
@@ -657,6 +668,16 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		return Config{}, nil, err
 	}
 	cfg.LogLevel = level
+
+	// Notifications
+	switch strings.ToLower(strings.TrimSpace(cfg.Notifications)) {
+	case "", "auto":
+		cfg.Notifications = "auto"
+	case "osc9", "osc99", "bell", "off":
+		cfg.Notifications = strings.ToLower(strings.TrimSpace(cfg.Notifications))
+	default:
+		return Config{}, nil, fmt.Errorf("notifications %q: want \"auto\", \"osc9\", \"osc99\", \"bell\", or \"off\"", cfg.Notifications)
+	}
 
 	// Mouse
 	cfg.MouseEnabled = cfg.Mouse == nil || *cfg.Mouse

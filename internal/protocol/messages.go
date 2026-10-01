@@ -165,6 +165,13 @@ type MsgPanePatch struct {
 // MsgPaneResync asks for a full snapshot after a missing or stale patch.
 type MsgPaneResync struct{ PaneID int }
 
+// MsgPaneNotification carries an alert/notification for a specific pane.
+type MsgPaneNotification struct {
+	PaneID  int
+	Title   string
+	Message string
+}
+
 // PlacementKind says what a placement represents, which the renderer
 // cannot infer from geometry: a card sliver and a pane clipped by the
 // viewport edge are both a narrow Dst over a cropped Src, and Z does

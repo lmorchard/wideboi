@@ -290,6 +290,14 @@ func MarshalServer(msg any) ([]byte, error) {
 				Bindings:       encodeKeyBindings(m.Bindings),
 			},
 		}
+	case MsgPaneNotification:
+		env.Msg = &wirepb.ServerMessage_PaneNotification{
+			PaneNotification: &wirepb.MsgPaneNotification{
+				PaneId:  int32(m.PaneID),
+				Title:   validUTF8(m.Title),
+				Message: validUTF8(m.Message),
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -438,6 +446,12 @@ func UnmarshalServer(data []byte) (any, error) {
 			MinColumnWidth: int(m.ConfigSnapshot.MinColumnWidth),
 			MaxColumnWidth: int(m.ConfigSnapshot.MaxColumnWidth),
 			Bindings:       decodeKeyBindings(m.ConfigSnapshot.Bindings),
+		}, nil
+	case *wirepb.ServerMessage_PaneNotification:
+		return MsgPaneNotification{
+			PaneID:  int(m.PaneNotification.PaneId),
+			Title:   m.PaneNotification.Title,
+			Message: m.PaneNotification.Message,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

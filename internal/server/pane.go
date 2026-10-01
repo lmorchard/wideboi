@@ -447,6 +447,13 @@ func (p *Pane) markExited(code int) {
 	p.exitMu.Unlock()
 }
 
+// SetOnBell configures a callback for terminal BEL characters.
+func (p *Pane) SetOnBell(fn func()) {
+	if p.grid != nil {
+		p.grid.OnBell(fn)
+	}
+}
+
 // reapedExitCode is the child's exit status if it has been reaped.
 // Custom panes have no child and so no status.
 func (p *Pane) reapedExitCode() (int, bool) {

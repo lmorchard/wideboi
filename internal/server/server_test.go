@@ -549,3 +549,49 @@ func TestServerSpawnsPanesWithWideboiEnvironment(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestServerBellNotification(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Command: "exec sleep 30"},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	grid := srv.PaneGrid(1)
+	if grid == nil {
+		t.Fatal("grid for pane 1 not found")
+	}
+
+	_, err := grid.Write([]byte("\a"))
+	if err != nil {
+		t.Fatalf("grid.Write: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		select {
+		case msg := <-tp.ServerSend:
+			if notif, ok := msg.(protocol.MsgPaneNotification); ok {
+				if notif.PaneID != 1 {
+					t.Errorf("PaneID = %d, want 1", notif.PaneID)
+				}
+				if notif.Message != "Alert" {
+					t.Errorf("Message = %q, want Alert", notif.Message)
+				}
+				return
+			}
+		case <-time.After(50 * time.Millisecond):
+			if time.Now().After(deadline) {
+				t.Fatal("timeout waiting for MsgPaneNotification")
+			}
+		}
+	}
+}

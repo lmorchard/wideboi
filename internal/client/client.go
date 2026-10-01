@@ -3,8 +3,12 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"image"
+	"io"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -64,6 +68,8 @@ type Client struct {
 	motion             *motion
 	sel                *selection
 	theme              Theme
+	notifications      string
+	onNotification     func(title, msg string)
 	// mouseTracking is which panes' children have asked for mouse
 	// events, from MsgPaneUpdate. grab is a drag being forwarded to one.
 	mouseTracking map[int]bool
@@ -114,6 +120,20 @@ func (c *Client) SetTheme(t Theme) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.theme = t
+}
+
+// SetNotifications configures the desktop notifications mode (auto, osc9, osc99, bell, off).
+func (c *Client) SetNotifications(mode string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.notifications = mode
+}
+
+// SetNotificationEmitter sets an emitter hook for tests.
+func (c *Client) SetNotificationEmitter(fn func(title, msg string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onNotification = fn
 }
 
 func (c *Client) SetPanStep(step int) {
@@ -189,6 +209,31 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		c.pendingFocusPaneID = m.PaneID
 	case protocol.MsgLayoutSnapshot:
 		slog.Debug("received MsgLayoutSnapshot", "cols", len(m.Columns), "focusPaneID", c.focusPaneID)
+		if m.PaneStatuses != nil && c.paneStatuses != nil {
+			for paneID, newStatus := range m.PaneStatuses {
+				oldStatus, hadOld := c.paneStatuses[paneID]
+				if hadOld && oldStatus == protocol.StatusWorking && oldStatus != newStatus {
+					if paneID != c.focusPaneID {
+						title := m.PaneTitles[paneID]
+						if title == "" {
+							title = fmt.Sprintf("Pane %d", paneID)
+						}
+						var desc string
+						switch newStatus {
+						case protocol.StatusNeedsInput:
+							desc = "Needs input"
+						case protocol.StatusDone:
+							desc = "Finished successfully"
+						case protocol.StatusFailed:
+							desc = "Failed"
+						}
+						if desc != "" {
+							c.emitNotificationLocked(title, desc)
+						}
+					}
+				}
+			}
+		}
 		c.applySnapshotLocked(m)
 
 	case protocol.MsgPaneUpdate:
@@ -206,6 +251,11 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 		// A baseline mismatch means at least one patch was lost or a
 		// layout replaced the mirror. Ask the server for a full snapshot.
 		toSend = append(toSend, protocol.MsgPaneResync{PaneID: m.PaneID})
+
+	case protocol.MsgPaneNotification:
+		if m.PaneID != c.focusPaneID {
+			c.emitNotificationLocked(m.Title, m.Message)
+		}
 
 	case protocol.MsgPaneMetadata:
 		if c.paneMetadata == nil {
@@ -259,6 +309,58 @@ func (c *Client) applyPaneUpdateLocked(m protocol.MsgPaneUpdate) {
 		c.mouseTracking = make(map[int]bool)
 	}
 	c.mouseTracking[m.PaneID] = m.MouseTracking
+}
+
+func (c *Client) emitNotificationLocked(title, msg string) {
+	if c.onNotification != nil {
+		c.onNotification(title, msg)
+		return
+	}
+	emitHostNotification(c.notifications, title, msg)
+}
+
+func emitHostNotification(mode, title, msg string) {
+	emitHostNotificationTo(os.Stdout, os.Getenv, mode, title, msg)
+}
+
+func emitHostNotificationTo(w io.Writer, getenv func(string) string, mode, title, msg string) {
+	if mode == "off" {
+		return
+	}
+	if mode == "bell" {
+		_, _ = io.WriteString(w, "\a")
+		return
+	}
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	title = sanitizeNotificationText(title)
+	msg = sanitizeNotificationText(msg)
+	switch mode {
+	case "osc9":
+		_, _ = io.WriteString(w, fmt.Sprintf("\x1b]9;%s: %s\x07", title, msg))
+	case "osc99":
+		_, _ = io.WriteString(w, fmt.Sprintf("\x1b]99;;%s: %s\x07", title, msg))
+	case "auto", "":
+		isKitty := getenv("KITTY_WINDOW_ID") != "" || strings.Contains(strings.ToLower(getenv("TERM")), "kitty")
+		if isKitty {
+			_, _ = io.WriteString(w, fmt.Sprintf("\x1b]99;;%s: %s\x07", title, msg))
+		} else {
+			_, _ = io.WriteString(w, fmt.Sprintf("\x1b]9;%s: %s\x07", title, msg))
+		}
+	}
+}
+
+func sanitizeNotificationText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // drawLayer names what Draw paints this frame.
