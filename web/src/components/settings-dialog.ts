@@ -3,6 +3,7 @@ import { customElement, property } from 'lit/decorators.js';
 import { wideboiAppStyles } from '../wideboi-app.styles';
 import { AVAILABLE_FONTS } from '../fonts';
 import { listThemes } from '../themes';
+import { getPref, setPref } from '../prefs';
 
 @customElement('wideboi-settings')
 export class WideboiSettings extends LitElement {
@@ -65,6 +66,19 @@ export class WideboiSettings extends LitElement {
     this.dispatchEvent(new CustomEvent('layout-change', { detail: val, bubbles: true, composed: true }));
   };
 
+  private handleToggleNotifications = async () => {
+    const current = getPref('notifications');
+    if (!current) {
+      if (typeof Notification !== 'undefined' && Notification.requestPermission && Notification.permission !== 'granted') {
+        await Notification.requestPermission();
+      }
+      setPref('notifications', true);
+    } else {
+      setPref('notifications', false);
+    }
+    this.requestUpdate();
+  };
+
   render() {
     return html`
       <div class="settings-overlay" @click=${this.handleClose}>
@@ -125,6 +139,16 @@ export class WideboiSettings extends LitElement {
                 <option value="cards" .selected=${this.cards}>Cards</option>
                 <option value="scroll" .selected=${!this.cards}>Scroll</option>
               </select>
+            </div>
+            <div class="settings-row">
+              <label for="settings-notifications">Desktop Notifications</label>
+              <button id="settings-notifications" type="button" @click=${this.handleToggleNotifications}>
+                ${!getPref('notifications')
+                  ? 'Disabled (Click to Enable)'
+                  : typeof Notification !== 'undefined' && Notification.permission === 'granted'
+                    ? 'Enabled (Click to Disable)'
+                    : 'Enable Notifications'}
+              </button>
             </div>
           </div>
         </div>

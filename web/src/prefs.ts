@@ -7,6 +7,7 @@ export interface Preferences {
   macros: Macro[];
   fontSize: number;
   fontFamily: string;
+  notifications: boolean;
 }
 
 const PREF_KEYS: Record<keyof Preferences, { modern: string; legacy?: string }> = {
@@ -15,6 +16,7 @@ const PREF_KEYS: Record<keyof Preferences, { modern: string; legacy?: string }> 
   macros: { modern: 'wideboi:macros', legacy: 'wideboi.macros' },
   fontSize: { modern: 'wideboi:fontSize' },
   fontFamily: { modern: 'wideboi:fontFamily' },
+  notifications: { modern: 'wideboi:notifications', legacy: 'wideboi.notifications' },
 };
 
 function getStorage(): Storage | null {
@@ -77,6 +79,10 @@ export function getPref<K extends keyof Preferences>(key: K): Preferences[K] {
     case 'fontFamily': {
       return (raw || 'monospace') as Preferences[K];
     }
+    case 'notifications': {
+      if (raw === null) return true as Preferences[K];
+      return (raw !== 'false' && raw !== 'off') as Preferences[K];
+    }
   }
 }
 
@@ -108,5 +114,7 @@ export function getDefaultPref<K extends keyof Preferences>(key: K): Preferences
       return 14 as Preferences[K];
     case 'fontFamily':
       return 'monospace' as Preferences[K];
+    case 'notifications':
+      return true as Preferences[K];
   }
 }

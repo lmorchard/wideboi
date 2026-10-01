@@ -154,6 +154,12 @@ message MsgFocusPane {
   int32 pane_id = 1;
 }
 
+message MsgPaneNotification {
+  int32 pane_id = 1;
+  string title = 2;
+  string message = 3;
+}
+
 message ServerMessage {
   oneof msg {
     MsgPaneUpdate pane_update = 1;
@@ -174,6 +180,7 @@ message ServerMessage {
     MsgUpgradeResponse upgrade_response = 16;
     MsgWebServerControlResponse web_server_control_response = 17;
     MsgConfigSnapshot config_snapshot = 18;
+    MsgPaneNotification pane_notification = 19;
   }
 }
 

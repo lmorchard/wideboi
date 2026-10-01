@@ -472,6 +472,15 @@ export class WideboiApp extends LitElement {
     this.statsTimer = undefined;
   }
 
+  private notifyBackground(title: string, body: string) {
+    if (!getPref('notifications')) return;
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+      try {
+        new Notification(title, { body });
+      } catch (e) {}
+    }
+  }
+
   private connectClient() {
     if (this.client) {
       this.client.disconnect();
@@ -537,6 +546,20 @@ export class WideboiApp extends LitElement {
       switch (message.msg.case) {
         case 'layoutSnapshot': {
           const snapshot = message.msg.value;
+          if (snapshot.paneStatuses) {
+            for (const [idStr, newStatus] of Object.entries(snapshot.paneStatuses)) {
+              const paneId = Number(idStr);
+              const oldStatus = this.paneStatuses[paneId];
+              if (oldStatus === PaneStatus.WORKING && newStatus !== oldStatus && paneId !== this.focusedPaneId) {
+                const title = snapshot.paneTitles?.[paneId] || `Pane ${paneId}`;
+                let desc = '';
+                if (newStatus === PaneStatus.NEEDS_INPUT) desc = 'Needs input';
+                else if (newStatus === PaneStatus.DONE) desc = 'Finished successfully';
+                else if (newStatus === PaneStatus.FAILED) desc = 'Failed';
+                if (desc) this.notifyBackground(title, desc);
+              }
+            }
+          }
           const previous = this.panePositions();
           const previousFocus = this.focusedPaneId;
           this.dispatchSession({
@@ -651,6 +674,13 @@ export class WideboiApp extends LitElement {
             this.keyRouter.setBindings(config.bindings);
           }
           this.requestUpdate();
+          break;
+        }
+        case 'paneNotification': {
+          const notif = message.msg.value;
+          if (notif.paneId !== this.focusedPaneId) {
+            this.notifyBackground(notif.title, notif.message);
+          }
           break;
         }
       }

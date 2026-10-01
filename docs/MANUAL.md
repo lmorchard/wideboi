@@ -141,6 +141,16 @@ To explicitly allow running a nested session, pass `--allow-nested` or set `WIDE
 wideboi --allow-nested
 ```
 
+### Desktop Host Notifications
+
+Wideboi can emit host desktop notifications (via OSC 9 or OSC 99) when background panes complete commands, change status (`needs_input`, `done`, `failed`), or emit terminal bells:
+
+```bash
+wideboi --notifications auto   # options: auto, osc9, osc99, bell, off
+```
+
+You can also set `notifications = "auto"` in `config.toml` or set `WIDEBOI_NOTIFICATIONS=auto`.
+
 ---
 
 ## 4. Terminal Client and Key Bindings

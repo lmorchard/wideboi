@@ -35,4 +35,5 @@ package protocol
 // 18 adds paste boolean flag to MsgInput (#312).
 // 19 adds link_id to CellData and links table to MsgPaneUpdate/MsgPanePatch for OSC 8 hyperlinks (#328).
 // 20 adds wrapped flag to LineData and PaneRow for soft-wrap copy preservation (#337).
-const Version uint32 = 20
+// 21 adds MsgPaneNotification for background desktop notifications (#330).
+const Version uint32 = 21

@@ -530,6 +530,9 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	}
 	p.closeGrace = s.closeGrace
 	p.keep = spec.Keep
+	p.SetOnBell(func() {
+		s.onPaneBell(id)
+	})
 
 	s.panes[id] = p
 	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
@@ -550,6 +553,34 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	}
 
 	return p, nil
+}
+
+func (s *Server) onPaneBell(paneID int) {
+	go s.broadcastPaneBell(paneID)
+}
+
+func (s *Server) broadcastPaneBell(paneID int) {
+	s.mu.Lock()
+	p := s.panes[paneID]
+	var title string
+	if p != nil {
+		title = p.Title()
+	}
+	tps := append([]transport.Transport{}, s.transports...)
+	s.mu.Unlock()
+	if title == "" {
+		title = fmt.Sprintf("Pane %d", paneID)
+	}
+	msg := protocol.MsgPaneNotification{
+		PaneID:  paneID,
+		Title:   title,
+		Message: "Alert",
+	}
+	for _, tp := range tps {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		_ = tp.SendServer(ctx, msg)
+		cancel()
+	}
 }
 
 func (s *Server) spawnDashboardPaneLocked(afterPaneID int) (*Pane, error) {

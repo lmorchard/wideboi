@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -71,6 +72,17 @@ func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 	}
 	cols, rows = p.Size()
 	return cols, rows, true
+}
+
+// PaneGrid exposes a pane's Grid for tests.
+func (s *Server) PaneGrid(id int) term.Grid {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.panes[id]
+	if p == nil {
+		return nil
+	}
+	return p.grid
 }
 
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport at the
