@@ -1,4 +1,4 @@
-.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-test desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version prune-worktrees
+.PHONY: check check-targets quick test linux-test web-test web-build proto proto-check race lint fmt fmt-check seam-check build desktop desktop-test desktop-app run tidy verify-exit smoke golden attach-check traffic print-go-version prune-worktrees audit
 
 # Stamped into the binary at build time so a released artifact can say
 # what it is. VERSION falls back to a placeholder outside a tagged
@@ -86,6 +86,10 @@ race: web/dist
 
 lint: web/dist
 	go vet ./...
+
+audit: web/node_modules/.installed
+	npm audit --prefix web
+	GOTOOLCHAIN=go$$($(MAKE) -s print-go-version) go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 # fmt rewrites. fmt-check reports and fails. Keep them separate.
 fmt:
