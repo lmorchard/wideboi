@@ -39,15 +39,18 @@ func TestSpawnRunsCommandAndEchoesOutput(t *testing.T) {
 func TestSpawnInjectsEnvironmentAndStripsStaleSession(t *testing.T) {
 	t.Setenv("WIDEBOI_SOCK", "/stale/path.sock")
 	t.Setenv("WIDEBOI_SESSION", "stale-session")
+	t.Setenv("WIDEBOI", "stale")
+	t.Setenv("LC_WIDEBOI", "stale")
+	t.Setenv("WIDEBOI_PANE_ID", "stale")
 
-	p, err := ptyx.Spawn([]string{"/bin/sh", "-c", "echo WS=$WIDEBOI_SOCK:WESS=$WIDEBOI_SESSION"}, 40, 10, t.TempDir(), "WIDEBOI_SOCK=/fresh/path.sock", "WIDEBOI_SESSION=fresh-session")
+	p, err := ptyx.Spawn([]string{"/bin/sh", "-c", "echo WS=$WIDEBOI_SOCK:WESS=$WIDEBOI_SESSION:WB=$WIDEBOI:PID=$WIDEBOI_PANE_ID"}, 40, 10, t.TempDir(), "WIDEBOI_SOCK=/fresh/path.sock", "WIDEBOI_SESSION=fresh-session", "WIDEBOI=1", "WIDEBOI_PANE_ID=2")
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
 	t.Cleanup(func() { p.Hangup(testGrace) })
 
-	if !readUntil(t, p.Master, "WS=/fresh/path.sock:WESS=fresh-session", 5*time.Second) {
-		t.Fatal("expected WIDEBOI_SOCK and WIDEBOI_SESSION in output")
+	if !readUntil(t, p.Master, "WS=/fresh/path.sock:WESS=fresh-session:WB=1:PID=2", 5*time.Second) {
+		t.Fatal("expected fresh WIDEBOI_SOCK, WIDEBOI_SESSION, WIDEBOI, WIDEBOI_PANE_ID in output")
 	}
 }
 

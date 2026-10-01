@@ -133,7 +133,8 @@ func cleanEnv(base []string, removeKeys ...string) []string {
 
 // Spawn starts argv on a new PTY sized cols x rows, with dir as its
 // working directory. Any extraEnv entries are appended to the child
-// environment, with any inherited WIDEBOI_SOCK and WIDEBOI_SESSION stripped first.
+// environment, with any inherited WIDEBOI_SOCK, WIDEBOI_SESSION, WIDEBOI,
+// LC_WIDEBOI, TERM_PROGRAM, and WIDEBOI_PANE_ID stripped first.
 func Spawn(argv []string, cols, rows int, dir string, extraEnv ...string) (*Pane, error) {
 	if len(argv) == 0 {
 		return nil, fmt.Errorf("ptyx: empty argv")
@@ -141,7 +142,7 @@ func Spawn(argv []string, cols, rows int, dir string, extraEnv ...string) (*Pane
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
-	baseEnv := cleanEnv(os.Environ(), "WIDEBOI_SOCK", "WIDEBOI_SESSION")
+	baseEnv := cleanEnv(os.Environ(), "WIDEBOI_SOCK", "WIDEBOI_SESSION", "WIDEBOI", "LC_WIDEBOI", "TERM_PROGRAM", "WIDEBOI_PANE_ID")
 	cmd.Env = append(baseEnv, "TERM=xterm-256color")
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{

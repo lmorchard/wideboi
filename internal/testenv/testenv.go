@@ -42,7 +42,7 @@ func Run(m *testing.M) int {
 			return 1
 		}
 	}
-	for _, k := range []string{"WIDEBOI_SOCK", "WIDEBOI_SESSION"} {
+	for _, k := range []string{"WIDEBOI_SOCK", "WIDEBOI_SESSION", "WIDEBOI", "LC_WIDEBOI", "WIDEBOI_PANE_ID"} {
 		_ = os.Unsetenv(k)
 	}
 	return m.Run()

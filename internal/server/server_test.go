@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -495,4 +496,45 @@ func TestResizeSkipsWhenViewportNeverAttached(t *testing.T) {
 	}
 
 	_ = srv.Close()
+}
+
+func TestServerSpawnsPanesWithWideboiEnvironment(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	envFile := filepath.Join(t.TempDir(), "pane.env")
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetSession("test-session", "/tmp/test.sock")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Command: fmt.Sprintf("env > %q; exec sleep 30", envFile)},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if data, err := os.ReadFile(envFile); err == nil && len(data) > 0 {
+			envStr := string(data)
+			for _, want := range []string{
+				"WIDEBOI=1\n",
+				"LC_WIDEBOI=1\n",
+				"TERM_PROGRAM=wideboi\n",
+				"WIDEBOI_PANE_ID=1\n",
+				"WIDEBOI_SESSION=test-session\n",
+				"WIDEBOI_SOCK=/tmp/test.sock\n",
+			} {
+				if !strings.Contains(envStr, want) {
+					t.Errorf("pane env missing %q, got:\n%s", want, envStr)
+				}
+			}
+			break
+		} else if time.Now().After(deadline) {
+			t.Fatalf("pane env file not written in time")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

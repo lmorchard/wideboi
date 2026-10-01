@@ -255,10 +255,12 @@ func TestPrintHelp(t *testing.T) {
 		"-L, --session",
 		"--shell",
 		"--disable-auto-cleanup",
+		"--allow-nested",
 		"WIDEBOI_LAYOUT",
 		"WIDEBOI_PREFIX",
 		"WIDEBOI_SOCK",
 		"WIDEBOI_SESSION",
+		"WIDEBOI_ALLOW_NESTED",
 		"SHELL",
 	}
 
@@ -456,4 +458,108 @@ func TestPrintEndNotice(t *testing.T) {
 			t.Errorf("notice %q lacks %q", got, want)
 		}
 	}
+}
+
+func TestParseCLIAllowNested(t *testing.T) {
+	opts, err := parseCLI([]string{"--allow-nested"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if !opts.flags.AllowNested {
+		t.Errorf("opts.flags.AllowNested = false, want true")
+	}
+
+	opts2, err := parseCLI([]string{"attach", "--allow-nested"})
+	if err != nil {
+		t.Fatalf("parseCLI error: %v", err)
+	}
+	if !opts2.flags.AllowNested {
+		t.Errorf("opts2.flags.AllowNested = false, want true")
+	}
+}
+
+func TestCheckNestedSession(t *testing.T) {
+	mockEnv := func(env map[string]string) func(string) string {
+		return func(k string) string {
+			return env[k]
+		}
+	}
+
+	cleanEnv := mockEnv(map[string]string{})
+	nestedCases := []struct {
+		name string
+		env  map[string]string
+	}{
+		{"WIDEBOI", map[string]string{"WIDEBOI": "1"}},
+		{"LC_WIDEBOI", map[string]string{"LC_WIDEBOI": "1"}},
+		{"TERM_PROGRAM", map[string]string{"TERM_PROGRAM": "wideboi"}},
+		{"WIDEBOI_PANE_ID", map[string]string{"WIDEBOI_PANE_ID": "2"}},
+	}
+
+	for _, tc := range nestedCases {
+		t.Run("nested_by_"+tc.name, func(t *testing.T) {
+			env := mockEnv(tc.env)
+
+			// Default subcommand (plain wideboi)
+			opts := cliOptions{ownerFD: -1}
+			if err := checkNestedSession(opts, env); err == nil {
+				t.Errorf("checkNestedSession() want error for plain wideboi in nested session, got nil")
+			}
+
+			// attach subcommand
+			attachOpts := cliOptions{subcommand: "attach", ownerFD: -1}
+			if err := checkNestedSession(attachOpts, env); err == nil {
+				t.Errorf("checkNestedSession() want error for attach in nested session, got nil")
+			}
+
+			// standalone server subcommand
+			serverOpts := cliOptions{subcommand: "server", ownerFD: -1}
+			if err := checkNestedSession(serverOpts, env); err == nil {
+				t.Errorf("checkNestedSession() want error for server in nested session, got nil")
+			}
+
+			// desktop subcommand
+			desktopOpts := cliOptions{subcommand: "desktop", ownerFD: -1}
+			if err := checkNestedSession(desktopOpts, env); err == nil {
+				t.Errorf("checkNestedSession() want error for desktop in nested session, got nil")
+			}
+
+			// Internal server spawned with ownerFD != -1 must NOT be blocked
+			spawnedServerOpts := cliOptions{subcommand: "server", ownerFD: 3}
+			if err := checkNestedSession(spawnedServerOpts, env); err != nil {
+				t.Errorf("checkNestedSession() spawned server want nil, got: %v", err)
+			}
+
+			// Subcommands like split, ls, capture, status must NOT be blocked
+			for _, sub := range []string{"split", "ls", "status", "capture", "close", "wait"} {
+				subOpts := cliOptions{subcommand: sub, ownerFD: -1}
+				if err := checkNestedSession(subOpts, env); err != nil {
+					t.Errorf("checkNestedSession() for subcommand %q want nil, got: %v", sub, err)
+				}
+			}
+
+			// --allow-nested flag allows running
+			allowedOpts := cliOptions{flags: config.ConfigFlags{AllowNested: true}, ownerFD: -1}
+			if err := checkNestedSession(allowedOpts, env); err != nil {
+				t.Errorf("checkNestedSession() with AllowNested flag want nil, got: %v", err)
+			}
+
+			// WIDEBOI_ALLOW_NESTED=1 environment variable allows running
+			envWithAllow := map[string]string{}
+			for k, v := range tc.env {
+				envWithAllow[k] = v
+			}
+			envWithAllow["WIDEBOI_ALLOW_NESTED"] = "1"
+			if err := checkNestedSession(opts, mockEnv(envWithAllow)); err != nil {
+				t.Errorf("checkNestedSession() with WIDEBOI_ALLOW_NESTED=1 want nil, got: %v", err)
+			}
+		})
+	}
+
+	t.Run("clean_environment", func(t *testing.T) {
+		opts := cliOptions{ownerFD: -1}
+		if err := checkNestedSession(opts, cleanEnv); err != nil {
+			t.Errorf("checkNestedSession() in clean environment want nil, got: %v", err)
+		}
+	})
 }
