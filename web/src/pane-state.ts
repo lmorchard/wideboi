@@ -83,7 +83,7 @@ export class PaneStore {
         return false;
       }
       seen.add(row.y);
-      lines[row.y] = create(LineDataSchema, { cells: row.cells });
+      lines[row.y] = create(LineDataSchema, { cells: row.cells, wrapped: row.wrapped });
     }
     if (lines.some(line => line === undefined || line.cells.length !== base.cols)) {
       this.close(patch.paneId);
@@ -96,6 +96,7 @@ export class PaneStore {
       cursorVisible: patch.cursorVisible, mouseTracking: patch.mouseTracking,
       scrollOffset: patch.scrollOffset, scrollbackLen: patch.scrollbackLen,
       unreadOutput: patch.unreadOutput,
+      links: patch.links?.length ? patch.links : base.links,
     });
     return true;
   }
@@ -122,7 +123,18 @@ export function selectionText(pane: MsgPaneUpdate | undefined, start: CellPoint,
     }
     rows.push(text.trimEnd());
   }
-  return rows.join('\n');
+  let result = '';
+  for (let i = 0; i < rows.length; i++) {
+    result += rows[i];
+    if (i < rows.length - 1) {
+      const lineY = a.y + i;
+      const wrapped = pane.lines[lineY]?.wrapped ?? false;
+      if (!wrapped) {
+        result += '\n';
+      }
+    }
+  }
+  return result;
 }
 
 export interface DetectedUrl {
@@ -143,9 +155,9 @@ function cleanUrl(raw: string): string {
       const closeCount = (url.match(new RegExp('\\' + last, 'g')) || []).length;
       if (closeCount > openCount) {
         url = url.slice(0, -1);
-      } else {
-        break;
+        continue;
       }
+      break;
     } else {
       break;
     }
@@ -155,6 +167,28 @@ function cleanUrl(raw: string): string {
 
 export function findUrlAt(pane: MsgPaneUpdate | undefined, point: CellPoint): DetectedUrl | undefined {
   if (!pane || point.y < 0 || point.y >= pane.lines.length) return undefined;
+
+  // 1. Explicit OSC 8 hyperlink on cell
+  const targetCell = pane.lines[point.y]?.cells?.[point.x];
+  if (targetCell && targetCell.linkId > 0 && pane.links && pane.links.length >= targetCell.linkId) {
+    const linkId = targetCell.linkId;
+    const url = pane.links[linkId - 1];
+    let startX = point.x;
+    while (startX > 0 && pane.lines[point.y]?.cells?.[startX - 1]?.linkId === linkId) {
+      startX--;
+    }
+    let endX = point.x;
+    while (endX < pane.cols - 1 && pane.lines[point.y]?.cells?.[endX + 1]?.linkId === linkId) {
+      endX++;
+    }
+    return {
+      url,
+      start: { x: startX, y: point.y },
+      end: { x: endX, y: point.y },
+    };
+  }
+
+  // 2. Plaintext URL autolinking fallback
 
   let startY = point.y;
   while (startY > 0) {

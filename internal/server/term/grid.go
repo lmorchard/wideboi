@@ -84,6 +84,9 @@ type Grid interface {
 	// BracketedPaste reports whether the child has requested bracketed paste mode (DEC 2004).
 	BracketedPaste() bool
 
+	// OnBell registers a callback invoked when the emulator receives a BEL character.
+	OnBell(fn func())
+
 	// SendMouse encodes a mouse event in the child's requested mode and
 	// writes it to the child. Like SendKey it writes to an io.Pipe and
 	// blocks until something reads.
@@ -244,6 +247,7 @@ type vtGrid struct {
 
 	userVarsMu sync.Mutex
 	userVars   map[string]string
+	onBell     func()
 
 	// osc repairs OSC strings x/ansi would cut at a 0x9C byte (#175).
 	// Only Write touches it, under writeResizeMu.
@@ -313,6 +317,11 @@ func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
 	g.status.Store(int32(protocol.StatusIdle))
 
 	g.em.SetCallbacks(vt.Callbacks{
+		Bell: func() {
+			if g.onBell != nil {
+				g.onBell()
+			}
+		},
 		CursorVisibility: func(visible bool) { g.cursorVisible.Store(visible) },
 		// x/vt has parsed OSC 0/1/2 into a title all along; nobody
 		// registered the callback, so it was thrown away. An agent
@@ -663,6 +672,8 @@ func (g *vtGrid) trackTerminalMode(m ansi.Mode, on bool) {
 func (g *vtGrid) MouseTracking() bool { return g.mouseModes.Load() != 0 }
 
 func (g *vtGrid) BracketedPaste() bool { return g.bracketedPaste.Load() }
+
+func (g *vtGrid) OnBell(fn func()) { g.onBell = fn }
 
 func (g *vtGrid) SendMouse(m uv.MouseEvent) { g.em.SendMouse(m) }
 

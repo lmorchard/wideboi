@@ -65,6 +65,13 @@ export class WideboiSettings extends LitElement {
     this.dispatchEvent(new CustomEvent('layout-change', { detail: val, bubbles: true, composed: true }));
   };
 
+  private handleRequestNotifications = async () => {
+    if (typeof Notification !== 'undefined' && Notification.requestPermission) {
+      await Notification.requestPermission();
+      this.requestUpdate();
+    }
+  };
+
   render() {
     return html`
       <div class="settings-overlay" @click=${this.handleClose}>
@@ -125,6 +132,12 @@ export class WideboiSettings extends LitElement {
                 <option value="cards" .selected=${this.cards}>Cards</option>
                 <option value="scroll" .selected=${!this.cards}>Scroll</option>
               </select>
+            </div>
+            <div class="settings-row">
+              <label for="settings-notifications">Desktop Notifications</label>
+              <button id="settings-notifications" type="button" @click=${this.handleRequestNotifications}>
+                ${typeof Notification !== 'undefined' && Notification.permission === 'granted' ? 'Enabled (Granted)' : 'Enable Notifications'}
+              </button>
             </div>
           </div>
         </div>

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
@@ -77,4 +78,14 @@ func (s *Server) PaneSize(id int) (cols, rows int, ok bool) {
 // current scroll offset, with unread output marked false.
 func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {
 	return p.UpdateMessageForOffset(p.ScrollOffset(), false)
+}
+
+// PaneGrid returns the term.Grid for the given pane id, or nil.
+func (s *Server) PaneGrid(id int) term.Grid {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p, ok := s.panes[id]; ok {
+		return p.grid
+	}
+	return nil
 }

@@ -103,6 +103,7 @@ type CellData struct {
 	Content string
 	Width   int
 	Style   StyleData
+	LinkID  uint32
 }
 
 // LineData represents a horizontal row indexed by terminal column. A wide
@@ -117,6 +118,7 @@ type MsgPaneUpdate struct {
 	Cols          int
 	Rows          int
 	Lines         []LineData
+	WrappedLines  []bool
 	CursorX       int
 	CursorY       int
 	CursorVisible bool
@@ -128,13 +130,15 @@ type MsgPaneUpdate struct {
 	ScrollOffset  int
 	ScrollbackLen int
 	UnreadOutput  bool
+	Links         []string
 }
 
 // PaneRow replaces one complete row. Complete rows keep wide glyph
 // continuation cells and all style fields together.
 type PaneRow struct {
-	Y     int
-	Cells LineData
+	Y       int
+	Cells   LineData
+	Wrapped bool
 }
 
 // MsgPanePatch changes a pane relative to an exact client baseline.
@@ -155,6 +159,14 @@ type MsgPanePatch struct {
 	ScrollOffset  int
 	ScrollbackLen int
 	UnreadOutput  bool
+	Links         []string
+}
+
+// MsgPaneNotification carries a desktop or bell notification event from a background pane.
+type MsgPaneNotification struct {
+	PaneID  int
+	Title   string
+	Message string
 }
 
 // MsgPaneResync asks for a full snapshot after a missing or stale patch.

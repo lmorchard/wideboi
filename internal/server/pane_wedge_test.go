@@ -62,6 +62,7 @@ func (g *blockingGrid) SendKey(uv.KeyEvent)                    {}
 func (g *blockingGrid) SendText(string)                        {}
 func (g *blockingGrid) MouseTracking() bool                    { return false }
 func (g *blockingGrid) BracketedPaste() bool                   { return false }
+func (g *blockingGrid) OnBell(func())                          {}
 func (g *blockingGrid) SendMouse(uv.MouseEvent)                {}
 func (g *blockingGrid) CursorPosition() image.Point            { return image.Point{} }
 func (g *blockingGrid) CursorVisible() bool                    { return false }

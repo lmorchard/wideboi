@@ -310,12 +310,15 @@ func (c *Client) selectionText(scr uv.Screen) string {
 			wrap := false
 			if m != nil {
 				localY := y - c.sel.dst.Min.Y
-				localX := c.sel.dst.Dx() - 1
-
-				if localY >= 0 && localY < m.Rows && localX >= 0 && localX < m.Cols {
-					lastCell := m.Surface.CellAt(localX, localY)
-					if lastCell != nil && lastCell.Content != "" && lastCell.Content != " " {
-						wrap = true
+				if pu, ok := c.paneUpdates[c.sel.paneID]; ok && localY >= 0 && localY < len(pu.WrappedLines) {
+					wrap = pu.WrappedLines[localY]
+				} else {
+					localX := c.sel.dst.Dx() - 1
+					if localY >= 0 && localY < m.Rows && localX >= 0 && localX < m.Cols {
+						lastCell := m.Surface.CellAt(localX, localY)
+						if lastCell != nil && lastCell.Content != "" && lastCell.Content != " " {
+							wrap = true
+						}
 					}
 				}
 			}

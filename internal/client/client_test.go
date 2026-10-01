@@ -89,3 +89,95 @@ func TestMsgFocusPaneSwitchesFocus(t *testing.T) {
 		t.Fatalf("after MsgFocusPane: focus = %d, want 2", got)
 	}
 }
+
+func TestClientDesktopNotifications(t *testing.T) {
+	cli := client.NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
+	var notifs [][2]string
+	cli.SetNotificationEmitter(func(title, msg string) {
+		notifs = append(notifs, [2]string{title, msg})
+	})
+
+	// Initial snapshot: pane 1 (focused) is Working, pane 2 (unfocused) is Working
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusWorking,
+			2: protocol.StatusWorking,
+		},
+		PaneTitles: map[int]string{
+			1: "Editor",
+			2: "Compiler",
+		},
+	})
+
+	if len(notifs) != 0 {
+		t.Fatalf("unexpected notifications on initial snapshot: %v", notifs)
+	}
+
+	// Snapshot: pane 1 (focused) finishes -> NO notification because focused!
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusDone,
+			2: protocol.StatusWorking,
+		},
+		PaneTitles: map[int]string{
+			1: "Editor",
+			2: "Compiler",
+		},
+	})
+	if len(notifs) != 0 {
+		t.Fatalf("focused pane finished should not emit notification: %v", notifs)
+	}
+
+	// Snapshot: pane 2 (unfocused) finishes -> EMIT notification!
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusDone,
+			2: protocol.StatusDone,
+		},
+		PaneTitles: map[int]string{
+			1: "Editor",
+			2: "Compiler",
+		},
+	})
+	if len(notifs) != 1 {
+		t.Fatalf("expected 1 notification, got: %v", notifs)
+	}
+	if notifs[0][0] != "Compiler" || notifs[0][1] != "Finished successfully" {
+		t.Errorf("got notification %v, want Compiler: Finished successfully", notifs[0])
+	}
+
+	// Bell on pane 2 (unfocused) -> EMIT notification!
+	cli.HandleServerMsg(protocol.MsgPaneNotification{
+		PaneID:  2,
+		Title:   "Compiler",
+		Message: "Alert",
+	})
+	if len(notifs) != 2 {
+		t.Fatalf("expected 2 notifications, got: %v", notifs)
+	}
+	if notifs[1][0] != "Compiler" || notifs[1][1] != "Alert" {
+		t.Errorf("got notification %v, want Compiler: Alert", notifs[1])
+	}
+
+	// Bell on pane 1 (focused) -> NO notification!
+	cli.HandleServerMsg(protocol.MsgPaneNotification{
+		PaneID:  1,
+		Title:   "Editor",
+		Message: "Alert",
+	})
+	if len(notifs) != 2 {
+		t.Fatalf("bell on focused pane should not emit notification: %v", notifs)
+	}
+}

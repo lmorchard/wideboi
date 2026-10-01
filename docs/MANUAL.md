@@ -564,6 +564,8 @@ You can remap control-mode action keys in the `[keys]` table:
 | `--tls-key <path>` | Path to TLS private key PEM file | — |
 | `--shell <path>` | Shell executable for new panes | `$SHELL` or `/bin/sh` |
 | `--disable-auto-cleanup` | Keep runtime files on clean exit | Cleanup enabled |
+| `--allow-nested` | Allow running nested wideboi sessions inside an existing session | Disabled |
+| `--notifications <mode>` | Desktop notifications (`auto`, `osc9`, `osc99`, `bell`, `off`) | `auto` |
 | `-v, --version` | Display version information and exit | — |
 | `-h, --help` | Display command-line help text and exit | — |
 
@@ -586,6 +588,7 @@ You can remap control-mode action keys in the `[keys]` table:
 | `WIDEBOI_AUTO_CLEANUP` | Remove sockets and logs on clean exit (`1` or `0`) |
 | `WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS` | Keep the session running when its terminal hangs up (`1` or `0`, default `1`) |
 | `WIDEBOI_ALLOW_NESTED` | Allow running nested wideboi sessions inside an existing session (`1` or `0`) |
+| `WIDEBOI_NOTIFICATIONS` | Desktop notifications mode (`auto`, `osc9`, `osc99`, `bell`, `off`) |
 | `SHELL` | Default fallback shell path |
 
 ### Logging and Cleanup

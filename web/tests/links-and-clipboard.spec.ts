@@ -184,3 +184,101 @@ test('drag-select copies text to clipboard and copy event copies active selectio
   // Clipboard should now contain the active selection again
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('Welcome');
 });
+
+test('hovering over and clicking an explicit OSC 8 hyperlink', async ({ page }) => {
+  await installMockWebSocket(page);
+  await page.setViewportSize({ width: 700, height: 400 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({
+      case: 'layoutSnapshot',
+      value: { columns: [{ paneId: 1, width: 80, height: 24 }] },
+    }));
+
+    const anchorText = 'Click Here'.split('').map(c => ({ content: c, width: 1, linkId: 1 }));
+    const emptyRow = () => ({ cells: Array.from({ length: 80 }, () => ({ content: ' ', width: 1 })) });
+    const lines = Array.from({ length: 23 }, emptyRow);
+    lines.push({ cells: anchorText });
+
+    window.testSockets[0].message(serverBytes({
+      case: 'paneUpdate',
+      value: {
+        paneId: 1, cols: 80, rows: 24, generation: 1n,
+        scrollOffset: 0, scrollbackLen: 0, lines,
+        links: ['https://wideboi.example/osc8-link'],
+      },
+    }));
+  });
+
+  await page.evaluate(() => {
+    (window as any).openedUrls = [];
+    window.open = (url: any) => { (window as any).openedUrls.push(String(url)); return null; };
+  });
+
+  const canvas = page.locator('wideboi-pane canvas');
+  const coords = await page.evaluate(() => {
+    const pane = (document.querySelector('wideboi-app') as any).shadowRoot.querySelector('wideboi-pane');
+    const rect = pane.canvas.getBoundingClientRect();
+    const cellW = pane.cellWidth * pane.zoom;
+    const cellH = 16.8 * pane.zoom;
+    return {
+      x: rect.left + 3 * cellW,
+      y: rect.top + 23 * cellH + cellH / 2,
+    };
+  });
+
+  await page.mouse.move(coords.x, coords.y);
+  await expect(canvas).toHaveCSS('cursor', 'pointer');
+  expect(await canvas.getAttribute('title')).toBe('https://wideboi.example/osc8-link');
+
+  await page.mouse.click(coords.x, coords.y);
+  expect(await page.evaluate(() => (window as any).openedUrls)).toEqual(['https://wideboi.example/osc8-link']);
+});
+
+test('soft-wrapped rows copy without intermediate newline', async ({ page }) => {
+  await installMockWebSocket(page);
+  await page.setViewportSize({ width: 700, height: 400 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect' }).click();
+  await page.evaluate(() => window.testSockets[0].open());
+
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({
+      case: 'layoutSnapshot',
+      value: { columns: [{ paneId: 1, width: 80, height: 24 }] },
+    }));
+
+    const emptyRow = () => ({ cells: Array.from({ length: 80 }, () => ({ content: ' ', width: 1 })) });
+    const lines = Array.from({ length: 22 }, emptyRow);
+    lines.push({
+      cells: 'Line 1 long text wrapping'.split('').map(c => ({ content: c, width: 1 })),
+      wrapped: true,
+    });
+    lines.push({
+      cells: 'continuation text here'.split('').map(c => ({ content: c, width: 1 })),
+      wrapped: false,
+    });
+
+    window.testSockets[0].message(serverBytes({
+      case: 'paneUpdate',
+      value: {
+        paneId: 1, cols: 80, rows: 24, generation: 1n,
+        scrollOffset: 0, scrollbackLen: 0, lines,
+      },
+    }));
+  });
+
+  const selected = await page.evaluate(async () => {
+    const { selectionText } = await import('/src/pane-state.ts');
+    const app = document.querySelector('wideboi-app') as any;
+    const pane = app.panes.get(1);
+    return selectionText(pane, { x: 0, y: 22 }, { x: 21, y: 23 });
+  });
+
+  expect(selected).toBe('Line 1 long text wrappingcontinuation text here');
+});

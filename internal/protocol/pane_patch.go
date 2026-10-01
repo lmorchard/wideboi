@@ -17,13 +17,22 @@ func BuildPanePatch(base, next MsgPaneUpdate) (MsgPanePatch, bool) {
 		CursorVisible: next.CursorVisible, MouseTracking: next.MouseTracking,
 		ScrollOffset: next.ScrollOffset, ScrollbackLen: next.ScrollbackLen,
 		UnreadOutput: next.UnreadOutput,
+		Links:        next.Links,
 	}
 	for y := range next.Lines {
 		if len(base.Lines[y]) != base.Cols || len(next.Lines[y]) != next.Cols {
 			return MsgPanePatch{}, false
 		}
-		if !slices.Equal(base.Lines[y], next.Lines[y]) {
-			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: y, Cells: next.Lines[y]})
+		wrappedChanged := false
+		if len(base.WrappedLines) == len(next.WrappedLines) && y < len(base.WrappedLines) {
+			wrappedChanged = base.WrappedLines[y] != next.WrappedLines[y]
+		}
+		if !slices.Equal(base.Lines[y], next.Lines[y]) || wrappedChanged {
+			wrapped := false
+			if y < len(next.WrappedLines) {
+				wrapped = next.WrappedLines[y]
+			}
+			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: y, Cells: next.Lines[y], Wrapped: wrapped})
 		}
 	}
 	if len(patch.ChangedRows)*2 < next.Rows {
@@ -67,7 +76,11 @@ func BuildPanePatch(base, next MsgPaneUpdate) (MsgPanePatch, bool) {
 	patch.ChangedRows = nil
 	for y := 0; y < next.Rows; y++ {
 		if shift < 0 && y >= next.Rows-replaced || shift > 0 && y < replaced {
-			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: y, Cells: next.Lines[y]})
+			wrapped := false
+			if y < len(next.WrappedLines) {
+				wrapped = next.WrappedLines[y]
+			}
+			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: y, Cells: next.Lines[y], Wrapped: wrapped})
 		}
 	}
 	return patch, true
@@ -106,10 +119,16 @@ func ApplyPanePatch(base MsgPaneUpdate, patch MsgPanePatch) (MsgPaneUpdate, bool
 	}
 	next := base
 	next.Lines = make([]LineData, base.Rows)
+	if len(base.WrappedLines) == base.Rows {
+		next.WrappedLines = make([]bool, base.Rows)
+	}
 	for y := range next.Lines {
 		source := y - patch.ShiftRows
 		if source >= 0 && source < base.Rows {
 			next.Lines[y] = base.Lines[source]
+			if len(next.WrappedLines) == base.Rows {
+				next.WrappedLines[y] = base.WrappedLines[source]
+			}
 		}
 	}
 	seen := make([]bool, base.Rows)
@@ -119,11 +138,17 @@ func ApplyPanePatch(base MsgPaneUpdate, patch MsgPanePatch) (MsgPaneUpdate, bool
 		}
 		seen[row.Y] = true
 		next.Lines[row.Y] = row.Cells
+		if len(next.WrappedLines) == base.Rows {
+			next.WrappedLines[row.Y] = row.Wrapped
+		}
 	}
 	for _, row := range next.Lines {
 		if len(row) != base.Cols {
 			return MsgPaneUpdate{}, false
 		}
+	}
+	if len(patch.Links) > 0 {
+		next.Links = patch.Links
 	}
 	next.Generation = patch.Generation
 	next.CursorX, next.CursorY = patch.CursorX, patch.CursorY

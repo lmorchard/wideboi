@@ -65,10 +65,12 @@ message CellData {
   string content = 1;
   int32 width = 2;
   StyleData style = 3;
+  uint32 link_id = 4;
 }
 
 message LineData {
   repeated CellData cells = 1;
+  bool wrapped = 2;
 }
 
 // Generations arrive in the browser as bigint (protobuf-es ignores
@@ -86,6 +88,7 @@ message MsgPaneUpdate {
   int32 scroll_offset = 10;
   int32 scrollback_len = 11;
   bool unread_output = 12;
+  repeated string links = 13;
 }
 
 // PaneRow replaces one complete row, style and wide-glyph continuations
@@ -93,6 +96,7 @@ message MsgPaneUpdate {
 message PaneRow {
   int32 y = 1;
   repeated CellData cells = 2;
+  bool wrapped = 3;
 }
 
 // MsgPanePatch changes a pane relative to an exact client baseline. Its
@@ -112,6 +116,7 @@ message MsgPanePatch {
   int32 scroll_offset = 12;
   int32 scrollback_len = 13;
   bool unread_output = 14;
+  repeated string links = 15;
 }
 
 message ColumnData {
@@ -149,6 +154,12 @@ message MsgFocusPane {
   int32 pane_id = 1;
 }
 
+message MsgPaneNotification {
+  int32 pane_id = 1;
+  string title = 2;
+  string message = 3;
+}
+
 message ServerMessage {
   oneof msg {
     MsgPaneUpdate pane_update = 1;
@@ -169,6 +180,7 @@ message ServerMessage {
     MsgUpgradeResponse upgrade_response = 16;
     MsgWebServerControlResponse web_server_control_response = 17;
     MsgConfigSnapshot config_snapshot = 18;
+    MsgPaneNotification pane_notification = 19;
   }
 }
 

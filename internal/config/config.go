@@ -57,10 +57,11 @@ type Config struct {
 	KeepSessionOnOwnerLossEnabled bool  `toml:"-"`
 	// TLS is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read TLSEnabled, not this.
-	TLS        *bool  `toml:"tls"`
-	TLSEnabled bool   `toml:"-"`
-	TLSCert    string `toml:"tls_cert"`
-	TLSKey     string `toml:"tls_key"`
+	TLS           *bool  `toml:"tls"`
+	TLSEnabled    bool   `toml:"-"`
+	TLSCert       string `toml:"tls_cert"`
+	TLSKey        string `toml:"tls_key"`
+	Notifications string `toml:"notifications"`
 	// LogLevelName is what was configured; LogLevel is it resolved.
 	LogLevelName   string        `toml:"log_level"`
 	LogLevel       slog.Level    `toml:"-"`
@@ -124,6 +125,7 @@ type ConfigFlags struct {
 	TLSKey                string
 	TrustProject          bool
 	AllowNested           bool
+	Notifications         string
 	PromptTrust           func(path string, hasSensitive bool) bool
 }
 
@@ -609,8 +611,24 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if flags.TLSKey != "" {
 		cfg.TLSKey = flags.TLSKey
 	}
+	if flags.Notifications != "" {
+		cfg.Notifications = flags.Notifications
+	} else if envNotif := getenv("WIDEBOI_NOTIFICATIONS"); envNotif != "" {
+		cfg.Notifications = envNotif
+	}
 
 	// 5. Validation
+	// Notifications
+	if cfg.Notifications == "" {
+		cfg.Notifications = "auto"
+	}
+	cfg.Notifications = strings.ToLower(strings.TrimSpace(cfg.Notifications))
+	switch cfg.Notifications {
+	case "auto", "osc9", "osc99", "bell", "off":
+	default:
+		return Config{}, nil, fmt.Errorf("notifications %q: want auto, osc9, osc99, bell, or off", cfg.Notifications)
+	}
+
 	// Layout
 	switch strings.ToLower(strings.TrimSpace(cfg.Layout)) {
 	case "", "cards":

@@ -33,4 +33,5 @@ package protocol
 // 16 adds MsgConfigSnapshot for shipping server key bindings and width presets (#270).
 // 17 adds the attached client count to layout snapshots, for `wideboi ls`.
 // 18 adds paste boolean flag to MsgInput (#312).
-const Version uint32 = 18
+// 19 adds soft-wrap metadata, OSC 8 hyperlinks, and background pane notifications (#337, #328, #330).
+const Version uint32 = 19

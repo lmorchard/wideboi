@@ -192,9 +192,14 @@ func MarshalServer(msg any) ([]byte, error) {
 			ScrollOffset:  int32(m.ScrollOffset),
 			ScrollbackLen: int32(m.ScrollbackLen),
 			UnreadOutput:  m.UnreadOutput,
+			Links:         m.Links,
 		}
-		for _, line := range m.Lines {
-			update.Lines = append(update.Lines, &wirepb.LineData{Cells: encodeLine(line)})
+		for i, line := range m.Lines {
+			wrapped := false
+			if i < len(m.WrappedLines) {
+				wrapped = m.WrappedLines[i]
+			}
+			update.Lines = append(update.Lines, &wirepb.LineData{Cells: encodeLine(line), Wrapped: wrapped})
 		}
 		env.Msg = &wirepb.ServerMessage_PaneUpdate{PaneUpdate: update}
 	case MsgPanePatch:
@@ -212,9 +217,10 @@ func MarshalServer(msg any) ([]byte, error) {
 			ScrollOffset:   int32(m.ScrollOffset),
 			ScrollbackLen:  int32(m.ScrollbackLen),
 			UnreadOutput:   m.UnreadOutput,
+			Links:          m.Links,
 		}
 		for _, row := range m.ChangedRows {
-			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{Y: int32(row.Y), Cells: encodeLine(row.Cells)})
+			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{Y: int32(row.Y), Cells: encodeLine(row.Cells), Wrapped: row.Wrapped})
 		}
 		env.Msg = &wirepb.ServerMessage_PanePatch{PanePatch: patch}
 	case MsgPaneClosed:
@@ -280,6 +286,14 @@ func MarshalServer(msg any) ([]byte, error) {
 				Bindings:       encodeKeyBindings(m.Bindings),
 			},
 		}
+	case MsgPaneNotification:
+		env.Msg = &wirepb.ServerMessage_PaneNotification{
+			PaneNotification: &wirepb.MsgPaneNotification{
+				PaneId:  int32(m.PaneID),
+				Title:   validUTF8(m.Title),
+				Message: validUTF8(m.Message),
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -330,8 +344,25 @@ func UnmarshalServer(data []byte) (any, error) {
 			ScrollbackLen: int(src.ScrollbackLen),
 			UnreadOutput:  src.UnreadOutput,
 		}
+		if len(src.Links) > 0 {
+			update.Links = src.Links
+		}
+		hasWrapped := false
 		for _, row := range src.Lines {
+			if row.Wrapped {
+				hasWrapped = true
+				break
+			}
+		}
+		update.Lines = make([]LineData, 0, len(src.Lines))
+		if hasWrapped {
+			update.WrappedLines = make([]bool, len(src.Lines))
+		}
+		for i, row := range src.Lines {
 			update.Lines = append(update.Lines, decodeLine(row.Cells))
+			if hasWrapped {
+				update.WrappedLines[i] = row.Wrapped
+			}
 		}
 		return update, nil
 	case *wirepb.ServerMessage_PanePatch:
@@ -351,8 +382,11 @@ func UnmarshalServer(data []byte) (any, error) {
 			ScrollbackLen:  int(src.ScrollbackLen),
 			UnreadOutput:   src.UnreadOutput,
 		}
+		if len(src.Links) > 0 {
+			patch.Links = src.Links
+		}
 		for _, row := range src.ChangedRows {
-			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: int(row.Y), Cells: decodeLine(row.Cells)})
+			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: int(row.Y), Cells: decodeLine(row.Cells), Wrapped: row.Wrapped})
 		}
 		return patch, nil
 	case *wirepb.ServerMessage_PaneClosed:
@@ -416,6 +450,12 @@ func UnmarshalServer(data []byte) (any, error) {
 			MaxColumnWidth: int(m.ConfigSnapshot.MaxColumnWidth),
 			Bindings:       decodeKeyBindings(m.ConfigSnapshot.Bindings),
 		}, nil
+	case *wirepb.ServerMessage_PaneNotification:
+		return MsgPaneNotification{
+			PaneID:  int(m.PaneNotification.PaneId),
+			Title:   m.PaneNotification.Title,
+			Message: m.PaneNotification.Message,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
 	}
@@ -437,7 +477,12 @@ func validUTF8(s string) string {
 func encodeLine(line LineData) []*wirepb.CellData {
 	cells := make([]*wirepb.CellData, 0, len(line))
 	for _, cell := range line {
-		cells = append(cells, &wirepb.CellData{Content: validUTF8(cell.Content), Width: int32(cell.Width), Style: encodeStyle(cell.Style)})
+		cells = append(cells, &wirepb.CellData{
+			Content: validUTF8(cell.Content),
+			Width:   int32(cell.Width),
+			Style:   encodeStyle(cell.Style),
+			LinkId:  cell.LinkID,
+		})
 	}
 	return cells
 }
@@ -445,7 +490,12 @@ func encodeLine(line LineData) []*wirepb.CellData {
 func decodeLine(cells []*wirepb.CellData) LineData {
 	line := make(LineData, 0, len(cells))
 	for _, cell := range cells {
-		line = append(line, CellData{Content: cell.Content, Width: int(cell.Width), Style: decodeStyle(cell.Style)})
+		line = append(line, CellData{
+			Content: cell.Content,
+			Width:   int(cell.Width),
+			Style:   decodeStyle(cell.Style),
+			LinkID:  cell.LinkId,
+		})
 	}
 	return line
 }

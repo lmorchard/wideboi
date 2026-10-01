@@ -89,6 +89,7 @@ func newFlagSet(opts *cliOptions) *flag.FlagSet {
 	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
 	fs.BoolVar(&opts.flags.EndSessionOnOwnerLoss, "end-session-on-owner-loss", false, "end the session when its owning terminal hangs up or the owner dies without detaching")
 	fs.BoolVar(&opts.flags.AllowNested, "allow-nested", false, "allow running nested wideboi sessions inside an existing session")
+	fs.StringVar(&opts.flags.Notifications, "notifications", "", "desktop notifications: auto (default), osc9, osc99, bell, off")
 	fs.BoolVar(&opts.flags.TrustProject, "trust-project", false, "trust project configuration (.wideboi.toml) to execute commands and security settings")
 	fs.IntVar(&opts.ownerFD, "owner-fd", -1, "internal: inherited owner connection")
 	fs.BoolVar(&opts.showVer, "v", false, "display version and build information")
@@ -214,6 +215,8 @@ Flags:
                          End the session when the terminal that started it
                          hangs up (default: keep it running, detached)
       --allow-nested     Allow running nested wideboi sessions inside an existing session
+      --notifications <mode>
+                         Desktop host notifications: auto (default), osc9, osc99, bell, off
   -v, --version          Print version and exit
   -h, --help             Show this help text and exit
 
@@ -222,6 +225,7 @@ Environment Variables:
   WIDEBOI_PREFIX         Prefix key override (e.g. "ctrl+b")
   WIDEBOI_SESSION        Session name override
   WIDEBOI_ALLOW_NESTED   =1 to allow running nested wideboi sessions inside an existing session
+  WIDEBOI_NOTIFICATIONS  Desktop notifications mode: auto, osc9, osc99, bell, off
   WIDEBOI_WEBSOCKET      Address for WebSocket server (e.g. "127.0.0.1:8080")
   WIDEBOI_TLS            Enable TLS/HTTPS for web server (default true)
   WIDEBOI_DISABLE_TLS    Disable TLS/HTTPS for web server
@@ -967,6 +971,7 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 	cli.SetLayoutMode(cfg.LayoutMode)
 	cli.SetBindings(bindings)
 	cli.SetDetachable(true)
+	cli.SetNotifications(cfg.Notifications)
 	rt := &router{prefix: cfg.Prefix, detachable: true, bindings: bindings}
 
 	cli.Attach(ctx)

@@ -164,10 +164,20 @@ func (p *Pane) Start(onExit func()) {
 			onExit()
 		}()
 		buf := make([]byte, 4096)
+		qs := newQueryScanner()
 		for {
 			n, err := p.pty.Master.Read(buf)
 			if n > 0 {
-				_, _ = p.grid.Write(buf[:n])
+				p.renderMu.RLock()
+				cols, rows := p.cols, p.rows
+				p.renderMu.RUnlock()
+				cleaned, replies := qs.process(buf[:n], cols, rows)
+				if len(replies) > 0 {
+					_, _ = p.pty.WriteBounded(replies, ptyWriteTimeout)
+				}
+				if len(cleaned) > 0 {
+					_, _ = p.grid.Write(cleaned)
+				}
 			}
 			if err != nil {
 				return
@@ -443,6 +453,13 @@ func (p *Pane) markExited(code int) {
 	p.exitMu.Unlock()
 }
 
+// SetOnBell configures a callback for terminal BEL characters.
+func (p *Pane) SetOnBell(fn func()) {
+	if p.grid != nil {
+		p.grid.OnBell(fn)
+	}
+}
+
 // reapedExitCode is the child's exit status if it has been reaped.
 // Custom panes have no child and so no status.
 func (p *Pane) reapedExitCode() (int, bool) {
@@ -471,6 +488,10 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 	p.DrawAt(buf, image.Rect(0, 0, cols, rows), offset)
 
 	lines := make([]protocol.LineData, rows)
+	wrappedLines := make([]bool, rows)
+	linkMap := make(map[string]uint32)
+	var links []string
+
 	for y := 0; y < rows; y++ {
 		line := make(protocol.LineData, cols)
 		for x := 0; x < cols; x++ {
@@ -487,13 +508,39 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 			if w <= 0 {
 				w = 1
 			}
+			var linkID uint32
+			if c.Link.URL != "" {
+				if id, ok := linkMap[c.Link.URL]; ok {
+					linkID = id
+				} else {
+					linkID = uint32(len(links) + 1)
+					linkMap[c.Link.URL] = linkID
+					links = append(links, c.Link.URL)
+				}
+			}
 			line[x] = protocol.CellData{
 				Content: content,
 				Width:   w,
 				Style:   protocol.EncodeStyle(c.Style),
+				LinkID:  linkID,
 			}
 		}
 		lines[y] = line
+
+		if y < rows-1 {
+			lastCell := buf.CellAt(cols-1, y)
+			if lastCell != nil && lastCell.Content != "" && lastCell.Content != " " {
+				nextHasContent := false
+				for nx := 0; nx < cols; nx++ {
+					nc := buf.CellAt(nx, y+1)
+					if nc != nil && nc.Content != "" && nc.Content != " " {
+						nextHasContent = true
+						break
+					}
+				}
+				wrappedLines[y] = nextHasContent
+			}
+		}
 	}
 
 	cp := p.CursorPosition()
@@ -506,6 +553,7 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 		Cols:          cols,
 		Rows:          rows,
 		Lines:         lines,
+		WrappedLines:  wrappedLines,
 		CursorX:       cp.X,
 		CursorY:       cp.Y,
 		CursorVisible: cursorVisible,
@@ -513,6 +561,7 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 		ScrollOffset:  offset,
 		ScrollbackLen: p.ScrollbackLen(),
 		UnreadOutput:  unreadOutput,
+		Links:         links,
 	}, true
 }
 

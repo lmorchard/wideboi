@@ -51,6 +51,8 @@ func fill(v reflect.Value, n *int) {
 		v.SetInt(m)
 	case reflect.Uint8:
 		v.SetUint(uint64(200 + *n%56)) // high bit set: no sign confusion
+	case reflect.Uint32:
+		v.SetUint(uint64(1<<20 + *n))
 	case reflect.Uint64:
 		v.SetUint(1<<40 + uint64(*n)) // beyond 32 bits: a generation must not truncate
 	default:

@@ -256,11 +256,13 @@ func TestPrintHelp(t *testing.T) {
 		"--shell",
 		"--disable-auto-cleanup",
 		"--allow-nested",
+		"--notifications",
 		"WIDEBOI_LAYOUT",
 		"WIDEBOI_PREFIX",
 		"WIDEBOI_SOCK",
 		"WIDEBOI_SESSION",
 		"WIDEBOI_ALLOW_NESTED",
+		"WIDEBOI_NOTIFICATIONS",
 		"SHELL",
 	}
 
