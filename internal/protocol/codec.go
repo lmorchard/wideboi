@@ -192,6 +192,7 @@ func MarshalServer(msg any) ([]byte, error) {
 			ScrollOffset:  int32(m.ScrollOffset),
 			ScrollbackLen: int32(m.ScrollbackLen),
 			UnreadOutput:  m.UnreadOutput,
+			Links:         sanitizeLinks(m.Links),
 		}
 		for _, line := range m.Lines {
 			update.Lines = append(update.Lines, &wirepb.LineData{Cells: encodeLine(line)})
@@ -212,6 +213,7 @@ func MarshalServer(msg any) ([]byte, error) {
 			ScrollOffset:   int32(m.ScrollOffset),
 			ScrollbackLen:  int32(m.ScrollbackLen),
 			UnreadOutput:   m.UnreadOutput,
+			Links:          sanitizeLinks(m.Links),
 		}
 		for _, row := range m.ChangedRows {
 			patch.ChangedRows = append(patch.ChangedRows, &wirepb.PaneRow{Y: int32(row.Y), Cells: encodeLine(row.Cells)})
@@ -330,6 +332,9 @@ func UnmarshalServer(data []byte) (any, error) {
 			ScrollbackLen: int(src.ScrollbackLen),
 			UnreadOutput:  src.UnreadOutput,
 		}
+		if len(src.Links) > 0 {
+			update.Links = src.Links
+		}
 		for _, row := range src.Lines {
 			update.Lines = append(update.Lines, decodeLine(row.Cells))
 		}
@@ -350,6 +355,9 @@ func UnmarshalServer(data []byte) (any, error) {
 			ScrollOffset:   int(src.ScrollOffset),
 			ScrollbackLen:  int(src.ScrollbackLen),
 			UnreadOutput:   src.UnreadOutput,
+		}
+		if len(src.Links) > 0 {
+			patch.Links = src.Links
 		}
 		for _, row := range src.ChangedRows {
 			patch.ChangedRows = append(patch.ChangedRows, PaneRow{Y: int(row.Y), Cells: decodeLine(row.Cells)})
@@ -432,12 +440,28 @@ func validUTF8(s string) string {
 	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
+func sanitizeLinks(links []string) []string {
+	if len(links) == 0 {
+		return nil
+	}
+	out := make([]string, len(links))
+	for i, l := range links {
+		out[i] = validUTF8(l)
+	}
+	return out
+}
+
 // encodeLine and decodeLine convert one row; full updates and patches
 // share them so a cell field is mapped in exactly one place.
 func encodeLine(line LineData) []*wirepb.CellData {
 	cells := make([]*wirepb.CellData, 0, len(line))
 	for _, cell := range line {
-		cells = append(cells, &wirepb.CellData{Content: validUTF8(cell.Content), Width: int32(cell.Width), Style: encodeStyle(cell.Style)})
+		cells = append(cells, &wirepb.CellData{
+			Content: validUTF8(cell.Content),
+			Width:   int32(cell.Width),
+			Style:   encodeStyle(cell.Style),
+			LinkId:  cell.LinkID,
+		})
 	}
 	return cells
 }
@@ -445,7 +469,12 @@ func encodeLine(line LineData) []*wirepb.CellData {
 func decodeLine(cells []*wirepb.CellData) LineData {
 	line := make(LineData, 0, len(cells))
 	for _, cell := range cells {
-		line = append(line, CellData{Content: cell.Content, Width: int(cell.Width), Style: decodeStyle(cell.Style)})
+		line = append(line, CellData{
+			Content: cell.Content,
+			Width:   int(cell.Width),
+			Style:   decodeStyle(cell.Style),
+			LinkID:  cell.LinkId,
+		})
 	}
 	return line
 }

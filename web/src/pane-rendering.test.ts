@@ -142,6 +142,30 @@ describe('pane mirrors', () => {
       expect(found?.url).toBe('https://wide.dev');
       expect(found?.start).toEqual({ x: 3, y: 0 });
     });
+
+    it('detects explicit OSC 8 hyperlink on cell', () => {
+      const anchor = 'Click Here'.split('').map(c => ({ content: c, width: 1, linkId: 1 }));
+      const pane = create(MsgPaneUpdateSchema, {
+        paneId: 1, cols: 20, rows: 1,
+        lines: [{ cells: [...anchor, ...Array.from({ length: 10 }, () => ({ content: ' ', width: 1, linkId: 0 }))] }],
+        links: ['https://example.com/explicit-link'],
+      });
+      const found = findUrlAt(pane, { x: 3, y: 0 });
+      expect(found).toBeDefined();
+      expect(found?.url).toBe('https://example.com/explicit-link');
+      expect(found?.start).toEqual({ x: 0, y: 0 });
+      expect(found?.end).toEqual({ x: 9, y: 0 });
+    });
+
+    it('rejects unsafe URL protocols in OSC 8 hyperlinks', () => {
+      const anchor = 'Evil'.split('').map(c => ({ content: c, width: 1, linkId: 1 }));
+      const pane = create(MsgPaneUpdateSchema, {
+        paneId: 1, cols: 20, rows: 1,
+        lines: [{ cells: [...anchor, ...Array.from({ length: 16 }, () => ({ content: ' ', width: 1, linkId: 0 }))] }],
+        links: ['javascript:alert(1)'],
+      });
+      expect(findUrlAt(pane, { x: 2, y: 0 })).toBeUndefined();
+    });
   });
 
   it('updates scroll offset, scrollback length, and unread output from patch', () => {

@@ -41,6 +41,10 @@ type Pane struct {
 	// race is real, not theoretical.
 	resizeMu             sync.Mutex
 	lastResizeGeneration uint64
+	// linkMap and links provide stable LinkID assignments across consecutive frames
+	// so shift detection in BuildPanePatch remains effective during scrolling.
+	linkMap map[string]uint32
+	links   []string
 	// renderMu keeps grid.Close from overlapping a pane snapshot. Renderers
 	// acquire resizeMu first, so a renderer waiting behind a wedged Resize
 	// cannot prevent Close from reaching grid.Close to break that wedge.
@@ -471,6 +475,15 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 	p.DrawAt(buf, image.Rect(0, 0, cols, rows), offset)
 
 	lines := make([]protocol.LineData, rows)
+	if len(p.links) > 1000 {
+		p.linkMap = nil
+		p.links = nil
+	}
+	if p.linkMap == nil {
+		p.linkMap = make(map[string]uint32)
+	}
+	linksOnScreen := 0
+
 	for y := 0; y < rows; y++ {
 		line := make(protocol.LineData, cols)
 		for x := 0; x < cols; x++ {
@@ -487,13 +500,30 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 			if w <= 0 {
 				w = 1
 			}
+			var linkID uint32
+			if c.Link.URL != "" {
+				linksOnScreen++
+				if id, ok := p.linkMap[c.Link.URL]; ok {
+					linkID = id
+				} else {
+					linkID = uint32(len(p.links) + 1)
+					p.linkMap[c.Link.URL] = linkID
+					p.links = append(p.links, c.Link.URL)
+				}
+			}
 			line[x] = protocol.CellData{
 				Content: content,
 				Width:   w,
 				Style:   protocol.EncodeStyle(c.Style),
+				LinkID:  linkID,
 			}
 		}
 		lines[y] = line
+	}
+
+	if linksOnScreen == 0 && len(p.links) > 0 {
+		p.linkMap = nil
+		p.links = nil
 	}
 
 	cp := p.CursorPosition()
@@ -513,6 +543,7 @@ func (p *Pane) UpdateMessageForOffset(offset int, unreadOutput bool) (protocol.M
 		ScrollOffset:  offset,
 		ScrollbackLen: p.ScrollbackLen(),
 		UnreadOutput:  unreadOutput,
+		Links:         append([]string(nil), p.links...),
 	}, true
 }
 

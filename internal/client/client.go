@@ -238,6 +238,9 @@ func (c *Client) applyPaneUpdateLocked(m protocol.MsgPaneUpdate) {
 			}
 			uvCell := uv.NewCell(mirror.Surface.WidthMethod(), cell.Content)
 			uvCell.Style = cell.Style.Decode()
+			if cell.LinkID > 0 && int(cell.LinkID)-1 < len(m.Links) {
+				uvCell.Link = uv.NewLink(m.Links[cell.LinkID-1])
+			}
 			mirror.Surface.SetCell(x, y, uvCell)
 		}
 	}

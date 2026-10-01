@@ -33,4 +33,5 @@ package protocol
 // 16 adds MsgConfigSnapshot for shipping server key bindings and width presets (#270).
 // 17 adds the attached client count to layout snapshots, for `wideboi ls`.
 // 18 adds paste boolean flag to MsgInput (#312).
-const Version uint32 = 18
+// 19 adds link_id to CellData and links table to MsgPaneUpdate/MsgPanePatch for OSC 8 hyperlinks (#328).
+const Version uint32 = 19

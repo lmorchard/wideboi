@@ -707,3 +707,59 @@ func TestColumnOrSizeChangeForcesPaneResend(t *testing.T) {
 		t.Fatalf("size change did not force resend of all panes: got %v, want [1 2]", got)
 	}
 }
+
+func TestPaneUpdatePreservesLinkIDAcrossScroll(t *testing.T) {
+	grid := term.NewVT(30, 10)
+	t.Cleanup(func() { _ = grid.Close() })
+
+	// Fill screen with lines, bottom rows have links
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(grid, "line %d\r\n", i)
+	}
+	_, _ = grid.Write([]byte("\x1b]8;;https://link1.com\x1b\\Link1\x1b]8;;\x1b\\\r\n"))
+	_, _ = grid.Write([]byte("\x1b]8;;https://link2.com\x1b\\Link2\x1b]8;;\x1b\\"))
+
+	pane := &Pane{id: 1, grid: grid, cols: 30, rows: 10}
+	msg1, ok := pane.UpdateMessageForOffset(0, false)
+	if !ok {
+		t.Fatal("UpdateMessageForOffset frame 1 failed")
+	}
+	if len(msg1.Links) != 2 || msg1.Links[0] != "https://link1.com" || msg1.Links[1] != "https://link2.com" {
+		t.Fatalf("unexpected links in frame 1: %v", msg1.Links)
+	}
+	link1ID := msg1.Lines[8][0].LinkID
+	link2ID := msg1.Lines[9][0].LinkID
+	if link1ID != 1 || link2ID != 2 {
+		t.Fatalf("frame 1 link IDs: got %d, %d; want 1, 2", link1ID, link2ID)
+	}
+
+	// Scroll: print a new row at bottom, pushing Link1 up to row 7, Link2 to row 8
+	_, _ = grid.Write([]byte("\r\n\x1b]8;;https://link3.com\x1b\\Link3\x1b]8;;\x1b\\"))
+	msg2, ok := pane.UpdateMessageForOffset(0, false)
+	if !ok {
+		t.Fatal("UpdateMessageForOffset frame 2 failed")
+	}
+	msg2.Generation = msg1.Generation + 1
+
+	// In Frame 2: Link2 is at row 8 and should retain ID 2
+	if msg2.Lines[8][0].LinkID != link2ID {
+		t.Errorf("frame 2 row 8 linkID = %d, want stable %d", msg2.Lines[8][0].LinkID, link2ID)
+	}
+
+	// BuildPanePatch should successfully recognize the 1-row shift
+	patch, valid := protocol.BuildPanePatch(msg1, msg2)
+	if !valid {
+		t.Fatal("BuildPanePatch failed to build patch between frames with links")
+	}
+	if patch.ShiftRows != -1 {
+		t.Errorf("patch.ShiftRows = %d, want -1", patch.ShiftRows)
+	}
+
+	reconstructed, ok := protocol.ApplyPanePatch(msg1, patch)
+	if !ok {
+		t.Fatal("ApplyPanePatch failed")
+	}
+	if !slices.Equal(reconstructed.Links, msg2.Links) {
+		t.Errorf("reconstructed.Links = %v, want %v", reconstructed.Links, msg2.Links)
+	}
+}
