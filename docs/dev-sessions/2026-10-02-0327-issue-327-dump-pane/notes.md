@@ -40,3 +40,8 @@ Implemented `wideboi dump-pane` in root CLI (`cmd/wideboi/`) and internal comman
 ### Memory Candidates
 - When extending CLI boolean flags to accept optional numeric arguments, keep short flags strictly boolean (e.g. `-S`) so legacy flag-first invocations like `tool -S <operand>` never misinterpret the operand as an option value.
 
+### User Reflections & Next Steps
+- **Agent workflows:** Brainstorming future agent-driven scrolling and dumping scenarios will be a good next topic.
+- **Streaming output:** Separate open issue exists for streaming pane output (e.g. follow/tail mode).
+
+
