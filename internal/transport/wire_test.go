@@ -193,6 +193,8 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgPaneNotification{PaneID: 2, Title: "Test", Message: "Alert"},
 		protocol.MsgDumpPaneRequest{PaneID: 2, Scrollback: true, Offset: 10, Limit: 20, TailLines: 5, ANSI: true, CountOnly: false},
 		protocol.MsgDumpPaneResponse{PaneID: 2, Text: "dump text\n", TotalLines: 100, Offset: 10, Lines: 20, Error: ""},
+		protocol.MsgPipePaneRequest{PaneID: 2},
+		protocol.MsgPipePaneResponse{PaneID: 2, Data: []byte("raw chunk"), Closed: false, Error: ""},
 	}
 
 	for _, msg := range msgs {

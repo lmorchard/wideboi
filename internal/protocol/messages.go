@@ -543,6 +543,19 @@ type MsgDumpPaneResponse struct {
 	Lines      int    `json:"lines"`
 }
 
+// MsgPipePaneRequest requests a raw PTY byte stream tap of a pane.
+type MsgPipePaneRequest struct {
+	PaneID int `json:"pane_id"`
+}
+
+// MsgPipePaneResponse carries raw PTY chunks, closure status, or errors from a tap.
+type MsgPipePaneResponse struct {
+	PaneID int    `json:"pane_id"`
+	Data   []byte `json:"data,omitempty"`
+	Closed bool   `json:"closed,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
 // MsgWaitRequest asks to be told when a pane's process exits. The server
 // answers once, with MsgWaitResponse, when that happens.
 type MsgWaitRequest struct {

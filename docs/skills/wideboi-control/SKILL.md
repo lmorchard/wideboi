@@ -1,6 +1,6 @@
 ---
 name: wideboi-control
-description: Use when an agent wants to control wideboi panes headlessly (split, send, dump-pane, wait, close, status) to run commands, read their output and exit codes, or drive interactive programs in persistent session panes.
+description: Use when an agent wants to control wideboi panes headlessly (split, send, dump-pane, pipe-pane, wait, close, status) to run commands, read their output and exit codes, or drive interactive programs in persistent session panes.
 ---
 
 # Wideboi Control Skill
@@ -99,6 +99,27 @@ bottom are dropped. Wide characters (CJK, emoji) come through once each.
 Output is the screen as drawn, so a line longer than the pane is wide
 comes back split across rows. Match on short markers, not on long lines.
 `dump-pane` (and `capture`) works on a kept pane after its process has exited.
+
+### `pipe-pane`: stream raw PTY output
+
+```bash
+wideboi pipe-pane "$PANE_ID"                       # stream raw PTY bytes to stdout
+wideboi pipe-pane "$PANE_ID" -o /tmp/output.raw    # stream to file instead of stdout
+wideboi pipe-pane "$PANE_ID" -o /tmp/output.raw -a # append to existing file (-a / --append)
+
+# When run inside a wideboi session pane, pane ID can be omitted:
+wideboi pipe-pane -o /tmp/session.raw              # taps the calling pane ($WIDEBOI_PANE_ID)
+```
+
+`pipe-pane` streams unparsed raw bytes directly from the child process's PTY
+master descriptor in real time, before emulator parsing and query sequence
+filtering. Use it to capture reproducible test fixtures from complex programs
+(e.g., `htop`, `vim`, curses apps), record sessions for playback in tools like
+`asciinema`, or diagnose terminal escape sequence bugs.
+
+`pipe-pane` runs in the foreground until interrupted (Ctrl-C / SIGINT) or until
+the pane closes. If the reader consumer is slow, chunks are dropped to ensure
+the live pane and its process never stall.
 
 ### `wait`: block until the process exits
 

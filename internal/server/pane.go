@@ -86,6 +86,11 @@ type Pane struct {
 	titleMu        sync.RWMutex
 	customTitle    string
 	hasCustomTitle bool
+
+	tapMu      sync.RWMutex
+	taps       map[uint64]chan []byte
+	tapsClosed bool
+	nextTapID  uint64
 }
 
 // graceOrDefault resolves the hangup grace for this pane.
@@ -177,6 +182,7 @@ func (p *Pane) Start(onExit func()) {
 		for {
 			n, err := p.pty.Master.Read(buf)
 			if n > 0 {
+				p.broadcastRawBytes(buf[:n])
 				if t := p.queryTheme.Load(); t != nil {
 					qs.SetTheme(*t)
 				}
@@ -190,6 +196,7 @@ func (p *Pane) Start(onExit func()) {
 				}
 			}
 			if err != nil {
+				p.closeTaps()
 				return
 			}
 		}
@@ -718,6 +725,7 @@ func (p *Pane) DumpText(scrollback bool, offset int, limit int, tailLines int, a
 func (p *Pane) Close() error {
 	p.closeOnce.Do(func() {
 		close(p.closed)
+		p.closeTaps()
 
 		if p.pty != nil {
 			p.pty.Hangup(p.graceOrDefault())
@@ -797,5 +805,62 @@ func (p *Pane) drainInput(ceiling time.Duration) bool {
 		return true
 	case <-timer.C:
 		return false
+	}
+}
+
+// AddTap registers a channel to receive raw, unparsed bytes read from the pane's PTY.
+// Returns the tap ID and true, or (0, false) if the pane is already closed or its PTY EOF'd.
+func (p *Pane) AddTap(ch chan []byte) (uint64, bool) {
+	p.tapMu.Lock()
+	defer p.tapMu.Unlock()
+	if p.tapsClosed {
+		return 0, false
+	}
+	select {
+	case <-p.closed:
+		return 0, false
+	default:
+	}
+	if p.taps == nil {
+		p.taps = make(map[uint64]chan []byte)
+	}
+	p.nextTapID++
+	id := p.nextTapID
+	p.taps[id] = ch
+	return id, true
+}
+
+// RemoveTap unregisters an active raw byte tap.
+func (p *Pane) RemoveTap(id uint64) {
+	p.tapMu.Lock()
+	defer p.tapMu.Unlock()
+	delete(p.taps, id)
+}
+
+// broadcastRawBytes non-blockingly delivers a copy of chunk to all registered taps.
+func (p *Pane) broadcastRawBytes(chunk []byte) {
+	p.tapMu.RLock()
+	defer p.tapMu.RUnlock()
+	if len(p.taps) == 0 {
+		return
+	}
+	cp := append([]byte(nil), chunk...)
+	for _, ch := range p.taps {
+		select {
+		case ch <- cp:
+		default:
+			// drop on slow consumer to protect live pane
+		}
+	}
+}
+
+// closeTaps closes all active tap channels and marks taps as permanently closed.
+func (p *Pane) closeTaps() {
+	p.tapMu.Lock()
+	defer p.tapMu.Unlock()
+	p.tapsClosed = true
+	for id, ch := range p.taps {
+		close(ch)
+		delete(p.taps, id)
 	}
 }

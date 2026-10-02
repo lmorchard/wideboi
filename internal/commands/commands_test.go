@@ -133,7 +133,7 @@ func TestDefaultRegistryBuiltins(t *testing.T) {
 		"new-column", "split", "run",
 		"set-width", "move-left", "move-right",
 		"kill-pane", "close", "rename-pane",
-		"dump-pane",
+		"dump-pane", "pipe-pane",
 		"toggle-status",
 		"detach", "quit", "help",
 	}
@@ -562,6 +562,138 @@ func TestDumpPaneCommand(t *testing.T) {
 
 	// 6. Non-existent pane returns error
 	err = r.Execute(ctx, invStdout, ":capture 99999")
+	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
+		t.Fatalf("expected 'pane 99999 not found' error, got %v", err)
+	}
+}
+
+func TestPipePaneCommand(t *testing.T) {
+	r := commands.DefaultRegistry
+
+	// 1. Verify aliases
+	for _, name := range []string{"pipe-pane", "pipe"} {
+		cmd, ok := r.Lookup(name)
+		if !ok || cmd.Name != "pipe-pane" {
+			t.Fatalf("Lookup(%q) failed, ok=%v", name, ok)
+		}
+	}
+
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "commands_pipe.sock")
+
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	cfg := config.Config{
+		Socket: sockPath,
+	}
+
+	clientConn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+			break
+		}
+	}
+
+	// 2. Error outside session without pane ID
+	invNoPane := commands.Invocation{
+		Cfg:          cfg,
+		Socket:       sockPath,
+		CallerPaneID: 0,
+	}
+	err = r.Execute(ctx, invNoPane, ":pipe-pane")
+	if err == nil || !strings.Contains(err.Error(), "pane-id required") {
+		t.Fatalf("expected 'pane-id required' error, got %v", err)
+	}
+
+	// 3. Error without output file when inv.Stdout is nil
+	invNilStdout := commands.Invocation{
+		Cfg:          cfg,
+		Socket:       sockPath,
+		CallerPaneID: paneID,
+		Stdout:       nil,
+	}
+	err = r.Execute(ctx, invNilStdout, ":pipe-pane")
+	if err == nil || !strings.Contains(err.Error(), "output file required") {
+		t.Fatalf("expected 'output file required' error, got %v", err)
+	}
+
+	// 4. Start background tap to file, observe output, then stop
+	outFile := filepath.Join(dir, "prompt_pipe.raw")
+	err = r.Execute(ctx, invNilStdout, fmt.Sprintf(":pipe-pane -o %s", outFile))
+	if err != nil {
+		t.Fatalf("Execute(:pipe-pane -o ...) failed: %v", err)
+	}
+
+	// Send input and observe that background tap is connected and writing
+	_ = transport.WriteClientFrame(clientConn, protocol.MsgSendInputRequest{PaneID: paneID, Data: []byte("echo tap-sync-1\n")})
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		data, _ := os.ReadFile(outFile)
+		if strings.Contains(string(data), "tap-sync-1") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("timed out waiting for background tap to capture tap-sync-1")
+	}
+
+	// Stop background tap
+	err = r.Execute(ctx, invNilStdout, ":pipe-pane --stop")
+	if err != nil {
+		t.Fatalf("Execute(:pipe-pane --stop) failed: %v", err)
+	}
+
+	// Send more input and verify it is not appended to stopped tap
+	_ = transport.WriteClientFrame(clientConn, protocol.MsgSendInputRequest{PaneID: paneID, Data: []byte("echo tap-sync-2\n")})
+	time.Sleep(100 * time.Millisecond)
+	dataAfterStop, _ := os.ReadFile(outFile)
+	if strings.Contains(string(dataAfterStop), "tap-sync-2") {
+		t.Fatalf("unexpected data captured after --stop: %q", string(dataAfterStop))
+	}
+
+	// 5. Non-existent pane returns error
+	var stdout bytes.Buffer
+	invStdout := commands.Invocation{
+		Cfg:          cfg,
+		Socket:       sockPath,
+		CallerPaneID: paneID,
+		Stdout:       &stdout,
+	}
+	err = r.Execute(ctx, invStdout, ":pipe-pane 99999")
 	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
 		t.Fatalf("expected 'pane 99999 not found' error, got %v", err)
 	}

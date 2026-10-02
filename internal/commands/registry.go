@@ -13,6 +13,7 @@ import (
 
 	"github.com/lmorchard/wideboi/internal/layout"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/transport"
 )
 
 // Registry stores commands and resolves lookups by name or alias.
@@ -146,6 +147,50 @@ func ShellJoin(args []string) string {
 		quoted[i] = ShellQuote(a)
 	}
 	return strings.Join(quoted, " ")
+}
+
+type pipeTapEntry struct {
+	id     uint64
+	cancel context.CancelFunc
+}
+
+var (
+	activePipeTapsMu sync.Mutex
+	activePipeTaps   = make(map[int]pipeTapEntry)
+	nextPipeTapID    uint64
+)
+
+func reorderCommandFlags(args []string) []string {
+	var flags []string
+	var operands []string
+	afterDashDash := false
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if afterDashDash {
+			operands = append(operands, arg)
+			continue
+		}
+		if arg == "--" {
+			afterDashDash = true
+			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			if (arg == "-n" || arg == "-lines" || arg == "--lines" ||
+				arg == "-limit" || arg == "--limit" ||
+				arg == "-offset" || arg == "--offset" ||
+				arg == "-o" || arg == "-output" || arg == "--output" ||
+				arg == "-cwd" || arg == "--cwd" ||
+				arg == "-after" || arg == "--after") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				i++
+				flags = append(flags, args[i])
+			}
+		} else {
+			operands = append(operands, arg)
+		}
+	}
+	return append(flags, operands...)
 }
 
 func registerBuiltins(r *Registry) {
@@ -479,6 +524,189 @@ func registerBuiltins(r *Registry) {
 
 			fmt.Fprint(inv.Stdout, outContent)
 			return nil
+		},
+	})
+
+	r.Register(Command{
+		Name:        "pipe-pane",
+		Aliases:     []string{"pipe"},
+		Description: "Pipe raw PTY output of a pane to a file or stream",
+		Category:    "Panes",
+		ArgsUsage:   "[pane-id] [-o <file>] [-a|--append] [--stop]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			fs := flag.NewFlagSet("pipe-pane", flag.ContinueOnError)
+			if inv.Stderr != nil {
+				fs.SetOutput(inv.Stderr)
+			}
+			var output string
+			var appendMode bool
+			var stop bool
+
+			fs.StringVar(&output, "output", "", "write raw stream to file")
+			fs.StringVar(&output, "o", "", "write raw stream to file")
+			fs.BoolVar(&appendMode, "append", false, "append to output file")
+			fs.BoolVar(&appendMode, "a", false, "append to output file")
+			fs.BoolVar(&stop, "stop", false, "stop active background pipe for the pane")
+
+			if err := fs.Parse(reorderCommandFlags(inv.Args)); err != nil {
+				return err
+			}
+
+			targetID := inv.CallerPaneID
+			rest := fs.Args()
+			if len(rest) > 1 {
+				return fmt.Errorf("usage: pipe-pane [pane-id] [flags]")
+			}
+			if len(rest) == 1 {
+				id, err := strconv.Atoi(rest[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane id %q: %w", rest[0], err)
+				}
+				targetID = id
+			} else if targetID <= 0 {
+				return fmt.Errorf("usage: pipe-pane [pane-id] [flags] (pane-id required outside wideboi pane)")
+			}
+
+			if stop {
+				activePipeTapsMu.Lock()
+				entry, ok := activePipeTaps[targetID]
+				if ok {
+					entry.cancel()
+					delete(activePipeTaps, targetID)
+				}
+				activePipeTapsMu.Unlock()
+				return nil
+			}
+
+			socket, err := ResolveSocket(inv)
+			if err != nil {
+				return err
+			}
+
+			if output != "" {
+				flagVal := os.O_CREATE | os.O_WRONLY
+				if appendMode {
+					flagVal |= os.O_APPEND
+				} else {
+					flagVal |= os.O_TRUNC
+				}
+				f, err := os.OpenFile(output, flagVal, 0666)
+				if err != nil {
+					return fmt.Errorf("opening output file %q: %w", output, err)
+				}
+
+				tapCtx, cancel := context.WithCancel(context.Background())
+				activePipeTapsMu.Lock()
+				nextPipeTapID++
+				tapGen := nextPipeTapID
+				if prev, ok := activePipeTaps[targetID]; ok {
+					prev.cancel()
+				}
+				activePipeTaps[targetID] = pipeTapEntry{id: tapGen, cancel: cancel}
+				activePipeTapsMu.Unlock()
+
+				go func() {
+					defer f.Close()
+					defer func() {
+						activePipeTapsMu.Lock()
+						if cur, ok := activePipeTaps[targetID]; ok && cur.id == tapGen {
+							delete(activePipeTaps, targetID)
+						}
+						activePipeTapsMu.Unlock()
+					}()
+
+					conn, err := DialServer(tapCtx, socket)
+					if err != nil {
+						return
+					}
+					defer conn.Close()
+
+					done := make(chan struct{})
+					defer close(done)
+					go func() {
+						select {
+						case <-tapCtx.Done():
+							_ = conn.Close()
+						case <-done:
+						}
+					}()
+
+					req := protocol.MsgPipePaneRequest{PaneID: targetID}
+					if err := transport.WriteClientFrame(conn, req); err != nil {
+						return
+					}
+
+					for {
+						msg, err := transport.ReadServerFrame(conn)
+						if err != nil || tapCtx.Err() != nil {
+							return
+						}
+						resp, ok := msg.(protocol.MsgPipePaneResponse)
+						if !ok {
+							continue
+						}
+						if resp.Error != "" || resp.Closed {
+							return
+						}
+						if len(resp.Data) > 0 {
+							if _, err := f.Write(resp.Data); err != nil {
+								return
+							}
+						}
+					}
+				}()
+				return nil
+			}
+
+			if inv.Stdout == nil {
+				return fmt.Errorf("output file required (-o <file>) when run from prompt")
+			}
+
+			conn, err := DialServer(ctx, socket)
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+
+			done := make(chan struct{})
+			defer close(done)
+			go func() {
+				select {
+				case <-ctx.Done():
+					_ = conn.Close()
+				case <-done:
+				}
+			}()
+
+			req := protocol.MsgPipePaneRequest{PaneID: targetID}
+			if err := transport.WriteClientFrame(conn, req); err != nil {
+				return fmt.Errorf("sending pipe-pane request: %w", err)
+			}
+
+			for {
+				msg, err := transport.ReadServerFrame(conn)
+				if err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
+					return fmt.Errorf("reading pipe stream: %w", err)
+				}
+				resp, ok := msg.(protocol.MsgPipePaneResponse)
+				if !ok {
+					continue
+				}
+				if resp.Error != "" {
+					return fmt.Errorf("%s", resp.Error)
+				}
+				if len(resp.Data) > 0 {
+					if _, err := inv.Stdout.Write(resp.Data); err != nil {
+						return err
+					}
+				}
+				if resp.Closed {
+					return nil
+				}
+			}
 		},
 	})
 

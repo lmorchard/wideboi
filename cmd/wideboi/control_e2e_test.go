@@ -120,6 +120,50 @@ func TestControlSubcommandsE2E(t *testing.T) {
 		t.Fatalf("dump-pane output file invalid: %v, content=%q", err, string(content))
 	}
 
+	// 2c. Test pipe-pane CLI subcommand with -o
+	stdoutPipe, stderrPipe, codePipe := runCLI("split", "--keep", "sh")
+	if codePipe != 0 {
+		t.Fatalf("split for pipe-pane failed: %s", stderrPipe)
+	}
+	pipePaneIDStr := strings.TrimSpace(stdoutPipe)
+
+	pipeRawFile := filepath.Join(dir, "e2e_pipe.raw")
+	pipeDone := make(chan error, 1)
+	go func() {
+		_, pipeErr, pipeCode := runCLI("pipe-pane", pipePaneIDStr, "-o", pipeRawFile)
+		if pipeCode != 0 {
+			pipeDone <- fmt.Errorf("pipe-pane exit %d: %s", pipeCode, pipeErr)
+		} else {
+			pipeDone <- nil
+		}
+	}()
+
+	// Send trigger to shell and wait until observed in file
+	pipeDeadline := time.Now().Add(5 * time.Second)
+	pipeFound := false
+	for time.Now().Before(pipeDeadline) {
+		_, _, _ = runCLI("send", pipePaneIDStr, "echo e2e-pipe-stream", "--enter")
+		time.Sleep(50 * time.Millisecond)
+		data, _ := os.ReadFile(pipeRawFile)
+		if strings.Contains(string(data), "e2e-pipe-stream") {
+			pipeFound = true
+			break
+		}
+	}
+	if !pipeFound {
+		t.Fatal("timed out waiting for e2e-pipe-stream in pipeRawFile")
+	}
+
+	_, _, _ = runCLI("close", pipePaneIDStr)
+	select {
+	case err := <-pipeDone:
+		if err != nil {
+			t.Fatalf("pipe-pane failed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for pipe-pane to exit after pane closed")
+	}
+
 	// 3. Send input to the pane
 	stdout, stderr, code = runCLI("send", paneIDStr, "date", "--enter")
 	if code != 0 {
