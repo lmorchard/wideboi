@@ -215,6 +215,10 @@ hosting the developer or agent (#315). `ptycheck.py` now snapshots
 pre-existing wideboi processes at startup and filters them out while still
 checking for strays spawned during the run.
 
+`ptylib.pinned_env` also strips `WIDEBOI` and `LC_WIDEBOI` in addition to
+`WIDEBOI_*`; without that, out-of-process harnesses run by an agent inside
+an active wideboi session fail immediately on nested-session refusal (#332, #336).
+
 ## Keep desktop manager controls stable between polls
 
 The desktop manager polls the local session list. Replacing the whole list on

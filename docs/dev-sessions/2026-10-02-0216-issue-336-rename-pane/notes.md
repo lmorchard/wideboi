@@ -24,3 +24,27 @@
   - `make smoke`: Passed (all 41 tests + golden wire check).
   - `make attach-check`: Passed (all 29 tests).
   - Note: `make web-accept` requires `libnspr4.so` for launching the Chromium binary on Linux, which is installed in CI.
+
+## Retrospective
+
+### What was built
+- Full-stack support for user-defined pane titles and renaming via CLI (`wideboi rename-pane`), in-session prompt (`:title`, `:rename-pane`, `:label`), and web prompt (`:title`).
+- Custom title state is managed on `Pane` while preserving underlying `term.Grid` title tracking, providing zero-latency fallback to child process `OSC 0/2` titles when cleared.
+- Custom titles survive in-place server binary upgrades (`UpgradePane`), satisfying #250 and establishing pane title persistence for #326.
+- Protocol wire version bumped cleanly to 22 across Go and TypeScript protobuf bindings.
+
+### Scope drift
+- None. The feature stayed within the spec boundary. Review feedback from Copilot surfaced one missing client response handler in the web prompt (`renamePaneResponse`) and documentation details in `spec.md` and `research.md`, which were resolved prior to merge.
+
+### Surprises
+- Running `make verify-exit` from inside an active wideboi session initially failed with exit status `0x100`. The binary refused to start due to nested session detection (`#332`). Investigation revealed that `scripts/ptylib.py` only stripped `WIDEBOI_*` in `pinned_env`, leaving `WIDEBOI=1` and `LC_WIDEBOI=1` intact. Stripping those environment variables in `ptylib.py` resolved the issue completely.
+
+### Workflow friction
+- The vertical-slice plan executed very cleanly with fast feedback loops. The only minor friction was running `make check` serially inside bash when multiple heavy targets (`race`, `smoke`, `attach-check`) ran together and bumped up against the 120s bash tool timeout. Running them separately or in groups avoided the timeout.
+
+### Misses
+- In Phase 5, `WideboiApp.handlePromptCommand` dispatched `renamePaneRequest`, but `client.onMessage` lacked the corresponding `renamePaneResponse` case until Copilot flagged it.
+
+### Memory & Lesson candidates
+- Updated `docs/LESSONS.md` under "Pin the environment for every harness process" to record that `pinned_env` must strip `WIDEBOI` and `LC_WIDEBOI` to prevent nested-session refusal when tests run inside wideboi.
+
