@@ -80,6 +80,12 @@ func MarshalClient(msg any) ([]byte, error) {
 				CountOnly:  m.CountOnly,
 			},
 		}
+	case MsgPipePaneRequest:
+		env.Msg = &wirepb.ClientMessage_PipePaneRequest{
+			PipePaneRequest: &wirepb.MsgPipePaneRequest{
+				PaneId: int32(m.PaneID),
+			},
+		}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
@@ -165,6 +171,10 @@ func UnmarshalClient(data []byte) (any, error) {
 			TailLines:  int(m.DumpPaneRequest.TailLines),
 			ANSI:       m.DumpPaneRequest.Ansi,
 			CountOnly:  m.DumpPaneRequest.CountOnly,
+		}, nil
+	case *wirepb.ClientMessage_PipePaneRequest:
+		return MsgPipePaneRequest{
+			PaneID: int(m.PipePaneRequest.PaneId),
 		}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
@@ -311,6 +321,15 @@ func MarshalServer(msg any) ([]byte, error) {
 				TotalLines: int32(m.TotalLines),
 				Offset:     int32(m.Offset),
 				Lines:      int32(m.Lines),
+			},
+		}
+	case MsgPipePaneResponse:
+		env.Msg = &wirepb.ServerMessage_PipePaneResponse{
+			PipePaneResponse: &wirepb.MsgPipePaneResponse{
+				PaneId: int32(m.PaneID),
+				Data:   m.Data,
+				Closed: m.Closed,
+				Error:  validUTF8(m.Error),
 			},
 		}
 	case MsgWaitResponse:
@@ -520,6 +539,13 @@ func UnmarshalServer(data []byte) (any, error) {
 			TotalLines: int(m.DumpPaneResponse.TotalLines),
 			Offset:     int(m.DumpPaneResponse.Offset),
 			Lines:      int(m.DumpPaneResponse.Lines),
+		}, nil
+	case *wirepb.ServerMessage_PipePaneResponse:
+		return MsgPipePaneResponse{
+			PaneID: int(m.PipePaneResponse.PaneId),
+			Data:   m.PipePaneResponse.Data,
+			Closed: m.PipePaneResponse.Closed,
+			Error:  m.PipePaneResponse.Error,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

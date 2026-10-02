@@ -8,9 +8,11 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/commands"
@@ -427,6 +429,116 @@ func runDumpPane(cfg config.Config, args []string, stdout, stderr io.Writer) err
 
 	fmt.Fprint(stdout, outContent)
 	return nil
+}
+
+// runPipePane streams the raw, unparsed PTY byte stream of a pane to stdout or a file.
+func runPipePane(cfg config.Config, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("pipe-pane", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var output string
+	var appendMode bool
+	var session, socket string
+
+	fs.StringVar(&output, "output", "", "write raw stream to file instead of stdout")
+	fs.StringVar(&output, "o", "", "write raw stream to file instead of stdout")
+	fs.BoolVar(&appendMode, "append", false, "append to output file instead of truncating")
+	fs.BoolVar(&appendMode, "a", false, "append to output file instead of truncating")
+	addTargetFlags(fs, &session, &socket)
+
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	applySessionFlags(&cfg, session, socket)
+
+	var callerID int
+	if envID := os.Getenv("WIDEBOI_PANE_ID"); envID != "" {
+		if id, err := strconv.Atoi(envID); err == nil {
+			callerID = id
+		}
+	}
+
+	targetID := callerID
+	rest := fs.Args()
+	if len(rest) > 0 {
+		id, err := strconv.Atoi(rest[0])
+		if err != nil {
+			return fmt.Errorf("invalid pane id %q: %w", rest[0], err)
+		}
+		targetID = id
+	} else if targetID <= 0 {
+		return fmt.Errorf("usage: wideboi pipe-pane [flags] [pane-id] (pane-id required outside wideboi pane)")
+	}
+
+	var outWriter io.Writer = stdout
+	if output != "" {
+		flagVal := os.O_CREATE | os.O_WRONLY
+		if appendMode {
+			flagVal |= os.O_APPEND
+		} else {
+			flagVal |= os.O_TRUNC
+		}
+		f, err := os.OpenFile(output, flagVal, 0666)
+		if err != nil {
+			return fmt.Errorf("opening output file %q: %w", output, err)
+		}
+		defer f.Close()
+		outWriter = f
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	conn, err := commands.DialServer(ctx, cfg.Socket)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+
+	req := protocol.MsgPipePaneRequest{
+		PaneID: targetID,
+	}
+	if err := transport.WriteClientFrame(conn, req); err != nil {
+		return fmt.Errorf("sending pipe-pane request: %w", err)
+	}
+
+	for {
+		msg, err := transport.ReadServerFrame(conn)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("reading pipe stream: %w", err)
+		}
+		resp, ok := msg.(protocol.MsgPipePaneResponse)
+		if !ok {
+			continue
+		}
+		if resp.Error != "" {
+			return errors.New(resp.Error)
+		}
+		if len(resp.Data) > 0 {
+			if _, err := outWriter.Write(resp.Data); err != nil {
+				return err
+			}
+		}
+		if resp.Closed {
+			return nil
+		}
+	}
 }
 
 // runClose closes a pane using hangup semantics.

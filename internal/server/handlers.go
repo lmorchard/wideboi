@@ -35,6 +35,7 @@ type msgEffects struct {
 	closeResp     *protocol.MsgClosePaneResponse
 	renameResp    *protocol.MsgRenamePaneResponse
 	dumpResp      *protocol.MsgDumpPaneResponse
+	pipeResp      *protocol.MsgPipePaneResponse
 	waitResp      *protocol.MsgWaitResponse
 	webReq        *protocol.MsgWebServerControlRequest
 
@@ -45,21 +46,25 @@ type msgEffects struct {
 }
 
 func (s *Server) handleClientConnLoop(ctx context.Context, tp transport.Transport) {
+	connCtx, connCancel := context.WithCancel(ctx)
+	defer connCancel()
+
 	for {
 		select {
-		case <-ctx.Done():
+		case <-connCtx.Done():
 			return
 		case msg, ok := <-tp.ClientSendChan():
 			if !ok {
+				connCancel()
 				if s.dropClient(ctx, tp) {
 					s.ownerLeftWithoutDetaching()
 				}
 				return
 			}
-			if s.rejectRemoteClientMsg(ctx, tp, msg) {
+			if s.rejectRemoteClientMsg(connCtx, tp, msg) {
 				continue
 			}
-			if s.handleClientMsg(ctx, tp, msg) {
+			if s.handleClientMsg(connCtx, tp, msg) {
 				return
 			}
 		}
@@ -149,6 +154,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		eff = s.handleRenamePaneRequestLocked(tp, m)
 	case protocol.MsgDumpPaneRequest:
 		eff = s.handleDumpPaneRequestLocked(tp, m)
+	case protocol.MsgPipePaneRequest:
+		eff = s.handlePipePaneRequestLocked(ctx, tp, m)
 	case protocol.MsgWaitRequest:
 		eff = s.handleWaitRequestLocked(tp, m)
 	case protocol.MsgPaneResync:
@@ -282,6 +289,56 @@ func (s *Server) handleDumpPaneRequestLocked(tp transport.Transport, m protocol.
 		Offset:     m.Offset,
 		Lines:      m.Limit,
 	}
+	return eff
+}
+
+func (s *Server) handlePipePaneRequestLocked(ctx context.Context, tp transport.Transport, m protocol.MsgPipePaneRequest) msgEffects {
+	var eff msgEffects
+	p, ok := s.panes[m.PaneID]
+	if !ok {
+		eff.pipeResp = &protocol.MsgPipePaneResponse{
+			PaneID: m.PaneID,
+			Error:  fmt.Sprintf("pane %d not found", m.PaneID),
+		}
+		return eff
+	}
+
+	ch := make(chan []byte, 256)
+	tapID, ok := p.AddTap(ch)
+	if !ok {
+		eff.pipeResp = &protocol.MsgPipePaneResponse{
+			PaneID: m.PaneID,
+			Closed: true,
+		}
+		return eff
+	}
+
+	go func() {
+		defer p.RemoveTap(tapID)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case chunk, ok := <-ch:
+				if !ok {
+					if tp != nil {
+						tp.SendServer(context.Background(), protocol.MsgPipePaneResponse{
+							PaneID: m.PaneID,
+							Closed: true,
+						})
+					}
+					return
+				}
+				if tp == nil || !tp.SendServer(ctx, protocol.MsgPipePaneResponse{
+					PaneID: m.PaneID,
+					Data:   chunk,
+				}) {
+					return
+				}
+			}
+		}
+	}()
+
 	return eff
 }
 
@@ -736,6 +793,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if eff.dumpResp != nil {
 			tp.SendServer(ctx, *eff.dumpResp)
+		}
+		if eff.pipeResp != nil {
+			tp.SendServer(ctx, *eff.pipeResp)
 		}
 		if eff.waitResp != nil {
 			tp.SendServer(ctx, *eff.waitResp)

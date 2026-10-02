@@ -38,4 +38,5 @@ package protocol
 // 21 adds MsgPaneNotification for background desktop notifications (#330).
 // 22 adds MsgRenamePaneRequest and MsgRenamePaneResponse for user-defined pane renaming (#336).
 // 23 adds MsgDumpPaneRequest and MsgDumpPaneResponse for pane screen/scrollback inspection (#327).
-const Version uint32 = 23
+// 24 adds MsgPipePaneRequest and MsgPipePaneResponse for raw PTY stream tapping (#333).
+const Version uint32 = 24

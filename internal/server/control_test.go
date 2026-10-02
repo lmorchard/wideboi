@@ -98,6 +98,17 @@ func TestServerPaneControlRequests(t *testing.T) {
 		t.Fatalf("expected CountOnly: TotalLines=1, Text='', got %d, %q", dumpRespCount.TotalLines, dumpRespCount.Text)
 	}
 
+	// 1d. Test MsgPipePaneRequest streaming tap
+	s.handleClientMsg(ctx, tp, protocol.MsgPipePaneRequest{PaneID: 1})
+	p1.broadcastRawBytes([]byte("raw-pipe-data"))
+	pipeResp1 := takeResponse[protocol.MsgPipePaneResponse](t, tp)
+	if pipeResp1.Error != "" {
+		t.Fatalf("unexpected pipe error: %s", pipeResp1.Error)
+	}
+	if string(pipeResp1.Data) != "raw-pipe-data" {
+		t.Fatalf("expected raw-pipe-data, got %q", string(pipeResp1.Data))
+	}
+
 	// 2. Test MsgCaptureRequest on non-existent pane
 	s.handleClientMsg(ctx, tp, protocol.MsgCaptureRequest{PaneID: 999})
 	resp2 := takeResponse[protocol.MsgCaptureResponse](t, tp)
@@ -109,6 +120,13 @@ func TestServerPaneControlRequests(t *testing.T) {
 	s.handleClientMsg(ctx, tp, protocol.MsgDumpPaneRequest{PaneID: 999})
 	dumpResp2 := takeResponse[protocol.MsgDumpPaneResponse](t, tp)
 	if dumpResp2.Error == "" {
+		t.Fatal("expected error for non-existent pane, got none")
+	}
+
+	// 2c. Test MsgPipePaneRequest on non-existent pane
+	s.handleClientMsg(ctx, tp, protocol.MsgPipePaneRequest{PaneID: 999})
+	pipeResp2 := takeResponse[protocol.MsgPipePaneResponse](t, tp)
+	if pipeResp2.Error == "" {
 		t.Fatal("expected error for non-existent pane, got none")
 	}
 

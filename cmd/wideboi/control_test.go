@@ -544,3 +544,109 @@ func TestDumpPaneCLI(t *testing.T) {
 
 	_ = runClose(cfg, []string{paneIDStr}, &stderr)
 }
+
+func TestPipePaneCLI(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "control.sock")
+
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	cfg := config.Config{
+		Socket: sockPath,
+	}
+
+	// Keep a persistent dummy pane alive so the server stays up across splits
+	var dummyOut, dummyErr bytes.Buffer
+	err = runSplit(cfg, nil, []string{"--keep", "sleep 10"}, &dummyOut, &dummyErr)
+	if err != nil {
+		t.Fatalf("runSplit dummy failed: %v", err)
+	}
+
+	// 1. Split a command that sleeps briefly, prints output, and exits
+	var splitOut, splitErr bytes.Buffer
+	err = runSplit(cfg, nil, []string{"sleep 0.1 && echo stream1 && echo stream2"}, &splitOut, &splitErr)
+	if err != nil {
+		t.Fatalf("runSplit failed: %v, stderr: %s", err, splitErr.String())
+	}
+
+	paneIDStr := strings.TrimSpace(splitOut.String())
+	if paneIDStr == "" {
+		t.Fatal("expected pane ID from runSplit, got empty")
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := runPipePane(cfg, []string{paneIDStr}, &stdout, &stderr); err != nil {
+		t.Fatalf("runPipePane failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "stream1") || !strings.Contains(stdout.String(), "stream2") {
+		t.Fatalf("runPipePane output = %q, want stream1 and stream2", stdout.String())
+	}
+
+	// 2. Test output file with -o and -a
+	splitOut.Reset()
+	splitErr.Reset()
+	err = runSplit(cfg, nil, []string{"sleep 0.1 && echo file1"}, &splitOut, &splitErr)
+	if err != nil {
+		t.Fatalf("runSplit 2 failed: %v", err)
+	}
+	p2Str := strings.TrimSpace(splitOut.String())
+
+	outFile := filepath.Join(dir, "pipe.raw")
+	stdout.Reset()
+	stderr.Reset()
+	if err := runPipePane(cfg, []string{p2Str, "-o", outFile}, &stdout, &stderr); err != nil {
+		t.Fatalf("runPipePane -o failed: %v", err)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil || !strings.Contains(string(data), "file1") {
+		t.Fatalf("reading pipe output file: %v, data=%q", err, string(data))
+	}
+
+	// Append to file
+	splitOut.Reset()
+	splitErr.Reset()
+	err = runSplit(cfg, nil, []string{"sleep 0.1 && echo file2"}, &splitOut, &splitErr)
+	if err != nil {
+		t.Fatalf("runSplit 3 failed: %v", err)
+	}
+	p3Str := strings.TrimSpace(splitOut.String())
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := runPipePane(cfg, []string{p3Str, "-o", outFile, "-a"}, &stdout, &stderr); err != nil {
+		t.Fatalf("runPipePane -o -a failed: %v", err)
+	}
+	data, err = os.ReadFile(outFile)
+	if err != nil || !strings.Contains(string(data), "file1") || !strings.Contains(string(data), "file2") {
+		t.Fatalf("reading appended pipe output file: %v, data=%q", err, string(data))
+	}
+
+	// 3. Error outside session without pane ID
+	t.Setenv("WIDEBOI_PANE_ID", "")
+	stdout.Reset()
+	stderr.Reset()
+	err = runPipePane(cfg, []string{}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "pane-id required") {
+		t.Fatalf("expected pane-id required error, got %v", err)
+	}
+
+	// 4. Error with non-existent pane ID
+	stderr.Reset()
+	err = runPipePane(cfg, []string{"99999"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
+		t.Fatalf("expected not found error, got %v", err)
+	}
+}
