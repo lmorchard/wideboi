@@ -33,6 +33,7 @@ type msgEffects struct {
 	sendResp      *protocol.MsgSendInputResponse
 	captureResp   *protocol.MsgCaptureResponse
 	closeResp     *protocol.MsgClosePaneResponse
+	renameResp    *protocol.MsgRenamePaneResponse
 	waitResp      *protocol.MsgWaitResponse
 	webReq        *protocol.MsgWebServerControlRequest
 
@@ -143,6 +144,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		eff = s.handleCaptureRequestLocked(tp, m)
 	case protocol.MsgClosePaneRequest:
 		eff = s.handleClosePaneRequestLocked(tp, m)
+	case protocol.MsgRenamePaneRequest:
+		eff = s.handleRenamePaneRequestLocked(tp, m)
 	case protocol.MsgWaitRequest:
 		eff = s.handleWaitRequestLocked(tp, m)
 	case protocol.MsgPaneResync:
@@ -262,6 +265,29 @@ func (s *Server) handleClosePaneRequestLocked(tp transport.Transport, m protocol
 		eff.closedPaneID = m.PaneID
 		eff.needBroadcast = true
 		eff.closeResp = &protocol.MsgClosePaneResponse{PaneID: m.PaneID}
+	}
+	return eff
+}
+
+func (s *Server) handleRenamePaneRequestLocked(tp transport.Transport, m protocol.MsgRenamePaneRequest) msgEffects {
+	var eff msgEffects
+	p, ok := s.panes[m.PaneID]
+	if !ok {
+		eff.renameResp = &protocol.MsgRenamePaneResponse{
+			PaneID: m.PaneID,
+			Error:  fmt.Sprintf("pane %d not found", m.PaneID),
+		}
+		return eff
+	}
+	if m.Clear || m.Title == "" {
+		p.ClearCustomTitle()
+	} else {
+		p.SetCustomTitle(m.Title)
+	}
+	s.updateDashboardLocked()
+	eff.needBroadcast = true
+	eff.renameResp = &protocol.MsgRenamePaneResponse{
+		PaneID: m.PaneID,
 	}
 	return eff
 }
@@ -675,6 +701,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if eff.closeResp != nil {
 			tp.SendServer(ctx, *eff.closeResp)
+		}
+		if eff.renameResp != nil {
+			tp.SendServer(ctx, *eff.renameResp)
 		}
 		if eff.waitResp != nil {
 			tp.SendServer(ctx, *eff.waitResp)

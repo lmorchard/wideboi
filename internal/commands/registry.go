@@ -277,6 +277,70 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:        "rename-pane",
+		Aliases:     []string{"title", "label"},
+		Description: "Set or clear the title of a pane",
+		Category:    "Panes",
+		ArgsUsage:   "[pane-id] [title]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			targetID := inv.CallerPaneID
+			title := ""
+			clear := false
+
+			switch len(inv.Args) {
+			case 0:
+				if targetID <= 0 {
+					return fmt.Errorf("usage: rename-pane [pane-id] [title] (pane-id required outside wideboi pane)")
+				}
+				clear = true
+			case 1:
+				if targetID > 0 {
+					title = inv.Args[0]
+					if title == "" {
+						clear = true
+					}
+				} else {
+					id, err := strconv.Atoi(inv.Args[0])
+					if err != nil {
+						return fmt.Errorf("usage: rename-pane [pane-id] [title] (pane-id required outside wideboi pane)")
+					}
+					targetID = id
+					clear = true
+				}
+			default:
+				id, err := strconv.Atoi(inv.Args[0])
+				if err != nil {
+					if targetID > 0 {
+						title = strings.Join(inv.Args, " ")
+					} else {
+						return fmt.Errorf("invalid pane ID %q: %w", inv.Args[0], err)
+					}
+				} else {
+					targetID = id
+					title = strings.Join(inv.Args[1:], " ")
+					if title == "" {
+						clear = true
+					}
+				}
+			}
+
+			req := protocol.MsgRenamePaneRequest{
+				PaneID: targetID,
+				Title:  title,
+				Clear:  clear,
+			}
+			resp, err := RPCQuery[protocol.MsgRenamePaneResponse](ctx, inv, req, 5*time.Second)
+			if err != nil {
+				return err
+			}
+			if resp.Error != "" {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			return nil
+		},
+	})
+
+	r.Register(Command{
 		Name:        "set-width",
 		Aliases:     []string{"width"},
 		Description: "Set the width of the pane in columns",

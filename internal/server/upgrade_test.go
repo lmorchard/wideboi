@@ -202,6 +202,7 @@ func TestUpgradeStateRoundTrip(t *testing.T) {
 	grid2 := term.NewVT(80, 39)
 	_, _ = grid2.Write([]byte("\033[?1049h\033[?2004hRoundTripPane2"))
 	p2 := NewCustomPane(2, grid2, 80, 39)
+	p2.SetCustomTitle("Persisted Custom Title")
 	s.panes[2] = p2
 
 	s.strip.AddColumn(1, 120, 1, 0)
@@ -269,6 +270,12 @@ func TestUpgradeStateRoundTrip(t *testing.T) {
 	restoredP2 := newS.panes[2]
 	if restoredP2 == nil {
 		t.Fatal("pane 2 missing in restored server")
+	}
+	if got := restoredP2.Title(); got != "Persisted Custom Title" {
+		t.Errorf("restored pane 2 title = %q, want %q", got, "Persisted Custom Title")
+	}
+	if custom, ok := restoredP2.CustomTitle(); !ok || custom != "Persisted Custom Title" {
+		t.Errorf("restored pane 2 CustomTitle = (%q, %v), want (%q, true)", custom, ok, "Persisted Custom Title")
 	}
 	snap2 := restoredP2.grid.(term.Snapshotter).ExportSnapshot()
 	if !snap2.IsAltScreen {

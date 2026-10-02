@@ -358,6 +358,92 @@ func runClose(cfg config.Config, args []string, stderr io.Writer) error {
 	return nil
 }
 
+// runRenamePane sets or clears the custom title of a pane.
+func runRenamePane(cfg config.Config, args []string, stderr io.Writer) error {
+	fs := flag.NewFlagSet("rename-pane", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var session, socket string
+	addTargetFlags(fs, &session, &socket)
+
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	applySessionFlags(&cfg, session, socket)
+
+	rest := fs.Args()
+	targetID := 0
+	title := ""
+	clear := false
+
+	callerPaneStr := os.Getenv("WIDEBOI_PANE_ID")
+	callerID := 0
+	if callerPaneStr != "" {
+		if id, err := strconv.Atoi(callerPaneStr); err == nil && id > 0 {
+			callerID = id
+		}
+	}
+
+	switch len(rest) {
+	case 0:
+		if callerID <= 0 {
+			return fmt.Errorf("usage: wideboi rename-pane [flags] <pane-id> [title] (pane-id required outside wideboi pane)")
+		}
+		targetID = callerID
+		clear = true
+	case 1:
+		if callerID > 0 {
+			targetID = callerID
+			title = rest[0]
+			if title == "" {
+				clear = true
+			}
+		} else {
+			id, err := strconv.Atoi(rest[0])
+			if err != nil {
+				return fmt.Errorf("usage: wideboi rename-pane [flags] <pane-id> [title] (pane-id required outside wideboi pane)")
+			}
+			targetID = id
+			clear = true
+		}
+	default:
+		id, err := strconv.Atoi(rest[0])
+		if err != nil {
+			if callerID > 0 {
+				targetID = callerID
+				title = strings.Join(rest, " ")
+			} else {
+				return fmt.Errorf("invalid pane id %q: %w", rest[0], err)
+			}
+		} else {
+			targetID = id
+			title = strings.Join(rest[1:], " ")
+			if title == "" {
+				clear = true
+			}
+		}
+	}
+
+	req := protocol.MsgRenamePaneRequest{
+		PaneID: targetID,
+		Title:  title,
+		Clear:  clear,
+	}
+
+	resp, err := rpcQuery[protocol.MsgRenamePaneResponse](cfg, req, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	if resp.Error != "" {
+		return errors.New(resp.Error)
+	}
+
+	return nil
+}
+
 // exitWaitTimeout is timeout(1)'s code for "gave up waiting".
 const exitWaitTimeout = 124
 

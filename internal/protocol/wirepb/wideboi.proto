@@ -181,6 +181,7 @@ message ServerMessage {
     MsgWebServerControlResponse web_server_control_response = 17;
     MsgConfigSnapshot config_snapshot = 18;
     MsgPaneNotification pane_notification = 19;
+    MsgRenamePaneResponse rename_pane_response = 20;
   }
 }
 
@@ -287,6 +288,7 @@ message ClientMessage {
     MsgSaveMacros save_macros = 19;
     MsgUpgradeRequest upgrade_request = 20;
     MsgWebServerControlRequest web_server_control_request = 21;
+    MsgRenamePaneRequest rename_pane_request = 22;
   }
 }
 
@@ -347,6 +349,17 @@ message MsgClosePaneRequest {
 }
 
 message MsgClosePaneResponse {
+  int32 pane_id = 1;
+  string error = 2;
+}
+
+message MsgRenamePaneRequest {
+  int32 pane_id = 1;
+  string title = 2;
+  bool clear = 3;
+}
+
+message MsgRenamePaneResponse {
   int32 pane_id = 1;
   string error = 2;
 }
