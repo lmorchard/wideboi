@@ -13,6 +13,16 @@ import (
 	"github.com/lmorchard/wideboi/internal/transport"
 )
 
+// wsAssertionTimeout is a generous ceiling for test assertions (channel closure,
+// message receipt, read deadlines) to prevent false failures under heavy CI load (#368).
+// Successful tests finish promptly upon delivery without waiting out the full duration.
+const wsAssertionTimeout = 5 * time.Second
+
+// wsPumpTimeout is the safety ceiling for test pump contexts. It is kept strictly
+// longer than wsAssertionTimeout so that an assertion failure fires before the context
+// expires and closes the transport pumps underneath the test.
+const wsPumpTimeout = 15 * time.Second
+
 // sendClient writes msg the way the browser does: one binary frame
 // holding a protobuf ClientMessage.
 func sendClient(t *testing.T, conn *websocket.Conn, msg any) {
@@ -48,7 +58,7 @@ func TestWebSocketRoundTrip(t *testing.T) {
 	var serverWSConn *transport.WebSocketServerConn
 	connErr := make(chan error, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +93,7 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		if !ok || got.Cols != 80 || got.Rows != 24 {
 			t.Fatalf("got server msg %+v, want MsgAttach {80, 24}", msg)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("timeout waiting for client message on server")
 	}
 
@@ -105,7 +115,7 @@ func TestWebSocketRoundTrip(t *testing.T) {
 		if msg != (protocol.MsgPaneResync{PaneID: 7}) {
 			t.Fatalf("resync decoded as %#v", msg)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("timeout waiting for resync request")
 	}
 	if !serverWSConn.SendServer(ctx, protocol.MsgPanePatch{PaneID: 7, Cols: 2, Rows: 4, BaseGeneration: 1, Generation: 2}) {
@@ -123,7 +133,7 @@ func TestWebSocketCloseBehavior(t *testing.T) {
 	var serverWSConn *transport.WebSocketServerConn
 	connErr := make(chan error, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +167,7 @@ func TestWebSocketCloseBehavior(t *testing.T) {
 		if ok {
 			t.Error("expected ClientSendChan to be closed on client disconnect")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("timeout waiting for server to notice disconnect")
 	}
 }
@@ -185,7 +195,7 @@ func TestWebSocketSlowPeerDoesNotBlockAnotherPeer(t *testing.T) {
 	}
 	defer healthyClient.Close()
 	healthy := <-conns
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 	healthy.RunPumps(ctx)
 	defer healthy.Close()
@@ -199,7 +209,7 @@ func TestWebSocketSlowPeerDoesNotBlockAnotherPeer(t *testing.T) {
 	if !healthy.SendServer(ctx, msg) {
 		t.Fatal("healthy peer was blocked")
 	}
-	_ = healthyClient.SetReadDeadline(time.Now().Add(time.Second))
+	_ = healthyClient.SetReadDeadline(time.Now().Add(wsAssertionTimeout))
 	if got, ok := readServer(t, healthyClient).(protocol.MsgLayoutSnapshot); !ok {
 		t.Fatalf("got %#v", got)
 	}
@@ -211,7 +221,7 @@ func TestWebSocketSlowPeerDoesNotBlockAnotherPeer(t *testing.T) {
 func TestWebSocketSkipsUndecodableFrames(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	conns := make(chan *transport.WebSocketServerConn, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
@@ -258,7 +268,7 @@ func TestWebSocketSkipsUndecodableFrames(t *testing.T) {
 func TestWebSocketRejectsOversizedInput(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	conns := make(chan *transport.WebSocketServerConn, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
@@ -283,7 +293,7 @@ func TestWebSocketRejectsOversizedInput(t *testing.T) {
 		if ok {
 			t.Fatal("oversized input reached server")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("oversized input did not close reader")
 	}
 }
@@ -293,7 +303,7 @@ func TestWebSocketRejectsDecompressedOversizedInput(t *testing.T) {
 		EnableCompression: true,
 	}
 	conns := make(chan *transport.WebSocketServerConn, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -336,12 +346,12 @@ func TestWebSocketRejectsDecompressedOversizedInput(t *testing.T) {
 		if ok {
 			t.Fatalf("decompressed oversized input reached server: %T", msg)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("decompressed oversized input did not close reader")
 	}
 
 	// Verify client observes CloseMessageTooBig
-	_ = ws.SetReadDeadline(time.Now().Add(time.Second))
+	_ = ws.SetReadDeadline(time.Now().Add(wsAssertionTimeout))
 	_, _, err = ws.ReadMessage()
 	if err == nil {
 		t.Fatal("expected read error on client after oversized input, got nil")
@@ -386,7 +396,7 @@ func TestWebSocketBoundaryPayloads(t *testing.T) {
 				EnableCompression: compress,
 			}
 			conns := make(chan *transport.WebSocketServerConn, 1)
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 			defer cancel()
 
 			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -425,7 +435,7 @@ func TestWebSocketBoundaryPayloads(t *testing.T) {
 				if !ok || string(got.Data) != "valid-message" {
 					t.Fatalf("unexpected message: %#v", msg)
 				}
-			case <-time.After(time.Second):
+			case <-time.After(wsAssertionTimeout):
 				t.Fatal("timed out waiting for small message")
 			}
 
@@ -448,7 +458,7 @@ func TestWebSocketBoundaryPayloads(t *testing.T) {
 				if _, ok := msg.(protocol.MsgInput); !ok {
 					t.Fatalf("unexpected message type on boundary: %T", msg)
 				}
-			case <-time.After(time.Second):
+			case <-time.After(wsAssertionTimeout):
 				t.Fatal("timed out waiting for 1 MiB boundary message")
 			}
 
@@ -463,11 +473,11 @@ func TestWebSocketBoundaryPayloads(t *testing.T) {
 				if ok {
 					t.Fatalf("oversized 1 MiB + 1 payload reached server: %T", msg)
 				}
-			case <-time.After(time.Second):
+			case <-time.After(wsAssertionTimeout):
 				t.Fatal("oversized 1 MiB + 1 payload did not close reader")
 			}
 
-			_ = client.SetReadDeadline(time.Now().Add(time.Second))
+			_ = client.SetReadDeadline(time.Now().Add(wsAssertionTimeout))
 			_, _, err = client.ReadMessage()
 			if err == nil {
 				t.Fatal("expected read error on client after oversized input, got nil")
@@ -486,7 +496,7 @@ func TestWebSocketBoundaryPayloads(t *testing.T) {
 func TestWebSocketFragmentedMessage(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	conns := make(chan *transport.WebSocketServerConn, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -546,7 +556,7 @@ func TestWebSocketFragmentedMessage(t *testing.T) {
 		if string(got.Data) != chunk {
 			t.Fatalf("fragmented payload content mismatch: len got %d, want %d", len(got.Data), len(chunk))
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("timed out waiting for fragmented message")
 	}
 }
@@ -554,7 +564,7 @@ func TestWebSocketFragmentedMessage(t *testing.T) {
 func TestWebSocketFragmentedOversizedInput(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	conns := make(chan *transport.WebSocketServerConn, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -599,7 +609,7 @@ func TestWebSocketFragmentedOversizedInput(t *testing.T) {
 		if ok {
 			t.Fatalf("oversized fragmented message reached server: %T", msg)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(wsAssertionTimeout):
 		t.Fatal("oversized fragmented input did not close reader")
 	}
 }
@@ -610,7 +620,7 @@ func TestWebSocketWritePumpSkipsAnUnencodableMessage(t *testing.T) {
 	var serverWSConn *transport.WebSocketServerConn
 	connErr := make(chan error, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -638,7 +648,7 @@ func TestWebSocketWritePumpSkipsAnUnencodableMessage(t *testing.T) {
 
 	serverWSConn.SendServer(ctx, struct{}{})
 	serverWSConn.SendServer(ctx, protocol.MsgPaneClosed{PaneID: 9})
-	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	_ = clientConn.SetReadDeadline(time.Now().Add(wsAssertionTimeout))
 	if got := readServer(t, clientConn); got != (protocol.MsgPaneClosed{PaneID: 9}) {
 		t.Fatalf("got %#v, want the MsgPaneClosed sent after the unencodable message", got)
 	}
@@ -652,7 +662,7 @@ func TestWebSocketCompressionRoundTripAndWireBytes(t *testing.T) {
 	var cw *transport.CountingResponseWriter
 	connErr := make(chan error, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -710,7 +720,7 @@ func TestWebSocketCompressionRoundTripAndWireBytes(t *testing.T) {
 	wireBefore := cw.WireBytes()
 	serverWSConn.SendServer(ctx, update)
 
-	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	_ = clientConn.SetReadDeadline(time.Now().Add(wsAssertionTimeout))
 	got := readServer(t, clientConn)
 	gotUpdate, ok := got.(protocol.MsgPaneUpdate)
 	if !ok {
@@ -721,7 +731,7 @@ func TestWebSocketCompressionRoundTripAndWireBytes(t *testing.T) {
 	}
 
 	var wireWritten uint64
-	for start := time.Now(); time.Since(start) < time.Second; time.Sleep(time.Millisecond) {
+	for start := time.Now(); time.Since(start) < wsAssertionTimeout; time.Sleep(time.Millisecond) {
 		if n := cw.WireBytes() - wireBefore; n > 0 {
 			wireWritten = n
 			break
@@ -742,7 +752,7 @@ func TestWebSocketTrafficStatsSentUncompressed(t *testing.T) {
 	var cw *transport.CountingResponseWriter
 	connErr := make(chan error, 1)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), wsPumpTimeout)
 	defer cancel()
 
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -783,14 +793,14 @@ func TestWebSocketTrafficStatsSentUncompressed(t *testing.T) {
 	wireBefore := cw.WireBytes()
 	serverWSConn.SendServer(ctx, trafficStats)
 
-	_ = clientConn.SetReadDeadline(time.Now().Add(time.Second))
+	_ = clientConn.SetReadDeadline(time.Now().Add(wsAssertionTimeout))
 	gotTraffic := readServer(t, clientConn)
 	if _, ok := gotTraffic.(protocol.MsgTrafficStats); !ok {
 		t.Fatalf("got %T, want MsgTrafficStats", gotTraffic)
 	}
 
 	var wireWritten uint64
-	for start := time.Now(); time.Since(start) < time.Second; time.Sleep(time.Millisecond) {
+	for start := time.Now(); time.Since(start) < wsAssertionTimeout; time.Sleep(time.Millisecond) {
 		if n := cw.WireBytes() - wireBefore; n > 0 {
 			wireWritten = n
 			break
