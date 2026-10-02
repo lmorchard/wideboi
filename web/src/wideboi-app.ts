@@ -594,6 +594,11 @@ export class WideboiApp extends LitElement {
             this.dispatchSession({ type: 'splitResponse', paneId: message.msg.value.paneId });
           }
           break;
+        case 'renamePaneResponse':
+          if (message.msg.value.error) {
+            console.warn(`[wideboi] rename-pane error: ${message.msg.value.error}`);
+          }
+          break;
         case 'paneUpdate':
           this.panes.update(message.msg.value);
           this.requestUpdate();
@@ -1456,6 +1461,35 @@ export class WideboiApp extends LitElement {
         if (!isNaN(w) && this.focusedPaneId) {
           this.client?.send({ case: 'setPaneWidth', value: { paneId: this.focusedPaneId, width: w } });
         }
+        break;
+      }
+      case 'rename-pane':
+      case 'title':
+      case 'label': {
+        if (!this.focusedPaneId) break;
+        let targetId = this.focusedPaneId;
+        let newTitle = rest;
+        let clear = false;
+        if (parts[1]) {
+          const parsedId = parseInt(parts[1], 10);
+          if (!isNaN(parsedId)) {
+            targetId = parsedId;
+            newTitle = line.slice(parts[0].length).trim().slice(parts[1].length).trim();
+          }
+        }
+        if (
+          (newTitle.startsWith('"') && newTitle.endsWith('"')) ||
+          (newTitle.startsWith("'") && newTitle.endsWith("'"))
+        ) {
+          newTitle = newTitle.slice(1, -1);
+        }
+        if (!newTitle) {
+          clear = true;
+        }
+        this.client?.send({
+          case: 'renamePaneRequest',
+          value: { paneId: targetId, title: newTitle, clear },
+        });
         break;
       }
       case 'cards':

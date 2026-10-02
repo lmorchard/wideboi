@@ -347,3 +347,105 @@ func TestDetachCommand(t *testing.T) {
 		t.Fatalf("detachFile content = %q, want 'detach'", string(data))
 	}
 }
+
+func TestRenamePaneExecution(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "s.sock")
+	sl, err := transport.NewSocketListener(sock)
+	if err != nil {
+		t.Fatalf("NewSocketListener: %v", err)
+	}
+	defer sl.Close()
+
+	s := server.NewServer(nil, "/bin/sh", "")
+	defer s.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.ListenSocket(ctx, sl)
+	go func() { _ = s.Run(ctx) }()
+
+	clientConn, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 100, Rows: 30}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+			break
+		}
+	}
+
+	inv := commands.Invocation{
+		CallerPaneID: paneID,
+		Socket:       sock,
+	}
+
+	r := commands.DefaultRegistry
+
+	// 1. Rename via :title
+	if err := r.Execute(ctx, inv, `:title "Renamed Card"`); err != nil {
+		t.Fatalf("Execute(:title) failed: %v", err)
+	}
+
+	// Read frames until title matches
+	var gotTitle string
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading server frame after :title: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+			if t, ok := snap.PaneTitles[paneID]; ok && t == "Renamed Card" {
+				gotTitle = t
+				break
+			}
+		}
+	}
+	if gotTitle != "Renamed Card" {
+		t.Fatalf("gotTitle = %q, want 'Renamed Card'", gotTitle)
+	}
+
+	// 2. Clear via :title ""
+	if err := r.Execute(ctx, inv, `:title ""`); err != nil {
+		t.Fatalf("Execute(:title \"\") failed: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading server frame after clear: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+			if t, ok := snap.PaneTitles[paneID]; ok && t == "" {
+				gotTitle = t
+				break
+			}
+		}
+	}
+	if gotTitle != "" {
+		t.Fatalf("gotTitle = %q after clear, want empty", gotTitle)
+	}
+
+	// 3. Rename invalid pane ID returns error
+	err = r.Execute(ctx, inv, `:title 99999 "Invalid"`)
+	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
+		t.Fatalf("expected 'pane 99999 not found' error, got %v", err)
+	}
+}

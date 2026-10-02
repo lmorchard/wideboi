@@ -46,7 +46,7 @@ def pinned_env(overlay: dict | None = None) -> dict:
     XDG_CONFIG_HOME so child shells and server instances behave predictably
     regardless of developer environment.
     """
-    env = {k: v for k, v in os.environ.items() if not k.startswith("WIDEBOI_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith("WIDEBOI_") and k not in ("WIDEBOI", "LC_WIDEBOI")}
     env.update({
         "SHELL": "/bin/sh",
         "TERM": "xterm-256color",

@@ -82,6 +82,10 @@ type Pane struct {
 
 	failMu   sync.Mutex
 	failures []error
+
+	titleMu        sync.RWMutex
+	customTitle    string
+	hasCustomTitle bool
 }
 
 // graceOrDefault resolves the hangup grace for this pane.
@@ -408,9 +412,42 @@ func (p *Pane) CursorPosition() image.Point { return p.grid.CursorPosition() }
 // CursorVisible reports whether DECTCEM cursor visibility is enabled.
 func (p *Pane) CursorVisible() bool { return p.grid.CursorVisible() }
 
-// Title reports the pane's terminal title, or "" if its child has
-// never set one.
-func (p *Pane) Title() string { return p.grid.Title() }
+// SetCustomTitle sets a user-defined title that overrides the child terminal title.
+func (p *Pane) SetCustomTitle(title string) {
+	p.titleMu.Lock()
+	p.customTitle = title
+	p.hasCustomTitle = true
+	p.titleMu.Unlock()
+}
+
+// ClearCustomTitle removes the user-defined title override, restoring child terminal title tracking.
+func (p *Pane) ClearCustomTitle() {
+	p.titleMu.Lock()
+	p.customTitle = ""
+	p.hasCustomTitle = false
+	p.titleMu.Unlock()
+}
+
+// CustomTitle reports the user-defined title, if one has been set.
+func (p *Pane) CustomTitle() (title string, ok bool) {
+	p.titleMu.RLock()
+	defer p.titleMu.RUnlock()
+	return p.customTitle, p.hasCustomTitle
+}
+
+// Title reports the pane's terminal title. If a custom title has been set by the user,
+// it returns the custom title. Otherwise, it reports the child's terminal title,
+// or "" if never set.
+func (p *Pane) Title() string {
+	p.titleMu.RLock()
+	if p.hasCustomTitle {
+		title := p.customTitle
+		p.titleMu.RUnlock()
+		return title
+	}
+	p.titleMu.RUnlock()
+	return p.grid.Title()
+}
 
 // CWD reports the pane's current working directory, or "" if not set.
 func (p *Pane) CWD() string { return p.grid.CWD() }

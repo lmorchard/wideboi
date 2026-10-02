@@ -60,6 +60,14 @@ func MarshalClient(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ClientMessage_CaptureRequest{CaptureRequest: &wirepb.MsgCaptureRequest{PaneId: int32(m.PaneID), Scrollback: m.Scrollback, Lines: int32(m.Lines)}}
 	case MsgClosePaneRequest:
 		env.Msg = &wirepb.ClientMessage_ClosePaneRequest{ClosePaneRequest: &wirepb.MsgClosePaneRequest{PaneId: int32(m.PaneID)}}
+	case MsgRenamePaneRequest:
+		env.Msg = &wirepb.ClientMessage_RenamePaneRequest{
+			RenamePaneRequest: &wirepb.MsgRenamePaneRequest{
+				PaneId: int32(m.PaneID),
+				Title:  validUTF8(m.Title),
+				Clear:  m.Clear,
+			},
+		}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
@@ -130,6 +138,12 @@ func UnmarshalClient(data []byte) (any, error) {
 		return MsgCaptureRequest{PaneID: int(m.CaptureRequest.PaneId), Scrollback: m.CaptureRequest.Scrollback, Lines: int(m.CaptureRequest.Lines)}, nil
 	case *wirepb.ClientMessage_ClosePaneRequest:
 		return MsgClosePaneRequest{PaneID: int(m.ClosePaneRequest.PaneId)}, nil
+	case *wirepb.ClientMessage_RenamePaneRequest:
+		return MsgRenamePaneRequest{
+			PaneID: int(m.RenamePaneRequest.PaneId),
+			Title:  m.RenamePaneRequest.Title,
+			Clear:  m.RenamePaneRequest.Clear,
+		}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
 	case *wirepb.ClientMessage_UpgradeRequest:
@@ -259,6 +273,13 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_CaptureResponse{CaptureResponse: &wirepb.MsgCaptureResponse{PaneId: int32(m.PaneID), Text: validUTF8(m.Text), Error: validUTF8(m.Error)}}
 	case MsgClosePaneResponse:
 		env.Msg = &wirepb.ServerMessage_ClosePaneResponse{ClosePaneResponse: &wirepb.MsgClosePaneResponse{PaneId: int32(m.PaneID), Error: validUTF8(m.Error)}}
+	case MsgRenamePaneResponse:
+		env.Msg = &wirepb.ServerMessage_RenamePaneResponse{
+			RenamePaneResponse: &wirepb.MsgRenamePaneResponse{
+				PaneId: int32(m.PaneID),
+				Error:  validUTF8(m.Error),
+			},
+		}
 	case MsgWaitResponse:
 		env.Msg = &wirepb.ServerMessage_WaitResponse{WaitResponse: &wirepb.MsgWaitResponse{PaneId: int32(m.PaneID), ExitCode: int32(m.ExitCode), Error: validUTF8(m.Error)}}
 	case MsgUpgradeResponse:
@@ -452,6 +473,11 @@ func UnmarshalServer(data []byte) (any, error) {
 			PaneID:  int(m.PaneNotification.PaneId),
 			Title:   m.PaneNotification.Title,
 			Message: m.PaneNotification.Message,
+		}, nil
+	case *wirepb.ServerMessage_RenamePaneResponse:
+		return MsgRenamePaneResponse{
+			PaneID: int(m.RenamePaneResponse.PaneId),
+			Error:  m.RenamePaneResponse.Error,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

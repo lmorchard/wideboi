@@ -46,17 +46,19 @@ type UpgradeState struct {
 }
 
 type UpgradePane struct {
-	ID          int                `json:"id"`
-	Cols        int                `json:"cols"`
-	Rows        int                `json:"rows"`
-	HasPTY      bool               `json:"has_pty"`
-	PtyFD       int                `json:"pty_fd"`
-	Pid         int                `json:"pid"`
-	Keep        bool               `json:"keep"`
-	IsDashboard bool               `json:"is_dashboard"`
-	Exited      bool               `json:"exited"`
-	ExitCode    int                `json:"exit_code"`
-	GridSnap    *term.GridSnapshot `json:"grid_snap,omitempty"`
+	ID             int                `json:"id"`
+	Cols           int                `json:"cols"`
+	Rows           int                `json:"rows"`
+	HasPTY         bool               `json:"has_pty"`
+	PtyFD          int                `json:"pty_fd"`
+	Pid            int                `json:"pid"`
+	Keep           bool               `json:"keep"`
+	IsDashboard    bool               `json:"is_dashboard"`
+	Exited         bool               `json:"exited"`
+	ExitCode       int                `json:"exit_code"`
+	CustomTitle    string             `json:"custom_title,omitempty"`
+	HasCustomTitle bool               `json:"has_custom_title,omitempty"`
+	GridSnap       *term.GridSnapshot `json:"grid_snap,omitempty"`
 }
 
 // cleanExecArgs removes --owner-fd flags and ensures "server" is present in arguments.
@@ -144,6 +146,10 @@ func (s *Server) buildUpgradeStateLocked(webStatus protocol.MsgWebServerControlR
 			Keep:        p.keep,
 			IsDashboard: p.isDashboard || id == s.statusPaneID,
 			GridSnap:    gridSnap,
+		}
+		if customTitle, ok := p.CustomTitle(); ok {
+			up.CustomTitle = customTitle
+			up.HasCustomTitle = true
 		}
 
 		if p.pty != nil && p.pty.Master != nil {
@@ -364,6 +370,9 @@ func RestoreState(s *Server) error {
 					})
 				}
 			}
+		}
+		if up.HasCustomTitle {
+			p.SetCustomTitle(up.CustomTitle)
 		}
 	}
 

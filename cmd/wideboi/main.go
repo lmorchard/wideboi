@@ -124,7 +124,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust" || arg == "rename-pane") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -178,6 +178,9 @@ func printHelp(w io.Writer) {
                              Read a pane's terminal text
   wideboi [flags] close <pane-id>
                              Close a pane using hangup semantics
+  wideboi [flags] rename-pane [pane-id] [title]
+                             Set or clear a pane's title (uses $WIDEBOI_PANE_ID if omitted;
+                             empty title clears override)
   wideboi [flags] wait [--timeout <duration>] <pane-id>
                              Block until a pane's process exits; exit with its code
                              (124 on timeout). Use split --keep to wait after exit
@@ -352,6 +355,8 @@ func main() {
 		fatal(runCapture(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
 	case "close":
 		fatal(runClose(cfg, opts.subcommandArgs, os.Stderr))
+	case "rename-pane":
+		fatal(runRenamePane(cfg, opts.subcommandArgs, os.Stderr))
 	case "wait":
 		code, err := runWait(cfg, opts.subcommandArgs, os.Stderr)
 		fatal(err)

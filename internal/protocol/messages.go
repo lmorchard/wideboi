@@ -509,6 +509,19 @@ type MsgClosePaneResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// MsgRenamePaneRequest asks the server to set or clear a custom pane title.
+type MsgRenamePaneRequest struct {
+	PaneID int    `json:"pane_id"`
+	Title  string `json:"title,omitempty"`
+	Clear  bool   `json:"clear,omitempty"`
+}
+
+// MsgRenamePaneResponse acknowledges MsgRenamePaneRequest or reports an error.
+type MsgRenamePaneResponse struct {
+	PaneID int    `json:"pane_id"`
+	Error  string `json:"error,omitempty"`
+}
+
 // MsgWaitRequest asks to be told when a pane's process exits. The server
 // answers once, with MsgWaitResponse, when that happens.
 type MsgWaitRequest struct {
