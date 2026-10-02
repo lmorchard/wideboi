@@ -138,6 +138,7 @@ type Grid interface {
 	DrawAt(dst uv.Screen, area image.Rectangle, offset int)
 	CellAt(x, y int) *uv.Cell
 	CaptureText(scrollback bool, maxLines int) string
+	DumpText(scrollback bool, offset int, limit int, tailLines int, ansi bool) (string, int)
 	Size() (cols, rows int)
 	Close() error
 }
@@ -1088,65 +1089,184 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 }
 
 func (g *vtGrid) CaptureText(scrollback bool, maxLines int) string {
+	text, _ := g.DumpText(scrollback, 0, 0, maxLines, false)
+	return text
+}
+
+func (g *vtGrid) isRowBlank(row int, inScrollback bool, cols int) bool {
+	for x := 0; x < cols; {
+		var cell *uv.Cell
+		if inScrollback {
+			cell = g.em.ScrollbackCellAt(x, row)
+		} else {
+			cell = g.em.CellAt(x, row)
+		}
+		if cell != nil && (cell.Content != "" && cell.Content != " " || !cell.Style.IsZero()) {
+			return false
+		}
+		if cell != nil && cell.Width > 0 {
+			x += cell.Width
+		} else {
+			x++
+		}
+	}
+	return true
+}
+
+func (g *vtGrid) DumpText(scrollback bool, offset int, limit int, tailLines int, ansiFormat bool) (string, int) {
 	g.writeResizeMu.Lock()
 	defer g.writeResizeMu.Unlock()
 
 	cols, rows := g.em.Width(), g.em.Height()
 	sbLen := g.em.ScrollbackLen()
 
-	totalLines := rows
+	totalRows := rows
 	if scrollback {
-		totalLines += sbLen
+		totalRows += sbLen
+	}
+
+	// Trim trailing blank lines at the bottom of the visible screen.
+	trimmedTotal := totalRows
+	for r := rows - 1; r >= 0; r-- {
+		if !g.isRowBlank(r, false, cols) {
+			break
+		}
+		trimmedTotal--
+	}
+
+	if trimmedTotal == 0 {
+		return "", 0
 	}
 
 	startLine := 0
-	if maxLines > 0 && totalLines > rows+maxLines {
-		startLine = totalLines - (rows + maxLines)
+	count := trimmedTotal
+
+	if tailLines > 0 && offset <= 0 && limit <= 0 {
+		if trimmedTotal > tailLines {
+			startLine = trimmedTotal - tailLines
+		}
+		count = tailLines
+	} else if offset >= 0 || limit > 0 {
+		if offset > 0 {
+			startLine = offset
+		}
+		if limit > 0 {
+			count = limit
+		} else {
+			count = trimmedTotal - startLine
+		}
+	}
+
+	if startLine < 0 {
+		startLine = 0
+	}
+	if startLine >= trimmedTotal || count <= 0 {
+		return "", trimmedTotal
+	}
+	endLine := startLine + count
+	if endLine > trimmedTotal {
+		endLine = trimmedTotal
 	}
 
 	var lines []string
-	for idx := startLine; idx < totalLines; idx++ {
-		var sb strings.Builder
+	for idx := startLine; idx < endLine; idx++ {
 		inScrollback := scrollback && idx < sbLen
 		row := idx
 		if scrollback && !inScrollback {
 			row = idx - sbLen
 		}
-		for x := 0; x < cols; {
-			var cell *uv.Cell
-			if inScrollback {
-				cell = g.em.ScrollbackCellAt(x, row)
-			} else {
-				cell = g.em.CellAt(x, row)
+
+		if !ansiFormat {
+			var sb strings.Builder
+			for x := 0; x < cols; {
+				var cell *uv.Cell
+				if inScrollback {
+					cell = g.em.ScrollbackCellAt(x, row)
+				} else {
+					cell = g.em.CellAt(x, row)
+				}
+				if cell == nil || cell.Content == "" {
+					sb.WriteByte(' ')
+					x++
+					continue
+				}
+				sb.WriteString(cell.Content)
+				w := cell.Width
+				if w <= 0 {
+					w = 1
+				}
+				x += w
 			}
-			if cell == nil || cell.Content == "" {
-				sb.WriteByte(' ')
-				x++
+			lines = append(lines, strings.TrimRight(sb.String(), " "))
+		} else {
+			lastX := -1
+			for x := 0; x < cols; {
+				var cell *uv.Cell
+				if inScrollback {
+					cell = g.em.ScrollbackCellAt(x, row)
+				} else {
+					cell = g.em.CellAt(x, row)
+				}
+				if cell != nil && (cell.Content != "" && cell.Content != " " || !cell.Style.IsZero()) {
+					w := 1
+					if cell.Width > 0 {
+						w = cell.Width
+					}
+					lastX = x + w - 1
+				}
+				if cell != nil && cell.Width > 0 {
+					x += cell.Width
+				} else {
+					x++
+				}
+			}
+
+			if lastX < 0 {
+				lines = append(lines, "")
 				continue
 			}
-			sb.WriteString(cell.Content)
-			w := cell.Width
-			if w <= 0 {
-				w = 1
+
+			var sb strings.Builder
+			var curStyle uv.Style
+			for x := 0; x <= lastX; {
+				var cell *uv.Cell
+				if inScrollback {
+					cell = g.em.ScrollbackCellAt(x, row)
+				} else {
+					cell = g.em.CellAt(x, row)
+				}
+				var cellStyle uv.Style
+				cellContent := " "
+				cellWidth := 1
+				if cell != nil {
+					cellStyle = cell.Style
+					if cell.Content != "" {
+						cellContent = cell.Content
+					}
+					if cell.Width > 0 {
+						cellWidth = cell.Width
+					}
+				}
+
+				if !cellStyle.Equal(&curStyle) {
+					diff := cellStyle.Diff(&curStyle)
+					sb.WriteString(diff)
+					curStyle = cellStyle
+				}
+				sb.WriteString(cellContent)
+				x += cellWidth
 			}
-			x += w
+			if !curStyle.IsZero() {
+				sb.WriteString(ansi.ResetStyle)
+			}
+			lines = append(lines, sb.String())
 		}
-		lines = append(lines, strings.TrimRight(sb.String(), " "))
-	}
-
-	// Trim trailing empty lines at the bottom of the viewport
-	for len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-
-	if maxLines > 0 && len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
 	}
 
 	if len(lines) == 0 {
-		return ""
+		return "", trimmedTotal
 	}
-	return strings.Join(lines, "\n") + "\n"
+	return strings.Join(lines, "\n") + "\n", trimmedTotal
 }
 
 // Close closes the underlying emulator, which unblocks any goroutine

@@ -124,7 +124,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust" || arg == "rename-pane") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "dump-pane" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust" || arg == "rename-pane") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -174,8 +174,8 @@ func printHelp(w io.Writer) {
   wideboi [flags] send <pane-id> <text> [--enter|-e]
                              Send input to a pane (literal by default; -e adds Enter;
                              quote text containing spaces)
-  wideboi [flags] capture <pane-id> [--scrollback|-S] [--lines|-n <count>]
-                             Read a pane's terminal text
+  wideboi [flags] dump-pane [pane-id] [--scrollback|-S [lines]] [--offset <N>] [--limit|-n <N>] [--count|-c] [--ansi|--plain] [-o <file>]
+                             Dump a pane's screen or scrollback (alias: capture)
   wideboi [flags] close <pane-id>
                              Close a pane using hangup semantics
   wideboi [flags] rename-pane [pane-id] [title]
@@ -351,8 +351,8 @@ func main() {
 		fatal(runPalette(cfg, opts.subcommandArgs, os.Stdin, os.Stdout, os.Stderr))
 	case "send":
 		fatal(runSend(cfg, opts.subcommandArgs, os.Stderr))
-	case "capture":
-		fatal(runCapture(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
+	case "dump-pane", "capture":
+		fatal(runDumpPane(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
 	case "close":
 		fatal(runClose(cfg, opts.subcommandArgs, os.Stderr))
 	case "rename-pane":

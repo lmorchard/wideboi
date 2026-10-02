@@ -99,6 +99,27 @@ func TestControlSubcommandsE2E(t *testing.T) {
 		t.Fatalf("expected capture to include 'agent-script-output', got stdout=%q, stderr=%q, code=%d", capturedText, stderr, code)
 	}
 
+	// 2b. Test dump-pane CLI subcommand with flags
+	stdout, stderr, code = runCLI("dump-pane", paneIDStr)
+	if code != 0 || !strings.Contains(stdout, "agent-script-output") {
+		t.Fatalf("dump-pane failed (exit %d): stderr=%q, stdout=%q", code, stderr, stdout)
+	}
+
+	stdout, stderr, code = runCLI("dump-pane", paneIDStr, "-c")
+	if code != 0 || strings.TrimSpace(stdout) == "" {
+		t.Fatalf("dump-pane -c failed (exit %d): stderr=%q, stdout=%q", code, stderr, stdout)
+	}
+
+	outFile := filepath.Join(dir, "e2e_dump.txt")
+	stdout, stderr, code = runCLI("dump-pane", paneIDStr, "-o", outFile)
+	if code != 0 {
+		t.Fatalf("dump-pane -o failed (exit %d): stderr=%q", code, stderr)
+	}
+	content, err := os.ReadFile(outFile)
+	if err != nil || !strings.Contains(string(content), "agent-script-output") {
+		t.Fatalf("dump-pane output file invalid: %v, content=%q", err, string(content))
+	}
+
 	// 3. Send input to the pane
 	stdout, stderr, code = runCLI("send", paneIDStr, "date", "--enter")
 	if code != 0 {

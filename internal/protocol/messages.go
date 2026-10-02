@@ -522,6 +522,27 @@ type MsgRenamePaneResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// MsgDumpPaneRequest requests terminal text output from a specific pane with pagination and formatting.
+type MsgDumpPaneRequest struct {
+	PaneID     int  `json:"pane_id"`
+	Scrollback bool `json:"scrollback"`
+	Offset     int  `json:"offset"`
+	Limit      int  `json:"limit"`
+	TailLines  int  `json:"tail_lines"`
+	ANSI       bool `json:"ansi"`
+	CountOnly  bool `json:"count_only"`
+}
+
+// MsgDumpPaneResponse returns the dumped text or an error, along with line counts.
+type MsgDumpPaneResponse struct {
+	PaneID     int    `json:"pane_id"`
+	Text       string `json:"text"`
+	Error      string `json:"error,omitempty"`
+	TotalLines int    `json:"total_lines"`
+	Offset     int    `json:"offset"`
+	Lines      int    `json:"lines"`
+}
+
 // MsgWaitRequest asks to be told when a pane's process exits. The server
 // answers once, with MsgWaitResponse, when that happens.
 type MsgWaitRequest struct {

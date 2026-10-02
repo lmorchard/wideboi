@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/commands"
+	"github.com/lmorchard/wideboi/internal/config"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/server"
 	"github.com/lmorchard/wideboi/internal/transport"
@@ -130,7 +132,8 @@ func TestDefaultRegistryBuiltins(t *testing.T) {
 	expected := []string{
 		"new-column", "split", "run",
 		"set-width", "move-left", "move-right",
-		"kill-pane", "close",
+		"kill-pane", "close", "rename-pane",
+		"dump-pane",
 		"toggle-status",
 		"detach", "quit", "help",
 	}
@@ -445,6 +448,120 @@ func TestRenamePaneExecution(t *testing.T) {
 
 	// 3. Rename invalid pane ID returns error
 	err = r.Execute(ctx, inv, `:title 99999 "Invalid"`)
+	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
+		t.Fatalf("expected 'pane 99999 not found' error, got %v", err)
+	}
+}
+
+func TestDumpPaneCommand(t *testing.T) {
+	r := commands.DefaultRegistry
+
+	// 1. Verify aliases
+	for _, name := range []string{"dump-pane", "dump", "capture"} {
+		cmd, ok := r.Lookup(name)
+		if !ok || cmd.Name != "dump-pane" {
+			t.Fatalf("Lookup(%q) failed, ok=%v", name, ok)
+		}
+	}
+
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "commands.sock")
+
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	cfg := config.Config{
+		Socket: sockPath,
+	}
+
+	clientConn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+			break
+		}
+	}
+
+	// 2. Error when run without pane ID outside wideboi pane
+	invNoPane := commands.Invocation{
+		Cfg:          cfg,
+		Socket:       sockPath,
+		CallerPaneID: 0,
+	}
+	err = r.Execute(ctx, invNoPane, ":dump-pane")
+	if err == nil || !strings.Contains(err.Error(), "pane-id required") {
+		t.Fatalf("expected 'pane-id required' error, got %v", err)
+	}
+
+	// 3. Error when run without output file and inv.Stdout is nil (TUI prompt mode)
+	invNilStdout := commands.Invocation{
+		Cfg:          cfg,
+		Socket:       sockPath,
+		CallerPaneID: paneID,
+		Stdout:       nil,
+	}
+	err = r.Execute(ctx, invNilStdout, ":dump-pane")
+	if err == nil || !strings.Contains(err.Error(), "output file required") {
+		t.Fatalf("expected 'output file required' error, got %v", err)
+	}
+
+	// 4. Dump to output file (-o)
+	outFile := filepath.Join(dir, "prompt_dump.txt")
+	err = r.Execute(ctx, invNilStdout, fmt.Sprintf(":dump-pane -o %s", outFile))
+	if err != nil {
+		t.Fatalf("Execute(:dump-pane -o ...) failed: %v", err)
+	}
+	if _, err := os.Stat(outFile); err != nil {
+		t.Fatalf("output file stat failed: %v", err)
+	}
+
+	// 5. Dump to inv.Stdout
+	var stdout bytes.Buffer
+	invStdout := commands.Invocation{
+		Cfg:          cfg,
+		Socket:       sockPath,
+		CallerPaneID: paneID,
+		Stdout:       &stdout,
+	}
+	err = r.Execute(ctx, invStdout, ":dump -c")
+	if err != nil {
+		t.Fatalf("Execute(:dump -c) failed: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatalf("expected line count, got empty")
+	}
+
+	// 6. Non-existent pane returns error
+	err = r.Execute(ctx, invStdout, ":capture 99999")
 	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
 		t.Fatalf("expected 'pane 99999 not found' error, got %v", err)
 	}

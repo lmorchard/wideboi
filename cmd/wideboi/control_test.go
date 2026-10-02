@@ -354,3 +354,193 @@ func TestRenamePaneSubcommand(t *testing.T) {
 		t.Fatalf("expected not found error, got %v", err)
 	}
 }
+
+func TestDumpPaneCLI(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "control.sock")
+
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	cfg := config.Config{
+		Socket: sockPath,
+	}
+
+	var splitOut, splitErr bytes.Buffer
+	err = runSplit(cfg, nil, []string{"echo dump1 && echo dump2 && sleep 5"}, &splitOut, &splitErr)
+	if err != nil {
+		t.Fatalf("runSplit failed: %v, stderr: %s", err, splitErr.String())
+	}
+
+	paneIDStr := strings.TrimSpace(splitOut.String())
+	if paneIDStr == "" {
+		t.Fatal("expected pane ID from runSplit, got empty")
+	}
+
+	// Wait for output
+	var stdout, stderr bytes.Buffer
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		stdout.Reset()
+		stderr.Reset()
+		if err := runDumpPane(cfg, []string{paneIDStr}, &stdout, &stderr); err == nil {
+			if strings.Contains(stdout.String(), "dump1") && strings.Contains(stdout.String(), "dump2") {
+				found = true
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !found {
+		t.Fatalf("expected dumped text to contain dump1 and dump2, got %q", stdout.String())
+	}
+
+	// 1. Basic dump
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{paneIDStr}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "dump1\ndump2") {
+		t.Fatalf("dump text = %q, want dump1\\ndump2", stdout.String())
+	}
+
+	// 2. Count-only (-c)
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{paneIDStr, "-c"}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane -c failed: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) != "2" {
+		t.Fatalf("dump count = %q, want 2", stdout.String())
+	}
+
+	// 3. Offset and limit (--offset 0 --limit 1)
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{paneIDStr, "--offset", "0", "--limit", "1"}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane offset/limit failed: %v", err)
+	}
+	if stdout.String() != "dump1\n" {
+		t.Fatalf("dump page 0 = %q, want 'dump1\\n'", stdout.String())
+	}
+
+	// 4. Scrollback with line count (--scrollback 100)
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{paneIDStr, "--scrollback", "100"}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane --scrollback 100 failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "dump1\ndump2") {
+		t.Fatalf("dump scrollback 100 = %q, want dump1\\ndump2", stdout.String())
+	}
+
+	// 5. Output file (-o)
+	outFile := filepath.Join(dir, "dump.txt")
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{paneIDStr, "-o", outFile}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane -o failed: %v", err)
+	}
+	content, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+	if !strings.Contains(string(content), "dump1\ndump2") {
+		t.Fatalf("file content = %q, want dump1\\ndump2", string(content))
+	}
+
+	// 6. In-session fallback (WIDEBOI_PANE_ID)
+	t.Setenv("WIDEBOI_PANE_ID", paneIDStr)
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{"--offset", "1", "--limit", "1"}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane with WIDEBOI_PANE_ID failed: %v", err)
+	}
+	if stdout.String() != "dump2\n" {
+		t.Fatalf("dump page 1 = %q, want 'dump2\\n'", stdout.String())
+	}
+
+	// 7. Error outside session without pane ID
+	t.Setenv("WIDEBOI_PANE_ID", "")
+	stdout.Reset()
+	stderr.Reset()
+	err = runDumpPane(cfg, []string{}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "pane-id required") {
+		t.Fatalf("expected pane-id required error, got %v", err)
+	}
+
+	// 8. Error with invalid pane ID
+	stderr.Reset()
+	err = runDumpPane(cfg, []string{"abc"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "invalid pane id") {
+		t.Fatalf("expected invalid pane id error, got %v", err)
+	}
+
+	// 9. Error with non-existent pane ID
+	stderr.Reset()
+	err = runDumpPane(cfg, []string{"99999"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
+		t.Fatalf("expected not found error, got %v", err)
+	}
+
+	// 10. Verify capture alias calls runDumpPane
+	stdout.Reset()
+	stderr.Reset()
+	if err := runCapture(cfg, []string{paneIDStr}, &stdout, &stderr); err != nil {
+		t.Fatalf("runCapture failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "dump1\ndump2") {
+		t.Fatalf("runCapture output = %q, want dump1\\ndump2", stdout.String())
+	}
+
+	// 11. Verify legacy flag-first syntax `capture -S <pane-id>` preserves pane ID
+	t.Setenv("WIDEBOI_PANE_ID", "")
+	stdout.Reset()
+	stderr.Reset()
+	if err := runCapture(cfg, []string{"-S", paneIDStr}, &stdout, &stderr); err != nil {
+		t.Fatalf("runCapture -S <pane-id> failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "dump1\ndump2") {
+		t.Fatalf("runCapture -S output = %q, want dump1\\ndump2", stdout.String())
+	}
+
+	// 12. Verify flag-first `dump-pane --scrollback <pane-id>` outside session
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{"--scrollback", paneIDStr}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane --scrollback <pane-id> failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "dump1\ndump2") {
+		t.Fatalf("runDumpPane --scrollback output = %q, want dump1\\ndump2", stdout.String())
+	}
+
+	// 13. Verify --scrollback=false is honored as a boolean
+	stdout.Reset()
+	stderr.Reset()
+	if err := runDumpPane(cfg, []string{"--scrollback=false", paneIDStr}, &stdout, &stderr); err != nil {
+		t.Fatalf("runDumpPane --scrollback=false failed: %v", err)
+	}
+
+	// 14. Verify malformed boolean returns error
+	stderr.Reset()
+	err = runDumpPane(cfg, []string{"--scrollback=notabool", paneIDStr}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error for --scrollback=notabool, got nil")
+	}
+
+	_ = runClose(cfg, []string{paneIDStr}, &stderr)
+}

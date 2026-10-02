@@ -565,3 +565,95 @@ func TestCaptureTextDoesNotRaceWrite(t *testing.T) {
 	}
 	<-done
 }
+
+func TestDumpTextPagination(t *testing.T) {
+	g := term.NewVT(10, 3)
+	defer g.Close()
+
+	for i := 0; i < 6; i++ {
+		fmt.Fprintf(g, "line %d\r\n", i)
+	}
+
+	// Page 0 (offset 0, limit 2)
+	got, total := g.DumpText(true, 0, 2, 0, false)
+	want := "line 0\nline 1\n"
+	if total != 6 {
+		t.Fatalf("total = %d, want 6", total)
+	}
+	if got != want {
+		t.Fatalf("page 0 = %q, want %q", got, want)
+	}
+
+	// Page 1 (offset 2, limit 2)
+	got, total = g.DumpText(true, 2, 2, 0, false)
+	want = "line 2\nline 3\n"
+	if total != 6 {
+		t.Fatalf("total = %d, want 6", total)
+	}
+	if got != want {
+		t.Fatalf("page 1 = %q, want %q", got, want)
+	}
+
+	// Page 2 (offset 4, limit 2)
+	got, total = g.DumpText(true, 4, 2, 0, false)
+	want = "line 4\nline 5\n"
+	if total != 6 {
+		t.Fatalf("total = %d, want 6", total)
+	}
+	if got != want {
+		t.Fatalf("page 2 = %q, want %q", got, want)
+	}
+
+	// Page 3 (past end: offset 6, limit 2)
+	got, total = g.DumpText(true, 6, 2, 0, false)
+	if total != 6 {
+		t.Fatalf("total = %d, want 6", total)
+	}
+	if got != "" {
+		t.Fatalf("page 3 = %q, want empty", got)
+	}
+}
+
+func TestDumpTextTailLines(t *testing.T) {
+	g := term.NewVT(10, 3)
+	defer g.Close()
+
+	for i := 0; i < 6; i++ {
+		fmt.Fprintf(g, "line %d\r\n", i)
+	}
+
+	got, total := g.DumpText(true, 0, 0, 2, false)
+	want := "line 4\nline 5\n"
+	if total != 6 {
+		t.Fatalf("total = %d, want 6", total)
+	}
+	if got != want {
+		t.Fatalf("tail 2 = %q, want %q", got, want)
+	}
+}
+
+func TestDumpTextANSI(t *testing.T) {
+	g := term.NewVT(20, 5)
+	defer g.Close()
+
+	fmt.Fprintf(g, "\x1b[31mred\x1b[0m plain \x1b[1mbold\x1b[0m\r\n")
+
+	// Plain text dump
+	gotPlain, _ := g.DumpText(false, 0, 0, 0, false)
+	wantPlain := "red plain bold\n"
+	if gotPlain != wantPlain {
+		t.Fatalf("DumpText(plain) = %q, want %q", gotPlain, wantPlain)
+	}
+
+	// ANSI text dump
+	gotANSI, _ := g.DumpText(false, 0, 0, 0, true)
+	if !strings.Contains(gotANSI, "\x1b[") {
+		t.Fatalf("DumpText(ansi) = %q, want ANSI escape sequences", gotANSI)
+	}
+	if !strings.HasPrefix(gotANSI, "\x1b[") {
+		t.Fatalf("DumpText(ansi) should start with red escape, got %q", gotANSI)
+	}
+	if !strings.HasSuffix(gotANSI, "\x1b[m\n") {
+		t.Fatalf("DumpText(ansi) should end with reset before newline, got %q", gotANSI)
+	}
+}

@@ -661,6 +661,19 @@ func (p *Pane) CaptureText(scrollback bool, maxLines int) string {
 	return p.grid.CaptureText(scrollback, maxLines)
 }
 
+// DumpText extracts text from the pane's terminal buffer with pagination and formatting.
+func (p *Pane) DumpText(scrollback bool, offset int, limit int, tailLines int, ansi bool) (string, int) {
+	p.renderMu.RLock()
+	defer p.renderMu.RUnlock()
+
+	select {
+	case <-p.closed:
+		return "", 0
+	default:
+	}
+	return p.grid.DumpText(scrollback, offset, limit, tailLines, ansi)
+}
+
 // Close hangs up the pane's pty and closes its emulator.
 //
 // pty.Hangup and grid.Close run BEFORE resizeMu is taken, not after. They

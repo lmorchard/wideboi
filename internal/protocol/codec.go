@@ -68,6 +68,18 @@ func MarshalClient(msg any) ([]byte, error) {
 				Clear:  m.Clear,
 			},
 		}
+	case MsgDumpPaneRequest:
+		env.Msg = &wirepb.ClientMessage_DumpPaneRequest{
+			DumpPaneRequest: &wirepb.MsgDumpPaneRequest{
+				PaneId:     int32(m.PaneID),
+				Scrollback: m.Scrollback,
+				Offset:     int32(m.Offset),
+				Limit:      int32(m.Limit),
+				TailLines:  int32(m.TailLines),
+				Ansi:       m.ANSI,
+				CountOnly:  m.CountOnly,
+			},
+		}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
@@ -143,6 +155,16 @@ func UnmarshalClient(data []byte) (any, error) {
 			PaneID: int(m.RenamePaneRequest.PaneId),
 			Title:  m.RenamePaneRequest.Title,
 			Clear:  m.RenamePaneRequest.Clear,
+		}, nil
+	case *wirepb.ClientMessage_DumpPaneRequest:
+		return MsgDumpPaneRequest{
+			PaneID:     int(m.DumpPaneRequest.PaneId),
+			Scrollback: m.DumpPaneRequest.Scrollback,
+			Offset:     int(m.DumpPaneRequest.Offset),
+			Limit:      int(m.DumpPaneRequest.Limit),
+			TailLines:  int(m.DumpPaneRequest.TailLines),
+			ANSI:       m.DumpPaneRequest.Ansi,
+			CountOnly:  m.DumpPaneRequest.CountOnly,
 		}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
@@ -278,6 +300,17 @@ func MarshalServer(msg any) ([]byte, error) {
 			RenamePaneResponse: &wirepb.MsgRenamePaneResponse{
 				PaneId: int32(m.PaneID),
 				Error:  validUTF8(m.Error),
+			},
+		}
+	case MsgDumpPaneResponse:
+		env.Msg = &wirepb.ServerMessage_DumpPaneResponse{
+			DumpPaneResponse: &wirepb.MsgDumpPaneResponse{
+				PaneId:     int32(m.PaneID),
+				Text:       validUTF8(m.Text),
+				Error:      validUTF8(m.Error),
+				TotalLines: int32(m.TotalLines),
+				Offset:     int32(m.Offset),
+				Lines:      int32(m.Lines),
 			},
 		}
 	case MsgWaitResponse:
@@ -478,6 +511,15 @@ func UnmarshalServer(data []byte) (any, error) {
 		return MsgRenamePaneResponse{
 			PaneID: int(m.RenamePaneResponse.PaneId),
 			Error:  m.RenamePaneResponse.Error,
+		}, nil
+	case *wirepb.ServerMessage_DumpPaneResponse:
+		return MsgDumpPaneResponse{
+			PaneID:     int(m.DumpPaneResponse.PaneId),
+			Text:       m.DumpPaneResponse.Text,
+			Error:      m.DumpPaneResponse.Error,
+			TotalLines: int(m.DumpPaneResponse.TotalLines),
+			Offset:     int(m.DumpPaneResponse.Offset),
+			Lines:      int(m.DumpPaneResponse.Lines),
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

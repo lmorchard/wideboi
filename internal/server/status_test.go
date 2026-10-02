@@ -91,27 +91,28 @@ func (g *statusGrid) UserVars() map[string]string {
 
 func (g *statusGrid) Status() protocol.PaneStatus { return protocol.PaneStatus(g.status.Load()) }
 
-func (g *statusGrid) Write(p []byte) (int, error)            { return len(p), nil }
-func (g *statusGrid) Read(p []byte) (int, error)             { return 0, nil }
-func (g *statusGrid) SendKey(uv.KeyEvent)                    {}
-func (g *statusGrid) SendText(string)                        {}
-func (g *statusGrid) MouseTracking() bool                    { return false }
-func (g *statusGrid) BracketedPaste() bool                   { return false }
-func (g *statusGrid) OnBell(func())                          {}
-func (g *statusGrid) SendMouse(uv.MouseEvent)                {}
-func (g *statusGrid) CursorPosition() image.Point            { return image.Point{} }
-func (g *statusGrid) CursorVisible() bool                    { return false }
-func (g *statusGrid) ScrollbackLen() int                     { return 0 }
-func (g *statusGrid) HistoryRows() (int, []string)           { return 0, nil }
-func (g *statusGrid) ScrollOffset() int                      { return 0 }
-func (g *statusGrid) SetScrollOffset(int)                    {}
-func (g *statusGrid) Draw(uv.Screen, image.Rectangle)        {}
-func (g *statusGrid) DrawAt(uv.Screen, image.Rectangle, int) {}
-func (g *statusGrid) CellAt(x, y int) *uv.Cell               { return nil }
-func (g *statusGrid) CaptureText(bool, int) string           { return "" }
-func (g *statusGrid) Size() (int, int)                       { return 10, 10 }
-func (g *statusGrid) Resize(cols, rows int)                  {}
-func (g *statusGrid) Close() error                           { return nil }
+func (g *statusGrid) Write(p []byte) (int, error)                      { return len(p), nil }
+func (g *statusGrid) Read(p []byte) (int, error)                       { return 0, nil }
+func (g *statusGrid) SendKey(uv.KeyEvent)                              {}
+func (g *statusGrid) SendText(string)                                  {}
+func (g *statusGrid) MouseTracking() bool                              { return false }
+func (g *statusGrid) BracketedPaste() bool                             { return false }
+func (g *statusGrid) OnBell(func())                                    {}
+func (g *statusGrid) SendMouse(uv.MouseEvent)                          {}
+func (g *statusGrid) CursorPosition() image.Point                      { return image.Point{} }
+func (g *statusGrid) CursorVisible() bool                              { return false }
+func (g *statusGrid) ScrollbackLen() int                               { return 0 }
+func (g *statusGrid) HistoryRows() (int, []string)                     { return 0, nil }
+func (g *statusGrid) ScrollOffset() int                                { return 0 }
+func (g *statusGrid) SetScrollOffset(int)                              {}
+func (g *statusGrid) Draw(uv.Screen, image.Rectangle)                  {}
+func (g *statusGrid) DrawAt(uv.Screen, image.Rectangle, int)           {}
+func (g *statusGrid) CellAt(x, y int) *uv.Cell                         { return nil }
+func (g *statusGrid) CaptureText(bool, int) string                     { return "" }
+func (g *statusGrid) DumpText(bool, int, int, int, bool) (string, int) { return "", 0 }
+func (g *statusGrid) Size() (int, int)                                 { return 10, 10 }
+func (g *statusGrid) Resize(cols, rows int)                            {}
+func (g *statusGrid) Close() error                                     { return nil }
 
 // serverWithStatuses builds a server holding one pane per entry, with
 // pane IDs taken from the map keys.

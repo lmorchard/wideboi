@@ -75,10 +75,40 @@ func TestServerPaneControlRequests(t *testing.T) {
 		t.Fatalf("unexpected text: %q", resp1.Text)
 	}
 
+	// 1b. Test MsgDumpPaneRequest on existing pane
+	s.handleClientMsg(ctx, tp, protocol.MsgDumpPaneRequest{PaneID: 1})
+	dumpResp1 := takeResponse[protocol.MsgDumpPaneResponse](t, tp)
+	if dumpResp1.Error != "" {
+		t.Fatalf("unexpected error: %s", dumpResp1.Error)
+	}
+	if dumpResp1.PaneID != 1 {
+		t.Fatalf("expected PaneID 1, got %d", dumpResp1.PaneID)
+	}
+	if dumpResp1.Text != "initial output\n" {
+		t.Fatalf("unexpected text: %q", dumpResp1.Text)
+	}
+	if dumpResp1.TotalLines != 1 {
+		t.Fatalf("expected TotalLines 1, got %d", dumpResp1.TotalLines)
+	}
+
+	// 1c. Test MsgDumpPaneRequest with CountOnly
+	s.handleClientMsg(ctx, tp, protocol.MsgDumpPaneRequest{PaneID: 1, CountOnly: true})
+	dumpRespCount := takeResponse[protocol.MsgDumpPaneResponse](t, tp)
+	if dumpRespCount.TotalLines != 1 || dumpRespCount.Text != "" {
+		t.Fatalf("expected CountOnly: TotalLines=1, Text='', got %d, %q", dumpRespCount.TotalLines, dumpRespCount.Text)
+	}
+
 	// 2. Test MsgCaptureRequest on non-existent pane
 	s.handleClientMsg(ctx, tp, protocol.MsgCaptureRequest{PaneID: 999})
 	resp2 := takeResponse[protocol.MsgCaptureResponse](t, tp)
 	if resp2.Error == "" {
+		t.Fatal("expected error for non-existent pane, got none")
+	}
+
+	// 2b. Test MsgDumpPaneRequest on non-existent pane
+	s.handleClientMsg(ctx, tp, protocol.MsgDumpPaneRequest{PaneID: 999})
+	dumpResp2 := takeResponse[protocol.MsgDumpPaneResponse](t, tp)
+	if dumpResp2.Error == "" {
 		t.Fatal("expected error for non-existent pane, got none")
 	}
 

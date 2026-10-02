@@ -191,6 +191,8 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgWaitRequest{PaneID: 5},
 		protocol.MsgWaitResponse{PaneID: 5, ExitCode: 143, Error: "gone"},
 		protocol.MsgPaneNotification{PaneID: 2, Title: "Test", Message: "Alert"},
+		protocol.MsgDumpPaneRequest{PaneID: 2, Scrollback: true, Offset: 10, Limit: 20, TailLines: 5, ANSI: true, CountOnly: false},
+		protocol.MsgDumpPaneResponse{PaneID: 2, Text: "dump text\n", TotalLines: 100, Offset: 10, Lines: 20, Error: ""},
 	}
 
 	for _, msg := range msgs {
