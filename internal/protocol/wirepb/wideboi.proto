@@ -182,6 +182,7 @@ message ServerMessage {
     MsgConfigSnapshot config_snapshot = 18;
     MsgPaneNotification pane_notification = 19;
     MsgRenamePaneResponse rename_pane_response = 20;
+    MsgDumpPaneResponse dump_pane_response = 21;
   }
 }
 
@@ -289,7 +290,27 @@ message ClientMessage {
     MsgUpgradeRequest upgrade_request = 20;
     MsgWebServerControlRequest web_server_control_request = 21;
     MsgRenamePaneRequest rename_pane_request = 22;
+    MsgDumpPaneRequest dump_pane_request = 23;
   }
+}
+
+message MsgDumpPaneRequest {
+  int32 pane_id = 1;
+  bool scrollback = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+  int32 tail_lines = 5;
+  bool ansi = 6;
+  bool count_only = 7;
+}
+
+message MsgDumpPaneResponse {
+  int32 pane_id = 1;
+  string text = 2;
+  string error = 3;
+  int32 total_lines = 4;
+  int32 offset = 5;
+  int32 lines = 6;
 }
 
 message MsgUpgradeRequest {

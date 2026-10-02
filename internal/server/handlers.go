@@ -34,6 +34,7 @@ type msgEffects struct {
 	captureResp   *protocol.MsgCaptureResponse
 	closeResp     *protocol.MsgClosePaneResponse
 	renameResp    *protocol.MsgRenamePaneResponse
+	dumpResp      *protocol.MsgDumpPaneResponse
 	waitResp      *protocol.MsgWaitResponse
 	webReq        *protocol.MsgWebServerControlRequest
 
@@ -146,6 +147,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		eff = s.handleClosePaneRequestLocked(tp, m)
 	case protocol.MsgRenamePaneRequest:
 		eff = s.handleRenamePaneRequestLocked(tp, m)
+	case protocol.MsgDumpPaneRequest:
+		eff = s.handleDumpPaneRequestLocked(tp, m)
 	case protocol.MsgWaitRequest:
 		eff = s.handleWaitRequestLocked(tp, m)
 	case protocol.MsgPaneResync:
@@ -252,6 +255,32 @@ func (s *Server) handleCaptureRequestLocked(tp transport.Transport, m protocol.M
 	} else {
 		text := p.CaptureText(m.Scrollback, m.Lines)
 		eff.captureResp = &protocol.MsgCaptureResponse{PaneID: m.PaneID, Text: text}
+	}
+	return eff
+}
+
+func (s *Server) handleDumpPaneRequestLocked(tp transport.Transport, m protocol.MsgDumpPaneRequest) msgEffects {
+	var eff msgEffects
+	p, ok := s.panes[m.PaneID]
+	if !ok {
+		eff.dumpResp = &protocol.MsgDumpPaneResponse{PaneID: m.PaneID, Error: fmt.Sprintf("pane %d not found", m.PaneID)}
+		return eff
+	}
+	if m.CountOnly {
+		_, total := p.DumpText(m.Scrollback, 0, 0, 0, false)
+		eff.dumpResp = &protocol.MsgDumpPaneResponse{
+			PaneID:     m.PaneID,
+			TotalLines: total,
+		}
+		return eff
+	}
+	text, total := p.DumpText(m.Scrollback, m.Offset, m.Limit, m.TailLines, m.ANSI)
+	eff.dumpResp = &protocol.MsgDumpPaneResponse{
+		PaneID:     m.PaneID,
+		Text:       text,
+		TotalLines: total,
+		Offset:     m.Offset,
+		Lines:      m.Limit,
 	}
 	return eff
 }
@@ -704,6 +733,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if eff.renameResp != nil {
 			tp.SendServer(ctx, *eff.renameResp)
+		}
+		if eff.dumpResp != nil {
+			tp.SendServer(ctx, *eff.dumpResp)
 		}
 		if eff.waitResp != nil {
 			tp.SendServer(ctx, *eff.waitResp)

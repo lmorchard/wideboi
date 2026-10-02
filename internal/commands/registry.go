@@ -341,6 +341,148 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:        "dump-pane",
+		Aliases:     []string{"dump", "capture"},
+		Description: "Dump the screen or scrollback of a pane",
+		Category:    "Panes",
+		ArgsUsage:   "[pane-id] [-s|--scrollback [lines]] [--offset <N>] [--limit|-n <N>] [-c|--count] [--ansi|--plain] [-o|--output <file>]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			fs := flag.NewFlagSet("dump-pane", flag.ContinueOnError)
+			if inv.Stderr != nil {
+				fs.SetOutput(inv.Stderr)
+			}
+			var scrollback bool
+			var offset int
+			var limit int
+			var countOnly bool
+			var ansi, plain bool
+			var output string
+
+			fs.BoolVar(&scrollback, "scrollback", false, "include scrollback history")
+			fs.BoolVar(&scrollback, "s", false, "include scrollback history")
+			fs.BoolVar(&scrollback, "S", false, "include scrollback history")
+			fs.IntVar(&offset, "offset", -1, "0-indexed starting line from top of buffer")
+			fs.IntVar(&limit, "limit", 0, "maximum lines to return")
+			fs.IntVar(&limit, "lines", 0, "maximum lines to return")
+			fs.IntVar(&limit, "n", 0, "maximum lines to return")
+			fs.BoolVar(&countOnly, "count", false, "query and print total line count only")
+			fs.BoolVar(&countOnly, "c", false, "query and print total line count only")
+			fs.BoolVar(&ansi, "ansi", false, "preserve ANSI color and style escapes")
+			fs.BoolVar(&plain, "plain", false, "strip ANSI formatting (default)")
+			fs.StringVar(&output, "output", "", "write output to file instead of stdout")
+			fs.StringVar(&output, "o", "", "write output to file instead of stdout")
+
+			var nonFlagInts []int
+			for i := 0; i < len(inv.Args); i++ {
+				arg := inv.Args[i]
+				if strings.HasPrefix(arg, "-") {
+					if (arg == "-n" || arg == "-lines" || arg == "--lines" ||
+						arg == "-limit" || arg == "--limit" ||
+						arg == "-offset" || arg == "--offset" ||
+						arg == "-o" || arg == "-output" || arg == "--output") && i+1 < len(inv.Args) {
+						i++
+					}
+					continue
+				}
+				if _, err := strconv.Atoi(arg); err == nil {
+					nonFlagInts = append(nonFlagInts, i)
+				}
+			}
+
+			var preprocessed []string
+			for i := 0; i < len(inv.Args); i++ {
+				arg := inv.Args[i]
+				// -S is strictly boolean
+				if arg == "-scrollback" || arg == "--scrollback" || arg == "-s" {
+					preprocessed = append(preprocessed, arg)
+					if i+1 < len(inv.Args) {
+						if _, err := strconv.Atoi(inv.Args[i+1]); err == nil {
+							if inv.CallerPaneID > 0 || len(nonFlagInts) > 1 {
+								i++
+								preprocessed = append(preprocessed, "-limit", inv.Args[i])
+							}
+						}
+					}
+					continue
+				}
+				if strings.HasPrefix(arg, "--scrollback=") || strings.HasPrefix(arg, "-scrollback=") || strings.HasPrefix(arg, "-s=") {
+					parts := strings.SplitN(arg, "=", 2)
+					if _, err := strconv.ParseBool(parts[1]); err == nil {
+						preprocessed = append(preprocessed, arg)
+					} else if n, err := strconv.Atoi(parts[1]); err == nil && n > 0 {
+						preprocessed = append(preprocessed, parts[0], "-limit", parts[1])
+					} else {
+						preprocessed = append(preprocessed, arg)
+					}
+					continue
+				}
+				preprocessed = append(preprocessed, arg)
+			}
+
+			if err := fs.Parse(preprocessed); err != nil {
+				return err
+			}
+
+			targetID := inv.CallerPaneID
+			rest := fs.Args()
+			if len(rest) > 0 {
+				id, err := strconv.Atoi(rest[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane id %q: %w", rest[0], err)
+				}
+				targetID = id
+			} else if targetID <= 0 {
+				return fmt.Errorf("usage: dump-pane [pane-id] [flags] (pane-id required outside wideboi pane)")
+			}
+
+			req := protocol.MsgDumpPaneRequest{
+				PaneID:     targetID,
+				Scrollback: scrollback,
+				ANSI:       ansi && !plain,
+				CountOnly:  countOnly,
+			}
+
+			if offset < 0 {
+				if limit > 0 {
+					req.TailLines = limit
+				}
+			} else {
+				req.Offset = offset
+				req.Limit = limit
+			}
+
+			resp, err := RPCQuery[protocol.MsgDumpPaneResponse](ctx, inv, req, 5*time.Second)
+			if err != nil {
+				return err
+			}
+			if resp.Error != "" {
+				return fmt.Errorf("%s", resp.Error)
+			}
+
+			var outContent string
+			if countOnly {
+				outContent = fmt.Sprintf("%d\n", resp.TotalLines)
+			} else {
+				outContent = resp.Text
+			}
+
+			if output != "" {
+				if err := os.WriteFile(output, []byte(outContent), 0666); err != nil {
+					return fmt.Errorf("writing output file %q: %w", output, err)
+				}
+				return nil
+			}
+
+			if inv.Stdout == nil {
+				return fmt.Errorf("output file required (-o <file>) when run from prompt")
+			}
+
+			fmt.Fprint(inv.Stdout, outContent)
+			return nil
+		},
+	})
+
+	r.Register(Command{
 		Name:        "set-width",
 		Aliases:     []string{"width"},
 		Description: "Set the width of the pane in columns",

@@ -1,6 +1,6 @@
 ---
 name: wideboi-control
-description: Use when an agent wants to control wideboi panes headlessly (split, send, capture, wait, close, status) to run commands, read their output and exit codes, or drive interactive programs in persistent session panes.
+description: Use when an agent wants to control wideboi panes headlessly (split, send, dump-pane, wait, close, status) to run commands, read their output and exit codes, or drive interactive programs in persistent session panes.
 ---
 
 # Wideboi Control Skill
@@ -73,19 +73,32 @@ wideboi send "$PANE_ID" $'\x1b'              # Escape
   is the letter's position in the alphabet (Ctrl-C = `\x03`).
 - Sending to a kept pane whose process has exited is an error.
 
-### `capture`: read the screen
+### `dump-pane`: inspect screen and scrollback (alias: `capture`)
 
 ```bash
-wideboi capture "$PANE_ID"              # visible screen
-wideboi capture "$PANE_ID" -S           # plus scrollback (--scrollback)
-wideboi capture "$PANE_ID" -S -n 100    # only the last 100 lines (--lines)
+wideboi dump-pane "$PANE_ID"                       # active screen
+wideboi dump-pane "$PANE_ID" -S                    # screen plus scrollback (--scrollback)
+wideboi dump-pane "$PANE_ID" --scrollback 100      # last 100 lines of scrollback+screen
+wideboi dump-pane "$PANE_ID" -S -n 100             # same, using -n / --lines / --limit
+
+# Paging through scrollback from top of buffer (0-indexed):
+TOTAL=$(wideboi dump-pane "$PANE_ID" -S -c)        # total lines available (-c / --count)
+wideboi dump-pane "$PANE_ID" -S --offset 0 --limit 100   # page 1: lines 0..99
+wideboi dump-pane "$PANE_ID" -S --offset 100 --limit 100 # page 2: lines 100..199
+
+# Formatting and output destination:
+wideboi dump-pane "$PANE_ID" --ansi                # preserve ANSI colors and SGR escapes
+wideboi dump-pane "$PANE_ID" -o /tmp/pane.txt      # write to file instead of stdout (-o / --output)
+
+# When run inside a wideboi session pane, pane ID can be omitted:
+wideboi dump-pane                                  # dumps the calling pane ($WIDEBOI_PANE_ID)
 ```
 
 Trailing spaces are trimmed from each row, and unwritten blank rows at the
 bottom are dropped. Wide characters (CJK, emoji) come through once each.
 Output is the screen as drawn, so a line longer than the pane is wide
 comes back split across rows. Match on short markers, not on long lines.
-`capture` still works on a kept pane after its process has exited.
+`dump-pane` (and `capture`) works on a kept pane after its process has exited.
 
 ### `wait`: block until the process exits
 

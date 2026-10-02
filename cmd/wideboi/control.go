@@ -118,6 +118,9 @@ func reorderFlags(args []string) []string {
 			if (arg == "-L" || arg == "-session" || arg == "--session" ||
 				arg == "-s" || arg == "-socket" || arg == "--socket" ||
 				arg == "-n" || arg == "-lines" || arg == "--lines" ||
+				arg == "-limit" || arg == "--limit" ||
+				arg == "-offset" || arg == "--offset" ||
+				arg == "-o" || arg == "-output" || arg == "--output" ||
 				arg == "-cwd" || arg == "--cwd" ||
 				arg == "-after" || arg == "--after" ||
 				arg == "-timeout" || arg == "--timeout") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
@@ -265,22 +268,105 @@ func runSend(cfg config.Config, args []string, stderr io.Writer) error {
 	return nil
 }
 
-// runCapture reads terminal text from a pane.
+// preprocessDumpPaneArgs expands `--scrollback [lines]` into `--scrollback -limit [lines]`
+// when lines is clearly intended as a line count rather than a target pane operand.
+func preprocessDumpPaneArgs(args []string, inSession bool) []string {
+	// First pass: identify non-flag integer operands
+	var nonFlagInts []int
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			if (arg == "-L" || arg == "-session" || arg == "--session" ||
+				arg == "-s" || arg == "-socket" || arg == "--socket" ||
+				arg == "-n" || arg == "-lines" || arg == "--lines" ||
+				arg == "-limit" || arg == "--limit" ||
+				arg == "-offset" || arg == "--offset" ||
+				arg == "-o" || arg == "-output" || arg == "--output") && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		if _, err := strconv.Atoi(arg); err == nil {
+			nonFlagInts = append(nonFlagInts, i)
+		}
+	}
+
+	var out []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		// -S is strictly boolean for backward compatibility with `wideboi capture -S <pane-id>`
+		if arg == "-scrollback" || arg == "--scrollback" {
+			out = append(out, arg)
+			if i+1 < len(args) {
+				if _, err := strconv.Atoi(args[i+1]); err == nil {
+					// Disambiguate: args[i+1] is a line limit if a pane ID was already seen,
+					// or follows after this number, or caller pane is known in session.
+					if inSession || len(nonFlagInts) > 1 {
+						i++
+						out = append(out, "-limit", args[i])
+					}
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "--scrollback=") || strings.HasPrefix(arg, "-scrollback=") {
+			parts := strings.SplitN(arg, "=", 2)
+			if _, err := strconv.ParseBool(parts[1]); err == nil {
+				// Valid boolean value (--scrollback=false / --scrollback=true)
+				out = append(out, arg)
+			} else if n, err := strconv.Atoi(parts[1]); err == nil && n > 0 {
+				out = append(out, parts[0], "-limit", parts[1])
+			} else {
+				out = append(out, arg)
+			}
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+// runCapture reads terminal text from a pane (alias for runDumpPane).
 func runCapture(cfg config.Config, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("capture", flag.ContinueOnError)
+	return runDumpPane(cfg, args, stdout, stderr)
+}
+
+// runDumpPane reads terminal text from a pane with optional pagination and ANSI styling.
+func runDumpPane(cfg config.Config, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("dump-pane", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var scrollback bool
-	var lines int
+	var offset int
+	var limit int
+	var countOnly bool
+	var ansi, plain bool
+	var output string
 	var session, socket string
 
 	fs.BoolVar(&scrollback, "scrollback", false, "include scrollback history")
 	fs.BoolVar(&scrollback, "S", false, "include scrollback history")
-	fs.IntVar(&lines, "lines", 0, "limit output to last N lines")
-	fs.IntVar(&lines, "n", 0, "limit output to last N lines")
+	fs.IntVar(&offset, "offset", -1, "0-indexed starting line from top of buffer")
+	fs.IntVar(&limit, "limit", 0, "maximum lines to return")
+	fs.IntVar(&limit, "lines", 0, "maximum lines to return")
+	fs.IntVar(&limit, "n", 0, "maximum lines to return")
+	fs.BoolVar(&countOnly, "count", false, "query and print total line count only")
+	fs.BoolVar(&countOnly, "c", false, "query and print total line count only")
+	fs.BoolVar(&ansi, "ansi", false, "preserve ANSI color and style escapes")
+	fs.BoolVar(&plain, "plain", false, "strip ANSI formatting (default)")
+	fs.StringVar(&output, "output", "", "write output to file instead of stdout")
+	fs.StringVar(&output, "o", "", "write output to file instead of stdout")
 	addTargetFlags(fs, &session, &socket)
 
-	if err := fs.Parse(reorderFlags(args)); err != nil {
+	var callerID int
+	if envID := os.Getenv("WIDEBOI_PANE_ID"); envID != "" {
+		if id, err := strconv.Atoi(envID); err == nil {
+			callerID = id
+		}
+	}
+
+	preprocessed := preprocessDumpPaneArgs(args, callerID > 0)
+	if err := fs.Parse(reorderFlags(preprocessed)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
 		}
@@ -288,23 +374,36 @@ func runCapture(cfg config.Config, args []string, stdout, stderr io.Writer) erro
 	}
 	applySessionFlags(&cfg, session, socket)
 
+	targetID := callerID
 	rest := fs.Args()
-	if len(rest) < 1 {
-		return fmt.Errorf("usage: wideboi capture [flags] <pane-id>")
+	if len(rest) > 0 {
+		id, err := strconv.Atoi(rest[0])
+		if err != nil {
+			return fmt.Errorf("invalid pane id %q: %w", rest[0], err)
+		}
+		targetID = id
+	} else if targetID <= 0 {
+		return fmt.Errorf("usage: wideboi dump-pane [flags] [pane-id] (pane-id required outside wideboi pane)")
 	}
 
-	paneID, err := strconv.Atoi(rest[0])
-	if err != nil {
-		return fmt.Errorf("invalid pane id %q: %w", rest[0], err)
-	}
-
-	req := protocol.MsgCaptureRequest{
-		PaneID:     paneID,
+	req := protocol.MsgDumpPaneRequest{
+		PaneID:     targetID,
 		Scrollback: scrollback,
-		Lines:      lines,
+		ANSI:       ansi && !plain,
+		CountOnly:  countOnly,
 	}
 
-	resp, err := rpcQuery[protocol.MsgCaptureResponse](cfg, req, 5*time.Second)
+	if offset < 0 {
+		// No offset specified: limit behaves as tailLines
+		if limit > 0 {
+			req.TailLines = limit
+		}
+	} else {
+		req.Offset = offset
+		req.Limit = limit
+	}
+
+	resp, err := rpcQuery[protocol.MsgDumpPaneResponse](cfg, req, 5*time.Second)
 	if err != nil {
 		return err
 	}
@@ -312,7 +411,21 @@ func runCapture(cfg config.Config, args []string, stdout, stderr io.Writer) erro
 		return errors.New(resp.Error)
 	}
 
-	fmt.Fprint(stdout, resp.Text)
+	var outContent string
+	if countOnly {
+		outContent = fmt.Sprintf("%d\n", resp.TotalLines)
+	} else {
+		outContent = resp.Text
+	}
+
+	if output != "" {
+		if err := os.WriteFile(output, []byte(outContent), 0666); err != nil {
+			return fmt.Errorf("writing output file %q: %w", output, err)
+		}
+		return nil
+	}
+
+	fmt.Fprint(stdout, outContent)
 	return nil
 }
 

@@ -37,4 +37,5 @@ package protocol
 // 20 adds wrapped flag to LineData and PaneRow for soft-wrap copy preservation (#337).
 // 21 adds MsgPaneNotification for background desktop notifications (#330).
 // 22 adds MsgRenamePaneRequest and MsgRenamePaneResponse for user-defined pane renaming (#336).
-const Version uint32 = 22
+// 23 adds MsgDumpPaneRequest and MsgDumpPaneResponse for pane screen/scrollback inspection (#327).
+const Version uint32 = 23
