@@ -24,6 +24,7 @@ import './components/command-menu';
 import type { WideboiCommandMenu } from './components/command-menu';
 import './components/command-palette';
 import type { WideboiCommandPalette } from './components/command-palette';
+import { MobileDirectInputController } from './mobile-direct-input';
 
 const desktopSession = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('session') : null;
 const STATS_REPORT_MS = 5000;
@@ -198,6 +199,27 @@ export class WideboiApp extends LitElement {
           input.select();
         }
       });
+    },
+  });
+
+  private mobileDirectController = new MobileDirectInputController({
+    onKey: (e) => {
+      if (!this.client || !this.connected || !this.focusedPaneId) return false;
+      return sendKeyboardInput(this.client, this.focusedPaneId, e);
+    },
+    onText: (text) => {
+      if (!this.client || !this.connected || !this.focusedPaneId) return false;
+      return sendTextInput(this.client, this.focusedPaneId, text);
+    },
+    getCtrl: () => this.mobileCtrl,
+    resetCtrl: () => {
+      this.mobileCtrl = false;
+    },
+    onRevealCursor: () => {
+      if (this.focusedPaneId) {
+        this.pendingReveal.add(this.focusedPaneId);
+        this.focusedPane()?.revealCursor();
+      }
     },
   });
 
@@ -432,6 +454,7 @@ export class WideboiApp extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this.mobileDirectController.detach();
     this.listeners?.abort();
     this.listeners = undefined;
     this.pointer = undefined;
@@ -1211,31 +1234,11 @@ export class WideboiApp extends LitElement {
   }
 
   private handleMobileDirectKey(e: KeyboardEvent) {
-    if (!this.client || !this.connected || !this.focusedPaneId) return;
-    if (this.mobileCtrl && e.key.length === 1) {
-      this.sendMobileKey(e.key, e.code);
-      e.preventDefault();
-      const input = e.target as HTMLInputElement;
-      if (input) input.value = '';
-      return;
-    }
-    if (sendKeyboardInput(this.client, this.focusedPaneId, e)) {
-      this.pendingReveal.add(this.focusedPaneId);
-      this.focusedPane()?.revealCursor();
-      e.preventDefault();
-    }
-    const input = e.target as HTMLInputElement;
-    if (input) input.value = '';
+    this.mobileDirectController.handleKeyDown(e);
   }
 
   private handleMobileDirectInput(e: Event) {
-    const input = e.target as HTMLInputElement;
-    if (!input || !input.value || !this.client || !this.connected || !this.focusedPaneId) return;
-    if (sendTextInput(this.client, this.focusedPaneId, input.value)) {
-      this.pendingReveal.add(this.focusedPaneId);
-      this.focusedPane()?.revealCursor();
-    }
-    input.value = '';
+    this.mobileDirectController.handleInput(e);
   }
 
   private sendMobileDraft() {
@@ -1947,8 +1950,14 @@ export class WideboiApp extends LitElement {
                 autocapitalize="off"
                 autocorrect="off"
                 spellcheck="false"
+                @focus=${(e: FocusEvent) => this.mobileDirectController.handleFocus(e)}
+                @blur=${(e: FocusEvent) => this.mobileDirectController.handleBlur(e)}
+                @click=${(e: MouseEvent) => this.mobileDirectController.handleClick(e)}
                 @keydown=${this.handleMobileDirectKey}
-                @input=${this.handleMobileDirectInput} />
+                @beforeinput=${(e: InputEvent) => this.mobileDirectController.handleBeforeInput(e)}
+                @input=${this.handleMobileDirectInput}
+                @compositionstart=${(e: CompositionEvent) => this.mobileDirectController.handleCompositionStart(e)}
+                @compositionend=${(e: CompositionEvent) => this.mobileDirectController.handleCompositionEnd(e)} />
             `}
             <button
               class=${this.showMacros ? 'mobile-macros-btn active' : 'mobile-macros-btn'}

@@ -166,6 +166,13 @@ test('direct input mode forwards keystrokes immediately to the terminal', async 
   const inputs = (await sent(page)).filter(msg => msg.case === 'input');
   expect(inputs).toHaveLength(1);
   expect((inputs[0].value as any).key.code).toBe(113);
+
+  // Test Backspace in direct mode
+  await directInput.press('Backspace');
+  const afterBksp = (await sent(page)).filter(msg => msg.case === 'input');
+  expect(afterBksp).toHaveLength(2);
+  expect((afterBksp[1].value as any).key.code).toBe(127);
+
   await page.getByRole('button', { name: 'Draft mode' }).click();
   await expect(page.getByRole('textbox', { name: 'Command or response' })).toBeVisible();
 });
