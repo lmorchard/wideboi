@@ -265,6 +265,12 @@ type vtGrid struct {
 	// idle immediately.
 	idleTimeout time.Duration
 
+	heuristicMu            sync.Mutex
+	cachedHeuristicStatus  protocol.PaneStatus
+	cachedHeuristicMatched bool
+	lastHeuristicGen       uint64
+	lastHeuristicTitle     string
+
 	// writeResizeMu serializes Write against Resize. SafeEmulator's
 	// CellAt returns *uv.Cell aliasing its live buffer slot (uv.Line.At
 	// is literally &l[x]), not a copy, and its own se.mu.RLock is
@@ -588,16 +594,80 @@ func (g *vtGrid) UserVars() map[string]string {
 
 func (g *vtGrid) Status() protocol.PaneStatus {
 	st := protocol.PaneStatus(g.status.Load())
-	if !g.sawAuthoritativeStatus.Load() && st == protocol.StatusWorking {
-		idle := g.idleTimeout
-		if idle <= 0 {
-			idle = DefaultIdleTimeout
+	if g.sawAuthoritativeStatus.Load() {
+		return st
+	}
+
+	t := g.lastWriteTime.Load()
+	if t == nil {
+		return st
+	}
+
+	idle := g.idleTimeout
+	if idle <= 0 {
+		idle = DefaultIdleTimeout
+	}
+	debounce := heuristicDebounceWindow
+	if debounce > idle/2 {
+		debounce = idle / 2
+	}
+
+	since := time.Since(*t)
+	// While output has been active recently within the debounce window, report working without scanning.
+	if since < debounce {
+		return protocol.StatusWorking
+	}
+
+	title := g.Title()
+	curGen := g.outputGen.Load()
+
+	// Check if cached heuristic scan is still valid for this output generation and title.
+	g.heuristicMu.Lock()
+	if curGen == g.lastHeuristicGen && title == g.lastHeuristicTitle {
+		cachedStatus := g.cachedHeuristicStatus
+		cachedMatched := g.cachedHeuristicMatched
+		g.heuristicMu.Unlock()
+		if cachedMatched {
+			return cachedStatus
 		}
-		if t := g.lastWriteTime.Load(); t != nil && time.Since(*t) > idle {
+		if since > idle {
 			return protocol.StatusIdle
 		}
+		return protocol.StatusWorking
 	}
-	return st
+	g.heuristicMu.Unlock()
+
+	// Perform heuristic evaluation outside heuristicMu to avoid lock contention.
+	var newStatus protocol.PaneStatus
+	var matched bool
+
+	if isBlockerTitle(title) {
+		newStatus = protocol.StatusNeedsInput
+		matched = true
+	} else if isWorkingTitle(title) {
+		newStatus = protocol.StatusWorking
+		matched = true
+	} else {
+		// Dump the last 12 lines of the visible screen.
+		dump, _ := g.DumpText(false, 0, 0, 12, false)
+		lines := strings.Split(dump, "\n")
+		newStatus, matched = scanScreenTail(lines)
+	}
+
+	g.heuristicMu.Lock()
+	g.lastHeuristicGen = curGen
+	g.lastHeuristicTitle = title
+	g.cachedHeuristicStatus = newStatus
+	g.cachedHeuristicMatched = matched
+	g.heuristicMu.Unlock()
+
+	if matched {
+		return newStatus
+	}
+	if since > idle {
+		return protocol.StatusIdle
+	}
+	return protocol.StatusWorking
 }
 func (g *vtGrid) Read(p []byte) (int, error) { return g.em.Read(p) }
 

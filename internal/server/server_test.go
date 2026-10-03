@@ -114,6 +114,24 @@ func recvLayoutWidth(t *testing.T, ch <-chan transport.ServerMessage, paneID, wi
 	}
 }
 
+func recvLayoutColumns(t *testing.T, ch <-chan transport.ServerMessage, wantCols int, timeout time.Duration) protocol.MsgLayoutSnapshot {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-ch:
+			if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+				if len(snap.Columns) == wantCols {
+					return snap
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for MsgLayoutSnapshot with %d columns", wantCols)
+			return protocol.MsgLayoutSnapshot{}
+		}
+	}
+}
+
 func TestServerLifecycleAndAttach(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")
@@ -163,10 +181,7 @@ func TestServerVerbHandling(t *testing.T) {
 	// server's placements, which at 80 columns in scroll mode was 2
 	// either way -- the new pane scrolls off -- so it never showed the
 	// verb did anything. Columns count every pane.
-	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
-	if len(snap.Columns) != 3 {
-		t.Fatalf("expected 3 columns after NewColumn verb, got %d", len(snap.Columns))
-	}
+	_ = recvLayoutColumns(t, tp.ServerSend, 3, 2*time.Second)
 
 	// Test GrowWidth verb
 	focusedID := 1
