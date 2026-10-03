@@ -10,11 +10,12 @@ import (
 // rather than a silent idle.
 func TestPaneStatusText(t *testing.T) {
 	want := map[PaneStatus]string{
-		StatusIdle:       "idle",
-		StatusWorking:    "working",
-		StatusNeedsInput: "needs_input",
-		StatusDone:       "done",
-		StatusFailed:     "failed",
+		StatusIdle:        "idle",
+		StatusWorking:     "working",
+		StatusNeedsInput:  "needs_input",
+		StatusDone:        "done",
+		StatusFailed:      "failed",
+		StatusInterrupted: "interrupted",
 	}
 	for s, name := range want {
 		b, err := s.MarshalText()

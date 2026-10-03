@@ -30,6 +30,17 @@ func TestSmartJumpPrefersFailedOverDone(t *testing.T) {
 	}
 }
 
+func TestSmartJumpPrefersInterruptedOverDone(t *testing.T) {
+	c := clientWithStatuses(t, map[int]protocol.PaneStatus{
+		1: protocol.StatusDone,
+		2: protocol.StatusInterrupted,
+		3: protocol.StatusNeedsInput,
+	})
+	if got := c.smartJumpTargetLocked(); got != 2 {
+		t.Errorf("smartJumpTargetLocked() = %d, want 2 (Interrupted outranks Done)", got)
+	}
+}
+
 func TestSmartJumpPrefersDoneOverNeedsInput(t *testing.T) {
 	c := clientWithStatuses(t, map[int]protocol.PaneStatus{
 		1: protocol.StatusNeedsInput,

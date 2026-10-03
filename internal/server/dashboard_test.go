@@ -362,6 +362,7 @@ func TestDashboardPrioritySorting(t *testing.T) {
 		{ID: 4, Status: protocol.StatusFailed, Title: "failed-4"},
 		{ID: 5, Status: protocol.StatusDone, Title: "done-5"},
 		{ID: 6, Status: protocol.StatusNeedsInput, Title: "needs-input-6"},
+		{ID: 7, Status: protocol.StatusInterrupted, Title: "interrupted-7"},
 	}
 
 	out := string(db.Render(panes, 120, 24))
@@ -369,6 +370,7 @@ func TestDashboardPrioritySorting(t *testing.T) {
 	// Verify fleet summary banner has accurate counts
 	if !strings.Contains(out, "2 needs input") ||
 		!strings.Contains(out, "1 failed") ||
+		!strings.Contains(out, "1 interrupted") ||
 		!strings.Contains(out, "1 done") ||
 		!strings.Contains(out, "1 working") ||
 		!strings.Contains(out, "1 idle") {
@@ -376,8 +378,8 @@ func TestDashboardPrioritySorting(t *testing.T) {
 	}
 
 	// Verify priority ordering:
-	// NeedsInput (3, 6 by ID) -> Failed (4) -> Done (5) -> Working (2) -> Idle (1)
-	expectedOrder := []int{3, 6, 4, 5, 2, 1}
+	// NeedsInput (3, 6 by ID) -> Failed/Interrupted (4, 7 by ID) -> Done (5) -> Working (2) -> Idle (1)
+	expectedOrder := []int{3, 6, 4, 7, 5, 2, 1}
 	if len(db.panes) != len(expectedOrder) {
 		t.Fatalf("len(db.panes) = %d, want %d", len(db.panes), len(expectedOrder))
 	}

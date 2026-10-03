@@ -273,3 +273,98 @@ func TestGridStatusHeuristicPlainDecaysToIdle(t *testing.T) {
 	// Decays to StatusIdle within the ceiling
 	waitStatusWithCeiling(t, g, protocol.StatusIdle, 1*time.Second)
 }
+
+func TestWorkingInactivityTimeout(t *testing.T) {
+	const idle = 50 * time.Millisecond
+	const inactivity = 100 * time.Millisecond
+	g := NewVTWithTimeouts(80, 24, idle, inactivity)
+	defer g.Close()
+
+	// Write title spinner so heuristic holds StatusWorking past idleTimeout
+	if _, err := g.Write([]byte("\x1b]0;⠋ Thinking...\x07")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Within inactivity timeout: StatusWorking
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() before inactivity timeout = %v, want %v", got, protocol.StatusWorking)
+	}
+
+	// After inactivity timeout: should become StatusInterrupted
+	waitStatusWithCeiling(t, g, protocol.StatusInterrupted, 1*time.Second)
+}
+
+func TestWorkingInactivityAutoResume(t *testing.T) {
+	const idle = 50 * time.Millisecond
+	const inactivity = 100 * time.Millisecond
+	g := NewVTWithTimeouts(80, 24, idle, inactivity)
+	defer g.Close()
+
+	// Write title spinner to hold StatusWorking
+	if _, err := g.Write([]byte("\x1b]0;⠋ Thinking...\x07")); err != nil {
+		t.Fatal(err)
+	}
+	waitStatusWithCeiling(t, g, protocol.StatusInterrupted, 1*time.Second)
+
+	// New write output arrives -> immediately auto-resumes to StatusWorking
+	if _, err := g.Write([]byte("Thinking chunk 2...\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() immediately after write resume = %v, want %v", got, protocol.StatusWorking)
+	}
+}
+
+func TestAuthoritativeWorkingInactivity(t *testing.T) {
+	const idle = 50 * time.Millisecond
+	const inactivity = 100 * time.Millisecond
+	g := NewVTWithTimeouts(80, 24, idle, inactivity)
+	defer g.Close()
+
+	// Authoritative OSC 9;4;3 progress busy sequence
+	if _, err := g.Write([]byte("\x1b]9;4;3;\x07")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() after OSC 9;4;3 = %v, want %v", got, protocol.StatusWorking)
+	}
+
+	// Even with sawAuthoritativeStatus, inactivity timeout flags StatusInterrupted
+	waitStatusWithCeiling(t, g, protocol.StatusInterrupted, 1*time.Second)
+
+	// Resumes working when output resumes
+	if _, err := g.Write([]byte("more progress\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() after resume = %v, want %v", got, protocol.StatusWorking)
+	}
+}
+
+func TestRestoredWorkingPaneInactivity(t *testing.T) {
+	const idle = 50 * time.Millisecond
+	const inactivity = 100 * time.Millisecond
+	g1 := NewVTWithTimeouts(80, 24, idle, inactivity)
+	defer g1.Close()
+
+	if _, err := g1.Write([]byte("\x1b]0;⠋ Thinking...\x07start working\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := g1.(Snapshotter).ExportSnapshot()
+	if snap.Status != int32(protocol.StatusWorking) {
+		t.Fatalf("snap.Status = %v, want Working", snap.Status)
+	}
+
+	g2 := NewVTWithTimeouts(80, 24, idle, inactivity)
+	defer g2.Close()
+	g2.(Snapshotter).RestoreSnapshot(snap)
+
+	// Immediately after restore: StatusWorking
+	if got := g2.Status(); got != protocol.StatusWorking {
+		t.Fatalf("Status() immediately after restore = %v, want %v", got, protocol.StatusWorking)
+	}
+
+	// Because lastWriteTime was seeded, it must decay to StatusInterrupted after inactivity timeout
+	waitStatusWithCeiling(t, g2, protocol.StatusInterrupted, 1*time.Second)
+}

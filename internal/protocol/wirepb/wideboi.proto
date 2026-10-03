@@ -38,6 +38,7 @@ enum PaneStatus {
   PANE_STATUS_NEEDS_INPUT = 2;
   PANE_STATUS_DONE = 3;
   PANE_STATUS_FAILED = 4;
+  PANE_STATUS_INTERRUPTED = 5;
 }
 
 enum ColorKind {

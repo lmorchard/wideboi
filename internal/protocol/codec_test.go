@@ -175,11 +175,12 @@ func TestEnumsMatchWireSchema(t *testing.T) {
 	}
 
 	statuses := map[PaneStatus]wirepb.PaneStatus{
-		StatusIdle:       wirepb.PaneStatus_PANE_STATUS_IDLE,
-		StatusWorking:    wirepb.PaneStatus_PANE_STATUS_WORKING,
-		StatusNeedsInput: wirepb.PaneStatus_PANE_STATUS_NEEDS_INPUT,
-		StatusDone:       wirepb.PaneStatus_PANE_STATUS_DONE,
-		StatusFailed:     wirepb.PaneStatus_PANE_STATUS_FAILED,
+		StatusIdle:        wirepb.PaneStatus_PANE_STATUS_IDLE,
+		StatusWorking:     wirepb.PaneStatus_PANE_STATUS_WORKING,
+		StatusNeedsInput:  wirepb.PaneStatus_PANE_STATUS_NEEDS_INPUT,
+		StatusDone:        wirepb.PaneStatus_PANE_STATUS_DONE,
+		StatusFailed:      wirepb.PaneStatus_PANE_STATUS_FAILED,
+		StatusInterrupted: wirepb.PaneStatus_PANE_STATUS_INTERRUPTED,
 	}
 	for goVal, wireVal := range statuses {
 		if int32(goVal) != int32(wireVal) {
