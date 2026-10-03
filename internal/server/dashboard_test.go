@@ -7,6 +7,7 @@ import (
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/protocol"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
@@ -485,5 +486,138 @@ func TestDashboardVerticalScrolling(t *testing.T) {
 	wantTarget := panes[db.scrollOffset].ID
 	if !handled || target != wantTarget {
 		t.Errorf("HandleMouse(Y: 2) with scrollOffset %d: target = %d, want %d", db.scrollOffset, target, wantTarget)
+	}
+}
+
+func TestDashboardWideMode(t *testing.T) {
+	db := NewDashboard()
+	panes := []PaneInfo{
+		{ID: 1, Status: protocol.StatusNeedsInput, Title: "claude-review", CWD: "/home/user/project"},
+		{ID: 2, Status: protocol.StatusWorking, Title: "build-task", CWD: "/home/user/build"},
+	}
+
+	out := string(db.Render(panes, 80, 24))
+
+	// Wide mode header and banner:
+	if !strings.Contains(out, "[ wideboi dashboard ]") {
+		t.Errorf("wide mode missing wide banner:\n%s", out)
+	}
+	if !strings.Contains(out, "PANE ID") || !strings.Contains(out, "STATUS") || !strings.Contains(out, "TITLE") || !strings.Contains(out, "CWD") {
+		t.Errorf("wide mode missing 4 columns:\n%s", out)
+	}
+	if !strings.Contains(out, "/home/user/project") {
+		t.Errorf("wide mode missing CWD:\n%s", out)
+	}
+	if !strings.Contains(out, "[j/k/↑/↓] Select") {
+		t.Errorf("wide mode missing full footer:\n%s", out)
+	}
+}
+
+func TestDashboardCompactMode(t *testing.T) {
+	db := NewDashboard()
+	panes := []PaneInfo{
+		{ID: 1, Status: protocol.StatusNeedsInput, Title: "claude-review", CWD: "/home/user/project"},
+		{ID: 2, Status: protocol.StatusWorking, Title: "build-task", CWD: "/home/user/build"},
+	}
+
+	out := string(db.Render(panes, 50, 24))
+
+	// Compact mode header and banner:
+	if !strings.Contains(out, "[ wideboi ]") {
+		t.Errorf("compact mode missing compact banner:\n%s", out)
+	}
+	if !strings.Contains(out, "PANE ID") || !strings.Contains(out, "STATUS") || !strings.Contains(out, "TITLE") {
+		t.Errorf("compact mode missing 3 columns:\n%s", out)
+	}
+	if strings.Contains(out, "CWD") {
+		t.Errorf("compact mode should omit CWD column:\n%s", out)
+	}
+	if !strings.Contains(out, "claude-review") || !strings.Contains(out, "build-task") {
+		t.Errorf("compact mode missing titles:\n%s", out)
+	}
+	if !strings.Contains(out, "[j/k] Select") {
+		t.Errorf("compact mode missing compact footer:\n%s", out)
+	}
+}
+
+func TestDashboardDrawerMode(t *testing.T) {
+	db := NewDashboard()
+	panes := []PaneInfo{
+		{ID: 1, Status: protocol.StatusNeedsInput, Title: "claude-review", Focused: true},
+		{ID: 2, Status: protocol.StatusWorking, Title: "build-task"},
+		{ID: 3, Status: protocol.StatusIdle, Title: "bash-session"},
+	}
+
+	// Render in 28 columns (typical width for pinned left drawer)
+	out := string(db.Render(panes, 28, 24))
+
+	// Drawer banner with concise badges:
+	if !strings.Contains(out, "[wb]") || !strings.Contains(out, "1!") || !strings.Contains(out, "1▲") || !strings.Contains(out, "1●") {
+		t.Errorf("drawer mode missing concise banner badges:\n%s", out)
+	}
+
+	// Drawer column header:
+	if !strings.Contains(out, "PANE") || !strings.Contains(out, "ST") || !strings.Contains(out, "TITLE") {
+		t.Errorf("drawer mode missing compact 3-column header:\n%s", out)
+	}
+
+	// Drawer data rows should display glyphs and titles without clipping titles out:
+	if !strings.Contains(out, "!") || !strings.Contains(out, "claude-review") {
+		t.Errorf("drawer mode row 1 missing glyph or title:\n%s", out)
+	}
+	if !strings.Contains(out, "▲") || !strings.Contains(out, "build-task") {
+		t.Errorf("drawer mode row 2 missing glyph or title:\n%s", out)
+	}
+	if !strings.Contains(out, "[1]*") {
+		t.Errorf("drawer mode missing focus marker on pane 1:\n%s", out)
+	}
+
+	// Drawer footer:
+	if !strings.Contains(out, "[j/k] Move") {
+		t.Errorf("drawer mode missing drawer footer:\n%s", out)
+	}
+}
+
+func TestDashboardUltraNarrowMode(t *testing.T) {
+	db := NewDashboard()
+	panes := []PaneInfo{
+		{ID: 1, Status: protocol.StatusNeedsInput, Title: "my-task"},
+	}
+
+	out := string(db.Render(panes, 16, 24))
+
+	lines := strings.Split(out, "\r\n")
+	for _, l := range lines {
+		clean := stripANSI(l)
+		if len([]rune(clean)) > 16 {
+			t.Errorf("line exceeded 16 runes (%d): %q", len([]rune(clean)), clean)
+		}
+	}
+	if !strings.Contains(out, "[j/k] [Enter]") {
+		t.Errorf("ultra narrow mode missing shortest footer:\n%s", out)
+	}
+}
+
+func TestDashboardWideCharacters(t *testing.T) {
+	db := NewDashboard()
+	panes := []PaneInfo{
+		{ID: 1, Status: protocol.StatusNeedsInput, Title: "日本語タイトル長め", CWD: "/home/user/日本語"},
+		{ID: 2, Status: protocol.StatusWorking, Title: "🚀rocket-title", CWD: "/tmp"},
+	}
+
+	for _, cols := range []int{24, 28, 35, 50, 80} {
+		out := string(db.Render(panes, cols, 24))
+		lines := strings.Split(out, "\r\n")
+		for _, l := range lines {
+			clean := stripANSI(l)
+			// Must never emit unicode replacement character:
+			if strings.ContainsRune(clean, '\uFFFD') {
+				t.Fatalf("cols %d: emitted replacement char in line: %q", cols, clean)
+			}
+			// Cell width must never exceed target cols:
+			if w := ansi.StringWidth(clean); w > cols {
+				t.Errorf("cols %d: line cell width %d exceeded cols: %q", cols, w, clean)
+			}
+		}
 	}
 }
