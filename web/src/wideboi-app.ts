@@ -1912,7 +1912,7 @@ export class WideboiApp extends LitElement {
     if (cards && this.columns.length > 0) {
       const displayWidth = (column: ColumnData) =>
         this.displayWidths[column.paneId] ?? column.width;
-      const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column) }));
+      const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column), pinned: column.pinned }));
       const stackFocusId = this.stackFocusId === null ? null :
         (this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId);
       const layout = cardLayout(
@@ -1931,20 +1931,30 @@ export class WideboiApp extends LitElement {
     const displayWidth = (column: ColumnData) =>
       this.mobile ? Math.max(1, Math.floor(this.cardViewportWidth / this.cellWidth)) :
       this.displayWidths[column.paneId] ?? column.width;
-    const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column) }));
+    const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column), pinned: column.pinned }));
     const stackFocusId = this.stackFocusId === null ? null :
       (this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId);
     const layout = cards ? cardLayout(displayColumns, this.focusedPaneId,
       Math.floor(this.cardViewportWidth / this.cellWidth), this.cardFirst, stackFocusId) : undefined;
     const placements = new Map(layout?.placements.map(p => [p.paneId, p]));
+    const pinnedLeftOffsets: Record<number, number> = {};
+    let curPinnedPx = 0;
+    for (const col of this.columns) {
+      if (col.pinned) {
+        pinnedLeftOffsets[col.paneId] = curPinnedPx;
+        curPinnedPx += (displayWidth(col) + 1) * this.cellWidth;
+      }
+    }
     return html`
       <div class="terminal-shell">
         <div class=${this.mobile ? 'pane-strip mobile' : cards ? 'pane-strip cards' : 'pane-strip'}>
           ${repeat(this.columns, column => column.paneId, column => {
             const placement = placements.get(column.paneId);
+            const isPinnedScroll = !cards && column.pinned && !this.mobile;
+            const scrollPinnedStyle = isPinnedScroll ? `position: sticky; left: ${pinnedLeftOffsets[column.paneId] ?? 0}px; z-index: 5; background: var(--wb-bg-pane, #1e1e1e);` : '';
             return html`
             <wideboi-pane
-              style=${`width: ${this.mobile ? '100%' : `${displayWidth(column) * this.cellWidth}px`}; --divider-width: ${cards || this.mobile ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : ''}`}
+              style=${`width: ${this.mobile ? '100%' : `${displayWidth(column) * this.cellWidth}px`}; --divider-width: ${cards || this.mobile ? 0 : this.cellWidth}px; ${cards ? `left: ${(placement?.left ?? 0) * this.cellWidth}px; z-index: ${placement?.z ?? 0}; visibility: ${placement?.visible ? 'visible' : 'hidden'}` : scrollPinnedStyle}`}
               .paneId=${column.paneId}
               .pane=${this.panes.get(column.paneId)}
               .theme=${this.currentTheme}

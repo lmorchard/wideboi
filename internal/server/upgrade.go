@@ -378,6 +378,9 @@ func RestoreState(s *Server) error {
 
 	for _, col := range state.Columns {
 		s.strip.AddColumn(col.PaneID, col.Width, col.Height, 0)
+		if col.Pinned {
+			s.strip.PinColumn(col.PaneID)
+		}
 	}
 
 	// Restore previous focus history before final focus

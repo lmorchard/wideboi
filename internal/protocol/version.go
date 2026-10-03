@@ -39,4 +39,5 @@ package protocol
 // 22 adds MsgRenamePaneRequest and MsgRenamePaneResponse for user-defined pane renaming (#336).
 // 23 adds MsgDumpPaneRequest and MsgDumpPaneResponse for pane screen/scrollback inspection (#327).
 // 24 adds MsgPipePaneRequest and MsgPipePaneResponse for raw PTY stream tapping (#333).
-const Version uint32 = 24
+// 25 adds pinned boolean flag to ColumnData and VerbTogglePin (#373).
+const Version uint32 = 25

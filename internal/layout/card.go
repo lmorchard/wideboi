@@ -56,36 +56,108 @@ func shareAt(total, n, i int) int {
 }
 
 // ComputePlacements lays the focused pane out at its own width and
-// divides the remainder among the others.
+// divides the remainder among the others. Pinned columns are anchored
+// to the left edge of the viewport.
 func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight int) []Placement {
 	if len(s.columns) == 0 || viewportWidth <= 0 || viewportHeight <= 0 {
 		return nil
 	}
 
 	availHeight := AvailHeight(viewportHeight)
-	numCols := len(s.columns)
 
-	if numCols == 1 {
-		col := s.columns[0]
-		w := min(col.Width, viewportWidth)
+	// Partition pinned and unpinned columns.
+	var pinnedCols []Column
+	var unpinnedCols []Column
+	for _, c := range s.columns {
+		if c.Pinned {
+			pinnedCols = append(pinnedCols, c)
+		} else {
+			unpinnedCols = append(unpinnedCols, c)
+		}
+	}
+
+	placements := make([]Placement, 0, len(s.columns))
+	focusedID := s.FocusedPaneID()
+
+	// 1. Place pinned columns statically on the left.
+	pinnedWidth := 0
+	for _, c := range pinnedCols {
+		dstX := pinnedWidth
+		dstW := min(c.Width, max(0, viewportWidth-dstX))
+		pinnedWidth += c.Width + 1
+		if dstW <= 0 {
+			continue
+		}
+		maxSrcY := max(0, c.Height-availHeight)
+		z := 0
+		if c.PaneID == focusedID {
+			z = 1
+		}
+		placements = append(placements, Placement{
+			PaneID: c.PaneID,
+			Src:    image.Rect(0, maxSrcY, dstW, maxSrcY+availHeight),
+			Dst:    image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Frame:  image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Z:      z,
+			Kind:   protocol.PlacementFull,
+		})
+	}
+
+	unpinnedStartX := pinnedWidth
+	remainingViewport := max(0, viewportWidth-unpinnedStartX)
+	if len(unpinnedCols) == 0 || remainingViewport <= 0 {
+		return placements
+	}
+
+	if len(unpinnedCols) == 1 {
+		col := unpinnedCols[0]
+		w := min(col.Width, remainingViewport)
 		maxSrcY := max(0, col.Height-availHeight)
-		dst := image.Rect(0, 1, w, 1+availHeight)
-		return []Placement{{
+		dst := image.Rect(unpinnedStartX, 1, unpinnedStartX+w, 1+availHeight)
+		placements = append(placements, Placement{
 			PaneID: col.PaneID,
 			Src:    image.Rect(0, maxSrcY, w, maxSrcY+availHeight),
 			Dst:    dst,
 			Frame:  dst,
 			Z:      1,
-			// A lone column is occluded by nothing.
-			Kind: protocol.PlacementFull,
-		}}
+			Kind:   protocol.PlacementFull,
+		})
+		return placements
 	}
 
-	focusedIdx := s.focusIndex
-	focusedW := min(s.columns[focusedIdx].Width, viewportWidth)
-	remaining := max(viewportWidth-focusedW, 0)
+	// 2. Lay out unpinned columns using the card fan within remainingViewport.
+	focusedInUnpinned := false
+	unpinnedFocusIdx := 0
+	for i, c := range unpinnedCols {
+		if c.PaneID == focusedID {
+			unpinnedFocusIdx = i
+			focusedInUnpinned = true
+			break
+		}
+	}
 
-	showLeft, showRight := cs.visibleSides(s, remaining)
+	if !focusedInUnpinned {
+		// A pinned pane is focused. Prefer keeping the active unpinned card
+		// based on lastFocusPaneID or the existing cardFirst window.
+		if s.lastFocusPaneID != 0 {
+			for i, c := range unpinnedCols {
+				if c.PaneID == s.lastFocusPaneID {
+					unpinnedFocusIdx = i
+					break
+				}
+			}
+		}
+		if s.lastFocusPaneID == 0 || unpinnedFocusIdx == 0 {
+			if s.cardFirst >= 0 && s.cardFirst < len(unpinnedCols) {
+				unpinnedFocusIdx = s.cardFirst
+			}
+		}
+	}
+
+	focusedW := min(unpinnedCols[unpinnedFocusIdx].Width, remainingViewport)
+	remaining := max(remainingViewport-focusedW, 0)
+
+	showLeft, showRight := cs.visibleSidesForCols(unpinnedCols, unpinnedFocusIdx, s, remaining, focusedInUnpinned)
 	sliverCount := showLeft + showRight
 
 	// Sliver widths, indexed left to right across the whole fan so the
@@ -100,8 +172,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		return min(share, col.Width)
 	}
 
-	placements := make([]Placement, 0, sliverCount+1)
-	x := 0
+	x := unpinnedStartX
 	sliverIdx := 0
 
 	// ownBorder is whether the card's border takes the first cell of
@@ -111,7 +182,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 			return
 		}
 		left := x
-		if ownBorder && left > 0 {
+		if ownBorder && left > unpinnedStartX {
 			left++ // past the border
 		}
 		right := min(left+col.Width, viewportWidth)
@@ -121,7 +192,7 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		}
 
 		frame := dst
-		if left > 0 {
+		if left > unpinnedStartX {
 			frame = image.Rect(left-1, 1, right, 1+availHeight)
 		}
 
@@ -141,16 +212,16 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		x += w
 	}
 
-	for i := focusedIdx - showLeft; i < focusedIdx; i++ {
-		col := s.columns[i]
+	for i := unpinnedFocusIdx - showLeft; i < unpinnedFocusIdx; i++ {
+		col := unpinnedCols[i]
 		place(col, widthOf(sliverIdx, col), 0, true)
 		sliverIdx++
 	}
 
-	place(s.columns[focusedIdx], focusedW, 1, false)
+	place(unpinnedCols[unpinnedFocusIdx], focusedW, 1, false)
 
-	for i := focusedIdx + 1; i <= focusedIdx+showRight; i++ {
-		col := s.columns[i]
+	for i := unpinnedFocusIdx + 1; i <= unpinnedFocusIdx+showRight; i++ {
+		col := unpinnedCols[i]
 		place(col, widthOf(sliverIdx, col), 0, true)
 		sliverIdx++
 	}
@@ -158,26 +229,12 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 	return placements
 }
 
-// visibleSides decides how many cards to show on each side of the
-// focused pane.
-//
-// With enough columns the even share rounds below what chrome needs,
-// so only as many as clear MinSliverWidth are shown and the rest are
-// dropped, where hiddenCountsLocked finds them and the client draws a
-// "+N".
-//
-// Which ones survive is a window over the strip that scrolls the way
-// ScrollStrategy's viewport does (issue #20): it is remembered on the
-// Strip and moves only when focus would otherwise get too close to an
-// edge. Re-centring on every move instead meant each focus change
-// reshuffled which cards were on screen, on both sides.
-//
-// "Too close" is a margin of one card when the window holds at least
-// three, so both of the focused pane's neighbours stay visible --
-// those are the ones you are most likely to want next.
 func (cs CardStrategy) visibleSides(s *Strip, remaining int) (left, right int) {
-	numCols := len(s.columns)
-	focusedIdx := s.focusIndex
+	return cs.visibleSidesForCols(s.columns, s.focusIndex, s, remaining, true)
+}
+
+func (cs CardStrategy) visibleSidesForCols(cols []Column, focusedIdx int, s *Strip, remaining int, updateWindow bool) (left, right int) {
+	numCols := len(cols)
 	others := numCols - 1
 
 	budget := others
@@ -197,14 +254,25 @@ func (cs CardStrategy) visibleSides(s *Strip, remaining int) (left, right int) {
 	hi := min(focusedIdx+margin, numCols-1)
 
 	first := s.cardFirst
-	if lo < first {
-		first = lo
+	if updateWindow {
+		if lo < first {
+			first = lo
+		}
+		if hi > first+size-1 {
+			first = hi - size + 1
+		}
+		first = max(min(first, numCols-size), 0)
+		s.cardFirst = first
+	} else {
+		first = max(min(first, numCols-size), 0)
 	}
-	if hi > first+size-1 {
-		first = hi - size + 1
+
+	if focusedIdx < first {
+		focusedIdx = first
 	}
-	first = max(min(first, numCols-size), 0)
-	s.cardFirst = first
+	if focusedIdx > first+size-1 {
+		focusedIdx = first + size - 1
+	}
 
 	return focusedIdx - first, first + size - 1 - focusedIdx
 }

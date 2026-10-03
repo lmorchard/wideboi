@@ -160,6 +160,7 @@ type StartupPane struct {
 	Command   string
 	Dir       string
 	Width     int
+	Pinned    bool
 	// Keep retains the pane after its process exits; see watchKeptPane.
 	Keep bool
 }

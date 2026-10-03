@@ -268,7 +268,11 @@ func RPCQuery[Resp any](ctx context.Context, inv Invocation, req transport.Clien
 
 // SendVerb sends a Verb message to the server for the given paneID (or CallerPaneID).
 func SendVerb(ctx context.Context, inv Invocation, verb protocol.VerbType) error {
-	paneID := inv.CallerPaneID
+	return SendVerbTarget(ctx, inv, verb, inv.CallerPaneID)
+}
+
+// SendVerbTarget sends a Verb message to the server for an explicit paneID.
+func SendVerbTarget(ctx context.Context, inv Invocation, verb protocol.VerbType, paneID int) error {
 	return SendClientMsg(ctx, inv, protocol.MsgVerb{
 		Verb:   verb,
 		PaneID: paneID,

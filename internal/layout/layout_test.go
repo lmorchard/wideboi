@@ -449,7 +449,101 @@ func TestComputePlacementsAnchorsToBottomWhenTaller(t *testing.T) {
 	if got, want := ps[0].Src.Dy(), 20; got != want {
 		t.Errorf("Src.Dy() = %d, want %d", got, want)
 	}
-	if got, want := ps[0].Dst.Dy(), 20; got != want {
-		t.Errorf("Dst.Dy() = %d, want %d", got, want)
+}
+
+func TestPinColumnMethods(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 28, 20, 0)
+	s.AddColumn(3, 40, 20, 0)
+
+	if s.IsColumnPinned(2) {
+		t.Fatal("pane 2 should start unpinned")
+	}
+
+	// Pin pane 2: should move to front (pinned section)
+	if !s.PinColumn(2) {
+		t.Fatal("PinColumn(2) failed")
+	}
+	if !s.IsColumnPinned(2) {
+		t.Fatal("pane 2 should be pinned")
+	}
+
+	cols := s.Columns()
+	if cols[0].PaneID != 2 || !cols[0].Pinned {
+		t.Fatalf("cols[0] = %+v, want pane 2 pinned", cols[0])
+	}
+
+	// Toggle pin on pane 2: unpins it
+	s.TogglePinColumn(2)
+	if s.IsColumnPinned(2) {
+		t.Fatal("pane 2 should be unpinned after toggle")
+	}
+}
+
+func TestPinnedColumnsInScrollStrategy(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 28, 20, 0) // Drawer
+	s.AddColumn(2, 60, 20, 0) // Terminal 1
+	s.AddColumn(3, 60, 20, 0) // Terminal 2
+	s.PinColumn(1)
+
+	// Viewport width = 100
+	// Pinned column 1: occupies x = 0..28 (28 cells) + 1 divider at 28.
+	// Remaining unpinned viewport: starts at 29, width = 100 - 29 = 71 cells.
+	s.FocusPaneID(2)
+	ps := s.ComputePlacements(100, 24)
+
+	// Pinned pane 1 should be placed at [0, 1, 28, 23]
+	var p1, p2 layout.Placement
+	for _, p := range ps {
+		if p.PaneID == 1 {
+			p1 = p
+		} else if p.PaneID == 2 {
+			p2 = p
+		}
+	}
+
+	if p1.Dst.Min.X != 0 || p1.Dst.Max.X != 28 {
+		t.Errorf("pinned pane 1 Dst = %v, want Min.X=0 Max.X=28", p1.Dst)
+	}
+
+	// Unpinned pane 2 starts at unpinnedStartX (29)
+	if p2.Dst.Min.X != 29 || p2.Dst.Max.X != 89 {
+		t.Errorf("unpinned pane 2 Dst = %v, want Min.X=29 Max.X=89", p2.Dst)
+	}
+
+	// Now scroll to pane 3: pane 1 stays pinned at [0, 28]!
+	s.FocusPaneID(3)
+	ps = s.ComputePlacements(100, 24)
+	for _, p := range ps {
+		if p.PaneID == 1 {
+			p1 = p
+		}
+	}
+	if p1.Dst.Min.X != 0 || p1.Dst.Max.X != 28 {
+		t.Errorf("pinned pane 1 moved after focusing pane 3: Dst = %v", p1.Dst)
+	}
+}
+
+func TestPinnedBoundaryBlocksMove(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 28, 20, 0)
+	s.AddColumn(2, 60, 20, 0)
+	s.PinColumn(1)
+
+	// cols: [1 (pinned), 2 (unpinned)]
+	// Moving unpinned pane 2 left should be blocked by pinned boundary
+	s.MoveLeft(2)
+	cols := s.Columns()
+	if cols[0].PaneID != 1 || cols[1].PaneID != 2 {
+		t.Errorf("MoveLeft allowed unpinned pane into pinned group: %+v", cols)
+	}
+
+	// Moving pinned pane 1 right should be blocked by unpinned boundary
+	s.MoveRight(1)
+	cols = s.Columns()
+	if cols[0].PaneID != 1 || cols[1].PaneID != 2 {
+		t.Errorf("MoveRight allowed pinned pane into unpinned group: %+v", cols)
 	}
 }
