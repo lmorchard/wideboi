@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lmorchard/wideboi/internal/protocol"
 )
 
@@ -65,17 +66,17 @@ func statusPriority(st protocol.PaneStatus) int {
 	}
 }
 
-// padOrTruncate pads s with spaces to target width, or truncates by runes to fit.
+// padOrTruncate pads s with spaces to target terminal cell width, or truncates by cells.
 func padOrTruncate(s string, target int) string {
 	if target <= 0 {
 		return s
 	}
-	runes := []rune(s)
-	if len(runes) < target {
-		return s + strings.Repeat(" ", target-len(runes))
+	w := ansi.StringWidth(s)
+	if w < target {
+		return s + strings.Repeat(" ", target-w)
 	}
-	if len(runes) > target {
-		return string(runes[:target])
+	if w > target {
+		return ansi.Truncate(s, target, "")
 	}
 	return s
 }
@@ -194,12 +195,74 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 		summary = "no active panes"
 	}
 
-	banner := fmt.Sprintf("  [ wideboi dashboard ]  %s", summary)
+	// Breakpoints:
+	// - Wide (cols >= 60): full 4-column layout with CWD
+	// - Compact (38 <= cols < 60): 3-column layout without CWD
+	// - Drawer (cols < 38): ultra-compact layout for sidebar drawer
+	isDrawer := cols > 0 && cols < 38
+	isCompact := cols > 0 && cols >= 38 && cols < 60
+
+	var banner string
+	if isDrawer {
+		var shortParts []string
+		if needsInputCount > 0 {
+			shortParts = append(shortParts, fmt.Sprintf("%d!", needsInputCount))
+		}
+		if failedCount > 0 {
+			shortParts = append(shortParts, fmt.Sprintf("%d✖", failedCount))
+		}
+		if workingCount > 0 {
+			shortParts = append(shortParts, fmt.Sprintf("%d▲", workingCount))
+		}
+		if doneCount > 0 {
+			shortParts = append(shortParts, fmt.Sprintf("%d✔", doneCount))
+		}
+		if idleCount > 0 {
+			shortParts = append(shortParts, fmt.Sprintf("%d●", idleCount))
+		}
+		shortSummary := strings.Join(shortParts, " ")
+		if len(d.panes) == 0 {
+			shortSummary = "none"
+		}
+		banner = fmt.Sprintf("  [wb] %s", shortSummary)
+	} else if isCompact {
+		fullBanner := fmt.Sprintf("  [ wideboi ]  %s", summary)
+		if len([]rune(fullBanner)) <= cols {
+			banner = fullBanner
+		} else {
+			var shortParts []string
+			if needsInputCount > 0 {
+				shortParts = append(shortParts, fmt.Sprintf("%d!", needsInputCount))
+			}
+			if failedCount > 0 {
+				shortParts = append(shortParts, fmt.Sprintf("%d✖", failedCount))
+			}
+			if workingCount > 0 {
+				shortParts = append(shortParts, fmt.Sprintf("%d▲", workingCount))
+			}
+			if doneCount > 0 {
+				shortParts = append(shortParts, fmt.Sprintf("%d✔", doneCount))
+			}
+			if idleCount > 0 {
+				shortParts = append(shortParts, fmt.Sprintf("%d●", idleCount))
+			}
+			banner = fmt.Sprintf("  [ wideboi ]  %s", strings.Join(shortParts, " "))
+		}
+	} else {
+		banner = fmt.Sprintf("  [ wideboi dashboard ]  %s", summary)
+	}
 	banner = padOrTruncate(banner, cols)
 	sb.WriteString("\x1b[1;36m" + banner + "\x1b[0m\r\n")
 
 	// Table column header
-	header := fmt.Sprintf("  %-9s %-12s %-24s %s", "PANE ID", "STATUS", "TITLE", "CWD")
+	var header string
+	if isDrawer {
+		header = fmt.Sprintf("  %-6s %-3s %s", "PANE", "ST", "TITLE")
+	} else if isCompact {
+		header = fmt.Sprintf("  %-9s %-12s %s", "PANE ID", "STATUS", "TITLE")
+	} else {
+		header = fmt.Sprintf("  %-9s %-12s %-24s %s", "PANE ID", "STATUS", "TITLE", "CWD")
+	}
 	header = padOrTruncate(header, cols)
 	sb.WriteString("\x1b[7m" + header + "\x1b[0m\r\n")
 
@@ -224,32 +287,60 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 				rowEnd = "\x1b[0m"
 			}
 
-			statusStr := formatStatus(p.Status)
 			title := p.Title
 			if title == "" {
 				title = "-"
-			}
-			if len([]rune(title)) > 24 {
-				title = string([]rune(title)[:21]) + "..."
-			}
-
-			cwd := p.CWD
-			if cwd == "" {
-				cwd = "-"
 			}
 
 			idStr := fmt.Sprintf("[%d]", p.ID)
 			if p.Focused {
 				idStr += "*"
 			}
-			line := fmt.Sprintf("%s%-9s %-12s %-24s %s", marker, idStr, statusStr, title, cwd)
+
+			var line string
+			if isDrawer {
+				glyph := formatStatusGlyph(p.Status)
+				if maxLen := cols - 13; maxLen > 0 {
+					title = ansi.Truncate(title, maxLen, "...")
+				}
+				line = fmt.Sprintf("%s%-6s %-3s %s", marker, idStr, glyph, title)
+			} else if isCompact {
+				statusStr := formatStatus(p.Status)
+				if maxLen := cols - 25; maxLen > 0 {
+					title = ansi.Truncate(title, maxLen, "...")
+				}
+				line = fmt.Sprintf("%s%-9s %-12s %s", marker, idStr, statusStr, title)
+			} else {
+				statusStr := formatStatus(p.Status)
+				const maxTitleLen = 24
+				title = ansi.Truncate(title, maxTitleLen, "...")
+
+				cwd := p.CWD
+				if cwd == "" {
+					cwd = "-"
+				}
+				paddedTitle := padOrTruncate(title, maxTitleLen)
+				line = fmt.Sprintf("%s%-9s %-12s %s %s", marker, idStr, statusStr, paddedTitle, cwd)
+			}
+
 			line = padOrTruncate(line, cols)
 			sb.WriteString(rowStart + line + rowEnd + "\r\n")
 		}
 	}
 
 	// Instructions footer
-	footer := "  [j/k/↑/↓] Select   [Enter/Click] Jump   [C-b x] Close"
+	var footer string
+	if isDrawer {
+		if cols >= 26 {
+			footer = "  [j/k] Move  [Enter] Jump"
+		} else {
+			footer = "  [j/k] [Enter]"
+		}
+	} else if isCompact {
+		footer = "  [j/k] Select  [Enter] Jump  [C-b x] Close"
+	} else {
+		footer = "  [j/k/↑/↓] Select   [Enter/Click] Jump   [C-b x] Close"
+	}
 	footer = padOrTruncate(footer, cols)
 	sb.WriteString("\r\n\x1b[2m" + footer + "\x1b[0m\r\n")
 
@@ -268,6 +359,21 @@ func formatStatus(st protocol.PaneStatus) string {
 		return "✖ failed"
 	default:
 		return "● idle"
+	}
+}
+
+func formatStatusGlyph(st protocol.PaneStatus) string {
+	switch st {
+	case protocol.StatusWorking:
+		return "▲"
+	case protocol.StatusNeedsInput:
+		return "!"
+	case protocol.StatusDone:
+		return "✔"
+	case protocol.StatusFailed:
+		return "✖"
+	default:
+		return "●"
 	}
 }
 
