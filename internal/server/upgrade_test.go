@@ -207,6 +207,7 @@ func TestUpgradeStateRoundTrip(t *testing.T) {
 
 	s.strip.AddColumn(1, 120, 1, 0)
 	s.strip.AddColumn(2, 80, 39, 0)
+	s.strip.PinColumn(1)
 	s.strip.FocusPaneID(2)
 
 	// Build upgrade state
@@ -264,6 +265,9 @@ func TestUpgradeStateRoundTrip(t *testing.T) {
 	}
 	if newS.owner != nil {
 		t.Errorf("newS.owner before client reconnect = %v, want nil", newS.owner)
+	}
+	if !newS.strip.IsColumnPinned(1) {
+		t.Error("pane 1 should remain pinned after restore")
 	}
 
 	// Verify pane 2 preserved alt-screen mode

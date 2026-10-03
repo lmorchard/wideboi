@@ -278,3 +278,36 @@ func TestCardComputePlacementsAnchorsToBottomWhenTaller(t *testing.T) {
 		}
 	}
 }
+
+func TestPinnedColumnsInCardStrategy(t *testing.T) {
+	s := layout.NewStrip()
+	s.SetStrategy(layout.CardStrategy{})
+	s.AddColumn(1, 28, 20, 0) // Pinned Drawer
+	s.AddColumn(2, 60, 20, 0) // Unpinned 1
+	s.AddColumn(3, 60, 20, 0) // Unpinned 2
+	s.PinColumn(1)
+
+	// Viewport width = 120. Pinned column 1 takes 0..28 + divider at 28.
+	// Remaining card fan width = 120 - 29 = 91.
+	s.FocusPaneID(2)
+	ps := s.ComputePlacements(120, 24)
+
+	var p1, p2 layout.Placement
+	for _, p := range ps {
+		if p.PaneID == 1 {
+			p1 = p
+		} else if p.PaneID == 2 {
+			p2 = p
+		}
+	}
+
+	// Pinned pane 1 should be placed at [0, 28]
+	if p1.Dst.Min.X != 0 || p1.Dst.Max.X != 28 {
+		t.Errorf("card mode pinned pane 1 Dst = %v, want Min.X=0 Max.X=28", p1.Dst)
+	}
+
+	// Focused card 2 should be placed starting at 29
+	if p2.Dst.Min.X != 29 || p2.Dst.Max.X != 89 {
+		t.Errorf("card mode focused pane 2 Dst = %v, want Min.X=29 Max.X=89", p2.Dst)
+	}
+}

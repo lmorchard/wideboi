@@ -118,6 +118,71 @@ func TestStartupDashboardPane(t *testing.T) {
 	}
 }
 
+func TestStartupPinnedColumns(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Type: "dashboard", Width: 28, Pinned: true},
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	if len(snap.Columns) != 2 {
+		t.Fatalf("startup columns count = %d, want 2", len(snap.Columns))
+	}
+	if !snap.Columns[0].Pinned {
+		t.Errorf("expected column 0 to be pinned: %+v", snap.Columns[0])
+	}
+	if snap.Columns[1].Pinned {
+		t.Errorf("expected column 1 to be unpinned: %+v", snap.Columns[1])
+	}
+}
+
+func TestVerbTogglePin(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Width: 80},
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	pane2ID := snap.Columns[1].PaneID
+
+	// Send VerbTogglePin on pane 2
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbTogglePin, PaneID: pane2ID})
+
+	// Wait for updated layout snapshot with pane 2 pinned
+	deadline := time.After(2 * time.Second)
+	pinned := false
+	for !pinned {
+		select {
+		case msg := <-tp.ServerSend:
+			if nextSnap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+				if len(nextSnap.Columns) > 0 && nextSnap.Columns[0].PaneID == pane2ID && nextSnap.Columns[0].Pinned {
+					pinned = true
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for MsgLayoutSnapshot with pinned pane 2")
+		}
+	}
+}
+
 // testGrace is the hangup grace these tests tear down with. None of them
 // asserts anything about teardown -- that contract belongs to
 // internal/server/ptyx's hangup tests and to scripts/ptycheck.py via

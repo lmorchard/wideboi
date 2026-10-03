@@ -39,6 +39,9 @@ const (
 	VerbType_VERB_TYPE_FOCUS_LAST    VerbType = 12
 	VerbType_VERB_TYPE_TOGGLE_STATUS VerbType = 13
 	VerbType_VERB_TYPE_CLAIM_SIZE    VerbType = 14
+	VerbType_VERB_TYPE_TOGGLE_PIN    VerbType = 15
+	VerbType_VERB_TYPE_PIN_PANE      VerbType = 16
+	VerbType_VERB_TYPE_UNPIN_PANE    VerbType = 17
 )
 
 // Enum value maps for VerbType.
@@ -59,6 +62,9 @@ var (
 		12: "VERB_TYPE_FOCUS_LAST",
 		13: "VERB_TYPE_TOGGLE_STATUS",
 		14: "VERB_TYPE_CLAIM_SIZE",
+		15: "VERB_TYPE_TOGGLE_PIN",
+		16: "VERB_TYPE_PIN_PANE",
+		17: "VERB_TYPE_UNPIN_PANE",
 	}
 	VerbType_value = map[string]int32{
 		"VERB_TYPE_UNSPECIFIED":   0,
@@ -76,6 +82,9 @@ var (
 		"VERB_TYPE_FOCUS_LAST":    12,
 		"VERB_TYPE_TOGGLE_STATUS": 13,
 		"VERB_TYPE_CLAIM_SIZE":    14,
+		"VERB_TYPE_TOGGLE_PIN":    15,
+		"VERB_TYPE_PIN_PANE":      16,
+		"VERB_TYPE_UNPIN_PANE":    17,
 	}
 )
 
@@ -964,6 +973,7 @@ type ColumnData struct {
 	PaneId        int32                  `protobuf:"varint,1,opt,name=pane_id,json=paneId,proto3" json:"pane_id,omitempty"`
 	Width         int32                  `protobuf:"varint,2,opt,name=width,proto3" json:"width,omitempty"`
 	Height        int32                  `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`
+	Pinned        bool                   `protobuf:"varint,4,opt,name=pinned,proto3" json:"pinned,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1017,6 +1027,13 @@ func (x *ColumnData) GetHeight() int32 {
 		return x.Height
 	}
 	return 0
+}
+
+func (x *ColumnData) GetPinned() bool {
+	if x != nil {
+		return x.Pinned
+	}
+	return false
 }
 
 type MsgLayoutSnapshot struct {
@@ -5052,12 +5069,13 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\rscroll_offset\x18\f \x01(\x05R\fscrollOffset\x12%\n" +
 	"\x0escrollback_len\x18\r \x01(\x05R\rscrollbackLen\x12#\n" +
 	"\runread_output\x18\x0e \x01(\bR\funreadOutput\x12\x14\n" +
-	"\x05links\x18\x0f \x03(\tR\x05links\"S\n" +
+	"\x05links\x18\x0f \x03(\tR\x05links\"k\n" +
 	"\n" +
 	"ColumnData\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x14\n" +
 	"\x05width\x18\x02 \x01(\x05R\x05width\x12\x16\n" +
-	"\x06height\x18\x03 \x01(\x05R\x06height\"\xe7\x03\n" +
+	"\x06height\x18\x03 \x01(\x05R\x06height\x12\x16\n" +
+	"\x06pinned\x18\x04 \x01(\bR\x06pinned\"\xe7\x03\n" +
 	"\x11MsgLayoutSnapshot\x126\n" +
 	"\acolumns\x18\x01 \x03(\v2\x1c.wideboi.protocol.ColumnDataR\acolumns\x12Z\n" +
 	"\rpane_statuses\x18\x02 \x03(\v25.wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntryR\fpaneStatuses\x12T\n" +
@@ -5365,7 +5383,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\rwidth_presets\x18\x01 \x03(\x05R\fwidthPresets\x12(\n" +
 	"\x10min_column_width\x18\x02 \x01(\x05R\x0eminColumnWidth\x12(\n" +
 	"\x10max_column_width\x18\x03 \x01(\x05R\x0emaxColumnWidth\x12<\n" +
-	"\bbindings\x18\x04 \x03(\v2 .wideboi.protocol.KeyBindingDataR\bbindings*\x98\x03\n" +
+	"\bbindings\x18\x04 \x03(\v2 .wideboi.protocol.KeyBindingDataR\bbindings*\xe4\x03\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +
@@ -5382,7 +5400,10 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x14VERB_TYPE_MOVE_RIGHT\x10\v\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LAST\x10\f\x12\x1b\n" +
 	"\x17VERB_TYPE_TOGGLE_STATUS\x10\r\x12\x18\n" +
-	"\x14VERB_TYPE_CLAIM_SIZE\x10\x0e*\x86\x01\n" +
+	"\x14VERB_TYPE_CLAIM_SIZE\x10\x0e\x12\x18\n" +
+	"\x14VERB_TYPE_TOGGLE_PIN\x10\x0f\x12\x16\n" +
+	"\x12VERB_TYPE_PIN_PANE\x10\x10\x12\x18\n" +
+	"\x14VERB_TYPE_UNPIN_PANE\x10\x11*\x86\x01\n" +
 	"\n" +
 	"PaneStatus\x12\x14\n" +
 	"\x10PANE_STATUS_IDLE\x10\x00\x12\x17\n" +

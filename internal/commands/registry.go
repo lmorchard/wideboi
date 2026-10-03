@@ -758,6 +758,63 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:        "pin-pane",
+		Aliases:     []string{"pin"},
+		Description: "Pin a column to stay anchored to the left",
+		Category:    "Layout",
+		ArgsUsage:   "[pane-id]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			targetID := inv.CallerPaneID
+			if len(inv.Args) > 0 {
+				id, err := strconv.Atoi(inv.Args[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane ID: %w", err)
+				}
+				targetID = id
+			}
+			return SendVerbTarget(ctx, inv, protocol.VerbPinPane, targetID)
+		},
+	})
+
+	r.Register(Command{
+		Name:        "unpin-pane",
+		Aliases:     []string{"unpin"},
+		Description: "Unpin a column from the left edge",
+		Category:    "Layout",
+		ArgsUsage:   "[pane-id]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			targetID := inv.CallerPaneID
+			if len(inv.Args) > 0 {
+				id, err := strconv.Atoi(inv.Args[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane ID: %w", err)
+				}
+				targetID = id
+			}
+			return SendVerbTarget(ctx, inv, protocol.VerbUnpinPane, targetID)
+		},
+	})
+
+	r.Register(Command{
+		Name:        "toggle-pin",
+		Aliases:     []string{"pin-toggle"},
+		Description: "Toggle pinned status of a column to stay anchored to the left",
+		Category:    "Layout",
+		ArgsUsage:   "[pane-id]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			targetID := inv.CallerPaneID
+			if len(inv.Args) > 0 {
+				id, err := strconv.Atoi(inv.Args[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane ID: %w", err)
+				}
+				targetID = id
+			}
+			return SendVerbTarget(ctx, inv, protocol.VerbTogglePin, targetID)
+		},
+	})
+
+	r.Register(Command{
 		Name:        "toggle-status",
 		Aliases:     []string{"status-bar"},
 		Description: "Toggle the session status bar/dashboard pane",

@@ -534,6 +534,7 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 				Dashboard: pane.Dashboard,
 				Command:   pane.Command,
 				Width:     pane.Width,
+				Pinned:    pane.Pinned,
 			}
 		}
 		srv.SetStartupPanes(panes)

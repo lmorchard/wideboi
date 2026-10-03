@@ -84,6 +84,7 @@ type StartupPane struct {
 	Dashboard bool   `toml:"dashboard"`
 	Command   string `toml:"command"`
 	Width     int    `toml:"width"`
+	Pinned    bool   `toml:"pinned"`
 }
 
 // IsDashboard reports whether the pane is designated as a status dashboard pane.

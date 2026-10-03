@@ -23,8 +23,9 @@ type Placement struct {
 // Column represents one vertical column in the strip.
 type Column struct {
 	PaneID int
-	Width  int // logical column width in cells
-	Height int // logical pane height in cells
+	Width  int  // logical column width in cells
+	Height int  // logical pane height in cells
+	Pinned bool // anchored to left edge of screen
 }
 
 // DefaultWidthPresets is the default cycle sequence when none is configured.
@@ -221,6 +222,9 @@ func (s *Strip) MoveLeft(paneID int) {
 	for i := range s.columns {
 		if s.columns[i].PaneID == paneID {
 			if i > 0 {
+				if !s.columns[i].Pinned && s.columns[i-1].Pinned {
+					return
+				}
 				s.columns[i-1], s.columns[i] = s.columns[i], s.columns[i-1]
 				if s.focusIndex == i {
 					s.focusIndex = i - 1
@@ -238,6 +242,9 @@ func (s *Strip) MoveRight(paneID int) {
 	for i := range s.columns {
 		if s.columns[i].PaneID == paneID {
 			if i < len(s.columns)-1 {
+				if s.columns[i].Pinned && !s.columns[i+1].Pinned {
+					return
+				}
 				s.columns[i+1], s.columns[i] = s.columns[i], s.columns[i+1]
 				if s.focusIndex == i {
 					s.focusIndex = i + 1
@@ -288,6 +295,80 @@ func (s *Strip) KillPane(paneID int) {
 			}
 			return
 		}
+	}
+}
+
+// PinColumn marks the column containing paneID as pinned to the left edge of the strip.
+func (s *Strip) PinColumn(paneID int) bool {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			if s.columns[i].Pinned {
+				return true
+			}
+			s.columns[i].Pinned = true
+			s.reorderPinnedColumns()
+			return true
+		}
+	}
+	return false
+}
+
+// UnpinColumn unpins the column containing paneID.
+func (s *Strip) UnpinColumn(paneID int) bool {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			if !s.columns[i].Pinned {
+				return true
+			}
+			s.columns[i].Pinned = false
+			s.reorderPinnedColumns()
+			return true
+		}
+	}
+	return false
+}
+
+// TogglePinColumn toggles the pinned status of the column containing paneID.
+func (s *Strip) TogglePinColumn(paneID int) bool {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			s.columns[i].Pinned = !s.columns[i].Pinned
+			s.reorderPinnedColumns()
+			return true
+		}
+	}
+	return false
+}
+
+// IsColumnPinned reports whether the column containing paneID is pinned.
+func (s *Strip) IsColumnPinned(paneID int) bool {
+	for _, c := range s.columns {
+		if c.PaneID == paneID {
+			return c.Pinned
+		}
+	}
+	return false
+}
+
+// reorderPinnedColumns partitions s.columns so that all pinned columns
+// appear first (in their existing relative order) followed by all unpinned
+// columns (in their existing relative order), updating s.focusIndex.
+func (s *Strip) reorderPinnedColumns() {
+	if len(s.columns) <= 1 {
+		return
+	}
+	focusedID := s.FocusedPaneID()
+	var pinned, unpinned []Column
+	for _, c := range s.columns {
+		if c.Pinned {
+			pinned = append(pinned, c)
+		} else {
+			unpinned = append(unpinned, c)
+		}
+	}
+	s.columns = append(pinned, unpinned...)
+	if focusedID != 0 {
+		s.FocusPaneID(focusedID)
 	}
 }
 
@@ -380,30 +461,83 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 
 	availHeight := AvailHeight(viewportHeight)
 
-	colX := make([]int, len(s.columns))
-	currX := 0
-	for i, c := range s.columns {
-		colX[i] = currX
-		currX += c.Width + 1 // 1 cell divider between columns
-	}
-
-	focusColX := colX[s.focusIndex]
-	focusColW := s.columns[s.focusIndex].Width
-
-	if focusColX < s.scrollX {
-		s.scrollX = focusColX
-	} else if focusColX+focusColW > s.scrollX+viewportWidth {
-		s.scrollX = focusColX + focusColW - viewportWidth
+	// Partition pinned and unpinned columns.
+	var pinnedCols []Column
+	var unpinnedCols []Column
+	for _, c := range s.columns {
+		if c.Pinned {
+			pinnedCols = append(pinnedCols, c)
+		} else {
+			unpinnedCols = append(unpinnedCols, c)
+		}
 	}
 
 	placements := make([]Placement, 0, len(s.columns))
-	viewportRect := image.Rect(0, 1, viewportWidth, 1+availHeight)
 
-	for i, c := range s.columns {
-		screenX := colX[i] - s.scrollX
+	// 1. Place pinned columns statically on the left.
+	pinnedWidth := 0
+	for _, c := range pinnedCols {
+		dstX := pinnedWidth
+		dstW := min(c.Width, max(0, viewportWidth-dstX))
+		pinnedWidth += c.Width + 1
+		if dstW <= 0 {
+			continue
+		}
+		maxSrcY := max(0, c.Height-availHeight)
+		placements = append(placements, Placement{
+			PaneID: c.PaneID,
+			Src:    image.Rect(0, maxSrcY, dstW, maxSrcY+availHeight),
+			Dst:    image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Frame:  image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Z:      0,
+			Kind:   protocol.PlacementFull,
+		})
+	}
+
+	unpinnedStartX := pinnedWidth
+	unpinnedViewportWidth := max(0, viewportWidth-unpinnedStartX)
+	if len(unpinnedCols) == 0 || unpinnedViewportWidth <= 0 {
+		return placements
+	}
+
+	// 2. Compute scrolling placements for unpinned columns.
+	colX := make([]int, len(unpinnedCols))
+	currX := 0
+	for i, c := range unpinnedCols {
+		colX[i] = currX
+		currX += c.Width + 1
+	}
+
+	// Adjust scrollX if an unpinned column is focused.
+	focusedPaneID := s.FocusedPaneID()
+	focusedUnpinnedIdx := -1
+	for i, c := range unpinnedCols {
+		if c.PaneID == focusedPaneID {
+			focusedUnpinnedIdx = i
+			break
+		}
+	}
+
+	if focusedUnpinnedIdx >= 0 {
+		focusColX := colX[focusedUnpinnedIdx]
+		focusColW := unpinnedCols[focusedUnpinnedIdx].Width
+
+		if focusColX < s.scrollX {
+			s.scrollX = focusColX
+		} else if focusColX+focusColW > s.scrollX+unpinnedViewportWidth {
+			s.scrollX = focusColX + focusColW - unpinnedViewportWidth
+		}
+	}
+	if s.scrollX < 0 {
+		s.scrollX = 0
+	}
+
+	unpinnedViewportRect := image.Rect(unpinnedStartX, 1, viewportWidth, 1+availHeight)
+	for i, c := range unpinnedCols {
+		screenX := unpinnedStartX + colX[i] - s.scrollX
 		screenRect := image.Rect(screenX, 1, screenX+c.Width, 1+availHeight)
 
-		dst := screenRect.Intersect(viewportRect)
+		dst := screenRect.Intersect(unpinnedViewportRect)
 		if dst.Empty() {
 			continue
 		}
@@ -419,10 +553,7 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 			Dst:    dst,
 			Frame:  dst,
 			Z:      0,
-			// Always Full. This strategy clips panes at the viewport
-			// edge, and a clipped pane is still showing its own
-			// content -- the no-shrink premise depends on it.
-			Kind: protocol.PlacementFull,
+			Kind:   protocol.PlacementFull,
 		})
 	}
 
@@ -457,6 +588,7 @@ func ToColumnData(columns []Column) []protocol.ColumnData {
 			PaneID: c.PaneID,
 			Width:  c.Width,
 			Height: c.Height,
+			Pinned: c.Pinned,
 		}
 	}
 	return out
@@ -479,6 +611,7 @@ func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
 			PaneID: c.PaneID,
 			Width:  c.Width,
 			Height: c.Height,
+			Pinned: c.Pinned,
 		}
 	}
 	if len(s.columns) == 0 {

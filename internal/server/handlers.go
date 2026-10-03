@@ -478,6 +478,9 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 					slog.Error("starting configured pane", "command", spec.Command, "err", err)
 					continue
 				}
+				if spec.Pinned {
+					s.strip.PinColumn(p.ID())
+				}
 				if firstID == 0 {
 					firstID = p.ID()
 				}
@@ -616,6 +619,15 @@ func (s *Server) handleVerbLocked(tp transport.Transport, m protocol.MsgVerb) ms
 		} else if len(m.Widths) > 0 {
 			s.resizePanesLocked()
 		}
+	case protocol.VerbTogglePin:
+		s.strip.TogglePinColumn(m.PaneID)
+		s.resizePanesLocked()
+	case protocol.VerbPinPane:
+		s.strip.PinColumn(m.PaneID)
+		s.resizePanesLocked()
+	case protocol.VerbUnpinPane:
+		s.strip.UnpinColumn(m.PaneID)
+		s.resizePanesLocked()
 	case protocol.VerbToggleCards:
 		// Reserved: layout is the client's (#92).
 	}

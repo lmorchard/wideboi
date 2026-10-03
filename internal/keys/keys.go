@@ -38,6 +38,7 @@ const (
 	ActionNameFocusLast    = "focus_last"
 	ActionNameToggleCards  = "toggle_cards"
 	ActionNameToggleStatus = "toggle_status"
+	ActionNameTogglePin    = "toggle_pin"
 	ActionNameClaimSize    = "claim_size"
 	ActionNamePanLeft      = "pan_left"
 	ActionNamePanRight     = "pan_right"
@@ -194,6 +195,8 @@ var Bindings = slices.Concat([]Binding{
 		BarGroup: "a attn", Long: "jump to a pane wanting attention", HelpGroup: helpAttention},
 	{ActionName: ActionNameToggleStatus, Key: "s", Action: ActionVerb, Verb: protocol.VerbToggleStatus,
 		Long: "open or focus pane status dashboard", HelpGroup: helpAttention},
+	{ActionName: ActionNameTogglePin, Key: "P", Action: ActionVerb, Verb: protocol.VerbTogglePin,
+		Long: "pin or unpin this column to the left", HelpGroup: helpWidth},
 	// tab has no ctrl form -- CtrlForm wants a single letter, and ctrl+i
 	// decodes as tab anyway -- and repeating a toggle only bounces.
 	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
@@ -363,6 +366,8 @@ var validActions = map[string]string{
 	"attn":                 ActionNameSmartJump,
 	ActionNameToggleStatus: ActionNameToggleStatus,
 	"status":               ActionNameToggleStatus,
+	ActionNameTogglePin:    ActionNameTogglePin,
+	"pin":                  ActionNameTogglePin,
 	ActionNameFocusLast:    ActionNameFocusLast,
 	ActionNameToggleCards:  ActionNameToggleCards,
 	ActionNameClaimSize:    ActionNameClaimSize,
