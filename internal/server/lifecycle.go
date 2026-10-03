@@ -113,6 +113,9 @@ func (s *Server) detachPaneLocked(id int) (*Pane, bool) {
 	delete(s.panes, id)
 	delete(s.lastCWD, id)
 	delete(s.lastUserVars, id)
+	if s.unseenDone != nil {
+		delete(s.unseenDone, id)
+	}
 	s.updateDashboardLocked()
 	return p, !s.hasTerminalPanesLocked()
 }

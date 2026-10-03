@@ -111,6 +111,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 				if id := c.statusBarBadgeAtLocked(pt.X); id > 0 && id != c.focusPaneID {
 					c.strip.FocusPaneID(id)
 					c.focusPaneID = c.strip.FocusedPaneID()
+					c.markSeenLocked(c.focusPaneID)
 					c.updatePlacementsLocked()
 				}
 			}
@@ -153,6 +154,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 		if unfocused {
 			c.strip.FocusPaneID(p.PaneID)
 			c.focusPaneID = c.strip.FocusedPaneID()
+			c.markSeenLocked(c.focusPaneID)
 			c.updatePlacementsLocked()
 		}
 
@@ -174,6 +176,7 @@ func (c *Client) HandleMouse(ctx context.Context, ev uv.MouseEvent) string {
 			if c.sel.focusOnClick {
 				c.strip.FocusPaneID(c.sel.paneID)
 				c.focusPaneID = c.strip.FocusedPaneID()
+				c.markSeenLocked(c.focusPaneID)
 				c.updatePlacementsLocked()
 			}
 			c.sel = nil

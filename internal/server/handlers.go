@@ -654,6 +654,7 @@ func (s *Server) handleInputLocked(tp transport.Transport, m protocol.MsgInput) 
 		if handled {
 			if targetID > 0 {
 				eff.focusTargetID = targetID
+				s.markSeenLocked(targetID)
 			}
 			s.updateDashboardLocked()
 			eff.needPaneBroadcast = true
@@ -690,6 +691,7 @@ func (s *Server) handleMouseLocked(tp transport.Transport, m protocol.MsgMouse) 
 		if handled {
 			if targetID > 0 {
 				eff.focusTargetID = targetID
+				s.markSeenLocked(targetID)
 			}
 			s.updateDashboardLocked()
 			eff.needPaneBroadcast = true

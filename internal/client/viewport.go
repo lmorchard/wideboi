@@ -136,6 +136,24 @@ func (c *Client) applySnapshotLocked(m protocol.MsgLayoutSnapshot) {
 	}
 	c.strip.SyncColumns(displayColumns, c.focusPaneID)
 	c.focusPaneID = c.strip.FocusedPaneID()
+	c.markSeenLocked(c.focusPaneID)
+
+	// Track unseen completions for unfocused panes
+	for paneID, newStatus := range m.PaneStatuses {
+		oldStatus, hadOld := c.paneStatuses[paneID]
+		if hadOld && oldStatus == protocol.StatusWorking && newStatus == protocol.StatusIdle {
+			if paneID != c.focusPaneID {
+				if c.unseenDone == nil {
+					c.unseenDone = make(map[int]bool)
+				}
+				c.unseenDone[paneID] = true
+			}
+		} else if newStatus == protocol.StatusWorking {
+			if c.unseenDone != nil {
+				delete(c.unseenDone, paneID)
+			}
+		}
+	}
 
 	c.placements = c.computePlacementsLocked()
 	c.paneStatuses = m.PaneStatuses
@@ -164,6 +182,11 @@ func (c *Client) applySnapshotLocked(m protocol.MsgLayoutSnapshot) {
 		if !live[id] {
 			delete(c.mirrors, id)
 			delete(c.paneUpdates, id)
+		}
+	}
+	for id := range c.unseenDone {
+		if !live[id] {
+			delete(c.unseenDone, id)
 		}
 	}
 	for id := range c.mouseTracking {

@@ -52,6 +52,7 @@ type Client struct {
 	focusPaneID        int
 	pendingFocusPaneID int
 	paneStatuses       map[int]protocol.PaneStatus
+	unseenDone         map[int]bool
 	paneTitles         map[int]string
 	mirrors            map[int]*PaneMirror
 	paneUpdates        map[int]protocol.MsgPaneUpdate
@@ -265,6 +266,7 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 	case protocol.MsgFocusPane:
 		c.strip.FocusPaneID(m.PaneID)
 		c.focusPaneID = c.strip.FocusedPaneID()
+		c.markSeenLocked(c.focusPaneID)
 		c.updatePlacementsLocked()
 	case protocol.MsgHistorySnapshot:
 		if scroll := c.applyHistoryLocked(m); scroll != nil {
@@ -636,19 +638,23 @@ func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
 	case protocol.VerbFocusLeft:
 		c.strip.FocusLeft()
 		c.focusPaneID = c.strip.FocusedPaneID()
+		c.markSeenLocked(c.focusPaneID)
 		c.updatePlacementsLocked()
 	case protocol.VerbFocusRight:
 		c.strip.FocusRight()
 		c.focusPaneID = c.strip.FocusedPaneID()
+		c.markSeenLocked(c.focusPaneID)
 		c.updatePlacementsLocked()
 	case protocol.VerbFocusLast:
 		c.strip.FocusLast()
 		c.focusPaneID = c.strip.FocusedPaneID()
+		c.markSeenLocked(c.focusPaneID)
 		c.updatePlacementsLocked()
 	case protocol.VerbSmartJump:
 		if id := c.smartJumpTargetLocked(); id > 0 {
 			c.strip.FocusPaneID(id)
 			c.focusPaneID = c.strip.FocusedPaneID()
+			c.markSeenLocked(c.focusPaneID)
 			c.updatePlacementsLocked()
 		}
 	case protocol.VerbCycleWidth, protocol.VerbGrowWidth, protocol.VerbShrinkWidth:
@@ -691,6 +697,33 @@ func (c *Client) SendVerb(ctx context.Context, v protocol.VerbType) {
 	}
 }
 
+// DisplayStatus reports the effective status of pane id for display,
+// showing StatusDone for unfocused panes that completed work until focused.
+func (c *Client) DisplayStatus(id int) protocol.PaneStatus {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.displayStatusLocked(id)
+}
+
+// displayStatusLocked reports the effective status of pane id for display,
+// showing StatusDone for unfocused panes that completed work until focused.
+// c.mu must be held.
+func (c *Client) displayStatusLocked(id int) protocol.PaneStatus {
+	st := c.paneStatuses[id]
+	if st == protocol.StatusIdle && c.unseenDone != nil && c.unseenDone[id] {
+		return protocol.StatusDone
+	}
+	return st
+}
+
+// markSeenLocked clears the unseen completion flag for pane id.
+// c.mu must be held.
+func (c *Client) markSeenLocked(id int) {
+	if c.unseenDone != nil && id != 0 {
+		delete(c.unseenDone, id)
+	}
+}
+
 func (c *Client) smartJumpTargetLocked() int {
 	rank := func(st protocol.PaneStatus) int {
 		switch st {
@@ -708,7 +741,7 @@ func (c *Client) smartJumpTargetLocked() int {
 	bestID, bestRank := 0, 0
 	for _, p := range c.strip.Columns() {
 		id := p.PaneID
-		r := rank(c.paneStatuses[id])
+		r := rank(c.displayStatusLocked(id))
 		switch {
 		case r == 0:
 		case r > bestRank:
@@ -734,6 +767,7 @@ func (c *Client) FocusColumn(ctx context.Context, n int) {
 	if i >= 0 && i < len(ids) {
 		c.strip.FocusPaneID(ids[i])
 		c.focusPaneID = ids[i]
+		c.markSeenLocked(c.focusPaneID)
 		c.updatePlacementsLocked()
 	}
 }

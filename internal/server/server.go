@@ -96,6 +96,8 @@ type Server struct {
 	// so concurrent status queries and ticker broadcasts deliver in order.
 	metaSendMu sync.Mutex
 
+	unseenDone map[int]bool
+
 	// owner is the connection of the client that launched this session,
 	// or nil when the session is ownerless: started as `wideboi
 	// server`, or given up by a detach. Once nil it stays nil;
@@ -660,9 +662,13 @@ func (s *Server) updateDashboardLocked() {
 		if c.PaneID == s.statusPaneID {
 			continue
 		}
+		st := glyphs[c.PaneID]
+		if s.unseenDone != nil && s.unseenDone[c.PaneID] {
+			st = protocol.StatusDone
+		}
 		infos = append(infos, PaneInfo{
 			ID:      c.PaneID,
-			Status:  glyphs[c.PaneID],
+			Status:  st,
 			Title:   titles[c.PaneID],
 			CWD:     s.lastCWD[c.PaneID],
 			Width:   c.Width,
@@ -965,6 +971,12 @@ func (s *Server) sendPaneMetadataTo(ctx context.Context, tp transport.Transport)
 	}
 }
 
+func (s *Server) markSeenLocked(id int) {
+	if s.unseenDone != nil && id != 0 {
+		delete(s.unseenDone, id)
+	}
+}
+
 // broadcastLayoutIfStatusChanged pushes a layout snapshot when any
 // pane's status glyph differs from the last one sent, and reports
 // whether it did.
@@ -985,7 +997,25 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 			break
 		}
 	}
-	changed := !sameStatusMap(s.statusGlyphsLocked(), s.lastStatuses) ||
+	currentStatuses := s.statusGlyphsLocked()
+	focusedID := s.strip.FocusedPaneID()
+	for id, newSt := range currentStatuses {
+		oldSt := s.lastStatuses[id]
+		if oldSt == protocol.StatusWorking && newSt == protocol.StatusIdle {
+			if id != focusedID {
+				if s.unseenDone == nil {
+					s.unseenDone = make(map[int]bool)
+				}
+				s.unseenDone[id] = true
+			}
+		} else if newSt == protocol.StatusWorking {
+			if s.unseenDone != nil {
+				delete(s.unseenDone, id)
+			}
+		}
+	}
+
+	changed := !sameStatusMap(currentStatuses, s.lastStatuses) ||
 		!sameStringMap(s.paneTitlesLocked(), s.lastTitles) ||
 		hasPendingCreation
 	s.mu.Unlock()
