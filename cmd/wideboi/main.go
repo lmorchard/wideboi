@@ -529,7 +529,12 @@ func runServer(cfg config.Config, ownerFD int) (retErr error) {
 	if len(cfg.Startup) > 0 {
 		panes := make([]server.StartupPane, len(cfg.Startup))
 		for i, pane := range cfg.Startup {
-			panes[i] = server.StartupPane{Command: pane.Command, Width: pane.Width}
+			panes[i] = server.StartupPane{
+				Type:      pane.Type,
+				Dashboard: pane.Dashboard,
+				Command:   pane.Command,
+				Width:     pane.Width,
+			}
 		}
 		srv.SetStartupPanes(panes)
 	}

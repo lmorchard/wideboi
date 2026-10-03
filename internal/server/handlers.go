@@ -458,8 +458,22 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 		} else if !s.startupLaunched {
 			s.startupLaunched = true
 			firstID := 0
+			var firstInteractiveID int
 			for _, spec := range s.startup {
-				p, err := s.spawnPaneWithSpecLocked(spec, 0)
+				var p *Pane
+				var err error
+				if spec.IsDashboard() {
+					if s.statusPaneID != 0 {
+						slog.Warn("ignoring duplicate dashboard pane in startup configuration")
+						continue
+					}
+					p, err = s.spawnDashboardPaneWithWidthLocked(spec.Width, 0)
+				} else {
+					p, err = s.spawnPaneWithSpecLocked(spec, 0)
+					if err == nil && firstInteractiveID == 0 {
+						firstInteractiveID = p.ID()
+					}
+				}
 				if err != nil {
 					slog.Error("starting configured pane", "command", spec.Command, "err", err)
 					continue
@@ -468,7 +482,9 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 					firstID = p.ID()
 				}
 			}
-			if firstID != 0 {
+			if firstInteractiveID != 0 {
+				s.strip.FocusPaneID(firstInteractiveID)
+			} else if firstID != 0 {
 				s.strip.FocusPaneID(firstID)
 			}
 		}

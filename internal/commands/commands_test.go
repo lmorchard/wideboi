@@ -666,6 +666,7 @@ func TestPipePaneCommand(t *testing.T) {
 			found = true
 			break
 		}
+		_ = transport.WriteClientFrame(clientConn, protocol.MsgSendInputRequest{PaneID: paneID, Data: []byte("echo tap-sync-1\n")})
 	}
 	if !found {
 		t.Fatal("timed out waiting for background tap to capture tap-sync-1")

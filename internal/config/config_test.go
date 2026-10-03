@@ -972,6 +972,49 @@ func TestStartupPanesConfig(t *testing.T) {
 	}
 }
 
+func TestStartupDashboardConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	data := `
+[[startup]]
+type = "dashboard"
+width = 28
+
+[[startup]]
+dashboard = true
+width = 30
+
+[[startup]]
+type = "status"
+width = 24
+
+[[startup]]
+width = 80
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load(config.ConfigFlags{ConfigFile: path}, mockEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Startup) != 4 {
+		t.Fatalf("len(cfg.Startup) = %d, want 4", len(cfg.Startup))
+	}
+
+	if !cfg.Startup[0].IsDashboard() || cfg.Startup[0].Width != 28 {
+		t.Errorf("pane 0: got dashboard=%v width=%d, want true, 28", cfg.Startup[0].IsDashboard(), cfg.Startup[0].Width)
+	}
+	if !cfg.Startup[1].IsDashboard() || cfg.Startup[1].Width != 30 {
+		t.Errorf("pane 1: got dashboard=%v width=%d, want true, 30", cfg.Startup[1].IsDashboard(), cfg.Startup[1].Width)
+	}
+	if !cfg.Startup[2].IsDashboard() || cfg.Startup[2].Width != 24 {
+		t.Errorf("pane 2: got dashboard=%v width=%d, want true, 24", cfg.Startup[2].IsDashboard(), cfg.Startup[2].Width)
+	}
+	if cfg.Startup[3].IsDashboard() || cfg.Startup[3].Width != 80 {
+		t.Errorf("pane 3: got dashboard=%v width=%d, want false, 80", cfg.Startup[3].IsDashboard(), cfg.Startup[3].Width)
+	}
+}
+
 func TestConfigTheme(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	data := `
