@@ -145,6 +145,42 @@ func TestStartupPinnedColumns(t *testing.T) {
 	}
 }
 
+func TestServerDashboardUnseenDone(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Type: "dashboard", Width: 28},
+		{Width: 80},
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	shell2ID := snap.Columns[2].PaneID
+
+	// Simulate shell2 completing work in background
+	srv.SimulateUnseenCompletionForTest(shell2ID)
+	dbText := srv.DashboardTextForTest(10)
+
+	if !strings.Contains(dbText, "✔") {
+		t.Errorf("dashboard text missing '✔' (done) for unseen completed pane %d:\n%s", shell2ID, dbText)
+	}
+
+	// Focusing shell2 marks it seen and clears 'done'
+	srv.MarkSeenForTest(shell2ID)
+	dbTextAfter := srv.DashboardTextForTest(10)
+
+	if strings.Contains(dbTextAfter, "✔") {
+		t.Errorf("dashboard text still contains '✔' after pane %d focused:\n%s", shell2ID, dbTextAfter)
+	}
+}
+
 func TestVerbTogglePin(t *testing.T) {
 	tp := transport.NewInProcChannel(32)
 	srv := server.NewServer(tp, "/bin/sh", "")

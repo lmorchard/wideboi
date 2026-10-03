@@ -25,7 +25,7 @@ func (c *Client) badgeSpansLocked(budget int) []badgeSpan {
 	x := 0
 	for i, id := range ids {
 		isFocus := id == c.focusPaneID
-		st := c.paneStatuses[id]
+		st := c.displayStatusLocked(id)
 		badge := FormatBadge(id, isFocus, st)
 		needed := runeLen(badge)
 		if i > 0 {

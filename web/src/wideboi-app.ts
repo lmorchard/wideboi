@@ -296,8 +296,27 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  private unseenDone: Record<number, boolean> = {};
+
+  displayStatus(paneId: number): PaneStatus {
+    const st = this.paneStatuses[paneId] ?? PaneStatus.IDLE;
+    if (st === PaneStatus.IDLE && this.unseenDone[paneId]) {
+      return PaneStatus.DONE;
+    }
+    return st;
+  }
+
+  displayStatuses(): Record<number, PaneStatus> {
+    const res: Record<number, PaneStatus> = {};
+    for (const id of this.activePanes) {
+      res[id] = this.displayStatus(id);
+    }
+    return res;
+  }
+
   private focusPane(paneID: number) {
     if (!this.activePanes.includes(paneID)) return;
+    delete this.unseenDone[paneID];
     if (this.searchState && this.searchState.paneId !== paneID) {
       this.cancelSearch();
     }
@@ -584,9 +603,14 @@ export class WideboiApp extends LitElement {
                 const title = snapshot.paneTitles?.[paneId] || `Pane ${paneId}`;
                 let desc = '';
                 if (newStatus === PaneStatus.NEEDS_INPUT) desc = 'Needs input';
-                else if (newStatus === PaneStatus.DONE) desc = 'Finished successfully';
+                else if (newStatus === PaneStatus.DONE || newStatus === PaneStatus.IDLE) desc = 'Finished successfully';
                 else if (newStatus === PaneStatus.FAILED) desc = 'Failed';
                 if (desc) this.notifyBackground(title, desc);
+              }
+              if (oldStatus === PaneStatus.WORKING && newStatus === PaneStatus.IDLE && paneId !== this.focusedPaneId) {
+                this.unseenDone[paneId] = true;
+              } else if (newStatus === PaneStatus.WORKING) {
+                delete this.unseenDone[paneId];
               }
             }
           }
@@ -883,9 +907,9 @@ export class WideboiApp extends LitElement {
       const rank = (status: PaneStatus | undefined) =>
         status === PaneStatus.FAILED ? 3 : status === PaneStatus.DONE ? 2 : status === PaneStatus.NEEDS_INPUT ? 1 : 0;
       const target = this.activePanes.reduce((best, id) => {
-        const score = rank(this.paneStatuses[id]);
-        return score > rank(this.paneStatuses[best]) ||
-          (score > 0 && score === rank(this.paneStatuses[best]) && id < best) ? id : best;
+        const score = rank(this.displayStatus(id));
+        return score > rank(this.displayStatus(best)) ||
+          (score > 0 && score === rank(this.displayStatus(best)) && id < best) ? id : best;
       }, 0);
       if (target) this.focusPane(target);
     } else if ([VerbType.CYCLE_WIDTH, VerbType.GROW_WIDTH, VerbType.SHRINK_WIDTH].includes(verb)) {
@@ -1981,7 +2005,7 @@ export class WideboiApp extends LitElement {
             <div class="pane-tabs" role="tablist" aria-label="Terminal Panes">
               ${repeat(this.activePanes, id => id, id => {
                 const isFocused = id === this.focusedPaneId;
-                const status = this.paneStatuses[id] ?? PaneStatus.IDLE;
+                const status = this.displayStatus(id);
                 const pane = this.panes.get(id);
                 const scrollInfo = (pane && pane.scrollOffset > 0)
                   ? `+${pane.scrollOffset}${pane.unreadOutput ? ' ⤓' : ''}`
@@ -2076,7 +2100,7 @@ export class WideboiApp extends LitElement {
           .activePanes=${this.activePanes}
           .focusedPaneId=${this.focusedPaneId}
           .paneTitles=${this.paneTitles}
-          .paneStatuses=${this.paneStatuses}
+          .paneStatuses=${this.displayStatuses()}
           .paneScrolls=${this.paneScrolls}
           .currentZoom=${this.currentZoom}
           .currentMinZoom=${this.currentMinZoom}

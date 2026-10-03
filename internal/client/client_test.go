@@ -269,3 +269,78 @@ func TestEmitHostNotificationModesAndSanitization(t *testing.T) {
 		})
 	}
 }
+
+func TestClientUnseenCompletionBadging(t *testing.T) {
+	cli := client.NewClient(transport.NewInProcChannel(16), 100, 24, "C-b")
+
+	// Initial snapshot: pane 1 (focused) and pane 2 (unfocused) are both working
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusWorking,
+			2: protocol.StatusWorking,
+		},
+	})
+
+	if cli.FocusedPaneID() != 1 {
+		t.Fatalf("focused pane = %d, want 1", cli.FocusedPaneID())
+	}
+
+	// Unfocused pane 2 transitions Working -> Idle: should become StatusDone
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusWorking,
+			2: protocol.StatusIdle,
+		},
+	})
+
+	// Pane 2 should be displayed as StatusDone
+	if got := cli.DisplayStatus(2); got != protocol.StatusDone {
+		t.Fatalf("pane 2 status = %v, want %v", got, protocol.StatusDone)
+	}
+
+	// Smart jump should pick pane 2
+	ctx := context.Background()
+	cli.SendVerb(ctx, protocol.VerbSmartJump)
+	if got := cli.FocusedPaneID(); got != 2 {
+		t.Fatalf("after smart jump: focus = %d, want 2", got)
+	}
+
+	// Now that pane 2 is focused, its status should transition back to StatusIdle
+	if got := cli.DisplayStatus(2); got != protocol.StatusIdle {
+		t.Fatalf("pane 2 status after focus = %v, want %v", got, protocol.StatusIdle)
+	}
+
+	// If focused pane 2 transitions Working -> Idle while focused:
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusIdle,
+			2: protocol.StatusWorking,
+		},
+	})
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusIdle,
+			2: protocol.StatusIdle,
+		},
+	})
+	// Focused pane 2 was seen live, so it must be StatusIdle, not StatusDone
+	if got := cli.DisplayStatus(2); got != protocol.StatusIdle {
+		t.Fatalf("focused pane 2 status = %v, want %v", got, protocol.StatusIdle)
+	}
+}

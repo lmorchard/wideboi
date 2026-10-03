@@ -85,6 +85,40 @@ func (s *Server) PaneGrid(id int) term.Grid {
 	return p.grid
 }
 
+// SimulateUnseenCompletionForTest marks a pane as having an unseen completion for testing.
+func (s *Server) SimulateUnseenCompletionForTest(id int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unseenDone == nil {
+		s.unseenDone = make(map[int]bool)
+	}
+	s.unseenDone[id] = true
+	s.updateDashboardLocked()
+}
+
+// MarkSeenForTest clears the unseen completion flag for testing.
+func (s *Server) MarkSeenForTest(id int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.markSeenLocked(id)
+	s.updateDashboardLocked()
+}
+
+// DashboardTextForTest returns recent dumped text from the dashboard pane.
+func (s *Server) DashboardTextForTest(lines int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.statusPaneID == 0 {
+		return ""
+	}
+	p := s.panes[s.statusPaneID]
+	if p == nil {
+		return ""
+	}
+	text, _ := p.grid.DumpText(false, 0, 0, lines, false)
+	return text
+}
+
 // UpdateMessage constructs a protocol.MsgPaneUpdate for wire transport at the
 // current scroll offset, with unread output marked false.
 func (p *Pane) UpdateMessage() (protocol.MsgPaneUpdate, bool) {

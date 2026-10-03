@@ -28,10 +28,14 @@ type frameState struct {
 // frameStateLocked snapshots the layout state a frame is composed from.
 // c.mu must be held.
 func (c *Client) frameStateLocked() frameState {
+	statuses := make(map[int]protocol.PaneStatus, len(c.paneStatuses))
+	for id := range c.paneStatuses {
+		statuses[id] = c.displayStatusLocked(id)
+	}
 	return frameState{
 		placements:   c.placements,
 		focusPaneID:  c.focusPaneID,
-		paneStatuses: c.paneStatuses,
+		paneStatuses: statuses,
 		paneTitles:   c.paneTitles,
 		positions:    c.positionsLocked(),
 	}
