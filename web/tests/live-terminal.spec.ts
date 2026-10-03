@@ -29,6 +29,9 @@ test.describe('Live Server Terminal & Input Parity', () => {
     sockPath = path.join(os.tmpdir(), `wideboi-live-${Date.now()}-${Math.random().toString(36).slice(2)}.sock`);
 
     const binPath = path.resolve(process.cwd(), '../bin/wideboi');
+    const cleanEnv = Object.fromEntries(
+      Object.entries(process.env).filter(([k]) => !k.startsWith('WIDEBOI') && k !== 'LC_WIDEBOI')
+    );
     serverProc = spawn(
       binPath,
       [
@@ -39,7 +42,7 @@ test.describe('Live Server Terminal & Input Parity', () => {
       ],
       {
         env: {
-          ...process.env,
+          ...cleanEnv,
           SHELL: '/bin/sh',
           TERM: 'xterm-256color',
           PS1: '$ ',

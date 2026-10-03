@@ -176,6 +176,7 @@ export class WideboiCommandPalette extends LitElement {
 
   public getCommands(): CommandItem[] {
     return [
+      { id: 'paste', label: 'Paste from Clipboard', icon: '📋', shortcut: 'v', description: 'Paste text from system clipboard' },
       { id: 'new-pane', label: 'New Pane', icon: '➕', shortcut: 'n', description: 'Open a new terminal column' },
       { id: 'split', label: 'Split Pane', icon: '✂️', shortcut: '"', description: 'Split and open a new pane' },
       { id: 'close-pane', label: 'Close Pane', icon: '✕', shortcut: 'x', description: 'Close focused terminal pane' },

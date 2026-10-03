@@ -498,6 +498,7 @@ test('mobile bar command menu button opens dialog and closes with close button',
   await expect(page.locator('#command-menu-title')).toContainText('Commands');
   await expect(page.getByRole('menuitem', { name: 'Command Palette' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Command Prompt' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Paste from Clipboard' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'New Pane' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Close Pane' })).toBeVisible();
 
@@ -528,6 +529,27 @@ test('mobile command menu summons command palette and command prompt', async ({ 
   // Dismiss prompt
   await page.keyboard.press('Escape');
   await expect(page.locator('#command-palette-title')).toHaveCount(0);
+});
+
+test('mobile command menu triggers paste from clipboard', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await connect(page);
+
+  await page.evaluate(() => navigator.clipboard.writeText('mobile-paste-cmd'));
+  await page.evaluate(() => { window.testSockets[0].sent = []; });
+
+  await page.getByRole('button', { name: 'Command menu' }).click();
+  await page.getByRole('menuitem', { name: 'Paste from Clipboard' }).click();
+
+  await expect.poll(async () => {
+    return await page.evaluate(async () => {
+      const { clientMessages } = await import('/tests/browser-fixture.ts');
+      const msgs = clientMessages(window.testSockets[0].sent);
+      const input = msgs.find(m => m.case === 'input' && m.value?.paste);
+      if (!input?.value?.data) return '';
+      return new TextDecoder().decode(input.value.data);
+    });
+  }).toBe('mobile-paste-cmd');
 });
 
 test('mobile command menu triggers new pane and dismisses on Escape or backdrop click', async ({ page }) => {

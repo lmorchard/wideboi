@@ -108,6 +108,7 @@ export class WideboiCommandMenu extends LitElement {
     const commands: CommandItem[] = [
       { id: 'palette', label: 'Command Palette', icon: '🎯', shortcut: 'Space', description: 'Search & execute commands' },
       { id: 'prompt', label: 'Command Prompt', icon: '⌨️', shortcut: ':', description: 'Interactive command prompt' },
+      { id: 'paste', label: 'Paste from Clipboard', icon: '📋', shortcut: 'v', description: 'Paste into focused pane' },
       { id: 'new-pane', label: 'New Pane', icon: '➕', shortcut: 'n', description: 'Open new terminal column' },
       { id: 'close-pane', label: 'Close Pane', icon: '✕', shortcut: 'x', description: 'Close focused terminal' },
       { id: 'search', label: 'Search Scrollback', icon: '🔍', shortcut: '/', description: 'Find in history' },

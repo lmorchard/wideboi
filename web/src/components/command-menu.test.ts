@@ -119,4 +119,15 @@ describe('WideboiCommandMenu', () => {
     menu.disconnectedCallback();
     expect(listeners['keydown']?.length).toBe(0);
   });
+
+  it('includes paste command and triggers command event', () => {
+    const menu = new TestWideboiCommandMenu();
+    let triggeredCommand = '';
+    menu.addEventListener('command', (e: any) => {
+      triggeredCommand = e.detail;
+    });
+
+    (menu as any).triggerCommand('paste');
+    expect(triggeredCommand).toBe('paste');
+  });
 });

@@ -79,6 +79,21 @@ export class WideboiPane extends LitElement {
       display: block;
       outline: none;
     }
+    .clipboard-helper {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      border: none;
+      margin: 0;
+      opacity: 0;
+      pointer-events: none;
+      overflow: hidden;
+      resize: none;
+      z-index: -1;
+    }
     @media (prefers-reduced-motion: reduce) {
       :host, :host::after { transition: none; }
     }
@@ -99,7 +114,17 @@ export class WideboiPane extends LitElement {
   @property({ attribute: false }) theme: Theme = getTheme('dark');
 
   @query('canvas') private canvas!: HTMLCanvasElement;
+  @query('.clipboard-helper') private _helperTextarea?: HTMLTextAreaElement;
   @query('.viewport') private viewport!: HTMLDivElement;
+  private mockHelperTextarea?: HTMLTextAreaElement;
+
+  get helperElement(): HTMLTextAreaElement | undefined {
+    return this.mockHelperTextarea || this._helperTextarea;
+  }
+
+  set helperElement(el: HTMLTextAreaElement | undefined) {
+    this.mockHelperTextarea = el;
+  }
   private painter?: PanePainter;
   private observer?: ResizeObserver;
   private followBottom = true;
@@ -329,11 +354,23 @@ export class WideboiPane extends LitElement {
   setSelection(start: CellPoint, end: CellPoint) {
     this.currentSelection = { start, end };
     this.painter?.setSelection(start, end);
+    const helper = this.helperElement;
+    if (helper) {
+      const text = this.selectedText();
+      helper.value = text;
+      if (text && typeof helper.select === 'function') {
+        helper.select();
+      }
+    }
   }
 
   clearSelection() {
     this.currentSelection = undefined;
     this.painter?.clearSelection();
+    const helper = this.helperElement;
+    if (helper) {
+      helper.value = '';
+    }
   }
 
   getSelection(): { start: CellPoint; end: CellPoint } | undefined {
@@ -345,6 +382,11 @@ export class WideboiPane extends LitElement {
     return selectionText(this.pane, this.currentSelection.start, this.currentSelection.end);
   }
 
+  selectAll() {
+    if (!this.pane || this.pane.cols <= 0 || this.pane.rows <= 0) return;
+    this.setSelection({ x: 0, y: 0 }, { x: this.pane.cols - 1, y: this.pane.rows - 1 });
+  }
+
   setHoverCursor(cursor: string, title = '') {
     if (this.canvas) {
       this.canvas.style.cursor = cursor;
@@ -352,7 +394,46 @@ export class WideboiPane extends LitElement {
     }
   }
 
-  focusInput() { this.canvas.focus({ preventScroll: true }); }
+  focusInput() {
+    const helper = this.helperElement;
+    if (helper && typeof helper.focus === 'function') {
+      helper.focus({ preventScroll: true });
+    } else if (this.canvas && typeof this.canvas.focus === 'function') {
+      this.canvas.focus({ preventScroll: true });
+    }
+  }
+
+  private onHelperPaste = (e: ClipboardEvent) => {
+    const text = e.clipboardData?.getData('text/plain') || '';
+    if (text) {
+      this.dispatchEvent(new CustomEvent('pane-paste', {
+        detail: { paneId: this.paneId, text },
+        bubbles: true,
+        composed: true,
+      }));
+    }
+    const helper = this.helperElement;
+    if (helper) {
+      helper.value = '';
+    }
+    e.stopPropagation();
+    e.preventDefault();
+  };
+
+  private onHelperCopy = (e: ClipboardEvent) => {
+    const text = this.selectedText();
+    if (text) {
+      e.clipboardData?.setData('text/plain', text);
+      e.preventDefault();
+    }
+  };
+
+  private onHelperInput = () => {
+    const helper = this.helperElement;
+    if (helper && !this.currentSelection) {
+      helper.value = '';
+    }
+  };
 
   render() { return html`
     <div class="viewport" style=${`overflow-x: ${this.pane && this.pane.cols * this.zoom > this.displayCols ? 'auto' : 'hidden'}`}
@@ -360,6 +441,18 @@ export class WideboiPane extends LitElement {
       <canvas tabindex=${this.focused ? 0 : -1}
         style=${`width: ${this.pane ? `${this.pane.cols * this.cellWidth * this.zoom}px` : '100%'}; height: ${this.pane ? `${this.pane.rows * termSettings.cellHeight * this.zoom}px` : '100%'}`}></canvas>
     </div>
+    <textarea
+      class="clipboard-helper"
+      tabindex="-1"
+      aria-hidden="true"
+      autocomplete="off"
+      autocorrect="off"
+      autocapitalize="off"
+      spellcheck="false"
+      @paste=${this.onHelperPaste}
+      @copy=${this.onHelperCopy}
+      @input=${this.onHelperInput}
+    ></textarea>
     <span class="card-label">${this.cardLabel}</span>`; }
 }
 
