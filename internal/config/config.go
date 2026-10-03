@@ -78,9 +78,17 @@ type MacroConfig = protocol.Macro
 
 // StartupPane describes a column opened when a new session first attaches.
 // An empty command starts the configured interactive shell.
+// Type can be "dashboard" (or Dashboard can be true) to open the status dashboard.
 type StartupPane struct {
-	Command string `toml:"command"`
-	Width   int    `toml:"width"`
+	Type      string `toml:"type"`
+	Dashboard bool   `toml:"dashboard"`
+	Command   string `toml:"command"`
+	Width     int    `toml:"width"`
+}
+
+// IsDashboard reports whether the pane is designated as a status dashboard pane.
+func (p StartupPane) IsDashboard() bool {
+	return p.Dashboard || strings.EqualFold(p.Type, "dashboard") || strings.EqualFold(p.Type, "status")
 }
 
 // ThemeConfig holds optional user-configured color and attribute overrides

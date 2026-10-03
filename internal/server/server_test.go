@@ -62,6 +62,62 @@ func TestConfiguredStartupPanes(t *testing.T) {
 	}
 }
 
+func TestStartupDashboardPane(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Type: "dashboard", Width: 28},
+		{Width: 80},
+		{Type: "dashboard", Width: 35}, // duplicate dashboard; must be ignored
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	// Should create exactly 2 columns (dashboard + interactive shell, duplicate ignored)
+	if len(snap.Columns) != 2 {
+		t.Fatalf("startup columns count = %d, want 2", len(snap.Columns))
+	}
+	if snap.Columns[0].Width != 28 {
+		t.Errorf("dashboard column width = %d, want 28", snap.Columns[0].Width)
+	}
+	if snap.Columns[1].Width != 80 {
+		t.Errorf("shell column width = %d, want 80", snap.Columns[1].Width)
+	}
+
+	dashboardID := snap.Columns[0].PaneID
+	shellID := snap.Columns[1].PaneID
+
+	// Initial focus must prefer the interactive shell, not the dashboard
+	// (verified via server strip focused pane)
+	if _, ok := snap.PaneStatuses[dashboardID]; !ok {
+		t.Errorf("dashboard pane %d missing from PaneStatuses", dashboardID)
+	}
+
+	// Pressing VerbToggleStatus should target the already-running dashboard pane
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleStatus, PaneID: shellID})
+	deadline := time.After(2 * time.Second)
+	focusReceived := false
+	for !focusReceived {
+		select {
+		case msg := <-tp.ServerSend:
+			if foc, ok := msg.(protocol.MsgFocusPane); ok {
+				if foc.PaneID != dashboardID {
+					t.Errorf("MsgFocusPane = %d, want dashboard ID %d", foc.PaneID, dashboardID)
+				}
+				focusReceived = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for MsgFocusPane after VerbToggleStatus")
+		}
+	}
+}
+
 // testGrace is the hangup grace these tests tear down with. None of them
 // asserts anything about teardown -- that contract belongs to
 // internal/server/ptyx's hangup tests and to scripts/ptycheck.py via

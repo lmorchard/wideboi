@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -154,11 +155,18 @@ type Server struct {
 
 // StartupPane is a pane created on the first attach to a new session.
 type StartupPane struct {
-	Command string
-	Dir     string
-	Width   int
+	Type      string
+	Dashboard bool
+	Command   string
+	Dir       string
+	Width     int
 	// Keep retains the pane after its process exits; see watchKeptPane.
 	Keep bool
+}
+
+// IsDashboard reports whether the pane is designated as a status dashboard pane.
+func (p StartupPane) IsDashboard() bool {
+	return p.Dashboard || strings.EqualFold(p.Type, "dashboard") || strings.EqualFold(p.Type, "status")
 }
 
 // SetStartupPanes configures the initial columns in their display order.
@@ -597,6 +605,10 @@ func (s *Server) broadcastPaneBell(paneID int) {
 }
 
 func (s *Server) spawnDashboardPaneLocked(afterPaneID int) (*Pane, error) {
+	return s.spawnDashboardPaneWithWidthLocked(0, afterPaneID)
+}
+
+func (s *Server) spawnDashboardPaneWithWidthLocked(width int, afterPaneID int) (*Pane, error) {
 	if s.stoppingLocked() {
 		return nil, fmt.Errorf("server is shutting down")
 	}
@@ -606,6 +618,9 @@ func (s *Server) spawnDashboardPaneLocked(afterPaneID int) (*Pane, error) {
 	paneCols := presets[len(presets)-1]
 	if paneCols > s.cols && s.cols > 0 {
 		paneCols = s.cols
+	}
+	if width > 0 {
+		paneCols = width
 	}
 	paneRows := max(s.rows-2, 20)
 
