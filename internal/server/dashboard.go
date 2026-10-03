@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -24,9 +25,10 @@ type PaneInfo struct {
 // Dashboard manages the in-app overview table of active terminal panes,
 // tracking row selection and rendering formatted ANSI output.
 type Dashboard struct {
-	mu       sync.Mutex
-	selected int
-	panes    []PaneInfo
+	mu           sync.Mutex
+	selected     int
+	scrollOffset int
+	panes        []PaneInfo
 }
 
 // NewDashboard creates an initialized status dashboard.
@@ -44,23 +46,108 @@ func (d *Dashboard) SelectedPaneID() int {
 	return d.panes[d.selected].ID
 }
 
+// statusPriority assigns an urgency score to a PaneStatus for ordering
+// panes in the dashboard overview. Higher urgency appears first.
+func statusPriority(st protocol.PaneStatus) int {
+	switch st {
+	case protocol.StatusNeedsInput:
+		return 5
+	case protocol.StatusFailed:
+		return 4
+	case protocol.StatusDone:
+		return 3
+	case protocol.StatusWorking:
+		return 2
+	case protocol.StatusIdle:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// padOrTruncate pads s with spaces to target width, or truncates by runes to fit.
+func padOrTruncate(s string, target int) string {
+	if target <= 0 {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) < target {
+		return s + strings.Repeat(" ", target-len(runes))
+	}
+	if len(runes) > target {
+		return string(runes[:target])
+	}
+	return s
+}
+
 // Render formats the dashboard table into ANSI escape sequences and text
 // ready to be written to a VT emulator grid.
 func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	prevSelectedID := 0
+	if len(d.panes) > 0 && d.selected >= 0 && d.selected < len(d.panes) {
+		prevSelectedID = d.panes[d.selected].ID
+	}
+
 	d.panes = make([]PaneInfo, len(panes))
 	copy(d.panes, panes)
 
+	// Sort panes by urgency (highest priority first), breaking ties by ID.
+	sort.SliceStable(d.panes, func(i, j int) bool {
+		pi := statusPriority(d.panes[i].Status)
+		pj := statusPriority(d.panes[j].Status)
+		if pi != pj {
+			return pi > pj
+		}
+		return d.panes[i].ID < d.panes[j].ID
+	})
+
+	// Vertical viewport sizing: 1 banner row + 1 header row + 2 footer rows = 4 chrome rows.
+	maxVisible := rows - 4
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+
 	if len(d.panes) == 0 {
 		d.selected = 0
+		d.scrollOffset = 0
 	} else {
-		if d.selected >= len(d.panes) {
-			d.selected = len(d.panes) - 1
+		found := false
+		if prevSelectedID > 0 {
+			for i, p := range d.panes {
+				if p.ID == prevSelectedID {
+					d.selected = i
+					found = true
+					break
+				}
+			}
 		}
-		if d.selected < 0 {
-			d.selected = 0
+		if !found {
+			if d.selected >= len(d.panes) {
+				d.selected = len(d.panes) - 1
+			}
+			if d.selected < 0 {
+				d.selected = 0
+			}
+		}
+
+		// Adjust scrollOffset to keep d.selected within the visible window [scrollOffset, scrollOffset+maxVisible).
+		if d.selected < d.scrollOffset {
+			d.scrollOffset = d.selected
+		}
+		if d.selected >= d.scrollOffset+maxVisible {
+			d.scrollOffset = d.selected - maxVisible + 1
+		}
+		if maxOffset := len(d.panes) - maxVisible; d.scrollOffset > maxOffset {
+			if maxOffset < 0 {
+				maxOffset = 0
+			}
+			d.scrollOffset = maxOffset
+		}
+		if d.scrollOffset < 0 {
+			d.scrollOffset = 0
 		}
 	}
 
@@ -68,23 +155,66 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 	// Hide cursor, enable SGR mouse tracking, clear screen, move home
 	sb.WriteString("\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[2J\x1b[H")
 
-	// Table header
-	header := fmt.Sprintf("  %-9s %-12s %-24s %s", "PANE ID", "STATUS", "TITLE", "CWD")
-	if cols > 0 && len(header) < cols {
-		header += strings.Repeat(" ", cols-len(header))
-	} else if cols > 0 && len(header) > cols {
-		header = header[:cols]
+	// Fleet summary header banner
+	var needsInputCount, failedCount, doneCount, workingCount, idleCount int
+	for _, p := range d.panes {
+		switch p.Status {
+		case protocol.StatusNeedsInput:
+			needsInputCount++
+		case protocol.StatusFailed:
+			failedCount++
+		case protocol.StatusDone:
+			doneCount++
+		case protocol.StatusWorking:
+			workingCount++
+		default:
+			idleCount++
+		}
 	}
+
+	var summaryParts []string
+	if needsInputCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d needs input", needsInputCount))
+	}
+	if failedCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d failed", failedCount))
+	}
+	if workingCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d working", workingCount))
+	}
+	if doneCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d done", doneCount))
+	}
+	if idleCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d idle", idleCount))
+	}
+
+	summary := strings.Join(summaryParts, "  •  ")
+	if len(d.panes) == 0 {
+		summary = "no active panes"
+	}
+
+	banner := fmt.Sprintf("  [ wideboi dashboard ]  %s", summary)
+	banner = padOrTruncate(banner, cols)
+	sb.WriteString("\x1b[1;36m" + banner + "\x1b[0m\r\n")
+
+	// Table column header
+	header := fmt.Sprintf("  %-9s %-12s %-24s %s", "PANE ID", "STATUS", "TITLE", "CWD")
+	header = padOrTruncate(header, cols)
 	sb.WriteString("\x1b[7m" + header + "\x1b[0m\r\n")
 
 	if len(d.panes) == 0 {
-		msg := "   (no active terminal panes)"
-		if cols > 0 && len(msg) > cols {
-			msg = msg[:cols]
-		}
+		msg := padOrTruncate("   (no active terminal panes)", cols)
 		sb.WriteString("\r\n" + msg + "\r\n")
 	} else {
-		for i, p := range d.panes {
+		startIdx := d.scrollOffset
+		endIdx := startIdx + maxVisible
+		if endIdx > len(d.panes) {
+			endIdx = len(d.panes)
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			p := d.panes[i]
 			marker := "  "
 			rowStart := ""
 			rowEnd := ""
@@ -99,8 +229,8 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 			if title == "" {
 				title = "-"
 			}
-			if len(title) > 24 {
-				title = title[:21] + "..."
+			if len([]rune(title)) > 24 {
+				title = string([]rune(title)[:21]) + "..."
 			}
 
 			cwd := p.CWD
@@ -113,18 +243,14 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 				idStr += "*"
 			}
 			line := fmt.Sprintf("%s%-9s %-12s %-24s %s", marker, idStr, statusStr, title, cwd)
-			if cols > 0 && len(line) > cols {
-				line = line[:cols]
-			}
+			line = padOrTruncate(line, cols)
 			sb.WriteString(rowStart + line + rowEnd + "\r\n")
 		}
 	}
 
 	// Instructions footer
 	footer := "  [j/k/↑/↓] Select   [Enter/Click] Jump   [C-b x] Close"
-	if cols > 0 && len(footer) > cols {
-		footer = footer[:cols]
-	}
+	footer = padOrTruncate(footer, cols)
 	sb.WriteString("\r\n\x1b[2m" + footer + "\x1b[0m\r\n")
 
 	return []byte(sb.String())
@@ -212,9 +338,11 @@ func (d *Dashboard) HandleMouse(ev uv.MouseEvent) (int, bool) {
 	switch ev := ev.(type) {
 	case uv.MouseClickEvent:
 		if ev.Button == uv.MouseLeft {
-			// Header is row 0.
-			idx := ev.Y - 1
-			if idx >= 0 && idx < len(d.panes) {
+			// Header rows are row 0 (summary banner) and row 1 (column header).
+			// Data rows start at row 2, offset by scrollOffset.
+			clickedRow := ev.Y - 2
+			idx := d.scrollOffset + clickedRow
+			if clickedRow >= 0 && idx >= 0 && idx < len(d.panes) {
 				d.selected = idx
 				return d.panes[d.selected].ID, true
 			}
