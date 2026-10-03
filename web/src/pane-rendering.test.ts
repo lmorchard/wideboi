@@ -417,6 +417,49 @@ describe('per-pane painting', () => {
     expect(pane.selectedText()).toBe('');
   });
 
+  it('syncs selected text with helper textarea and emits pane-paste on helper paste', () => {
+    const pane = new WideboiPane();
+    pane.paneId = 42;
+    pane.pane = create(MsgPaneUpdateSchema, {
+      paneId: 42, cols: 10, rows: 2,
+      lines: [row(...'Hello World'.slice(0, 10).split(''))],
+    });
+
+    const mockTextarea = {
+      value: '',
+      select: vi.fn(),
+      focus: vi.fn(),
+    };
+    pane.helperElement = mockTextarea as unknown as HTMLTextAreaElement;
+
+    pane.focusInput();
+    expect(mockTextarea.focus).toHaveBeenCalled();
+
+    pane.setSelection({ x: 0, y: 0 }, { x: 4, y: 0 });
+    expect(mockTextarea.value).toBe('Hello');
+    expect(mockTextarea.select).toHaveBeenCalled();
+
+    pane.clearSelection();
+    expect(mockTextarea.value).toBe('');
+
+    let pastedDetail: any = null;
+    pane.addEventListener('pane-paste', (e: any) => {
+      pastedDetail = e.detail;
+    });
+
+    const pasteEvent = {
+      clipboardData: { getData: (format: string) => format === 'text/plain' ? 'pasted text' : '' },
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+    (pane as any).onHelperPaste(pasteEvent);
+
+    expect(pasteEvent.preventDefault).toHaveBeenCalled();
+    expect(pasteEvent.stopPropagation).toHaveBeenCalled();
+    expect(pastedDetail).toEqual({ paneId: 42, text: 'pasted text' });
+    expect(mockTextarea.value).toBe('');
+  });
+
   it('redraws and uses theme colors when theme changes', () => {
     const nord = getTheme('nord');
     const { painter: p, ctx } = painter();

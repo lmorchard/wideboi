@@ -24,11 +24,17 @@ import './components/command-menu';
 import type { WideboiCommandMenu } from './components/command-menu';
 import './components/command-palette';
 import type { WideboiCommandPalette } from './components/command-palette';
+import './components/context-menu';
+import type { ContextMenuAction } from './components/context-menu';
 import { MobileDirectInputController } from './mobile-direct-input';
 
 const desktopSession = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('session') : null;
 const STATS_REPORT_MS = 5000;
 const NARROW_VIEW = '(max-width: 480px)';
+function isApplePlatform(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform || '') || /Macintosh|iPhone|iPad/.test(navigator.userAgent || '');
+}
 
 @customElement('wideboi-app')
 export class WideboiApp extends LitElement {
@@ -167,6 +173,7 @@ export class WideboiApp extends LitElement {
   @state() private mobileInputMode: 'draft' | 'direct' = 'draft';
   @state() private showMacros = false;
   @state() private showMacroEditor = false;
+  @state() private contextMenu = { open: false, x: 0, y: 0, paneId: 0, hasSelection: false };
   @state() private draftMacroSteps: MacroStep[] = [];
   @state() private paneZooms = new Map<number, number>();
   private searchController = new SearchController({
@@ -719,8 +726,9 @@ export class WideboiApp extends LitElement {
 
   private setupKeyboard() {
     const fromFormControl = (e: Event) => e.composedPath().some(node =>
-      node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement ||
-      node instanceof HTMLSelectElement || node instanceof HTMLButtonElement);
+      (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement ||
+       node instanceof HTMLSelectElement || node instanceof HTMLButtonElement) &&
+      !(node instanceof HTMLElement && node.classList.contains('clipboard-helper')));
     document.addEventListener('keydown', (e) => {
       if (!this.connected || !this.client) return;
       if (this.showHelp) {
@@ -751,6 +759,13 @@ export class WideboiApp extends LitElement {
         }
         return;
       }
+      if (this.contextMenu.open) {
+        if (e.key === 'Escape') {
+          this.closeContextMenu();
+          e.preventDefault();
+        }
+        return;
+      }
       if (fromFormControl(e)) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.code === 'KeyF')) {
         e.preventDefault();
@@ -759,11 +774,31 @@ export class WideboiApp extends LitElement {
       }
       if (e.isComposing || e.key === 'Process' || e.key === 'Dead') return;
 
+      // macOS Shortcuts (Cmd+C / Cmd+V) - only on Apple platforms
+      if (!this.keyRouter.inPrefix && isApplePlatform() && e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (e.key === 'c' || e.key === 'C') {
+          const text = this.selectedPane?.selectedText() || this.focusedPane()?.selectedText() || '';
+          if (text) {
+            void this.copyToClipboard(text);
+            this.selectedPane?.clearSelection();
+            this.selectedPane = undefined;
+            e.preventDefault();
+            return;
+          }
+          return;
+        }
+        if (e.key === 'v' || e.key === 'V') {
+          void this.pasteFromClipboard();
+          return;
+        }
+      }
+
+      // Linux / Windows Shortcuts (Ctrl+C, Ctrl+Shift+C, Ctrl+V, Ctrl+Shift+V)
       if (!this.keyRouter.inPrefix && e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.shiftKey && (e.key === 'c' || e.key === 'C')) {
           const text = this.selectedPane?.selectedText() || this.focusedPane()?.selectedText() || '';
           if (text) {
-            if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+            void this.copyToClipboard(text);
             this.selectedPane?.clearSelection();
             this.selectedPane = undefined;
           }
@@ -773,29 +808,23 @@ export class WideboiApp extends LitElement {
         if (!e.shiftKey && (e.key === 'c' || e.key === 'C')) {
           const text = this.selectedPane?.selectedText() || this.focusedPane()?.selectedText() || '';
           if (text) {
-            if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+            void this.copyToClipboard(text);
             this.selectedPane?.clearSelection();
             this.selectedPane = undefined;
             e.preventDefault();
             return;
           }
+          // No selection: falls through to terminal SIGINT
         }
-        if (e.shiftKey && (e.key === 'v' || e.key === 'V')) {
-          if (navigator.clipboard?.readText) {
-            navigator.clipboard.readText().then(text => {
-              if (text && this.client) {
-                sendPasteInput(this.client, this.focusedPaneId, text);
-                this.pendingReveal.add(this.focusedPaneId);
-                this.focusedPane()?.revealCursor();
-              }
-            }).catch(() => {});
-          }
-          e.preventDefault();
+        if (e.key === 'v' || e.key === 'V') {
+          void this.pasteFromClipboard();
           return;
         }
-        if (!e.shiftKey && (e.key === 'v' || e.key === 'V')) {
-          return;
-        }
+      }
+
+      if (e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && e.key === 'Insert') {
+        void this.pasteFromClipboard();
+        return;
       }
 
       if (this.searchController.handleTerminalKeydown(e)) {
@@ -820,10 +849,15 @@ export class WideboiApp extends LitElement {
     document.addEventListener('paste', (e) => {
       if (!this.connected || !this.client || fromFormControl(e)) return;
       const value = e.clipboardData?.getData('text/plain') || '';
-      if (!sendPasteInput(this.client, this.focusedPaneId, value)) return;
-      this.pendingReveal.add(this.focusedPaneId);
-      this.focusedPane()?.revealCursor();
-      e.preventDefault();
+      if (this.handlePasteInput(this.focusedPaneId, value)) {
+        e.preventDefault();
+      }
+    }, { signal: this.listeners?.signal });
+
+    this.paneStrip.addEventListener('pane-paste', (e: Event) => {
+      const custom = e as CustomEvent<{ paneId: number; text: string }>;
+      if (!custom.detail?.text) return;
+      this.handlePasteInput(custom.detail.paneId, custom.detail.text);
     }, { signal: this.listeners?.signal });
 
     document.addEventListener('compositionend', (e) => {
@@ -934,16 +968,129 @@ export class WideboiApp extends LitElement {
     }
   }
 
+  private async copyToClipboard(text: string): Promise<boolean> {
+    if (!text) return false;
+    let copied = false;
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch {}
+    }
+    if (!copied) {
+      const pane = this.selectedPane || this.focusedPane();
+      const helper = pane?.helperElement;
+      if (helper) {
+        helper.value = text;
+        helper.select();
+        try {
+          copied = document.execCommand('copy');
+        } catch {}
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          copied = document.execCommand('copy');
+        } catch {}
+        document.body.removeChild(textarea);
+      }
+    }
+    return copied;
+  }
+
+  private lastPaste = { text: '', time: 0 };
+
+  private handlePasteInput(paneId: number, text: string): boolean {
+    if (!this.connected || !this.client || !text) return false;
+    const now = Date.now();
+    if (this.lastPaste.text === text && now - this.lastPaste.time < 150) {
+      return true;
+    }
+    this.lastPaste = { text, time: now };
+    if (!sendPasteInput(this.client, paneId, text)) return false;
+    this.pendingReveal.add(paneId);
+    this.focusedPane()?.revealCursor();
+    return true;
+  }
+
+  private async pasteFromClipboard(): Promise<boolean> {
+    if (!this.connected || !this.client) return false;
+    if (navigator.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          return this.handlePasteInput(this.focusedPaneId, text);
+        }
+      } catch {}
+    }
+    // Fallback: focus helper textarea so user can paste via native shortcut
+    this.focusedPane()?.focusInput();
+    return false;
+  }
+
+  private openContextMenu(x: number, y: number, pane: WideboiPane) {
+    const text = pane.selectedText();
+    this.contextMenu = {
+      open: true,
+      x,
+      y,
+      paneId: pane.paneId,
+      hasSelection: Boolean(text),
+    };
+  }
+
+  private closeContextMenu = () => {
+    if (this.contextMenu.open) {
+      this.contextMenu = { ...this.contextMenu, open: false };
+    }
+  };
+
+  private getPaneElement(paneId: number): WideboiPane | undefined {
+    return Array.from(this.paneStrip?.querySelectorAll('wideboi-pane') || [])
+      .find(element => element.paneId === paneId);
+  }
+
+  private handleContextMenuAction = (e: CustomEvent<{ action: ContextMenuAction; paneId: number }>) => {
+    const { action, paneId } = e.detail;
+    const pane = this.getPaneElement(paneId) || this.focusedPane();
+    if (!pane) return;
+
+    if (action === 'copy') {
+      const text = pane.selectedText();
+      if (text) {
+        void this.copyToClipboard(text);
+        pane.clearSelection();
+        this.selectedPane = undefined;
+      }
+    } else if (action === 'paste') {
+      this.focusPane(paneId);
+      void this.pasteFromClipboard();
+    } else if (action === 'select-all') {
+      this.focusPane(paneId);
+      pane.selectAll();
+      this.selectedPane = pane;
+    }
+  };
+
   private setupMouse() {
     this.paneStrip.addEventListener('scroll', () => {
+      if (this.contextMenu.open) this.closeContextMenu();
       if (this.layoutMode === 'cards' && this.paneStrip.scrollLeft) this.paneStrip.scrollLeft = 0;
     }, { signal: this.listeners?.signal });
 
     this.paneStrip.addEventListener('pointerdown', (e) => {
       if (!this.connected || !this.client) return;
       if (this.mobile) return;
+      if (this.contextMenu.open) this.closeContextMenu();
       const pane = this.eventPane(e);
       if (!pane) return;
+      if (e.button === 2 && !this.panes.mouseTracking(pane.paneId)) {
+        return;
+      }
       const start = pane.cellAt(e.clientX, e.clientY);
       this.pointer = {
         id: e.pointerId, pane,
@@ -1015,7 +1162,8 @@ export class WideboiApp extends LitElement {
         } else if (press.dragged) {
           const text = selectionText(this.panes.get(press.pane.paneId), press.start,
             press.pane.cellAt(e.clientX, e.clientY));
-          if (text && navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => {});
+          if (text) void this.copyToClipboard(text);
+          press.pane.focusInput();
         } else {
           const urlMatch = findUrlAt(this.panes.get(press.pane.paneId), press.start);
           if (urlMatch) {
@@ -1023,6 +1171,7 @@ export class WideboiApp extends LitElement {
           } else {
             this.selectedPane?.clearSelection();
             this.selectedPane = undefined;
+            press.pane.focusInput();
           }
         }
       }
@@ -1078,6 +1227,17 @@ export class WideboiApp extends LitElement {
         this.client.send({ case: 'scroll', value: { paneId: pane.paneId, delta } });
       }
     }, { passive: false, signal: this.listeners?.signal });
+
+    this.paneStrip.addEventListener('contextmenu', (e: MouseEvent) => {
+      if (!this.connected || !this.client) return;
+      const pane = this.eventPane(e);
+      if (!pane) return;
+      if (this.panes.mouseTracking(pane.paneId)) {
+        return;
+      }
+      e.preventDefault();
+      this.openContextMenu(e.clientX, e.clientY, pane);
+    }, { signal: this.listeners?.signal });
   }
 
   private eventPane(e: Event): WideboiPane | undefined {
@@ -1510,6 +1670,9 @@ export class WideboiApp extends LitElement {
       case 'settings':
         this.openSettings();
         break;
+      case 'paste':
+        void this.pasteFromClipboard();
+        break;
       case 'quit':
       case 'q':
         this.client?.send({ case: 'shutdown', value: {} });
@@ -1569,6 +1732,9 @@ export class WideboiApp extends LitElement {
         break;
       case 'prompt':
         this.openCommandPalette(':');
+        break;
+      case 'paste':
+        void this.pasteFromClipboard();
         break;
       case 'new-pane':
         this.handleVerbAction(VerbType.NEW_COLUMN);
@@ -2189,6 +2355,15 @@ export class WideboiApp extends LitElement {
           @execute-prompt=${(e: CustomEvent<string>) => this.handlePromptCommand(e.detail)}
         ></wideboi-command-palette>
       ` : ''}
+      <wideboi-context-menu
+        .open=${this.contextMenu.open}
+        .x=${this.contextMenu.x}
+        .y=${this.contextMenu.y}
+        .hasSelection=${this.contextMenu.hasSelection}
+        .paneId=${this.contextMenu.paneId}
+        @action=${this.handleContextMenuAction}
+        @close=${this.closeContextMenu}
+      ></wideboi-context-menu>
       ${!this.connected ? html`
         <div class="overlay">
           <div class="connection-box">

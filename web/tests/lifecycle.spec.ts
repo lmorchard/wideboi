@@ -134,7 +134,8 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   expect(await page.evaluate(() => {
     const app = document.querySelector('wideboi-app') as any;
     const pane = app.shadowRoot.querySelector('wideboi-pane');
-    return app.shadowRoot.activeElement === pane && pane.shadowRoot.activeElement?.tagName === 'CANVAS';
+    const tag = pane?.shadowRoot?.activeElement?.tagName;
+    return app.shadowRoot.activeElement === pane && (tag === 'CANVAS' || tag === 'TEXTAREA');
   })).toBe(true);
 
   await page.evaluate(async () => {
@@ -159,7 +160,8 @@ test('pane elements keep their widths and browser scrolling reveals focus', asyn
   expect(await page.evaluate(() => {
     const app = document.querySelector('wideboi-app') as any;
     const pane = [...app.shadowRoot.querySelectorAll('wideboi-pane')].find(element => (element as any).paneId === 3);
-    return app.shadowRoot.activeElement === pane && pane.shadowRoot.activeElement?.tagName === 'CANVAS';
+    const tag = pane?.shadowRoot?.activeElement?.tagName;
+    return app.shadowRoot.activeElement === pane && (tag === 'CANVAS' || tag === 'TEXTAREA');
   })).toBe(true);
   await page.keyboard.type('q');
   await expect.poll(async () => (await messages()).some(msg =>

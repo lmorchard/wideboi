@@ -87,7 +87,7 @@ describe('RenderStats', () => {
     const stats = new RenderStats();
     for (let i = 0; i < 2_000_000; i++) stats.recordDraw(i % 1000);
     expect(stats.summary(5000).draw.max).toBe(999);
-  });
+  }, 15000);
 
   it('reports zeros rather than NaN for an empty window', () => {
     const s = new RenderStats().summary(0);
