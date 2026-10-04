@@ -605,6 +605,7 @@ export class WideboiApp extends LitElement {
                 if (newStatus === PaneStatus.NEEDS_INPUT) desc = 'Needs input';
                 else if (newStatus === PaneStatus.DONE || newStatus === PaneStatus.IDLE) desc = 'Finished successfully';
                 else if (newStatus === PaneStatus.FAILED) desc = 'Failed';
+                else if (newStatus === PaneStatus.INTERRUPTED) desc = 'Interrupted';
                 if (desc) this.notifyBackground(title, desc);
               }
               if (oldStatus === PaneStatus.WORKING && newStatus === PaneStatus.IDLE && paneId !== this.focusedPaneId) {
@@ -905,7 +906,7 @@ export class WideboiApp extends LitElement {
     else if (verb === VerbType.FOCUS_LAST) this.focusPane(this.previousFocusId);
     else if (verb === VerbType.SMART_JUMP) {
       const rank = (status: PaneStatus | undefined) =>
-        status === PaneStatus.FAILED ? 3 : status === PaneStatus.DONE ? 2 : status === PaneStatus.NEEDS_INPUT ? 1 : 0;
+        status === PaneStatus.FAILED || status === PaneStatus.INTERRUPTED ? 3 : status === PaneStatus.DONE ? 2 : status === PaneStatus.NEEDS_INPUT ? 1 : 0;
       const target = this.activePanes.reduce((best, id) => {
         const score = rank(this.displayStatus(id));
         return score > rank(this.displayStatus(best)) ||
@@ -2013,16 +2014,19 @@ export class WideboiApp extends LitElement {
                 const glyph = status === PaneStatus.WORKING ? '»'
                   : status === PaneStatus.NEEDS_INPUT ? '!'
                   : status === PaneStatus.DONE ? '✓'
-                  : status === PaneStatus.FAILED ? '✗' : '';
+                  : status === PaneStatus.FAILED ? '✗'
+                  : status === PaneStatus.INTERRUPTED ? '?' : '';
                 const statusClass = status === PaneStatus.WORKING ? 'working'
                   : status === PaneStatus.NEEDS_INPUT ? 'needs-input'
                   : status === PaneStatus.DONE ? 'done'
-                  : status === PaneStatus.FAILED ? 'failed' : '';
+                  : status === PaneStatus.FAILED ? 'failed'
+                  : status === PaneStatus.INTERRUPTED ? 'interrupted' : '';
                 const title = this.paneTitles[id] || 'Terminal';
                 const statusLabel = status === PaneStatus.WORKING ? ', working'
                   : status === PaneStatus.NEEDS_INPUT ? ', needs input'
                   : status === PaneStatus.DONE ? ', done'
-                  : status === PaneStatus.FAILED ? ', failed' : '';
+                  : status === PaneStatus.FAILED ? ', failed'
+                  : status === PaneStatus.INTERRUPTED ? ', interrupted' : '';
                 const scrollLabel = scrollInfo ? `, scroll ${scrollInfo}` : '';
                 const ariaLabel = `Pane ${id}: ${title}${statusLabel}${scrollLabel}`;
                 return html`

@@ -18,6 +18,7 @@ func TestFormatBadgeWidthInvariance(t *testing.T) {
 		protocol.StatusNeedsInput,
 		protocol.StatusDone,
 		protocol.StatusFailed,
+		protocol.StatusInterrupted,
 	}
 
 	for _, id := range []int{1, 5, 42, 100} {
@@ -54,6 +55,8 @@ func TestFormatBadgeExactStrings(t *testing.T) {
 		{1, true, protocol.StatusDone, "[● 1 ✓]"},
 		{1, false, protocol.StatusFailed, "[  1 ✗]"},
 		{1, true, protocol.StatusFailed, "[● 1 ✗]"},
+		{1, false, protocol.StatusInterrupted, "[  1 ?]"},
+		{1, true, protocol.StatusInterrupted, "[● 1 ?]"},
 	}
 
 	for _, tc := range cases {

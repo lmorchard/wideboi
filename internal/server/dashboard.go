@@ -53,7 +53,7 @@ func statusPriority(st protocol.PaneStatus) int {
 	switch st {
 	case protocol.StatusNeedsInput:
 		return 5
-	case protocol.StatusFailed:
+	case protocol.StatusFailed, protocol.StatusInterrupted:
 		return 4
 	case protocol.StatusDone:
 		return 3
@@ -157,13 +157,15 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 	sb.WriteString("\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[2J\x1b[H")
 
 	// Fleet summary header banner
-	var needsInputCount, failedCount, doneCount, workingCount, idleCount int
+	var needsInputCount, failedCount, interruptedCount, doneCount, workingCount, idleCount int
 	for _, p := range d.panes {
 		switch p.Status {
 		case protocol.StatusNeedsInput:
 			needsInputCount++
 		case protocol.StatusFailed:
 			failedCount++
+		case protocol.StatusInterrupted:
+			interruptedCount++
 		case protocol.StatusDone:
 			doneCount++
 		case protocol.StatusWorking:
@@ -179,6 +181,9 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 	}
 	if failedCount > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d failed", failedCount))
+	}
+	if interruptedCount > 0 {
+		summaryParts = append(summaryParts, fmt.Sprintf("%d interrupted", interruptedCount))
 	}
 	if workingCount > 0 {
 		summaryParts = append(summaryParts, fmt.Sprintf("%d working", workingCount))
@@ -211,6 +216,9 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 		if failedCount > 0 {
 			shortParts = append(shortParts, fmt.Sprintf("%d✖", failedCount))
 		}
+		if interruptedCount > 0 {
+			shortParts = append(shortParts, fmt.Sprintf("%d?", interruptedCount))
+		}
 		if workingCount > 0 {
 			shortParts = append(shortParts, fmt.Sprintf("%d▲", workingCount))
 		}
@@ -236,6 +244,9 @@ func (d *Dashboard) Render(panes []PaneInfo, cols, rows int) []byte {
 			}
 			if failedCount > 0 {
 				shortParts = append(shortParts, fmt.Sprintf("%d✖", failedCount))
+			}
+			if interruptedCount > 0 {
+				shortParts = append(shortParts, fmt.Sprintf("%d?", interruptedCount))
 			}
 			if workingCount > 0 {
 				shortParts = append(shortParts, fmt.Sprintf("%d▲", workingCount))
@@ -357,6 +368,8 @@ func formatStatus(st protocol.PaneStatus) string {
 		return "✔ done"
 	case protocol.StatusFailed:
 		return "✖ failed"
+	case protocol.StatusInterrupted:
+		return "? interrupted"
 	default:
 		return "● idle"
 	}
@@ -372,6 +385,8 @@ func formatStatusGlyph(st protocol.PaneStatus) string {
 		return "✔"
 	case protocol.StatusFailed:
 		return "✖"
+	case protocol.StatusInterrupted:
+		return "?"
 	default:
 		return "●"
 	}

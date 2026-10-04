@@ -10,6 +10,7 @@ function statusGlyph(status: PaneStatus | undefined): string {
     case PaneStatus.NEEDS_INPUT: return '!';
     case PaneStatus.DONE: return '✓';
     case PaneStatus.FAILED: return '✗';
+    case PaneStatus.INTERRUPTED: return '?';
     default: return '';
   }
 }

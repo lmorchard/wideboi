@@ -123,6 +123,7 @@ const (
 	PaneStatus_PANE_STATUS_NEEDS_INPUT PaneStatus = 2
 	PaneStatus_PANE_STATUS_DONE        PaneStatus = 3
 	PaneStatus_PANE_STATUS_FAILED      PaneStatus = 4
+	PaneStatus_PANE_STATUS_INTERRUPTED PaneStatus = 5
 )
 
 // Enum value maps for PaneStatus.
@@ -133,6 +134,7 @@ var (
 		2: "PANE_STATUS_NEEDS_INPUT",
 		3: "PANE_STATUS_DONE",
 		4: "PANE_STATUS_FAILED",
+		5: "PANE_STATUS_INTERRUPTED",
 	}
 	PaneStatus_value = map[string]int32{
 		"PANE_STATUS_IDLE":        0,
@@ -140,6 +142,7 @@ var (
 		"PANE_STATUS_NEEDS_INPUT": 2,
 		"PANE_STATUS_DONE":        3,
 		"PANE_STATUS_FAILED":      4,
+		"PANE_STATUS_INTERRUPTED": 5,
 	}
 )
 
@@ -5403,14 +5406,15 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x14VERB_TYPE_CLAIM_SIZE\x10\x0e\x12\x18\n" +
 	"\x14VERB_TYPE_TOGGLE_PIN\x10\x0f\x12\x16\n" +
 	"\x12VERB_TYPE_PIN_PANE\x10\x10\x12\x18\n" +
-	"\x14VERB_TYPE_UNPIN_PANE\x10\x11*\x86\x01\n" +
+	"\x14VERB_TYPE_UNPIN_PANE\x10\x11*\xa3\x01\n" +
 	"\n" +
 	"PaneStatus\x12\x14\n" +
 	"\x10PANE_STATUS_IDLE\x10\x00\x12\x17\n" +
 	"\x13PANE_STATUS_WORKING\x10\x01\x12\x1b\n" +
 	"\x17PANE_STATUS_NEEDS_INPUT\x10\x02\x12\x14\n" +
 	"\x10PANE_STATUS_DONE\x10\x03\x12\x16\n" +
-	"\x12PANE_STATUS_FAILED\x10\x04*c\n" +
+	"\x12PANE_STATUS_FAILED\x10\x04\x12\x1b\n" +
+	"\x17PANE_STATUS_INTERRUPTED\x10\x05*c\n" +
 	"\tColorKind\x12\x13\n" +
 	"\x0fCOLOR_KIND_NONE\x10\x00\x12\x14\n" +
 	"\x10COLOR_KIND_BASIC\x10\x01\x12\x16\n" +

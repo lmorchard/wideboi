@@ -271,6 +271,10 @@ type vtGrid struct {
 	lastHeuristicGen       uint64
 	lastHeuristicTitle     string
 
+	// workingInactivityTimeout is how long a pane reporting StatusWorking may
+	// go without PTY output before being flagged as StatusInterrupted.
+	workingInactivityTimeout time.Duration
+
 	// writeResizeMu serializes Write against Resize. SafeEmulator's
 	// CellAt returns *uv.Cell aliasing its live buffer slot (uv.Line.At
 	// is literally &l[x]), not a copy, and its own se.mu.RLock is
@@ -319,7 +323,16 @@ func NewVT(cols, rows int) Grid {
 // Widening NewVT itself would touch its ~20 existing call sites to serve
 // one test.
 func NewVTWithIdleTimeout(cols, rows int, idle time.Duration) Grid {
-	g := &vtGrid{em: vt.NewSafeEmulator(cols, rows), idleTimeout: idle}
+	return NewVTWithTimeouts(cols, rows, idle, DefaultWorkingInactivityTimeout)
+}
+
+// NewVTWithTimeouts is NewVT with custom idle and working inactivity timeouts.
+func NewVTWithTimeouts(cols, rows int, idle, inactivity time.Duration) Grid {
+	g := &vtGrid{
+		em:                       vt.NewSafeEmulator(cols, rows),
+		idleTimeout:              idle,
+		workingInactivityTimeout: inactivity,
+	}
 	g.cursorVisible.Store(true)
 	g.status.Store(int32(protocol.StatusIdle))
 
@@ -594,11 +607,20 @@ func (g *vtGrid) UserVars() map[string]string {
 
 func (g *vtGrid) Status() protocol.PaneStatus {
 	st := protocol.PaneStatus(g.status.Load())
+	t := g.lastWriteTime.Load()
+
+	inactivityLimit := g.workingInactivityTimeout
+	if inactivityLimit <= 0 {
+		inactivityLimit = DefaultWorkingInactivityTimeout
+	}
+
 	if g.sawAuthoritativeStatus.Load() {
+		if st == protocol.StatusWorking && t != nil && time.Since(*t) > inactivityLimit {
+			return protocol.StatusInterrupted
+		}
 		return st
 	}
 
-	t := g.lastWriteTime.Load()
 	if t == nil {
 		return st
 	}
@@ -628,6 +650,9 @@ func (g *vtGrid) Status() protocol.PaneStatus {
 		cachedMatched := g.cachedHeuristicMatched
 		g.heuristicMu.Unlock()
 		if cachedMatched {
+			if cachedStatus == protocol.StatusWorking && since > inactivityLimit {
+				return protocol.StatusInterrupted
+			}
 			return cachedStatus
 		}
 		if since > idle {
@@ -662,6 +687,9 @@ func (g *vtGrid) Status() protocol.PaneStatus {
 	g.heuristicMu.Unlock()
 
 	if matched {
+		if newStatus == protocol.StatusWorking && since > inactivityLimit {
+			return protocol.StatusInterrupted
+		}
 		return newStatus
 	}
 	if since > idle {
@@ -1138,6 +1166,10 @@ func (g *vtGrid) RestoreSnapshot(snap *GridSnapshot) {
 		_, _ = g.em.Write([]byte("\033[?66h"))
 	}
 	g.status.Store(snap.Status)
+	if snap.Status == int32(protocol.StatusWorking) {
+		now := time.Now()
+		g.lastWriteTime.Store(&now)
+	}
 	if snap.Title != "" {
 		t := snap.Title
 		g.title.Store(&t)

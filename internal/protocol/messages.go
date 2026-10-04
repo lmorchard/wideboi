@@ -42,14 +42,16 @@ const (
 	StatusNeedsInput
 	StatusDone
 	StatusFailed
+	StatusInterrupted
 )
 
 var paneStatusNames = [...]string{
-	StatusIdle:       "idle",
-	StatusWorking:    "working",
-	StatusNeedsInput: "needs_input",
-	StatusDone:       "done",
-	StatusFailed:     "failed",
+	StatusIdle:        "idle",
+	StatusWorking:     "working",
+	StatusNeedsInput:  "needs_input",
+	StatusDone:        "done",
+	StatusFailed:      "failed",
+	StatusInterrupted: "interrupted",
 }
 
 // String returns the status's name, as status --json and the status
@@ -86,6 +88,8 @@ func (s PaneStatus) Glyph() string {
 		return "✓"
 	case StatusFailed:
 		return "✗"
+	case StatusInterrupted:
+		return "?"
 	default:
 		return " "
 	}

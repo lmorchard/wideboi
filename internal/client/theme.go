@@ -57,6 +57,8 @@ func BadgeComponents(id int, isFocus bool, status protocol.PaneStatus) (focusStr
 		statusStr = "✓"
 	case protocol.StatusFailed:
 		statusStr = "✗"
+	case protocol.StatusInterrupted:
+		statusStr = "?"
 	}
 	return focusStr, idStr, statusStr
 }
@@ -65,7 +67,7 @@ func BadgeComponents(id int, isFocus bool, status protocol.PaneStatus) (focusStr
 func (t Theme) StatusStyle(status protocol.PaneStatus) uv.Style {
 	if t.NoColor {
 		switch status {
-		case protocol.StatusWorking, protocol.StatusNeedsInput, protocol.StatusFailed:
+		case protocol.StatusWorking, protocol.StatusNeedsInput, protocol.StatusFailed, protocol.StatusInterrupted:
 			return uv.Style{Attrs: uv.AttrBold}
 		default:
 			return uv.Style{}
@@ -80,6 +82,8 @@ func (t Theme) StatusStyle(status protocol.PaneStatus) uv.Style {
 		return t.Done
 	case protocol.StatusFailed:
 		return t.Failed
+	case protocol.StatusInterrupted:
+		return t.Working
 	default:
 		return uv.Style{}
 	}

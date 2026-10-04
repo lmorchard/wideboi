@@ -227,6 +227,8 @@ func (c *Client) HandleServerMsg(msg transport.ServerMessage) {
 							desc = "Finished successfully"
 						case protocol.StatusFailed:
 							desc = "Failed"
+						case protocol.StatusInterrupted:
+							desc = "Interrupted"
 						}
 						if desc != "" {
 							c.emitNotificationLocked(title, desc)
@@ -727,7 +729,7 @@ func (c *Client) markSeenLocked(id int) {
 func (c *Client) smartJumpTargetLocked() int {
 	rank := func(st protocol.PaneStatus) int {
 		switch st {
-		case protocol.StatusFailed:
+		case protocol.StatusFailed, protocol.StatusInterrupted:
 			return 3
 		case protocol.StatusDone:
 			return 2

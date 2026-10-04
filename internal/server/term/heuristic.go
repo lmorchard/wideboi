@@ -12,6 +12,10 @@ import (
 // before scanning screen contents and title for interactive agent prompts.
 const heuristicDebounceWindow = 500 * time.Millisecond
 
+// DefaultWorkingInactivityTimeout is the maximum duration a pane may report
+// StatusWorking without any PTY output before being flagged as StatusInterrupted.
+const DefaultWorkingInactivityTimeout = 30 * time.Second
+
 var (
 	// regexProgress matches common ASCII / Unicode progress bar blocks.
 	regexProgress = regexp.MustCompile(`(■|⬝){4,}|\[={5,}>`)

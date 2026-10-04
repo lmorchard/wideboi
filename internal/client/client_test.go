@@ -181,6 +181,33 @@ func TestClientDesktopNotifications(t *testing.T) {
 	if len(notifs) != 2 {
 		t.Fatalf("bell on focused pane should not emit notification: %v", notifs)
 	}
+
+	// Working -> Interrupted on pane 2 (unfocused) -> EMIT notification!
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusIdle,
+			2: protocol.StatusWorking,
+		},
+		PaneTitles: map[int]string{1: "Editor", 2: "Compiler"},
+	})
+	cli.HandleServerMsg(protocol.MsgLayoutSnapshot{
+		Columns: []protocol.ColumnData{
+			{PaneID: 1, Width: 40, Height: 22},
+			{PaneID: 2, Width: 40, Height: 22},
+		},
+		PaneStatuses: map[int]protocol.PaneStatus{
+			1: protocol.StatusIdle,
+			2: protocol.StatusInterrupted,
+		},
+		PaneTitles: map[int]string{1: "Editor", 2: "Compiler"},
+	})
+	if len(notifs) != 3 || notifs[2][0] != "Compiler" || notifs[2][1] != "Interrupted" {
+		t.Errorf("expected Interrupted notification, got %v", notifs)
+	}
 }
 
 func TestEmitHostNotificationModesAndSanitization(t *testing.T) {
