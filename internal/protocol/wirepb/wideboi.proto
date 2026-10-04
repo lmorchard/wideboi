@@ -30,6 +30,9 @@ enum VerbType {
   VERB_TYPE_TOGGLE_PIN = 15;
   VERB_TYPE_PIN_PANE = 16;
   VERB_TYPE_UNPIN_PANE = 17;
+  VERB_TYPE_TOGGLE_COLLAPSE = 18;
+  VERB_TYPE_COLLAPSE_PANE = 19;
+  VERB_TYPE_UNCOLLAPSE_PANE = 20;
 }
 
 enum PaneStatus {
@@ -128,6 +131,7 @@ message ColumnData {
   int32 width = 2;
   int32 height = 3;
   bool pinned = 4;
+  bool collapsed = 5;
 }
 
 message MsgLayoutSnapshot {

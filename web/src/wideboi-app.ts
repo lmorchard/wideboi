@@ -1936,8 +1936,8 @@ export class WideboiApp extends LitElement {
     const cards = this.layoutMode === 'cards' && !this.mobile;
     if (cards && this.columns.length > 0) {
       const displayWidth = (column: ColumnData) =>
-        this.displayWidths[column.paneId] ?? column.width;
-      const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column), pinned: column.pinned }));
+        column.collapsed ? 4 : (this.displayWidths[column.paneId] ?? column.width);
+      const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column), pinned: column.pinned, collapsed: column.collapsed }));
       const stackFocusId = this.stackFocusId === null ? null :
         (this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId);
       const layout = cardLayout(
@@ -1955,8 +1955,9 @@ export class WideboiApp extends LitElement {
     const cards = this.layoutMode === 'cards' && !this.mobile;
     const displayWidth = (column: ColumnData) =>
       this.mobile ? Math.max(1, Math.floor(this.cardViewportWidth / this.cellWidth)) :
+      column.collapsed ? 4 :
       this.displayWidths[column.paneId] ?? column.width;
-    const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column), pinned: column.pinned }));
+    const displayColumns = this.columns.map(column => ({ paneId: column.paneId, width: displayWidth(column), pinned: column.pinned, collapsed: column.collapsed }));
     const stackFocusId = this.stackFocusId === null ? null :
       (this.activePanes.includes(this.stackFocusId) ? this.stackFocusId : this.focusedPaneId);
     const layout = cards ? cardLayout(displayColumns, this.focusedPaneId,

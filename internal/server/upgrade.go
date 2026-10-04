@@ -384,6 +384,9 @@ func RestoreState(s *Server) error {
 		if col.Pinned {
 			s.strip.PinColumn(col.PaneID)
 		}
+		if col.Collapsed {
+			s.strip.CollapseColumn(col.PaneID)
+		}
 	}
 
 	// Restore previous focus history before final focus

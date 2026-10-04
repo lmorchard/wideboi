@@ -190,6 +190,7 @@ type StartupPane struct {
 	Dir       string
 	Width     int
 	Pinned    bool
+	Collapsed bool
 	// Keep retains the pane after its process exits; see watchKeptPane.
 	Keep bool
 }

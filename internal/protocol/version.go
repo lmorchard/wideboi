@@ -43,4 +43,5 @@ package protocol
 // 26 adds StatusInterrupted to PaneStatus (#383).
 // 27 adds MsgSetPaneStatusRequest and MsgSetPaneStatusResponse (#382).
 // 28 adds wait-output and wait-status requests and responses (#377).
-const Version uint32 = 28
+// 29 adds collapsed column flag and collapse verbs (#386).
+const Version uint32 = 29

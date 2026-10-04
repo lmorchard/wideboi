@@ -311,3 +311,42 @@ func TestPinnedColumnsInCardStrategy(t *testing.T) {
 		t.Errorf("card mode focused pane 2 Dst = %v, want Min.X=29 Max.X=89", p2.Dst)
 	}
 }
+
+func TestCollapsedColumnsInCardStrategy(t *testing.T) {
+	s := layout.NewStrip()
+	s.SetStrategy(layout.CardStrategy{})
+	s.AddColumn(1, 28, 20, 0) // Pinned
+	s.AddColumn(2, 60, 20, 0) // Unpinned
+	s.AddColumn(3, 60, 20, 0) // Collapsed
+	s.PinColumn(1)
+	s.CollapseColumn(3)
+
+	// Viewport width = 120.
+	// Pinned column 1 takes 0..28 (starts at 0, width 28)
+	// Collapsed column 3 takes 116..119 (starts at 120 - 4 = 116, width 3)
+	// Remaining fan width = 116 - 29 = 87.
+	s.FocusPaneID(2)
+	ps := s.ComputePlacements(120, 24)
+
+	var p1, p2, p3 layout.Placement
+	for _, p := range ps {
+		switch p.PaneID {
+		case 1:
+			p1 = p
+		case 2:
+			p2 = p
+		case 3:
+			p3 = p
+		}
+	}
+
+	if p1.Dst.Min.X != 0 || p1.Dst.Max.X != 28 {
+		t.Errorf("card mode pinned pane 1 Dst = %v, want Min.X=0 Max.X=28", p1.Dst)
+	}
+	if p3.Dst.Min.X != 116 || p3.Dst.Max.X != 119 {
+		t.Errorf("card mode collapsed pane 3 Dst = %v, want Min.X=116 Max.X=119", p3.Dst)
+	}
+	if p2.Dst.Min.X != 29 {
+		t.Errorf("card mode unpinned pane 2 Dst.Min.X = %d, want 29", p2.Dst.Min.X)
+	}
+}

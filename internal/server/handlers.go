@@ -762,6 +762,9 @@ func (s *Server) handleAttachLocked(tp transport.Transport, m protocol.MsgAttach
 				if spec.Pinned {
 					s.strip.PinColumn(p.ID())
 				}
+				if spec.Collapsed {
+					s.strip.CollapseColumn(p.ID())
+				}
 				if firstID == 0 {
 					firstID = p.ID()
 				}
@@ -908,6 +911,15 @@ func (s *Server) handleVerbLocked(tp transport.Transport, m protocol.MsgVerb) ms
 		s.resizePanesLocked()
 	case protocol.VerbUnpinPane:
 		s.strip.UnpinColumn(m.PaneID)
+		s.resizePanesLocked()
+	case protocol.VerbToggleCollapse:
+		s.strip.ToggleCollapseColumn(m.PaneID)
+		s.resizePanesLocked()
+	case protocol.VerbCollapsePane:
+		s.strip.CollapseColumn(m.PaneID)
+		s.resizePanesLocked()
+	case protocol.VerbUncollapsePane:
+		s.strip.UncollapseColumn(m.PaneID)
 		s.resizePanesLocked()
 	case protocol.VerbToggleCards:
 		// Reserved: layout is the client's (#92).

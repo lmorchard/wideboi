@@ -252,7 +252,7 @@ func MarshalServer(msg any) ([]byte, error) {
 	case MsgLayoutSnapshot:
 		snap := &wirepb.MsgLayoutSnapshot{SessionCwd: validUTF8(m.SessionCWD), AttachedClients: int32(m.AttachedClients)}
 		for _, c := range m.Columns {
-			snap.Columns = append(snap.Columns, &wirepb.ColumnData{PaneId: int32(c.PaneID), Width: int32(c.Width), Height: int32(c.Height), Pinned: c.Pinned})
+			snap.Columns = append(snap.Columns, &wirepb.ColumnData{PaneId: int32(c.PaneID), Width: int32(c.Width), Height: int32(c.Height), Pinned: c.Pinned, Collapsed: c.Collapsed})
 		}
 		if m.PaneStatuses != nil {
 			snap.PaneStatuses = make(map[int32]wirepb.PaneStatus, len(m.PaneStatuses))
@@ -460,7 +460,7 @@ func UnmarshalServer(data []byte) (any, error) {
 		src := m.LayoutSnapshot
 		snap := MsgLayoutSnapshot{SessionCWD: src.SessionCwd, AttachedClients: int(src.AttachedClients)}
 		for _, c := range src.Columns {
-			snap.Columns = append(snap.Columns, ColumnData{PaneID: int(c.PaneId), Width: int(c.Width), Height: int(c.Height), Pinned: c.Pinned})
+			snap.Columns = append(snap.Columns, ColumnData{PaneID: int(c.PaneId), Width: int(c.Width), Height: int(c.Height), Pinned: c.Pinned, Collapsed: c.Collapsed})
 		}
 		if src.PaneStatuses != nil {
 			snap.PaneStatuses = make(map[int]PaneStatus, len(src.PaneStatuses))

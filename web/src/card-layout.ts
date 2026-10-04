@@ -1,4 +1,4 @@
-export interface CardColumn { paneId: number; width: number; pinned?: boolean }
+export interface CardColumn { paneId: number; width: number; pinned?: boolean; collapsed?: boolean }
 
 export interface CardPlacement {
   paneId: number;
@@ -15,17 +15,19 @@ export interface CardLayout {
 }
 
 const MIN_SLIVER_WIDTH = 4;
+const COLLAPSED_WIDTH = 4;
 
 // Positions are in display cells. The elements retain their chosen card widths;
 // later cards cover their predecessors to leave visible slivers. Pinned cards
-// anchor to the left edge of the viewport.
+// anchor to the left edge of the viewport; collapsed cards anchor to the right.
 export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewportWidth: number, previousFirst: number, stackFocusId: number | null = focusedPaneId): CardLayout {
   if (!columns.length || viewportWidth <= 0) {
     return { first: 0, placements: columns.map(c => ({ paneId: c.paneId, left: 0, visible: false, z: 0 })), hiddenLeft: 0, hiddenRight: 0 };
   }
 
   const pinnedCols = columns.filter(c => c.pinned);
-  const unpinnedCols = columns.filter(c => !c.pinned);
+  const collapsedCols = columns.filter(c => !c.pinned && c.collapsed);
+  const unpinnedCols = columns.filter(c => !c.pinned && !c.collapsed);
 
   let pinnedX = 0;
   const pinnedPlacements: CardPlacement[] = [];
@@ -40,11 +42,26 @@ export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewpor
     });
   }
 
-  const remainingViewport = Math.max(0, viewportWidth - pinnedX);
+  const collapsedTotalWidth = collapsedCols.length * COLLAPSED_WIDTH;
+  const collapsedStartX = Math.max(pinnedX, viewportWidth - collapsedTotalWidth);
+  const collapsedPlacements: CardPlacement[] = [];
+  let curCollapsedX = collapsedStartX;
+  for (const col of collapsedCols) {
+    const left = curCollapsedX;
+    curCollapsedX += COLLAPSED_WIDTH;
+    collapsedPlacements.push({
+      paneId: col.paneId,
+      left,
+      visible: true,
+      z: stackFocusId !== null && col.paneId === stackFocusId ? columns.length + 1 : 1,
+    });
+  }
+
+  const remainingViewport = Math.max(0, collapsedStartX - pinnedX);
   const startX = pinnedX;
 
   if (!unpinnedCols.length || remainingViewport <= 0) {
-    const placementMap = new Map(pinnedPlacements.map(p => [p.paneId, p]));
+    const placementMap = new Map([...pinnedPlacements, ...collapsedPlacements].map(p => [p.paneId, p]));
     return {
       first: 0,
       placements: columns.map(c => placementMap.get(c.paneId) ?? { paneId: c.paneId, left: 0, visible: false, z: 0 }),
@@ -62,7 +79,7 @@ export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewpor
       visible: true,
       z: isFocused ? columns.length + 1 : 1,
     }];
-    const placementMap = new Map([...pinnedPlacements, ...unpinnedPlacements].map(p => [p.paneId, p]));
+    const placementMap = new Map([...pinnedPlacements, ...unpinnedPlacements, ...collapsedPlacements].map(p => [p.paneId, p]));
     return {
       first: 0,
       placements: columns.map(c => placementMap.get(c.paneId) ?? { paneId: c.paneId, left: 0, visible: false, z: 0 }),
@@ -113,7 +130,7 @@ export function cardLayout(columns: CardColumn[], focusedPaneId: number, viewpor
     };
   });
 
-  const placementMap = new Map([...pinnedPlacements, ...unpinnedPlacements].map(p => [p.paneId, p]));
+  const placementMap = new Map([...pinnedPlacements, ...unpinnedPlacements, ...collapsedPlacements].map(p => [p.paneId, p]));
   const placements = columns.map(c => placementMap.get(c.paneId) ?? { paneId: c.paneId, left: 0, visible: false, z: 0 });
   return { first, placements, hiddenLeft: first, hiddenRight: unpinnedCols.length - last - 1 };
 }
