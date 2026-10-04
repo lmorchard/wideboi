@@ -23,33 +23,34 @@ import (
 
 // Canonical action names used in configuration files.
 const (
-	ActionNameFocusLeft    = "focus_left"
-	ActionNameFocusRight   = "focus_right"
-	ActionNameScrollDown   = "scroll_down"
-	ActionNameScrollUp     = "scroll_up"
-	ActionNameNewColumn    = "new_column"
-	ActionNameCycleWidth   = "cycle_width"
-	ActionNameGrowWidth    = "grow_width"
-	ActionNameShrinkWidth  = "shrink_width"
-	ActionNameMoveLeft     = "move_left"
-	ActionNameMoveRight    = "move_right"
-	ActionNameKillPane     = "kill_pane"
-	ActionNameSmartJump    = "smart_jump"
-	ActionNameFocusLast    = "focus_last"
-	ActionNameToggleCards  = "toggle_cards"
-	ActionNameToggleStatus = "toggle_status"
-	ActionNameTogglePin    = "toggle_pin"
-	ActionNameClaimSize    = "claim_size"
-	ActionNamePanLeft      = "pan_left"
-	ActionNamePanRight     = "pan_right"
-	ActionNameFollowPTY    = "follow_pty"
-	ActionNameHelp         = "help"
-	ActionNameSearch       = "search"
-	ActionNameDetach       = "detach"
-	ActionNameQuit         = "quit"
-	ActionNameExit         = "exit"
-	ActionNamePrompt       = "prompt"
-	ActionNamePalette      = "palette"
+	ActionNameFocusLeft      = "focus_left"
+	ActionNameFocusRight     = "focus_right"
+	ActionNameScrollDown     = "scroll_down"
+	ActionNameScrollUp       = "scroll_up"
+	ActionNameNewColumn      = "new_column"
+	ActionNameCycleWidth     = "cycle_width"
+	ActionNameGrowWidth      = "grow_width"
+	ActionNameShrinkWidth    = "shrink_width"
+	ActionNameMoveLeft       = "move_left"
+	ActionNameMoveRight      = "move_right"
+	ActionNameKillPane       = "kill_pane"
+	ActionNameSmartJump      = "smart_jump"
+	ActionNameFocusLast      = "focus_last"
+	ActionNameToggleCards    = "toggle_cards"
+	ActionNameToggleStatus   = "toggle_status"
+	ActionNameTogglePin      = "toggle_pin"
+	ActionNameToggleCollapse = "toggle_collapse"
+	ActionNameClaimSize      = "claim_size"
+	ActionNamePanLeft        = "pan_left"
+	ActionNamePanRight       = "pan_right"
+	ActionNameFollowPTY      = "follow_pty"
+	ActionNameHelp           = "help"
+	ActionNameSearch         = "search"
+	ActionNameDetach         = "detach"
+	ActionNameQuit           = "quit"
+	ActionNameExit           = "exit"
+	ActionNamePrompt         = "prompt"
+	ActionNamePalette        = "palette"
 )
 
 // Action is what a binding does when it fires. It is deliberately not
@@ -197,6 +198,8 @@ var Bindings = slices.Concat([]Binding{
 		Long: "open or focus pane status dashboard", HelpGroup: helpAttention},
 	{ActionName: ActionNameTogglePin, Key: "P", Action: ActionVerb, Verb: protocol.VerbTogglePin,
 		Long: "pin or unpin this column to the left", HelpGroup: helpWidth},
+	{ActionName: ActionNameToggleCollapse, Key: "C", Action: ActionVerb, Verb: protocol.VerbToggleCollapse,
+		Long: "collapse or expand this column", HelpGroup: helpWidth},
 	// tab has no ctrl form -- CtrlForm wants a single letter, and ctrl+i
 	// decodes as tab anyway -- and repeating a toggle only bounces.
 	{ActionName: ActionNameFocusLast, Key: "tab", Action: ActionVerb, Verb: protocol.VerbFocusLast,
@@ -351,36 +354,38 @@ func BarItems(detachable bool) (droppable, essential []string) {
 
 // validActions is the set of canonical action names and recognized aliases.
 var validActions = map[string]string{
-	ActionNameFocusLeft:    ActionNameFocusLeft,
-	ActionNameFocusRight:   ActionNameFocusRight,
-	ActionNameScrollDown:   ActionNameScrollDown,
-	ActionNameScrollUp:     ActionNameScrollUp,
-	ActionNameNewColumn:    ActionNameNewColumn,
-	ActionNameCycleWidth:   ActionNameCycleWidth,
-	ActionNameGrowWidth:    ActionNameGrowWidth,
-	ActionNameShrinkWidth:  ActionNameShrinkWidth,
-	ActionNameMoveLeft:     ActionNameMoveLeft,
-	ActionNameMoveRight:    ActionNameMoveRight,
-	ActionNameKillPane:     ActionNameKillPane,
-	ActionNameSmartJump:    ActionNameSmartJump,
-	"attn":                 ActionNameSmartJump,
-	ActionNameToggleStatus: ActionNameToggleStatus,
-	"status":               ActionNameToggleStatus,
-	ActionNameTogglePin:    ActionNameTogglePin,
-	"pin":                  ActionNameTogglePin,
-	ActionNameFocusLast:    ActionNameFocusLast,
-	ActionNameToggleCards:  ActionNameToggleCards,
-	ActionNameClaimSize:    ActionNameClaimSize,
-	ActionNamePanLeft:      ActionNamePanLeft,
-	ActionNamePanRight:     ActionNamePanRight,
-	ActionNameFollowPTY:    ActionNameFollowPTY,
-	ActionNameHelp:         ActionNameHelp,
-	ActionNameSearch:       ActionNameSearch,
-	ActionNameDetach:       ActionNameDetach,
-	ActionNameQuit:         ActionNameQuit,
-	ActionNameExit:         ActionNameExit,
-	ActionNamePrompt:       ActionNamePrompt,
-	ActionNamePalette:      ActionNamePalette,
+	ActionNameFocusLeft:      ActionNameFocusLeft,
+	ActionNameFocusRight:     ActionNameFocusRight,
+	ActionNameScrollDown:     ActionNameScrollDown,
+	ActionNameScrollUp:       ActionNameScrollUp,
+	ActionNameNewColumn:      ActionNameNewColumn,
+	ActionNameCycleWidth:     ActionNameCycleWidth,
+	ActionNameGrowWidth:      ActionNameGrowWidth,
+	ActionNameShrinkWidth:    ActionNameShrinkWidth,
+	ActionNameMoveLeft:       ActionNameMoveLeft,
+	ActionNameMoveRight:      ActionNameMoveRight,
+	ActionNameKillPane:       ActionNameKillPane,
+	ActionNameSmartJump:      ActionNameSmartJump,
+	"attn":                   ActionNameSmartJump,
+	ActionNameToggleStatus:   ActionNameToggleStatus,
+	"status":                 ActionNameToggleStatus,
+	ActionNameTogglePin:      ActionNameTogglePin,
+	"pin":                    ActionNameTogglePin,
+	ActionNameToggleCollapse: ActionNameToggleCollapse,
+	"collapse":               ActionNameToggleCollapse,
+	ActionNameFocusLast:      ActionNameFocusLast,
+	ActionNameToggleCards:    ActionNameToggleCards,
+	ActionNameClaimSize:      ActionNameClaimSize,
+	ActionNamePanLeft:        ActionNamePanLeft,
+	ActionNamePanRight:       ActionNamePanRight,
+	ActionNameFollowPTY:      ActionNameFollowPTY,
+	ActionNameHelp:           ActionNameHelp,
+	ActionNameSearch:         ActionNameSearch,
+	ActionNameDetach:         ActionNameDetach,
+	ActionNameQuit:           ActionNameQuit,
+	ActionNameExit:           ActionNameExit,
+	ActionNamePrompt:         ActionNamePrompt,
+	ActionNamePalette:        ActionNamePalette,
 }
 
 // validNamedKeys is the set of non-single-character key names produced by ultraviolet.

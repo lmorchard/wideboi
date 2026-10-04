@@ -65,12 +65,15 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 
 	availHeight := AvailHeight(viewportHeight)
 
-	// Partition pinned and unpinned columns.
+	// Partition pinned, unpinned, and collapsed columns.
 	var pinnedCols []Column
 	var unpinnedCols []Column
+	var collapsedCols []Column
 	for _, c := range s.columns {
 		if c.Pinned {
 			pinnedCols = append(pinnedCols, c)
+		} else if c.Collapsed {
+			collapsedCols = append(collapsedCols, c)
 		} else {
 			unpinnedCols = append(unpinnedCols, c)
 		}
@@ -103,8 +106,38 @@ func (cs CardStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight
 		})
 	}
 
+	// 2. Place collapsed columns statically on the right.
+	collapsedTotalWidth := 0
+	for range collapsedCols {
+		collapsedTotalWidth += CollapsedColumnWidth + 1
+	}
+
+	collapsedStartX := max(pinnedWidth, viewportWidth-collapsedTotalWidth)
+	currCollapsedX := collapsedStartX
+	for _, c := range collapsedCols {
+		dstX := currCollapsedX
+		dstW := min(CollapsedColumnWidth, max(0, viewportWidth-dstX))
+		currCollapsedX += CollapsedColumnWidth + 1
+		if dstW <= 0 {
+			continue
+		}
+		maxSrcY := max(0, c.Height-availHeight)
+		z := 0
+		if c.PaneID == focusedID {
+			z = 1
+		}
+		placements = append(placements, Placement{
+			PaneID: c.PaneID,
+			Src:    image.Rect(0, maxSrcY, dstW, maxSrcY+availHeight),
+			Dst:    image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Frame:  image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Z:      z,
+			Kind:   protocol.PlacementFull,
+		})
+	}
+
 	unpinnedStartX := pinnedWidth
-	remainingViewport := max(0, viewportWidth-unpinnedStartX)
+	remainingViewport := max(0, collapsedStartX-unpinnedStartX)
 	if len(unpinnedCols) == 0 || remainingViewport <= 0 {
 		return placements
 	}

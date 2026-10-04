@@ -31,6 +31,9 @@ const (
 	VerbTogglePin
 	VerbPinPane
 	VerbUnpinPane
+	VerbToggleCollapse
+	VerbCollapsePane
+	VerbUncollapsePane
 )
 
 // PaneStatus represents the current state of a pane's process.
@@ -97,10 +100,11 @@ func (s PaneStatus) Glyph() string {
 
 // ColumnData describes a column's logical width and height.
 type ColumnData struct {
-	PaneID int  `json:"pane_id"`
-	Width  int  `json:"width"`
-	Height int  `json:"height"`
-	Pinned bool `json:"pinned,omitempty"`
+	PaneID    int  `json:"pane_id"`
+	Width     int  `json:"width"`
+	Height    int  `json:"height"`
+	Pinned    bool `json:"pinned,omitempty"`
+	Collapsed bool `json:"collapsed,omitempty"`
 }
 
 // CellData carries one cell's text content, width, and style across transport.

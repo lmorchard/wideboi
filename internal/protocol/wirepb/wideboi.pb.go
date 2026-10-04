@@ -24,24 +24,27 @@ const (
 type VerbType int32
 
 const (
-	VerbType_VERB_TYPE_UNSPECIFIED   VerbType = 0
-	VerbType_VERB_TYPE_FOCUS_LEFT    VerbType = 1
-	VerbType_VERB_TYPE_FOCUS_RIGHT   VerbType = 2
-	VerbType_VERB_TYPE_NEW_COLUMN    VerbType = 3
-	VerbType_VERB_TYPE_CYCLE_WIDTH   VerbType = 4
-	VerbType_VERB_TYPE_KILL_PANE     VerbType = 5
-	VerbType_VERB_TYPE_SMART_JUMP    VerbType = 6
-	VerbType_VERB_TYPE_TOGGLE_CARDS  VerbType = 7
-	VerbType_VERB_TYPE_GROW_WIDTH    VerbType = 8
-	VerbType_VERB_TYPE_SHRINK_WIDTH  VerbType = 9
-	VerbType_VERB_TYPE_MOVE_LEFT     VerbType = 10
-	VerbType_VERB_TYPE_MOVE_RIGHT    VerbType = 11
-	VerbType_VERB_TYPE_FOCUS_LAST    VerbType = 12
-	VerbType_VERB_TYPE_TOGGLE_STATUS VerbType = 13
-	VerbType_VERB_TYPE_CLAIM_SIZE    VerbType = 14
-	VerbType_VERB_TYPE_TOGGLE_PIN    VerbType = 15
-	VerbType_VERB_TYPE_PIN_PANE      VerbType = 16
-	VerbType_VERB_TYPE_UNPIN_PANE    VerbType = 17
+	VerbType_VERB_TYPE_UNSPECIFIED     VerbType = 0
+	VerbType_VERB_TYPE_FOCUS_LEFT      VerbType = 1
+	VerbType_VERB_TYPE_FOCUS_RIGHT     VerbType = 2
+	VerbType_VERB_TYPE_NEW_COLUMN      VerbType = 3
+	VerbType_VERB_TYPE_CYCLE_WIDTH     VerbType = 4
+	VerbType_VERB_TYPE_KILL_PANE       VerbType = 5
+	VerbType_VERB_TYPE_SMART_JUMP      VerbType = 6
+	VerbType_VERB_TYPE_TOGGLE_CARDS    VerbType = 7
+	VerbType_VERB_TYPE_GROW_WIDTH      VerbType = 8
+	VerbType_VERB_TYPE_SHRINK_WIDTH    VerbType = 9
+	VerbType_VERB_TYPE_MOVE_LEFT       VerbType = 10
+	VerbType_VERB_TYPE_MOVE_RIGHT      VerbType = 11
+	VerbType_VERB_TYPE_FOCUS_LAST      VerbType = 12
+	VerbType_VERB_TYPE_TOGGLE_STATUS   VerbType = 13
+	VerbType_VERB_TYPE_CLAIM_SIZE      VerbType = 14
+	VerbType_VERB_TYPE_TOGGLE_PIN      VerbType = 15
+	VerbType_VERB_TYPE_PIN_PANE        VerbType = 16
+	VerbType_VERB_TYPE_UNPIN_PANE      VerbType = 17
+	VerbType_VERB_TYPE_TOGGLE_COLLAPSE VerbType = 18
+	VerbType_VERB_TYPE_COLLAPSE_PANE   VerbType = 19
+	VerbType_VERB_TYPE_UNCOLLAPSE_PANE VerbType = 20
 )
 
 // Enum value maps for VerbType.
@@ -65,26 +68,32 @@ var (
 		15: "VERB_TYPE_TOGGLE_PIN",
 		16: "VERB_TYPE_PIN_PANE",
 		17: "VERB_TYPE_UNPIN_PANE",
+		18: "VERB_TYPE_TOGGLE_COLLAPSE",
+		19: "VERB_TYPE_COLLAPSE_PANE",
+		20: "VERB_TYPE_UNCOLLAPSE_PANE",
 	}
 	VerbType_value = map[string]int32{
-		"VERB_TYPE_UNSPECIFIED":   0,
-		"VERB_TYPE_FOCUS_LEFT":    1,
-		"VERB_TYPE_FOCUS_RIGHT":   2,
-		"VERB_TYPE_NEW_COLUMN":    3,
-		"VERB_TYPE_CYCLE_WIDTH":   4,
-		"VERB_TYPE_KILL_PANE":     5,
-		"VERB_TYPE_SMART_JUMP":    6,
-		"VERB_TYPE_TOGGLE_CARDS":  7,
-		"VERB_TYPE_GROW_WIDTH":    8,
-		"VERB_TYPE_SHRINK_WIDTH":  9,
-		"VERB_TYPE_MOVE_LEFT":     10,
-		"VERB_TYPE_MOVE_RIGHT":    11,
-		"VERB_TYPE_FOCUS_LAST":    12,
-		"VERB_TYPE_TOGGLE_STATUS": 13,
-		"VERB_TYPE_CLAIM_SIZE":    14,
-		"VERB_TYPE_TOGGLE_PIN":    15,
-		"VERB_TYPE_PIN_PANE":      16,
-		"VERB_TYPE_UNPIN_PANE":    17,
+		"VERB_TYPE_UNSPECIFIED":     0,
+		"VERB_TYPE_FOCUS_LEFT":      1,
+		"VERB_TYPE_FOCUS_RIGHT":     2,
+		"VERB_TYPE_NEW_COLUMN":      3,
+		"VERB_TYPE_CYCLE_WIDTH":     4,
+		"VERB_TYPE_KILL_PANE":       5,
+		"VERB_TYPE_SMART_JUMP":      6,
+		"VERB_TYPE_TOGGLE_CARDS":    7,
+		"VERB_TYPE_GROW_WIDTH":      8,
+		"VERB_TYPE_SHRINK_WIDTH":    9,
+		"VERB_TYPE_MOVE_LEFT":       10,
+		"VERB_TYPE_MOVE_RIGHT":      11,
+		"VERB_TYPE_FOCUS_LAST":      12,
+		"VERB_TYPE_TOGGLE_STATUS":   13,
+		"VERB_TYPE_CLAIM_SIZE":      14,
+		"VERB_TYPE_TOGGLE_PIN":      15,
+		"VERB_TYPE_PIN_PANE":        16,
+		"VERB_TYPE_UNPIN_PANE":      17,
+		"VERB_TYPE_TOGGLE_COLLAPSE": 18,
+		"VERB_TYPE_COLLAPSE_PANE":   19,
+		"VERB_TYPE_UNCOLLAPSE_PANE": 20,
 	}
 )
 
@@ -977,6 +986,7 @@ type ColumnData struct {
 	Width         int32                  `protobuf:"varint,2,opt,name=width,proto3" json:"width,omitempty"`
 	Height        int32                  `protobuf:"varint,3,opt,name=height,proto3" json:"height,omitempty"`
 	Pinned        bool                   `protobuf:"varint,4,opt,name=pinned,proto3" json:"pinned,omitempty"`
+	Collapsed     bool                   `protobuf:"varint,5,opt,name=collapsed,proto3" json:"collapsed,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1035,6 +1045,13 @@ func (x *ColumnData) GetHeight() int32 {
 func (x *ColumnData) GetPinned() bool {
 	if x != nil {
 		return x.Pinned
+	}
+	return false
+}
+
+func (x *ColumnData) GetCollapsed() bool {
+	if x != nil {
+		return x.Collapsed
 	}
 	return false
 }
@@ -5520,13 +5537,14 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\rscroll_offset\x18\f \x01(\x05R\fscrollOffset\x12%\n" +
 	"\x0escrollback_len\x18\r \x01(\x05R\rscrollbackLen\x12#\n" +
 	"\runread_output\x18\x0e \x01(\bR\funreadOutput\x12\x14\n" +
-	"\x05links\x18\x0f \x03(\tR\x05links\"k\n" +
+	"\x05links\x18\x0f \x03(\tR\x05links\"\x89\x01\n" +
 	"\n" +
 	"ColumnData\x12\x17\n" +
 	"\apane_id\x18\x01 \x01(\x05R\x06paneId\x12\x14\n" +
 	"\x05width\x18\x02 \x01(\x05R\x05width\x12\x16\n" +
 	"\x06height\x18\x03 \x01(\x05R\x06height\x12\x16\n" +
-	"\x06pinned\x18\x04 \x01(\bR\x06pinned\"\xe7\x03\n" +
+	"\x06pinned\x18\x04 \x01(\bR\x06pinned\x12\x1c\n" +
+	"\tcollapsed\x18\x05 \x01(\bR\tcollapsed\"\xe7\x03\n" +
 	"\x11MsgLayoutSnapshot\x126\n" +
 	"\acolumns\x18\x01 \x03(\v2\x1c.wideboi.protocol.ColumnDataR\acolumns\x12Z\n" +
 	"\rpane_statuses\x18\x02 \x03(\v25.wideboi.protocol.MsgLayoutSnapshot.PaneStatusesEntryR\fpaneStatuses\x12T\n" +
@@ -5863,7 +5881,7 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\rwidth_presets\x18\x01 \x03(\x05R\fwidthPresets\x12(\n" +
 	"\x10min_column_width\x18\x02 \x01(\x05R\x0eminColumnWidth\x12(\n" +
 	"\x10max_column_width\x18\x03 \x01(\x05R\x0emaxColumnWidth\x12<\n" +
-	"\bbindings\x18\x04 \x03(\v2 .wideboi.protocol.KeyBindingDataR\bbindings*\xe4\x03\n" +
+	"\bbindings\x18\x04 \x03(\v2 .wideboi.protocol.KeyBindingDataR\bbindings*\xbf\x04\n" +
 	"\bVerbType\x12\x19\n" +
 	"\x15VERB_TYPE_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14VERB_TYPE_FOCUS_LEFT\x10\x01\x12\x19\n" +
@@ -5883,7 +5901,10 @@ const file_internal_protocol_wirepb_wideboi_proto_rawDesc = "" +
 	"\x14VERB_TYPE_CLAIM_SIZE\x10\x0e\x12\x18\n" +
 	"\x14VERB_TYPE_TOGGLE_PIN\x10\x0f\x12\x16\n" +
 	"\x12VERB_TYPE_PIN_PANE\x10\x10\x12\x18\n" +
-	"\x14VERB_TYPE_UNPIN_PANE\x10\x11*\xa3\x01\n" +
+	"\x14VERB_TYPE_UNPIN_PANE\x10\x11\x12\x1d\n" +
+	"\x19VERB_TYPE_TOGGLE_COLLAPSE\x10\x12\x12\x1b\n" +
+	"\x17VERB_TYPE_COLLAPSE_PANE\x10\x13\x12\x1d\n" +
+	"\x19VERB_TYPE_UNCOLLAPSE_PANE\x10\x14*\xa3\x01\n" +
 	"\n" +
 	"PaneStatus\x12\x14\n" +
 	"\x10PANE_STATUS_IDLE\x10\x00\x12\x17\n" +

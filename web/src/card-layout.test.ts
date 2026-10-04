@@ -52,6 +52,27 @@ describe('card layout', () => {
     expect(p2.visible).toBe(true);
   });
 
+  it('anchors collapsed columns to the right while fanning unpinned cards', () => {
+    const cols = [
+      { paneId: 1, width: 28, pinned: true },
+      { paneId: 2, width: 60 },
+      { paneId: 3, width: 60, collapsed: true },
+    ];
+    // Viewport width 120. Pinned col 1 takes left 0, width 28 + divider (29 total).
+    // Collapsed col 3 takes left 120 - 4 = 116.
+    // Focused unpinned col 2 takes left 29, width 60.
+    const layout = cardLayout(cols, 2, 120, 0);
+    const p1 = layout.placements.find(p => p.paneId === 1)!;
+    const p2 = layout.placements.find(p => p.paneId === 2)!;
+    const p3 = layout.placements.find(p => p.paneId === 3)!;
+    expect(p1.left).toBe(0);
+    expect(p1.visible).toBe(true);
+    expect(p3.left).toBe(116);
+    expect(p3.visible).toBe(true);
+    expect(p2.left).toBe(29);
+    expect(p2.visible).toBe(true);
+  });
+
   describe('golden fixtures generated from Go', () => {
     for (const tc of goldenCases) {
       it(`matches Go layout for "${tc.name}"`, () => {

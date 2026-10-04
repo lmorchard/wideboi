@@ -547,3 +547,113 @@ func TestPinnedBoundaryBlocksMove(t *testing.T) {
 		t.Errorf("MoveRight allowed pinned pane into unpinned group: %+v", cols)
 	}
 }
+
+func TestCollapseColumnMethods(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 40, 20, 0)
+	s.AddColumn(2, 60, 20, 0)
+	s.AddColumn(3, 80, 20, 0)
+
+	if s.IsColumnCollapsed(2) {
+		t.Fatal("pane 2 should start uncollapsed")
+	}
+
+	// Collapse pane 2: moves to collapsed section at end
+	if !s.CollapseColumn(2) {
+		t.Fatal("CollapseColumn(2) failed")
+	}
+	if !s.IsColumnCollapsed(2) {
+		t.Fatal("pane 2 should be collapsed")
+	}
+	cols := s.Columns()
+	if cols[len(cols)-1].PaneID != 2 || !cols[len(cols)-1].Collapsed {
+		t.Fatalf("last column = %+v, want pane 2 collapsed", cols[len(cols)-1])
+	}
+
+	// Pinning pane 2 uncollapses it and moves it to front
+	s.PinColumn(2)
+	if s.IsColumnCollapsed(2) {
+		t.Fatal("pane 2 should not be collapsed after pin")
+	}
+	if !s.IsColumnPinned(2) {
+		t.Fatal("pane 2 should be pinned")
+	}
+	cols = s.Columns()
+	if cols[0].PaneID != 2 || !cols[0].Pinned {
+		t.Fatalf("first column = %+v, want pane 2 pinned", cols[0])
+	}
+
+	// Collapsing pane 2 unpins it and moves it to end
+	s.CollapseColumn(2)
+	if s.IsColumnPinned(2) {
+		t.Fatal("pane 2 should not be pinned after collapse")
+	}
+	if !s.IsColumnCollapsed(2) {
+		t.Fatal("pane 2 should be collapsed")
+	}
+
+	// Toggle collapse on pane 2: uncollapses it
+	s.ToggleCollapseColumn(2)
+	if s.IsColumnCollapsed(2) {
+		t.Fatal("pane 2 should be uncollapsed after toggle")
+	}
+}
+
+func TestCollapsedColumnsInScrollStrategy(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 28, 20, 0) // Pinned
+	s.AddColumn(2, 60, 20, 0) // Active
+	s.AddColumn(3, 80, 20, 0) // Collapsed
+	s.PinColumn(1)
+	s.CollapseColumn(3)
+
+	// Viewport width = 120
+	// Pinned pane 1: x = 0..28
+	// Collapsed pane 3: width = 3, starts at 120 - 4 = 116
+	s.FocusPaneID(2)
+	ps := s.ComputePlacements(120, 24)
+
+	var p1, p2, p3 layout.Placement
+	for _, p := range ps {
+		switch p.PaneID {
+		case 1:
+			p1 = p
+		case 2:
+			p2 = p
+		case 3:
+			p3 = p
+		}
+	}
+
+	if p1.Dst.Min.X != 0 || p1.Dst.Max.X != 28 {
+		t.Errorf("pinned pane 1 Dst = %v, want Min.X=0 Max.X=28", p1.Dst)
+	}
+	if p3.Dst.Min.X != 116 || p3.Dst.Max.X != 119 {
+		t.Errorf("collapsed pane 3 Dst = %v, want Min.X=116 Max.X=119", p3.Dst)
+	}
+	if p2.Dst.Min.X != 29 || p2.Dst.Max.X != 89 {
+		t.Errorf("active pane 2 Dst = %v, want Min.X=29 Max.X=89", p2.Dst)
+	}
+}
+
+func TestCollapsedBoundaryBlocksMove(t *testing.T) {
+	s := layout.NewStrip()
+	s.AddColumn(1, 60, 20, 0)
+	s.AddColumn(2, 80, 20, 0)
+	s.CollapseColumn(2)
+
+	// cols: [1 (active), 2 (collapsed)]
+	// Moving active pane 1 right should be blocked by collapsed boundary
+	s.MoveRight(1)
+	cols := s.Columns()
+	if cols[0].PaneID != 1 || cols[1].PaneID != 2 {
+		t.Errorf("MoveRight allowed active pane into collapsed group: %+v", cols)
+	}
+
+	// Moving collapsed pane 2 left should be blocked by collapsed boundary
+	s.MoveLeft(2)
+	cols = s.Columns()
+	if cols[0].PaneID != 1 || cols[1].PaneID != 2 {
+		t.Errorf("MoveLeft allowed collapsed pane into active group: %+v", cols)
+	}
+}

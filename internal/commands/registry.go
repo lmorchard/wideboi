@@ -815,6 +815,44 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:        "toggle-collapse",
+		Aliases:     []string{"collapse-toggle", "collapse"},
+		Description: "Toggle collapsed status of a column to narrow right margin strip",
+		Category:    "Layout",
+		ArgsUsage:   "[pane-id]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			targetID := inv.CallerPaneID
+			if len(inv.Args) > 0 {
+				id, err := strconv.Atoi(inv.Args[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane ID: %w", err)
+				}
+				targetID = id
+			}
+			return SendVerbTarget(ctx, inv, protocol.VerbToggleCollapse, targetID)
+		},
+	})
+
+	r.Register(Command{
+		Name:        "uncollapse",
+		Aliases:     []string{"expand"},
+		Description: "Expand a collapsed column to resume normal layout flow",
+		Category:    "Layout",
+		ArgsUsage:   "[pane-id]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			targetID := inv.CallerPaneID
+			if len(inv.Args) > 0 {
+				id, err := strconv.Atoi(inv.Args[0])
+				if err != nil {
+					return fmt.Errorf("invalid pane ID: %w", err)
+				}
+				targetID = id
+			}
+			return SendVerbTarget(ctx, inv, protocol.VerbUncollapsePane, targetID)
+		},
+	})
+
+	r.Register(Command{
 		Name:        "set-pane-status",
 		Aliases:     []string{"status-set"},
 		Description: "Set or clear an explicit status override on a pane",

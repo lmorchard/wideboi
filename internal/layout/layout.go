@@ -22,10 +22,11 @@ type Placement struct {
 
 // Column represents one vertical column in the strip.
 type Column struct {
-	PaneID int
-	Width  int  // logical column width in cells
-	Height int  // logical pane height in cells
-	Pinned bool // anchored to left edge of screen
+	PaneID    int
+	Width     int  // logical column width in cells
+	Height    int  // logical pane height in cells
+	Pinned    bool // anchored to left edge of screen
+	Collapsed bool // collapsed to narrow strip on right edge of screen
 }
 
 // DefaultWidthPresets is the default cycle sequence when none is configured.
@@ -33,8 +34,9 @@ var DefaultWidthPresets = []int{40, 60, 80}
 
 // Column widths are bounded by the PTY protocol's accepted range.
 const (
-	MinColumnWidth = 20
-	MaxColumnWidth = 4096
+	MinColumnWidth       = 20
+	MaxColumnWidth       = 4096
+	CollapsedColumnWidth = 3
 )
 
 // Strip manages a horizontal sequence of columns and viewport scrolling.
@@ -225,6 +227,9 @@ func (s *Strip) MoveLeft(paneID int) {
 				if !s.columns[i].Pinned && s.columns[i-1].Pinned {
 					return
 				}
+				if s.columns[i].Collapsed && !s.columns[i-1].Collapsed {
+					return
+				}
 				s.columns[i-1], s.columns[i] = s.columns[i], s.columns[i-1]
 				if s.focusIndex == i {
 					s.focusIndex = i - 1
@@ -243,6 +248,9 @@ func (s *Strip) MoveRight(paneID int) {
 		if s.columns[i].PaneID == paneID {
 			if i < len(s.columns)-1 {
 				if s.columns[i].Pinned && !s.columns[i+1].Pinned {
+					return
+				}
+				if !s.columns[i].Collapsed && s.columns[i+1].Collapsed {
 					return
 				}
 				s.columns[i+1], s.columns[i] = s.columns[i], s.columns[i+1]
@@ -306,6 +314,7 @@ func (s *Strip) PinColumn(paneID int) bool {
 				return true
 			}
 			s.columns[i].Pinned = true
+			s.columns[i].Collapsed = false
 			s.reorderPinnedColumns()
 			return true
 		}
@@ -333,6 +342,9 @@ func (s *Strip) TogglePinColumn(paneID int) bool {
 	for i := range s.columns {
 		if s.columns[i].PaneID == paneID {
 			s.columns[i].Pinned = !s.columns[i].Pinned
+			if s.columns[i].Pinned {
+				s.columns[i].Collapsed = false
+			}
 			s.reorderPinnedColumns()
 			return true
 		}
@@ -350,23 +362,81 @@ func (s *Strip) IsColumnPinned(paneID int) bool {
 	return false
 }
 
+// CollapseColumn collapses the column containing paneID to a narrow right margin sliver.
+func (s *Strip) CollapseColumn(paneID int) bool {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			if s.columns[i].Collapsed {
+				return true
+			}
+			s.columns[i].Collapsed = true
+			s.columns[i].Pinned = false
+			s.reorderPinnedColumns()
+			return true
+		}
+	}
+	return false
+}
+
+// UncollapseColumn uncollapses the column containing paneID, restoring it to active layout flow.
+func (s *Strip) UncollapseColumn(paneID int) bool {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			if !s.columns[i].Collapsed {
+				return true
+			}
+			s.columns[i].Collapsed = false
+			s.reorderPinnedColumns()
+			return true
+		}
+	}
+	return false
+}
+
+// ToggleCollapseColumn toggles the collapsed status of the column containing paneID.
+func (s *Strip) ToggleCollapseColumn(paneID int) bool {
+	for i := range s.columns {
+		if s.columns[i].PaneID == paneID {
+			s.columns[i].Collapsed = !s.columns[i].Collapsed
+			if s.columns[i].Collapsed {
+				s.columns[i].Pinned = false
+			}
+			s.reorderPinnedColumns()
+			return true
+		}
+	}
+	return false
+}
+
+// IsColumnCollapsed reports whether the column containing paneID is collapsed.
+func (s *Strip) IsColumnCollapsed(paneID int) bool {
+	for _, c := range s.columns {
+		if c.PaneID == paneID {
+			return c.Collapsed
+		}
+	}
+	return false
+}
+
 // reorderPinnedColumns partitions s.columns so that all pinned columns
 // appear first (in their existing relative order) followed by all unpinned
-// columns (in their existing relative order), updating s.focusIndex.
+// active columns, followed by all collapsed columns.
 func (s *Strip) reorderPinnedColumns() {
 	if len(s.columns) <= 1 {
 		return
 	}
 	focusedID := s.FocusedPaneID()
-	var pinned, unpinned []Column
+	var pinned, unpinned, collapsed []Column
 	for _, c := range s.columns {
 		if c.Pinned {
 			pinned = append(pinned, c)
+		} else if c.Collapsed {
+			collapsed = append(collapsed, c)
 		} else {
 			unpinned = append(unpinned, c)
 		}
 	}
-	s.columns = append(pinned, unpinned...)
+	s.columns = append(pinned, append(unpinned, collapsed...)...)
 	if focusedID != 0 {
 		s.FocusPaneID(focusedID)
 	}
@@ -461,12 +531,15 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 
 	availHeight := AvailHeight(viewportHeight)
 
-	// Partition pinned and unpinned columns.
+	// Partition pinned, unpinned, and collapsed columns.
 	var pinnedCols []Column
 	var unpinnedCols []Column
+	var collapsedCols []Column
 	for _, c := range s.columns {
 		if c.Pinned {
 			pinnedCols = append(pinnedCols, c)
+		} else if c.Collapsed {
+			collapsedCols = append(collapsedCols, c)
 		} else {
 			unpinnedCols = append(unpinnedCols, c)
 		}
@@ -494,13 +567,39 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 		})
 	}
 
+	// 2. Place collapsed columns statically on the right.
+	collapsedTotalWidth := 0
+	for range collapsedCols {
+		collapsedTotalWidth += CollapsedColumnWidth + 1
+	}
+
+	collapsedStartX := max(pinnedWidth, viewportWidth-collapsedTotalWidth)
+	currCollapsedX := collapsedStartX
+	for _, c := range collapsedCols {
+		dstX := currCollapsedX
+		dstW := min(CollapsedColumnWidth, max(0, viewportWidth-dstX))
+		currCollapsedX += CollapsedColumnWidth + 1
+		if dstW <= 0 {
+			continue
+		}
+		maxSrcY := max(0, c.Height-availHeight)
+		placements = append(placements, Placement{
+			PaneID: c.PaneID,
+			Src:    image.Rect(0, maxSrcY, dstW, maxSrcY+availHeight),
+			Dst:    image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Frame:  image.Rect(dstX, 1, dstX+dstW, 1+availHeight),
+			Z:      0,
+			Kind:   protocol.PlacementFull,
+		})
+	}
+
 	unpinnedStartX := pinnedWidth
-	unpinnedViewportWidth := max(0, viewportWidth-unpinnedStartX)
+	unpinnedViewportWidth := max(0, collapsedStartX-unpinnedStartX)
 	if len(unpinnedCols) == 0 || unpinnedViewportWidth <= 0 {
 		return placements
 	}
 
-	// 2. Compute scrolling placements for unpinned columns.
+	// 3. Compute scrolling placements for unpinned columns.
 	colX := make([]int, len(unpinnedCols))
 	currX := 0
 	for i, c := range unpinnedCols {
@@ -532,7 +631,7 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 		s.scrollX = 0
 	}
 
-	unpinnedViewportRect := image.Rect(unpinnedStartX, 1, viewportWidth, 1+availHeight)
+	unpinnedViewportRect := image.Rect(unpinnedStartX, 1, collapsedStartX, 1+availHeight)
 	for i, c := range unpinnedCols {
 		screenX := unpinnedStartX + colX[i] - s.scrollX
 		screenRect := image.Rect(screenX, 1, screenX+c.Width, 1+availHeight)
@@ -546,12 +645,13 @@ func (ScrollStrategy) ComputePlacements(s *Strip, viewportWidth, viewportHeight 
 		maxSrcY := max(0, c.Height-availHeight)
 		srcY := maxSrcY + (dst.Min.Y - 1)
 		src := image.Rect(srcX, srcY, srcX+dst.Dx(), srcY+dst.Dy())
+		frame := image.Rect(screenX, 1, screenX+c.Width, 1+availHeight).Intersect(unpinnedViewportRect)
 
 		placements = append(placements, Placement{
 			PaneID: c.PaneID,
 			Src:    src,
 			Dst:    dst,
-			Frame:  dst,
+			Frame:  frame,
 			Z:      0,
 			Kind:   protocol.PlacementFull,
 		})
@@ -585,10 +685,11 @@ func ToColumnData(columns []Column) []protocol.ColumnData {
 	out := make([]protocol.ColumnData, len(columns))
 	for i, c := range columns {
 		out[i] = protocol.ColumnData{
-			PaneID: c.PaneID,
-			Width:  c.Width,
-			Height: c.Height,
-			Pinned: c.Pinned,
+			PaneID:    c.PaneID,
+			Width:     c.Width,
+			Height:    c.Height,
+			Pinned:    c.Pinned,
+			Collapsed: c.Collapsed,
 		}
 	}
 	return out
@@ -608,10 +709,11 @@ func (s *Strip) SyncColumns(cols []protocol.ColumnData, focusPaneID int) {
 	s.columns = make([]Column, len(cols))
 	for i, c := range cols {
 		s.columns[i] = Column{
-			PaneID: c.PaneID,
-			Width:  c.Width,
-			Height: c.Height,
-			Pinned: c.Pinned,
+			PaneID:    c.PaneID,
+			Width:     c.Width,
+			Height:    c.Height,
+			Pinned:    c.Pinned,
+			Collapsed: c.Collapsed,
 		}
 	}
 	if len(s.columns) == 0 {

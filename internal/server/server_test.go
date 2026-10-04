@@ -219,6 +219,47 @@ func TestVerbTogglePin(t *testing.T) {
 	}
 }
 
+func TestVerbToggleCollapse(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Width: 80},
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	pane1ID := snap.Columns[0].PaneID
+
+	// Send VerbToggleCollapse on pane 1
+	tp.SendClient(ctx, protocol.MsgVerb{Verb: protocol.VerbToggleCollapse, PaneID: pane1ID})
+
+	// Wait for updated layout snapshot with pane 1 collapsed
+	deadline := time.After(2 * time.Second)
+	collapsed := false
+	for !collapsed {
+		select {
+		case msg := <-tp.ServerSend:
+			if nextSnap, ok := msg.(protocol.MsgLayoutSnapshot); ok {
+				for _, col := range nextSnap.Columns {
+					if col.PaneID == pane1ID && col.Collapsed {
+						collapsed = true
+						break
+					}
+				}
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for MsgLayoutSnapshot with collapsed pane 1")
+		}
+	}
+}
+
 func recvSetPaneStatusResponse(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgSetPaneStatusResponse {
 	t.Helper()
 	deadline := time.After(timeout)
