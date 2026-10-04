@@ -144,6 +144,32 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 			s.waiters[paneID] = filtered
 		}
 	}
+	for paneID, ws := range s.outputWaiters {
+		filtered := ws[:0]
+		for _, w := range ws {
+			if w.tp != tp {
+				filtered = append(filtered, w)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(s.outputWaiters, paneID)
+		} else {
+			s.outputWaiters[paneID] = filtered
+		}
+	}
+	for paneID, ws := range s.statusWaiters {
+		filtered := ws[:0]
+		for _, w := range ws {
+			if w.tp != tp {
+				filtered = append(filtered, w)
+			}
+		}
+		if len(filtered) == 0 {
+			delete(s.statusWaiters, paneID)
+		} else {
+			s.statusWaiters[paneID] = filtered
+		}
+	}
 }
 
 // dropClient removes tp from the broadcast set and closes it. It reports

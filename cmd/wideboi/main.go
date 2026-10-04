@@ -189,6 +189,12 @@ func printHelp(w io.Writer) {
   wideboi [flags] wait [--timeout <duration>] <pane-id>
                              Block until a pane's process exits; exit with its code
                              (124 on timeout). Use split --keep to wait after exit
+  wideboi [flags] wait-output [--timeout <dur>] [--lines <N>] <pane-id> <pattern>
+                             Block until matching text or regex appears in pane output;
+                             emits matched line (124 on timeout)
+  wideboi [flags] wait-status [--timeout <dur>] [--until <statuses>] <pane-id> [status]
+                             Block until pane transitions to target status (working,
+                             input, done, failed, idle); emits status (124 on timeout)
   wideboi [flags] upgrade-server <binary-path>
                              Upgrade the running server in-place using a new binary
                              without closing panes or dropping processes
@@ -368,6 +374,14 @@ func main() {
 		fatal(runSetPaneStatus(cfg, opts.subcommandArgs, os.Stderr))
 	case "wait":
 		code, err := runWait(cfg, opts.subcommandArgs, os.Stderr)
+		fatal(err)
+		os.Exit(code)
+	case "wait-output":
+		code, err := runWaitOutput(cfg, opts.subcommandArgs, os.Stdout, os.Stderr)
+		fatal(err)
+		os.Exit(code)
+	case "wait-status":
+		code, err := runWaitStatus(cfg, opts.subcommandArgs, os.Stdout, os.Stderr)
 		fatal(err)
 		os.Exit(code)
 	case "web":

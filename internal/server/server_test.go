@@ -282,6 +282,177 @@ func TestSetPaneStatusExplicitOverride(t *testing.T) {
 	}
 }
 
+func recvWaitOutputResponse(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgWaitOutputResponse {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-ch:
+			if resp, ok := msg.(protocol.MsgWaitOutputResponse); ok {
+				return resp
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for MsgWaitOutputResponse")
+			return protocol.MsgWaitOutputResponse{}
+		}
+	}
+}
+
+func recvWaitStatusResponse(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgWaitStatusResponse {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-ch:
+			if resp, ok := msg.(protocol.MsgWaitStatusResponse); ok {
+				return resp
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for MsgWaitStatusResponse")
+			return protocol.MsgWaitStatusResponse{}
+		}
+	}
+}
+
+func TestWaitOutputImmediateAndDelayed(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	paneID := snap.Columns[0].PaneID
+
+	// Send echo command to pane
+	tp.SendClient(ctx, protocol.MsgSendInputRequest{
+		PaneID: paneID,
+		Data:   []byte("echo 'ready-step-1'\n"),
+	})
+
+	// Immediate wait for output that appeared
+	tp.SendClient(ctx, protocol.MsgWaitOutputRequest{
+		PaneID: paneID,
+		Match:  "ready-step-1",
+	})
+	resp := recvWaitOutputResponse(t, tp.ServerSend, 2*time.Second)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error waiting for immediate output: %s", resp.Error)
+	}
+	if !strings.Contains(resp.MatchedLine, "ready-step-1") {
+		t.Fatalf("expected matched line to contain ready-step-1, got: %q", resp.MatchedLine)
+	}
+
+	// Delayed wait: register waiter for regex before command executes
+	tp.SendClient(ctx, protocol.MsgWaitOutputRequest{
+		PaneID: paneID,
+		Regex:  `step-[0-9]+-done`,
+	})
+
+	// Small pause, then send command that outputs the match
+	time.Sleep(50 * time.Millisecond)
+	tp.SendClient(ctx, protocol.MsgSendInputRequest{
+		PaneID: paneID,
+		Data:   []byte("echo 'step-2-done'\n"),
+	})
+
+	resp = recvWaitOutputResponse(t, tp.ServerSend, 2*time.Second)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error waiting for delayed output: %s", resp.Error)
+	}
+	if !strings.Contains(resp.MatchedLine, "step-2-done") {
+		t.Fatalf("expected matched line to contain step-2-done, got: %q", resp.MatchedLine)
+	}
+}
+
+func TestWaitStatusImmediateAndDelayed(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	paneID := snap.Columns[0].PaneID
+
+	// Immediate: status is StatusIdle or StatusWorking
+	tp.SendClient(ctx, protocol.MsgWaitStatusRequest{
+		PaneID: paneID,
+		Until:  []protocol.PaneStatus{protocol.StatusIdle, protocol.StatusWorking},
+	})
+	resp := recvWaitStatusResponse(t, tp.ServerSend, 2*time.Second)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error in immediate wait-status: %s", resp.Error)
+	}
+
+	// Delayed: wait for StatusNeedsInput
+	tp.SendClient(ctx, protocol.MsgWaitStatusRequest{
+		PaneID: paneID,
+		Until:  []protocol.PaneStatus{protocol.StatusNeedsInput},
+	})
+
+	// Small pause, then explicitly set StatusNeedsInput
+	time.Sleep(50 * time.Millisecond)
+	tp.SendClient(ctx, protocol.MsgSetPaneStatusRequest{
+		PaneID: paneID,
+		Status: protocol.StatusNeedsInput,
+	})
+
+	resp = recvWaitStatusResponse(t, tp.ServerSend, 2*time.Second)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error in delayed wait-status: %s", resp.Error)
+	}
+	if resp.Status != protocol.StatusNeedsInput {
+		t.Fatalf("expected StatusNeedsInput, got: %v", resp.Status)
+	}
+}
+
+func TestWaitStatusNonKeptExitDone(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Width: 80},
+		{Width: 80, Command: "sleep 0.2; exit 0"},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+	if len(snap.Columns) < 2 {
+		t.Fatalf("expected at least 2 columns, got %d", len(snap.Columns))
+	}
+	pane2ID := snap.Columns[1].PaneID
+
+	// Wait for status done on pane 2
+	tp.SendClient(ctx, protocol.MsgWaitStatusRequest{
+		PaneID: pane2ID,
+		Until:  []protocol.PaneStatus{protocol.StatusDone},
+	})
+	resp := recvWaitStatusResponse(t, tp.ServerSend, 3*time.Second)
+	if resp.Error != "" {
+		t.Fatalf("unexpected error waiting for non-kept exit done: %s", resp.Error)
+	}
+	if resp.Status != protocol.StatusDone {
+		t.Fatalf("expected StatusDone, got: %v", resp.Status)
+	}
+}
+
 // testGrace is the hangup grace these tests tear down with. None of them
 // asserts anything about teardown -- that contract belongs to
 // internal/server/ptyx's hangup tests and to scripts/ptycheck.py via

@@ -67,6 +67,7 @@ type Pane struct {
 	// the pty with the byte count. Tests use it to slow that hop down and
 	// to see when bytes have really left the process.
 	ptyWritten func(n int)
+	onOutput   func()
 
 	dead atomic.Bool
 
@@ -197,6 +198,9 @@ func (p *Pane) Start(onExit func()) {
 				}
 				if len(cleaned) > 0 {
 					_, _ = p.grid.Write(cleaned)
+					if p.onOutput != nil {
+						p.onOutput()
+					}
 				}
 			}
 			if err != nil {
@@ -537,6 +541,11 @@ func (p *Pane) SetOnBell(fn func()) {
 	if p.grid != nil {
 		p.grid.OnBell(fn)
 	}
+}
+
+// SetOnOutput registers a callback invoked when new PTY bytes are written to the terminal grid.
+func (p *Pane) SetOnOutput(fn func()) {
+	p.onOutput = fn
 }
 
 // SetQueryTheme configures synthesized colors for environment queries.

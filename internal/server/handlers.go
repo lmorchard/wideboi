@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/lmorchard/wideboi/internal/layout"
@@ -27,18 +30,22 @@ type msgEffects struct {
 	closedPaneID        int
 	paneClosed          <-chan struct{}
 
-	trafficReport *protocol.MsgTrafficStats
-	historyPane   *Pane
-	splitResp     *protocol.MsgSplitResponse
-	sendResp      *protocol.MsgSendInputResponse
-	captureResp   *protocol.MsgCaptureResponse
-	closeResp     *protocol.MsgClosePaneResponse
-	renameResp    *protocol.MsgRenamePaneResponse
-	setStatusResp *protocol.MsgSetPaneStatusResponse
-	dumpResp      *protocol.MsgDumpPaneResponse
-	pipeResp      *protocol.MsgPipePaneResponse
-	waitResp      *protocol.MsgWaitResponse
-	webReq        *protocol.MsgWebServerControlRequest
+	trafficReport        *protocol.MsgTrafficStats
+	historyPane          *Pane
+	splitResp            *protocol.MsgSplitResponse
+	sendResp             *protocol.MsgSendInputResponse
+	captureResp          *protocol.MsgCaptureResponse
+	closeResp            *protocol.MsgClosePaneResponse
+	renameResp           *protocol.MsgRenamePaneResponse
+	setStatusResp        *protocol.MsgSetPaneStatusResponse
+	dumpResp             *protocol.MsgDumpPaneResponse
+	pipeResp             *protocol.MsgPipePaneResponse
+	waitResp             *protocol.MsgWaitResponse
+	waitOutputResp       *protocol.MsgWaitOutputResponse
+	waitStatusResp       *protocol.MsgWaitStatusResponse
+	pendingOutputWaiters []pendingOutputResponse
+	pendingStatusWaiters []pendingStatusResponse
+	webReq               *protocol.MsgWebServerControlRequest
 
 	detachClient   bool
 	shutdownServer bool
@@ -161,6 +168,10 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		eff = s.handlePipePaneRequestLocked(ctx, tp, m)
 	case protocol.MsgWaitRequest:
 		eff = s.handleWaitRequestLocked(tp, m)
+	case protocol.MsgWaitOutputRequest:
+		eff = s.handleWaitOutputRequestLocked(tp, m)
+	case protocol.MsgWaitStatusRequest:
+		eff = s.handleWaitStatusRequestLocked(tp, m)
 	case protocol.MsgPaneResync:
 		eff = s.handlePaneResyncLocked(tp, m)
 	case protocol.MsgStatusRequest:
@@ -404,6 +415,7 @@ func (s *Server) handleSetPaneStatusRequestLocked(tp transport.Transport, m prot
 		}
 	}
 	s.updateDashboardLocked()
+	eff.pendingStatusWaiters = s.checkStatusWaitersLocked(m.PaneID)
 	eff.needBroadcast = true
 	eff.setStatusResp = &protocol.MsgSetPaneStatusResponse{
 		PaneID: m.PaneID,
@@ -414,6 +426,22 @@ func (s *Server) handleSetPaneStatusRequestLocked(tp transport.Transport, m prot
 func (s *Server) totalWaitersLocked() int {
 	total := 0
 	for _, ws := range s.waiters {
+		total += len(ws)
+	}
+	return total
+}
+
+func (s *Server) totalOutputWaitersLocked() int {
+	total := 0
+	for _, ws := range s.outputWaiters {
+		total += len(ws)
+	}
+	return total
+}
+
+func (s *Server) totalStatusWaitersLocked() int {
+	total := 0
+	for _, ws := range s.statusWaiters {
 		total += len(ws)
 	}
 	return total
@@ -447,6 +475,226 @@ func (s *Server) handleWaitRequestLocked(tp transport.Transport, m protocol.MsgW
 	}
 	s.waiters[m.PaneID] = append(s.waiters[m.PaneID], tp)
 	return eff
+}
+
+func findMatchingLine(p *Pane, lines int, match string, re *regexp.Regexp) (string, bool) {
+	text, _ := p.DumpText(true, 0, 0, lines, false)
+	allLines := strings.Split(text, "\n")
+	for _, l := range allLines {
+		trimmed := strings.TrimRight(l, "\r ")
+		if re != nil {
+			if re.MatchString(trimmed) {
+				return trimmed, true
+			}
+		} else if match != "" && strings.Contains(trimmed, match) {
+			return trimmed, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) handleWaitOutputRequestLocked(tp transport.Transport, m protocol.MsgWaitOutputRequest) msgEffects {
+	var eff msgEffects
+	p, ok := s.panes[m.PaneID]
+	if !ok {
+		eff.waitOutputResp = &protocol.MsgWaitOutputResponse{
+			PaneID: m.PaneID,
+			Error:  fmt.Sprintf("pane %d not found", m.PaneID),
+		}
+		return eff
+	}
+
+	if m.Match == "" && m.Regex == "" {
+		eff.waitOutputResp = &protocol.MsgWaitOutputResponse{
+			PaneID: m.PaneID,
+			Error:  "must specify match string or regex pattern",
+		}
+		return eff
+	}
+
+	var re *regexp.Regexp
+	if m.Regex != "" {
+		var err error
+		re, err = regexp.Compile(m.Regex)
+		if err != nil {
+			eff.waitOutputResp = &protocol.MsgWaitOutputResponse{
+				PaneID: m.PaneID,
+				Error:  fmt.Sprintf("invalid regex %q: %v", m.Regex, err),
+			}
+			return eff
+		}
+	}
+
+	lines := m.Lines
+	if lines <= 0 {
+		lines = 50
+	}
+
+	if matchedLine, ok := findMatchingLine(p, lines, m.Match, re); ok {
+		eff.waitOutputResp = &protocol.MsgWaitOutputResponse{
+			PaneID:      m.PaneID,
+			MatchedLine: matchedLine,
+		}
+		return eff
+	}
+
+	if s.outputWaiters == nil {
+		s.outputWaiters = make(map[int][]outputWaiter)
+	}
+	for _, existing := range s.outputWaiters[m.PaneID] {
+		if existing.tp == tp {
+			return eff
+		}
+	}
+	if len(s.outputWaiters[m.PaneID]) >= maxWaitersPerPane || s.totalOutputWaitersLocked() >= maxTotalWaiters {
+		eff.waitOutputResp = &protocol.MsgWaitOutputResponse{
+			PaneID: m.PaneID,
+			Error:  "wait registration limit exceeded",
+		}
+		return eff
+	}
+	s.outputWaiters[m.PaneID] = append(s.outputWaiters[m.PaneID], outputWaiter{
+		tp:        tp,
+		paneID:    m.PaneID,
+		match:     m.Match,
+		regex:     re,
+		tailLines: lines,
+	})
+	return eff
+}
+
+func (s *Server) checkOutputWaitersLocked(paneID int) []pendingOutputResponse {
+	waiters, ok := s.outputWaiters[paneID]
+	if !ok || len(waiters) == 0 {
+		return nil
+	}
+	p, ok := s.panes[paneID]
+	if !ok {
+		return nil
+	}
+
+	var remaining []outputWaiter
+	var ready []pendingOutputResponse
+	for _, w := range waiters {
+		if matchedLine, ok := findMatchingLine(p, w.tailLines, w.match, w.regex); ok {
+			ready = append(ready, pendingOutputResponse{
+				tp: w.tp,
+				resp: protocol.MsgWaitOutputResponse{
+					PaneID:      paneID,
+					MatchedLine: matchedLine,
+				},
+			})
+		} else {
+			remaining = append(remaining, w)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(s.outputWaiters, paneID)
+	} else {
+		s.outputWaiters[paneID] = remaining
+	}
+	return ready
+}
+
+func (s *Server) handleWaitStatusRequestLocked(tp transport.Transport, m protocol.MsgWaitStatusRequest) msgEffects {
+	var eff msgEffects
+	p, ok := s.panes[m.PaneID]
+	if !ok {
+		eff.waitStatusResp = &protocol.MsgWaitStatusResponse{
+			PaneID: m.PaneID,
+			Error:  fmt.Sprintf("pane %d not found", m.PaneID),
+		}
+		return eff
+	}
+
+	if len(m.Until) == 0 {
+		eff.waitStatusResp = &protocol.MsgWaitStatusResponse{
+			PaneID: m.PaneID,
+			Error:  "must specify at least one target status",
+		}
+		return eff
+	}
+
+	curStatus := p.Status()
+	if slices.Contains(m.Until, curStatus) {
+		eff.waitStatusResp = &protocol.MsgWaitStatusResponse{
+			PaneID: m.PaneID,
+			Status: curStatus,
+		}
+		return eff
+	}
+
+	if s.statusWaiters == nil {
+		s.statusWaiters = make(map[int][]statusWaiter)
+	}
+	for _, existing := range s.statusWaiters[m.PaneID] {
+		if existing.tp == tp {
+			return eff
+		}
+	}
+	if len(s.statusWaiters[m.PaneID]) >= maxWaitersPerPane || s.totalStatusWaitersLocked() >= maxTotalWaiters {
+		eff.waitStatusResp = &protocol.MsgWaitStatusResponse{
+			PaneID: m.PaneID,
+			Error:  "wait registration limit exceeded",
+		}
+		return eff
+	}
+	s.statusWaiters[m.PaneID] = append(s.statusWaiters[m.PaneID], statusWaiter{
+		tp:     tp,
+		paneID: m.PaneID,
+		until:  m.Until,
+	})
+	return eff
+}
+
+func (s *Server) checkStatusWaitersLocked(paneID int) []pendingStatusResponse {
+	waiters, ok := s.statusWaiters[paneID]
+	if !ok || len(waiters) == 0 {
+		return nil
+	}
+	p, ok := s.panes[paneID]
+	if !ok {
+		return nil
+	}
+
+	curStatus := p.Status()
+	var remaining []statusWaiter
+	var ready []pendingStatusResponse
+	for _, w := range waiters {
+		if slices.Contains(w.until, curStatus) {
+			ready = append(ready, pendingStatusResponse{
+				tp: w.tp,
+				resp: protocol.MsgWaitStatusResponse{
+					PaneID: paneID,
+					Status: curStatus,
+				},
+			})
+		} else {
+			remaining = append(remaining, w)
+		}
+	}
+	if len(remaining) == 0 {
+		delete(s.statusWaiters, paneID)
+	} else {
+		s.statusWaiters[paneID] = remaining
+	}
+	return ready
+}
+
+func sendReadyOutputWaiters(ready []pendingOutputResponse) {
+	for _, item := range ready {
+		ctx, cancel := context.WithTimeout(context.Background(), waiterSendCeiling)
+		item.tp.SendServer(ctx, item.resp)
+		cancel()
+	}
+}
+
+func sendReadyStatusWaiters(ready []pendingStatusResponse) {
+	for _, item := range ready {
+		ctx, cancel := context.WithTimeout(context.Background(), waiterSendCeiling)
+		item.tp.SendServer(ctx, item.resp)
+		cancel()
+	}
 }
 
 func (s *Server) handlePaneResyncLocked(tp transport.Transport, m protocol.MsgPaneResync) msgEffects {
@@ -865,6 +1113,18 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if eff.waitResp != nil {
 			tp.SendServer(ctx, *eff.waitResp)
+		}
+		if eff.waitOutputResp != nil {
+			tp.SendServer(ctx, *eff.waitOutputResp)
+		}
+		if eff.waitStatusResp != nil {
+			tp.SendServer(ctx, *eff.waitStatusResp)
+		}
+		if len(eff.pendingOutputWaiters) > 0 {
+			sendReadyOutputWaiters(eff.pendingOutputWaiters)
+		}
+		if len(eff.pendingStatusWaiters) > 0 {
+			sendReadyStatusWaiters(eff.pendingStatusWaiters)
 		}
 		if eff.webReq != nil {
 			var resp protocol.MsgWebServerControlResponse

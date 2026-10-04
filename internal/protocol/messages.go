@@ -577,6 +577,34 @@ type MsgSetPaneStatusResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// MsgWaitOutputRequest asks the server to block until matching output appears in a pane.
+type MsgWaitOutputRequest struct {
+	PaneID int    `json:"pane_id"`
+	Match  string `json:"match,omitempty"`
+	Regex  string `json:"regex,omitempty"`
+	Lines  int    `json:"lines,omitempty"`
+}
+
+// MsgWaitOutputResponse returns the matched line or an error.
+type MsgWaitOutputResponse struct {
+	PaneID      int    `json:"pane_id"`
+	MatchedLine string `json:"matched_line,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// MsgWaitStatusRequest asks the server to block until a pane transitions to one of the target statuses.
+type MsgWaitStatusRequest struct {
+	PaneID int          `json:"pane_id"`
+	Until  []PaneStatus `json:"until"`
+}
+
+// MsgWaitStatusResponse returns the achieved status or an error.
+type MsgWaitStatusResponse struct {
+	PaneID int        `json:"pane_id"`
+	Status PaneStatus `json:"status"`
+	Error  string     `json:"error,omitempty"`
+}
+
 // MsgWaitRequest asks to be told when a pane's process exits. The server
 // answers once, with MsgWaitResponse, when that happens.
 type MsgWaitRequest struct {

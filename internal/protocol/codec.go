@@ -94,6 +94,26 @@ func MarshalClient(msg any) ([]byte, error) {
 				Clear:  m.Clear,
 			},
 		}
+	case MsgWaitOutputRequest:
+		env.Msg = &wirepb.ClientMessage_WaitOutputRequest{
+			WaitOutputRequest: &wirepb.MsgWaitOutputRequest{
+				PaneId: int32(m.PaneID),
+				Match:  validUTF8(m.Match),
+				Regex:  validUTF8(m.Regex),
+				Lines:  int32(m.Lines),
+			},
+		}
+	case MsgWaitStatusRequest:
+		until := make([]wirepb.PaneStatus, len(m.Until))
+		for i, st := range m.Until {
+			until[i] = wirepb.PaneStatus(st)
+		}
+		env.Msg = &wirepb.ClientMessage_WaitStatusRequest{
+			WaitStatusRequest: &wirepb.MsgWaitStatusRequest{
+				PaneId: int32(m.PaneID),
+				Until:  until,
+			},
+		}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
@@ -189,6 +209,22 @@ func UnmarshalClient(data []byte) (any, error) {
 			PaneID: int(m.SetPaneStatusRequest.PaneId),
 			Status: PaneStatus(m.SetPaneStatusRequest.Status),
 			Clear:  m.SetPaneStatusRequest.Clear,
+		}, nil
+	case *wirepb.ClientMessage_WaitOutputRequest:
+		return MsgWaitOutputRequest{
+			PaneID: int(m.WaitOutputRequest.PaneId),
+			Match:  m.WaitOutputRequest.Match,
+			Regex:  m.WaitOutputRequest.Regex,
+			Lines:  int(m.WaitOutputRequest.Lines),
+		}, nil
+	case *wirepb.ClientMessage_WaitStatusRequest:
+		until := make([]PaneStatus, len(m.WaitStatusRequest.Until))
+		for i, st := range m.WaitStatusRequest.Until {
+			until[i] = PaneStatus(st)
+		}
+		return MsgWaitStatusRequest{
+			PaneID: int(m.WaitStatusRequest.PaneId),
+			Until:  until,
 		}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
@@ -350,6 +386,22 @@ func MarshalServer(msg any) ([]byte, error) {
 		env.Msg = &wirepb.ServerMessage_SetPaneStatusResponse{
 			SetPaneStatusResponse: &wirepb.MsgSetPaneStatusResponse{
 				PaneId: int32(m.PaneID),
+				Error:  validUTF8(m.Error),
+			},
+		}
+	case MsgWaitOutputResponse:
+		env.Msg = &wirepb.ServerMessage_WaitOutputResponse{
+			WaitOutputResponse: &wirepb.MsgWaitOutputResponse{
+				PaneId:      int32(m.PaneID),
+				MatchedLine: validUTF8(m.MatchedLine),
+				Error:       validUTF8(m.Error),
+			},
+		}
+	case MsgWaitStatusResponse:
+		env.Msg = &wirepb.ServerMessage_WaitStatusResponse{
+			WaitStatusResponse: &wirepb.MsgWaitStatusResponse{
+				PaneId: int32(m.PaneID),
+				Status: wirepb.PaneStatus(m.Status),
 				Error:  validUTF8(m.Error),
 			},
 		}
@@ -572,6 +624,18 @@ func UnmarshalServer(data []byte) (any, error) {
 		return MsgSetPaneStatusResponse{
 			PaneID: int(m.SetPaneStatusResponse.PaneId),
 			Error:  m.SetPaneStatusResponse.Error,
+		}, nil
+	case *wirepb.ServerMessage_WaitOutputResponse:
+		return MsgWaitOutputResponse{
+			PaneID:      int(m.WaitOutputResponse.PaneId),
+			MatchedLine: m.WaitOutputResponse.MatchedLine,
+			Error:       m.WaitOutputResponse.Error,
+		}, nil
+	case *wirepb.ServerMessage_WaitStatusResponse:
+		return MsgWaitStatusResponse{
+			PaneID: int(m.WaitStatusResponse.PaneId),
+			Status: PaneStatus(m.WaitStatusResponse.Status),
+			Error:  m.WaitStatusResponse.Error,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

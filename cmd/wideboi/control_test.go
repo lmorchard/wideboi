@@ -445,6 +445,95 @@ func TestSetPaneStatusCommand(t *testing.T) {
 	}
 }
 
+func TestWaitOutputAndStatusCLI(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "control.sock")
+
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	clientConn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+			break
+		}
+	}
+
+	cfg := config.Config{Socket: sockPath}
+	var stdout, stderr bytes.Buffer
+	paneIDStr := fmt.Sprintf("%d", paneID)
+
+	// Send echo command into pane
+	if err := runSend(cfg, []string{paneIDStr, "echo 'cli-output-check'\n"}, &stderr); err != nil {
+		t.Fatalf("runSend failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	// Wait for output using positional argument
+	code, err := runWaitOutput(cfg, []string{paneIDStr, "cli-output-check"}, &stdout, &stderr)
+	if err != nil || code != 0 {
+		t.Fatalf("runWaitOutput failed code=%d err=%v stderr=%s", code, err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "cli-output-check") {
+		t.Fatalf("expected stdout to contain cli-output-check, got: %q", stdout.String())
+	}
+
+	// Wait for status using --until flag
+	stdout.Reset()
+	stderr.Reset()
+	// Set status to working first
+	if err := runSetPaneStatus(cfg, []string{paneIDStr, "working"}, &stderr); err != nil {
+		t.Fatalf("runSetPaneStatus failed: %v", err)
+	}
+	code, err = runWaitStatus(cfg, []string{paneIDStr, "--until", "working"}, &stdout, &stderr)
+	if err != nil || code != 0 {
+		t.Fatalf("runWaitStatus failed code=%d err=%v stderr=%s", code, err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "working") {
+		t.Fatalf("expected stdout to contain working, got: %q", stdout.String())
+	}
+
+	// Timeout test
+	stderr.Reset()
+	code, err = runWaitOutput(cfg, []string{"--timeout", "100ms", paneIDStr, "nonexistent-string-xyz"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("runWaitOutput timeout returned err: %v", err)
+	}
+	if code != 124 {
+		t.Fatalf("runWaitOutput timeout expected code 124, got %d", code)
+	}
+}
+
 func TestDumpPaneCLI(t *testing.T) {
 	dir := t.TempDir()
 	sockPath := filepath.Join(dir, "control.sock")

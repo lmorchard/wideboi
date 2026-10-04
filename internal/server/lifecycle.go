@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -47,6 +48,10 @@ func (s *Server) watchKeptPane(id int, p *Pane, drained <-chan struct{}) {
 	}
 	code, _ := p.pty.ExitCode()
 	p.markExited(code)
+	s.mu.Lock()
+	readySt := s.checkStatusWaitersLocked(id)
+	s.mu.Unlock()
+	sendReadyStatusWaiters(readySt)
 	s.notifyWaiters(id, code, "")
 	s.broadcastLayout(context.Background())
 }
@@ -82,7 +87,50 @@ func drainAnswered(tps []transport.Transport) {
 // hung it up and waited for the reap, so the code is normally there; a
 // child that outlived the grace has none to give.
 func (s *Server) finishWaiters(id int, p *Pane) []transport.Transport {
-	if code, ok := p.reapedExitCode(); ok {
+	code, reaped := p.reapedExitCode()
+
+	s.mu.Lock()
+	ows := s.outputWaiters[id]
+	delete(s.outputWaiters, id)
+	sws := s.statusWaiters[id]
+	delete(s.statusWaiters, id)
+	s.mu.Unlock()
+
+	for _, w := range ows {
+		ctx, cancel := context.WithTimeout(context.Background(), waiterSendCeiling)
+		w.tp.SendServer(ctx, protocol.MsgWaitOutputResponse{
+			PaneID: id,
+			Error:  fmt.Sprintf("pane %d closed before matching output appeared", id),
+		})
+		cancel()
+	}
+
+	var exitStatus protocol.PaneStatus
+	if reaped {
+		if code == 0 {
+			exitStatus = protocol.StatusDone
+		} else {
+			exitStatus = protocol.StatusFailed
+		}
+	}
+
+	for _, w := range sws {
+		ctx, cancel := context.WithTimeout(context.Background(), waiterSendCeiling)
+		if reaped && slices.Contains(w.until, exitStatus) {
+			w.tp.SendServer(ctx, protocol.MsgWaitStatusResponse{
+				PaneID: id,
+				Status: exitStatus,
+			})
+		} else {
+			w.tp.SendServer(ctx, protocol.MsgWaitStatusResponse{
+				PaneID: id,
+				Error:  fmt.Sprintf("pane %d closed before reaching target status", id),
+			})
+		}
+		cancel()
+	}
+
+	if reaped {
 		return s.notifyWaiters(id, code, "")
 	}
 	return s.notifyWaiters(id, 0, fmt.Sprintf("pane %d closed before its process exited", id))
