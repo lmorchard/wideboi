@@ -355,6 +355,96 @@ func TestRenamePaneSubcommand(t *testing.T) {
 	}
 }
 
+func TestSetPaneStatusCommand(t *testing.T) {
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "control.sock")
+
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	clientConn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+			break
+		}
+	}
+
+	cfg := config.Config{Socket: sockPath}
+	var stderr bytes.Buffer
+	paneIDStr := fmt.Sprintf("%d", paneID)
+
+	// 1. Explicit pane ID and status "working"
+	if err := runSetPaneStatus(cfg, []string{paneIDStr, "working"}, &stderr); err != nil {
+		t.Fatalf("runSetPaneStatus working failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	// 2. Environment $WIDEBOI_PANE_ID and status "input"
+	t.Setenv("WIDEBOI_PANE_ID", paneIDStr)
+	stderr.Reset()
+	if err := runSetPaneStatus(cfg, []string{"input"}, &stderr); err != nil {
+		t.Fatalf("runSetPaneStatus input failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	// 3. Clear status
+	stderr.Reset()
+	if err := runSetPaneStatus(cfg, []string{paneIDStr, "clear"}, &stderr); err != nil {
+		t.Fatalf("runSetPaneStatus clear failed: %v, stderr: %s", err, stderr.String())
+	}
+
+	// 4. Error outside session without pane ID
+	t.Setenv("WIDEBOI_PANE_ID", "")
+	stderr.Reset()
+	err = runSetPaneStatus(cfg, []string{"working"}, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "pane-id required") {
+		t.Fatalf("expected pane-id required error, got %v", err)
+	}
+
+	// 5. Error with non-existent pane ID
+	stderr.Reset()
+	err = runSetPaneStatus(cfg, []string{"99999", "working"}, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
+		t.Fatalf("expected not found error, got %v", err)
+	}
+
+	// 6. Error with unknown status
+	stderr.Reset()
+	err = runSetPaneStatus(cfg, []string{paneIDStr, "dancing"}, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unknown status") {
+		t.Fatalf("expected unknown status error, got %v", err)
+	}
+}
+
 func TestDumpPaneCLI(t *testing.T) {
 	dir := t.TempDir()
 	sockPath := filepath.Join(dir, "control.sock")

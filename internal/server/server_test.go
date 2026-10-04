@@ -219,6 +219,69 @@ func TestVerbTogglePin(t *testing.T) {
 	}
 }
 
+func recvSetPaneStatusResponse(t *testing.T, ch <-chan transport.ServerMessage, timeout time.Duration) protocol.MsgSetPaneStatusResponse {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case msg := <-ch:
+			if resp, ok := msg.(protocol.MsgSetPaneStatusResponse); ok {
+				return resp
+			}
+		case <-deadline:
+			t.Fatalf("timeout waiting for MsgSetPaneStatusResponse")
+			return protocol.MsgSetPaneStatusResponse{}
+		}
+	}
+}
+
+func TestSetPaneStatusExplicitOverride(t *testing.T) {
+	tp := transport.NewInProcChannel(32)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Width: 80},
+		{Width: 80},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 120, Rows: 24})
+	snap := recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	pane2ID := snap.Columns[1].PaneID
+
+	// 1. Explicitly set StatusWorking
+	tp.SendClient(ctx, protocol.MsgSetPaneStatusRequest{PaneID: pane2ID, Status: protocol.StatusWorking})
+	res := recvSetPaneStatusResponse(t, tp.ServerSend, 2*time.Second)
+	if res.Error != "" {
+		t.Fatalf("unexpected error setting working: %s", res.Error)
+	}
+
+	// 2. Explicitly set StatusNeedsInput
+	tp.SendClient(ctx, protocol.MsgSetPaneStatusRequest{PaneID: pane2ID, Status: protocol.StatusNeedsInput})
+	res = recvSetPaneStatusResponse(t, tp.ServerSend, 2*time.Second)
+	if res.Error != "" {
+		t.Fatalf("unexpected error setting input: %s", res.Error)
+	}
+
+	// 3. Clear explicit override
+	tp.SendClient(ctx, protocol.MsgSetPaneStatusRequest{PaneID: pane2ID, Clear: true})
+	res = recvSetPaneStatusResponse(t, tp.ServerSend, 2*time.Second)
+	if res.Error != "" {
+		t.Fatalf("unexpected error clearing status: %s", res.Error)
+	}
+
+	// 4. Non-existent pane returns error
+	tp.SendClient(ctx, protocol.MsgSetPaneStatusRequest{PaneID: 9999, Status: protocol.StatusWorking})
+	res = recvSetPaneStatusResponse(t, tp.ServerSend, 2*time.Second)
+	if res.Error == "" || !strings.Contains(res.Error, "not found") {
+		t.Fatalf("expected not found error, got: %q", res.Error)
+	}
+}
+
 // testGrace is the hangup grace these tests tear down with. None of them
 // asserts anything about teardown -- that contract belongs to
 // internal/server/ptyx's hangup tests and to scripts/ptycheck.py via

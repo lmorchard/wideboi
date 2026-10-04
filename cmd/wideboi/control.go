@@ -669,6 +669,98 @@ func runRenamePane(cfg config.Config, args []string, stderr io.Writer) error {
 	return nil
 }
 
+// runSetPaneStatus sets or clears an explicit status override on a pane.
+func runSetPaneStatus(cfg config.Config, args []string, stderr io.Writer) error {
+	fs := flag.NewFlagSet("set-pane-status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var session, socket string
+	addTargetFlags(fs, &session, &socket)
+
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	applySessionFlags(&cfg, session, socket)
+
+	rest := fs.Args()
+	callerPaneStr := os.Getenv("WIDEBOI_PANE_ID")
+	callerID := 0
+	if callerPaneStr != "" {
+		if id, err := strconv.Atoi(callerPaneStr); err == nil && id > 0 {
+			callerID = id
+		}
+	}
+
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: wideboi set-pane-status [flags] <working|input|done|failed|idle|clear> [pane-id]")
+	}
+
+	statusWord := ""
+	targetID := callerID
+
+	// Support both: set-pane-status <status> [id] AND set-pane-status <id> <status>
+	if id, err := strconv.Atoi(rest[0]); err == nil && id > 0 {
+		targetID = id
+		if len(rest) > 1 {
+			statusWord = rest[1]
+		}
+	} else {
+		statusWord = rest[0]
+		if len(rest) > 1 {
+			if id, err := strconv.Atoi(rest[1]); err == nil && id > 0 {
+				targetID = id
+			} else {
+				return fmt.Errorf("invalid pane id %q: %w", rest[1], err)
+			}
+		}
+	}
+
+	if targetID <= 0 {
+		return fmt.Errorf("usage: wideboi set-pane-status [flags] <status> <pane-id> (pane-id required outside wideboi pane)")
+	}
+
+	clear := false
+	var status protocol.PaneStatus
+
+	switch strings.ToLower(statusWord) {
+	case "clear", "reset", "none":
+		clear = true
+	case "working", "busy":
+		status = protocol.StatusWorking
+	case "input", "needs_input", "waiting":
+		status = protocol.StatusNeedsInput
+	case "done", "finished", "success":
+		status = protocol.StatusDone
+	case "failed", "error":
+		status = protocol.StatusFailed
+	case "idle":
+		status = protocol.StatusIdle
+	case "":
+		return fmt.Errorf("usage: wideboi set-pane-status [flags] <status> [pane-id]")
+	default:
+		return fmt.Errorf("unknown status %q (must be working, input, done, failed, idle, or clear)", statusWord)
+	}
+
+	req := protocol.MsgSetPaneStatusRequest{
+		PaneID: targetID,
+		Status: status,
+		Clear:  clear,
+	}
+
+	resp, err := rpcQuery[protocol.MsgSetPaneStatusResponse](cfg, req, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	if resp.Error != "" {
+		return errors.New(resp.Error)
+	}
+
+	return nil
+}
+
 // exitWaitTimeout is timeout(1)'s code for "gave up waiting".
 const exitWaitTimeout = 124
 

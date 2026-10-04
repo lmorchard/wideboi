@@ -183,6 +183,9 @@ func printHelp(w io.Writer) {
   wideboi [flags] rename-pane [pane-id] [title]
                              Set or clear a pane's title (uses $WIDEBOI_PANE_ID if omitted;
                              empty title clears override)
+  wideboi [flags] set-pane-status <status> [pane-id]
+                             Set or clear a pane's status (working, input, done, failed,
+                             idle, clear; uses $WIDEBOI_PANE_ID if omitted)
   wideboi [flags] wait [--timeout <duration>] <pane-id>
                              Block until a pane's process exits; exit with its code
                              (124 on timeout). Use split --keep to wait after exit
@@ -361,6 +364,8 @@ func main() {
 		fatal(runClose(cfg, opts.subcommandArgs, os.Stderr))
 	case "rename-pane":
 		fatal(runRenamePane(cfg, opts.subcommandArgs, os.Stderr))
+	case "set-pane-status":
+		fatal(runSetPaneStatus(cfg, opts.subcommandArgs, os.Stderr))
 	case "wait":
 		code, err := runWait(cfg, opts.subcommandArgs, os.Stderr)
 		fatal(err)

@@ -189,6 +189,7 @@ message ServerMessage {
     MsgRenamePaneResponse rename_pane_response = 20;
     MsgDumpPaneResponse dump_pane_response = 21;
     MsgPipePaneResponse pipe_pane_response = 22;
+    MsgSetPaneStatusResponse set_pane_status_response = 23;
   }
 }
 
@@ -298,7 +299,19 @@ message ClientMessage {
     MsgRenamePaneRequest rename_pane_request = 22;
     MsgDumpPaneRequest dump_pane_request = 23;
     MsgPipePaneRequest pipe_pane_request = 24;
+    MsgSetPaneStatusRequest set_pane_status_request = 25;
   }
+}
+
+message MsgSetPaneStatusRequest {
+  int32 pane_id = 1;
+  PaneStatus status = 2;
+  bool clear = 3;
+}
+
+message MsgSetPaneStatusResponse {
+  int32 pane_id = 1;
+  string error = 2;
 }
 
 message MsgPipePaneRequest {

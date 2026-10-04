@@ -86,6 +86,14 @@ func MarshalClient(msg any) ([]byte, error) {
 				PaneId: int32(m.PaneID),
 			},
 		}
+	case MsgSetPaneStatusRequest:
+		env.Msg = &wirepb.ClientMessage_SetPaneStatusRequest{
+			SetPaneStatusRequest: &wirepb.MsgSetPaneStatusRequest{
+				PaneId: int32(m.PaneID),
+				Status: wirepb.PaneStatus(m.Status),
+				Clear:  m.Clear,
+			},
+		}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
@@ -175,6 +183,12 @@ func UnmarshalClient(data []byte) (any, error) {
 	case *wirepb.ClientMessage_PipePaneRequest:
 		return MsgPipePaneRequest{
 			PaneID: int(m.PipePaneRequest.PaneId),
+		}, nil
+	case *wirepb.ClientMessage_SetPaneStatusRequest:
+		return MsgSetPaneStatusRequest{
+			PaneID: int(m.SetPaneStatusRequest.PaneId),
+			Status: PaneStatus(m.SetPaneStatusRequest.Status),
+			Clear:  m.SetPaneStatusRequest.Clear,
 		}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
@@ -329,6 +343,13 @@ func MarshalServer(msg any) ([]byte, error) {
 				PaneId: int32(m.PaneID),
 				Data:   m.Data,
 				Closed: m.Closed,
+				Error:  validUTF8(m.Error),
+			},
+		}
+	case MsgSetPaneStatusResponse:
+		env.Msg = &wirepb.ServerMessage_SetPaneStatusResponse{
+			SetPaneStatusResponse: &wirepb.MsgSetPaneStatusResponse{
+				PaneId: int32(m.PaneID),
 				Error:  validUTF8(m.Error),
 			},
 		}
@@ -546,6 +567,11 @@ func UnmarshalServer(data []byte) (any, error) {
 			Data:   m.PipePaneResponse.Data,
 			Closed: m.PipePaneResponse.Closed,
 			Error:  m.PipePaneResponse.Error,
+		}, nil
+	case *wirepb.ServerMessage_SetPaneStatusResponse:
+		return MsgSetPaneStatusResponse{
+			PaneID: int(m.SetPaneStatusResponse.PaneId),
+			Error:  m.SetPaneStatusResponse.Error,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)
