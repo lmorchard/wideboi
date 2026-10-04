@@ -34,6 +34,7 @@ type msgEffects struct {
 	captureResp   *protocol.MsgCaptureResponse
 	closeResp     *protocol.MsgClosePaneResponse
 	renameResp    *protocol.MsgRenamePaneResponse
+	setStatusResp *protocol.MsgSetPaneStatusResponse
 	dumpResp      *protocol.MsgDumpPaneResponse
 	pipeResp      *protocol.MsgPipePaneResponse
 	waitResp      *protocol.MsgWaitResponse
@@ -152,6 +153,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		eff = s.handleClosePaneRequestLocked(tp, m)
 	case protocol.MsgRenamePaneRequest:
 		eff = s.handleRenamePaneRequestLocked(tp, m)
+	case protocol.MsgSetPaneStatusRequest:
+		eff = s.handleSetPaneStatusRequestLocked(tp, m)
 	case protocol.MsgDumpPaneRequest:
 		eff = s.handleDumpPaneRequestLocked(tp, m)
 	case protocol.MsgPipePaneRequest:
@@ -373,6 +376,36 @@ func (s *Server) handleRenamePaneRequestLocked(tp transport.Transport, m protoco
 	s.updateDashboardLocked()
 	eff.needBroadcast = true
 	eff.renameResp = &protocol.MsgRenamePaneResponse{
+		PaneID: m.PaneID,
+	}
+	return eff
+}
+
+func (s *Server) handleSetPaneStatusRequestLocked(tp transport.Transport, m protocol.MsgSetPaneStatusRequest) msgEffects {
+	var eff msgEffects
+	p, ok := s.panes[m.PaneID]
+	if !ok {
+		eff.setStatusResp = &protocol.MsgSetPaneStatusResponse{
+			PaneID: m.PaneID,
+			Error:  fmt.Sprintf("pane %d not found", m.PaneID),
+		}
+		return eff
+	}
+	if m.Clear {
+		p.ClearExplicitStatus()
+		s.markSeenLocked(m.PaneID)
+	} else {
+		p.SetExplicitStatus(m.Status)
+		if m.Status == protocol.StatusDone && m.PaneID != s.strip.FocusedPaneID() {
+			if s.unseenDone == nil {
+				s.unseenDone = make(map[int]bool)
+			}
+			s.unseenDone[m.PaneID] = true
+		}
+	}
+	s.updateDashboardLocked()
+	eff.needBroadcast = true
+	eff.setStatusResp = &protocol.MsgSetPaneStatusResponse{
 		PaneID: m.PaneID,
 	}
 	return eff
@@ -820,6 +853,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if eff.renameResp != nil {
 			tp.SendServer(ctx, *eff.renameResp)
+		}
+		if eff.setStatusResp != nil {
+			tp.SendServer(ctx, *eff.setStatusResp)
 		}
 		if eff.dumpResp != nil {
 			tp.SendServer(ctx, *eff.dumpResp)

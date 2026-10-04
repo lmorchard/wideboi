@@ -41,4 +41,5 @@ package protocol
 // 24 adds MsgPipePaneRequest and MsgPipePaneResponse for raw PTY stream tapping (#333).
 // 25 adds pinned boolean flag to ColumnData and VerbTogglePin (#373).
 // 26 adds StatusInterrupted to PaneStatus (#383).
-const Version uint32 = 26
+// 27 adds MsgSetPaneStatusRequest and MsgSetPaneStatusResponse (#382).
+const Version uint32 = 27

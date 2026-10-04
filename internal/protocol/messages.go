@@ -564,6 +564,19 @@ type MsgPipePaneResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// MsgSetPaneStatusRequest asks the server to set or clear an explicit status override on a pane.
+type MsgSetPaneStatusRequest struct {
+	PaneID int        `json:"pane_id"`
+	Status PaneStatus `json:"status"`
+	Clear  bool       `json:"clear,omitempty"`
+}
+
+// MsgSetPaneStatusResponse acknowledges MsgSetPaneStatusRequest or reports an error.
+type MsgSetPaneStatusResponse struct {
+	PaneID int    `json:"pane_id"`
+	Error  string `json:"error,omitempty"`
+}
+
 // MsgWaitRequest asks to be told when a pane's process exits. The server
 // answers once, with MsgWaitResponse, when that happens.
 type MsgWaitRequest struct {

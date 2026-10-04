@@ -151,6 +151,32 @@ wideboi close "$PANE_ID"
 process gets SIGHUP, and the pane leaves the layout. Closing the last pane
 ends the session.
 
+### `set-pane-status`: declare explicit agent status
+
+```bash
+wideboi set-pane-status working            # marks calling pane ($WIDEBOI_PANE_ID) as working
+wideboi set-pane-status input              # marks calling pane as needs input / waiting for permission
+wideboi set-pane-status done               # marks calling pane as completed
+wideboi set-pane-status idle               # marks calling pane as idle
+wideboi set-pane-status clear              # removes explicit override (resumes PTY/OSC heuristics)
+wideboi set-pane-status working "$PANE_ID" # targets an explicit pane ID
+```
+
+Explicit status takes precedence over PTY write heuristics. Use this in agent lifecycle
+hooks or scripts for 100% deterministic status tracking.
+
+#### Recommended Claude Code Hooks (`~/.claude/settings.json`)
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "type": "command", "command": "wideboi set-pane-status working" }],
+    "Notification": [{ "type": "command", "command": "wideboi set-pane-status input" }],
+    "Stop": [{ "type": "command", "command": "wideboi set-pane-status done" }]
+  }
+}
+```
+
 ### `status`: inspect the session
 
 ```bash

@@ -87,6 +87,10 @@ type Pane struct {
 	customTitle    string
 	hasCustomTitle bool
 
+	explicitStatusMu  sync.RWMutex
+	explicitStatus    protocol.PaneStatus
+	hasExplicitStatus bool
+
 	tapMu      sync.RWMutex
 	taps       map[uint64]chan []byte
 	tapsClosed bool
@@ -464,7 +468,8 @@ func (p *Pane) UserVars() map[string]string { return p.grid.UserVars() }
 
 // Status reports the current agent status of the pane. A kept pane whose
 // process has exited reports done or failed by its exit code, whatever
-// its output last said.
+// its output last said. An explicit status set via set-pane-status overrides
+// PTY output heuristics.
 func (p *Pane) Status() protocol.PaneStatus {
 	if code, exited := p.ExitStatus(); exited {
 		if code == 0 {
@@ -472,7 +477,31 @@ func (p *Pane) Status() protocol.PaneStatus {
 		}
 		return protocol.StatusFailed
 	}
+	p.explicitStatusMu.RLock()
+	if p.hasExplicitStatus {
+		st := p.explicitStatus
+		p.explicitStatusMu.RUnlock()
+		return st
+	}
+	p.explicitStatusMu.RUnlock()
 	return p.grid.Status()
+}
+
+// SetExplicitStatus sets an authoritative agent status override on the pane,
+// taking precedence over PTY output heuristics.
+func (p *Pane) SetExplicitStatus(st protocol.PaneStatus) {
+	p.explicitStatusMu.Lock()
+	p.explicitStatus = st
+	p.hasExplicitStatus = true
+	p.explicitStatusMu.Unlock()
+}
+
+// ClearExplicitStatus removes the authoritative status override,
+// allowing the pane to resume heuristic and OSC tracking.
+func (p *Pane) ClearExplicitStatus() {
+	p.explicitStatusMu.Lock()
+	p.hasExplicitStatus = false
+	p.explicitStatusMu.Unlock()
 }
 
 // ExitStatus reports whether a kept pane's process has exited, and its

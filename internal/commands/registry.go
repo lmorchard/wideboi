@@ -815,6 +815,70 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:        "set-pane-status",
+		Aliases:     []string{"status-set"},
+		Description: "Set or clear an explicit status override on a pane",
+		Category:    "Panes",
+		ArgsUsage:   "<working|input|done|failed|idle|clear> [pane-id]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			if len(inv.Args) == 0 {
+				return fmt.Errorf("usage: :set-pane-status <working|input|done|failed|idle|clear> [pane-id]")
+			}
+			targetID := inv.CallerPaneID
+			statusWord := ""
+			if id, err := strconv.Atoi(inv.Args[0]); err == nil && id > 0 {
+				targetID = id
+				if len(inv.Args) > 1 {
+					statusWord = inv.Args[1]
+				}
+			} else {
+				statusWord = inv.Args[0]
+				if len(inv.Args) > 1 {
+					if id, err := strconv.Atoi(inv.Args[1]); err == nil && id > 0 {
+						targetID = id
+					} else {
+						return fmt.Errorf("invalid pane id %q: %w", inv.Args[1], err)
+					}
+				}
+			}
+			if targetID <= 0 {
+				return fmt.Errorf("pane-id required outside wideboi pane")
+			}
+			clear := false
+			var status protocol.PaneStatus
+			switch strings.ToLower(statusWord) {
+			case "clear", "reset", "none":
+				clear = true
+			case "working", "busy":
+				status = protocol.StatusWorking
+			case "input", "needs_input", "waiting":
+				status = protocol.StatusNeedsInput
+			case "done", "finished", "success":
+				status = protocol.StatusDone
+			case "failed", "error":
+				status = protocol.StatusFailed
+			case "idle":
+				status = protocol.StatusIdle
+			default:
+				return fmt.Errorf("unknown status %q (must be working, input, done, failed, idle, or clear)", statusWord)
+			}
+			req := protocol.MsgSetPaneStatusRequest{
+				PaneID: targetID,
+				Status: status,
+				Clear:  clear,
+			}
+			resp, err := RPCQuery[protocol.MsgSetPaneStatusResponse](ctx, inv, req, 5*time.Second)
+			if err != nil {
+				return err
+			}
+			if resp.Error != "" {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			return nil
+		},
+	})
+
+	r.Register(Command{
 		Name:        "toggle-status",
 		Aliases:     []string{"status-bar"},
 		Description: "Toggle the session status bar/dashboard pane",
