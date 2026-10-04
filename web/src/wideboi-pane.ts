@@ -147,8 +147,11 @@ export class WideboiPane extends LitElement {
     const charWidth = this.cellWidth * this.zoom;
     const x = this.pane.cursorX * charWidth;
     const width = this.viewport.clientWidth;
-    if (x < this.viewport.scrollLeft) this.viewport.scrollLeft = x;
-    else if (x + charWidth > this.viewport.scrollLeft + width) {
+    if (x + charWidth <= width) {
+      this.viewport.scrollLeft = 0;
+    } else if (x < this.viewport.scrollLeft) {
+      this.viewport.scrollLeft = x;
+    } else if (x + charWidth > this.viewport.scrollLeft + width) {
       this.viewport.scrollLeft = x + charWidth - width;
     }
   }
@@ -288,7 +291,7 @@ export class WideboiPane extends LitElement {
         const oldZoom = (changedProperties.get('zoom') as number) || 1.0;
         const ratio = oldZoom > 0 ? this.zoom / oldZoom : 1.0;
 
-        if (canvasWidth <= this.viewport.clientWidth) {
+        if (canvasWidth <= this.viewport.clientWidth || this.viewport.scrollLeft === 0) {
           this.viewport.scrollLeft = 0;
         } else {
           const centerX = this.viewport.scrollLeft + this.viewport.clientWidth / 2;
