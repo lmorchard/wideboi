@@ -71,6 +71,32 @@ test('sending a mobile draft reveals the cursor after horizontal panning', async
   await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBe(0);
 });
 
+test('sending a mobile draft with prompt does not shift terminal canvas off screen to the left', async ({ page }) => {
+  await connect(page);
+  await page.evaluate(async () => {
+    const { serverBytes } = await import('/tests/browser-fixture.ts');
+    window.testSockets[0].message(serverBytes({ case: 'paneUpdate', value: {
+      paneId: 1, generation: 2n, cols: 80, rows: 24,
+      lines: Array.from({ length: 24 }, (_, y) => ({
+        cells: Array.from({ length: 80 }, (_, x) => ({
+          content: y === 0 && x === 0 ? '$' : ' ', width: 1,
+        })),
+      })),
+      cursorX: 2,
+      cursorY: 0,
+      cursorVisible: true,
+    } }));
+  });
+  await page.getByRole('button', { name: 'Reset zoom' }).click();
+  const viewport = page.locator('wideboi-pane').first().locator('.viewport');
+  expect(await viewport.evaluate(el => el.scrollLeft)).toBe(0);
+  await viewport.evaluate(el => { el.scrollLeft = el.scrollWidth; });
+  await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+  await page.getByRole('textbox', { name: 'Command or response' }).fill('ls');
+  await page.getByRole('button', { name: 'Send text' }).click();
+  await expect.poll(() => viewport.evaluate(el => el.scrollLeft)).toBe(0);
+});
+
 test('touch pans without terminal mouse messages and keyboard-sized view does not resize PTY', async ({ page }) => {
   await connect(page);
   await page.getByRole('button', { name: 'Reset zoom' }).click();
