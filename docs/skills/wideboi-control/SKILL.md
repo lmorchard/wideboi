@@ -141,6 +141,28 @@ a signal reports 128+signal, as a shell does (SIGTERM → 143, SIGHUP → 129).
 - Closing a pane while someone waits on it wakes the waiter. It gets the
   hangup's code, or an error if the process outlived the close.
 
+### `wait-output`: block until text or regex appears
+
+```bash
+wideboi wait-output "$PANE_ID" "Build completed"
+wideboi wait-output "$PANE_ID" --regex "Listening on :[0-9]+" --timeout 30s
+```
+
+`wait-output` blocks on the server until matching output appears in the pane's
+recent lines or scrollback. It prints the matched line to stdout and exits 0
+(or exits 124 on timeout). This replaces polling loops (`while ! capture | grep; do sleep ...; done`).
+
+### `wait-status`: block until pane transitions to status
+
+```bash
+wideboi wait-status "$PANE_ID" done
+wideboi wait-status "$PANE_ID" --until "needs_input,done" --timeout 1m
+```
+
+`wait-status` blocks on the server until the pane transitions to one of the specified
+target statuses (`working`, `input`, `done`, `failed`, `idle`, `interrupted`). It prints
+the achieved status to stdout and exits 0 (or exits 124 on timeout).
+
 ### `close`: remove a pane
 
 ```bash

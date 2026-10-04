@@ -125,6 +125,9 @@ func reorderFlags(args []string) []string {
 				arg == "-o" || arg == "-output" || arg == "--output" ||
 				arg == "-cwd" || arg == "--cwd" ||
 				arg == "-after" || arg == "--after" ||
+				arg == "-match" || arg == "--match" ||
+				arg == "-regex" || arg == "--regex" ||
+				arg == "-until" || arg == "--until" ||
 				arg == "-timeout" || arg == "--timeout") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flags = append(flags, args[i])
@@ -805,4 +808,167 @@ func runWait(cfg config.Config, args []string, stderr io.Writer) (int, error) {
 		return 0, errors.New(resp.Error)
 	}
 	return resp.ExitCode, nil
+}
+
+// runWaitOutput blocks until matching text appears in pane output and emits the matched line.
+func runWaitOutput(cfg config.Config, args []string, stdout, stderr io.Writer) (int, error) {
+	fs := flag.NewFlagSet("wait-output", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var match, regex string
+	var lines int
+	var timeout time.Duration
+	var session, socket string
+
+	fs.StringVar(&match, "match", "", "substring to wait for in pane output")
+	fs.StringVar(&regex, "regex", "", "regular expression pattern to wait for in pane output")
+	fs.IntVar(&lines, "lines", 50, "tail lines to inspect for matching output")
+	fs.DurationVar(&timeout, "timeout", 0, "give up after this long (exit 124); default waits forever")
+	addTargetFlags(fs, &session, &socket)
+
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	applySessionFlags(&cfg, session, socket)
+
+	rest := fs.Args()
+	targetID := 0
+	callerPaneStr := os.Getenv("WIDEBOI_PANE_ID")
+	if callerPaneStr != "" {
+		if id, err := strconv.Atoi(callerPaneStr); err == nil && id > 0 {
+			targetID = id
+		}
+	}
+
+	if len(rest) > 0 {
+		if id, err := strconv.Atoi(rest[0]); err == nil && id > 0 {
+			targetID = id
+			if len(rest) > 1 && match == "" && regex == "" {
+				match = strings.Join(rest[1:], " ")
+			}
+		} else if match == "" && regex == "" {
+			match = strings.Join(rest, " ")
+		}
+	}
+
+	if targetID <= 0 {
+		return 0, fmt.Errorf("usage: wideboi wait-output [flags] <pane-id> [pattern] (pane-id required outside wideboi pane)")
+	}
+
+	if match == "" && regex == "" {
+		return 0, fmt.Errorf("must specify pattern via argument, --match, or --regex")
+	}
+
+	req := protocol.MsgWaitOutputRequest{
+		PaneID: targetID,
+		Match:  match,
+		Regex:  regex,
+		Lines:  lines,
+	}
+
+	resp, err := rpcQuery[protocol.MsgWaitOutputResponse](cfg, req, timeout)
+	if errors.Is(err, errRPCTimeout) {
+		fmt.Fprintf(stderr, "wideboi: timed out after %s waiting for output on pane %d\n", timeout, targetID)
+		return exitWaitTimeout, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if resp.Error != "" {
+		return 0, errors.New(resp.Error)
+	}
+	fmt.Fprintln(stdout, resp.MatchedLine)
+	return 0, nil
+}
+
+// runWaitStatus blocks until a pane transitions to one of the target statuses and emits the status name.
+func runWaitStatus(cfg config.Config, args []string, stdout, stderr io.Writer) (int, error) {
+	fs := flag.NewFlagSet("wait-status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var until string
+	var timeout time.Duration
+	var session, socket string
+
+	fs.StringVar(&until, "until", "", "comma-separated statuses to wait for (working, input, done, failed, idle)")
+	fs.DurationVar(&timeout, "timeout", 0, "give up after this long (exit 124); default waits forever")
+	addTargetFlags(fs, &session, &socket)
+
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	applySessionFlags(&cfg, session, socket)
+
+	rest := fs.Args()
+	targetID := 0
+	callerPaneStr := os.Getenv("WIDEBOI_PANE_ID")
+	if callerPaneStr != "" {
+		if id, err := strconv.Atoi(callerPaneStr); err == nil && id > 0 {
+			targetID = id
+		}
+	}
+
+	if len(rest) > 0 {
+		if id, err := strconv.Atoi(rest[0]); err == nil && id > 0 {
+			targetID = id
+			if len(rest) > 1 && until == "" {
+				until = rest[1]
+			}
+		} else if until == "" {
+			until = rest[0]
+		}
+	}
+
+	if targetID <= 0 {
+		return 0, fmt.Errorf("usage: wideboi wait-status [flags] <pane-id> [status] (pane-id required outside wideboi pane)")
+	}
+
+	if until == "" {
+		return 0, fmt.Errorf("must specify status via argument or --until")
+	}
+
+	var targetStatuses []protocol.PaneStatus
+	for _, part := range strings.Split(until, ",") {
+		switch strings.ToLower(strings.TrimSpace(part)) {
+		case "working", "busy":
+			targetStatuses = append(targetStatuses, protocol.StatusWorking)
+		case "input", "needs_input", "waiting":
+			targetStatuses = append(targetStatuses, protocol.StatusNeedsInput)
+		case "done", "finished", "success":
+			targetStatuses = append(targetStatuses, protocol.StatusDone)
+		case "failed", "error":
+			targetStatuses = append(targetStatuses, protocol.StatusFailed)
+		case "idle":
+			targetStatuses = append(targetStatuses, protocol.StatusIdle)
+		case "interrupted":
+			targetStatuses = append(targetStatuses, protocol.StatusInterrupted)
+		default:
+			return 0, fmt.Errorf("unknown status %q", part)
+		}
+	}
+
+	req := protocol.MsgWaitStatusRequest{
+		PaneID: targetID,
+		Until:  targetStatuses,
+	}
+
+	resp, err := rpcQuery[protocol.MsgWaitStatusResponse](cfg, req, timeout)
+	if errors.Is(err, errRPCTimeout) {
+		fmt.Fprintf(stderr, "wideboi: timed out after %s waiting for status on pane %d\n", timeout, targetID)
+		return exitWaitTimeout, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if resp.Error != "" {
+		return 0, errors.New(resp.Error)
+	}
+	fmt.Fprintln(stdout, resp.Status.String())
+	return 0, nil
 }

@@ -358,6 +358,9 @@ func RestoreState(s *Server) error {
 			p.SetOnBell(func() {
 				s.onPaneBell(id)
 			})
+			p.SetOnOutput(func() {
+				s.onPaneOutput(id)
+			})
 
 			if p.pty != nil {
 				if up.Keep {

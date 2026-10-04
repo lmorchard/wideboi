@@ -879,6 +879,106 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:        "wait-output",
+		Description: "Block until matching text appears in a pane's output",
+		Category:    "Panes",
+		ArgsUsage:   "<pane-id> <pattern>",
+		Run: func(ctx context.Context, inv Invocation) error {
+			if len(inv.Args) == 0 {
+				return fmt.Errorf("usage: :wait-output <pane-id> <pattern>")
+			}
+			targetID := inv.CallerPaneID
+			pattern := ""
+			if id, err := strconv.Atoi(inv.Args[0]); err == nil && id > 0 {
+				targetID = id
+				if len(inv.Args) > 1 {
+					pattern = strings.Join(inv.Args[1:], " ")
+				}
+			} else {
+				pattern = strings.Join(inv.Args, " ")
+			}
+			if targetID <= 0 {
+				return fmt.Errorf("pane-id required outside wideboi pane")
+			}
+			if pattern == "" {
+				return fmt.Errorf("must specify pattern")
+			}
+			req := protocol.MsgWaitOutputRequest{
+				PaneID: targetID,
+				Match:  pattern,
+				Lines:  50,
+			}
+			resp, err := RPCQuery[protocol.MsgWaitOutputResponse](ctx, inv, req, 30*time.Second)
+			if err != nil {
+				return err
+			}
+			if resp.Error != "" {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			return nil
+		},
+	})
+
+	r.Register(Command{
+		Name:        "wait-status",
+		Description: "Block until a pane transitions to one of the target statuses",
+		Category:    "Panes",
+		ArgsUsage:   "<pane-id> <status1,status2...>",
+		Run: func(ctx context.Context, inv Invocation) error {
+			if len(inv.Args) == 0 {
+				return fmt.Errorf("usage: :wait-status <pane-id> <status>")
+			}
+			targetID := inv.CallerPaneID
+			statusWord := ""
+			if id, err := strconv.Atoi(inv.Args[0]); err == nil && id > 0 {
+				targetID = id
+				if len(inv.Args) > 1 {
+					statusWord = inv.Args[1]
+				}
+			} else {
+				statusWord = inv.Args[0]
+			}
+			if targetID <= 0 {
+				return fmt.Errorf("pane-id required outside wideboi pane")
+			}
+			if statusWord == "" {
+				return fmt.Errorf("must specify status")
+			}
+			var targetStatuses []protocol.PaneStatus
+			for _, part := range strings.Split(statusWord, ",") {
+				switch strings.ToLower(strings.TrimSpace(part)) {
+				case "working", "busy":
+					targetStatuses = append(targetStatuses, protocol.StatusWorking)
+				case "input", "needs_input", "waiting":
+					targetStatuses = append(targetStatuses, protocol.StatusNeedsInput)
+				case "done", "finished", "success":
+					targetStatuses = append(targetStatuses, protocol.StatusDone)
+				case "failed", "error":
+					targetStatuses = append(targetStatuses, protocol.StatusFailed)
+				case "idle":
+					targetStatuses = append(targetStatuses, protocol.StatusIdle)
+				case "interrupted":
+					targetStatuses = append(targetStatuses, protocol.StatusInterrupted)
+				default:
+					return fmt.Errorf("unknown status %q", part)
+				}
+			}
+			req := protocol.MsgWaitStatusRequest{
+				PaneID: targetID,
+				Until:  targetStatuses,
+			}
+			resp, err := RPCQuery[protocol.MsgWaitStatusResponse](ctx, inv, req, 30*time.Second)
+			if err != nil {
+				return err
+			}
+			if resp.Error != "" {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			return nil
+		},
+	})
+
+	r.Register(Command{
 		Name:        "toggle-status",
 		Aliases:     []string{"status-bar"},
 		Description: "Toggle the session status bar/dashboard pane",

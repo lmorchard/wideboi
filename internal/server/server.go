@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,30 @@ import (
 	"github.com/lmorchard/wideboi/internal/server/term"
 	"github.com/lmorchard/wideboi/internal/transport"
 )
+
+type outputWaiter struct {
+	tp        transport.Transport
+	paneID    int
+	match     string
+	regex     *regexp.Regexp
+	tailLines int
+}
+
+type statusWaiter struct {
+	tp     transport.Transport
+	paneID int
+	until  []protocol.PaneStatus
+}
+
+type pendingOutputResponse struct {
+	tp   transport.Transport
+	resp protocol.MsgWaitOutputResponse
+}
+
+type pendingStatusResponse struct {
+	tp   transport.Transport
+	resp protocol.MsgWaitStatusResponse
+}
 
 // Server manages multiplexer layout, PTY sessions, and client protocol messages.
 type Server struct {
@@ -53,7 +78,9 @@ type Server struct {
 
 	// waiters holds the transports blocked in `wideboi wait` on each
 	// pane, answered when that pane's process exits or it is closed.
-	waiters map[int][]transport.Transport
+	waiters       map[int][]transport.Transport
+	outputWaiters map[int][]outputWaiter
+	statusWaiters map[int][]statusWaiter
 
 	// lastStatuses and lastTitles are the per-pane glyph and title
 	// sets as of the last layout broadcast, so the frame loop can
@@ -367,6 +394,9 @@ func NewServer(tp transport.Transport, shell, cwd string) *Server {
 	srv := &Server{
 		strip:             layout.NewStrip(),
 		panes:             make(map[int]*Pane),
+		waiters:           make(map[int][]transport.Transport),
+		outputWaiters:     make(map[int][]outputWaiter),
+		statusWaiters:     make(map[int][]statusWaiter),
 		shell:             shell,
 		cwd:               cwd,
 		transports:        make([]transport.Transport, 0),
@@ -557,6 +587,9 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	p.SetOnBell(func() {
 		s.onPaneBell(id)
 	})
+	p.SetOnOutput(func() {
+		s.onPaneOutput(id)
+	})
 
 	s.panes[id] = p
 	s.strip.AddColumn(id, paneCols, paneRows, afterPaneID)
@@ -581,6 +614,16 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 
 func (s *Server) onPaneBell(paneID int) {
 	go s.broadcastPaneBell(paneID)
+}
+
+func (s *Server) onPaneOutput(paneID int) {
+	s.mu.Lock()
+	readyOut := s.checkOutputWaitersLocked(paneID)
+	readySt := s.checkStatusWaitersLocked(paneID)
+	s.mu.Unlock()
+
+	sendReadyOutputWaiters(readyOut)
+	sendReadyStatusWaiters(readySt)
 }
 
 func (s *Server) broadcastPaneBell(paneID int) {
@@ -999,6 +1042,7 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 	}
 	currentStatuses := s.statusGlyphsLocked()
 	focusedID := s.strip.FocusedPaneID()
+	var readySt []pendingStatusResponse
 	for id, newSt := range currentStatuses {
 		oldSt := s.lastStatuses[id]
 		if oldSt == protocol.StatusWorking && newSt == protocol.StatusIdle {
@@ -1013,12 +1057,14 @@ func (s *Server) broadcastLayoutIfStatusChanged(ctx context.Context) bool {
 				delete(s.unseenDone, id)
 			}
 		}
+		readySt = append(readySt, s.checkStatusWaitersLocked(id)...)
 	}
 
 	changed := !sameStatusMap(currentStatuses, s.lastStatuses) ||
 		!sameStringMap(s.paneTitlesLocked(), s.lastTitles) ||
 		hasPendingCreation
 	s.mu.Unlock()
+	sendReadyStatusWaiters(readySt)
 
 	if !changed {
 		return false
