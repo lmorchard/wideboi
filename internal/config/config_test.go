@@ -1156,7 +1156,9 @@ func TestEnsureSecureSessionDir(t *testing.T) {
 		t.Fatalf("expected secured permissions without group/other, got %04o", fi.Mode().Perm())
 	}
 
-	// 3. Symlink directory is rejected
+	// 3. A symlink to a directory the user controls is accepted: on macOS the
+	// managed session directory can resolve through /tmp, and refusing any
+	// link there would reject the normal case (#397).
 	realDir := filepath.Join(tmp, "real-target")
 	if err := os.Mkdir(realDir, 0700); err != nil {
 		t.Fatal(err)
@@ -1165,8 +1167,17 @@ func TestEnsureSecureSessionDir(t *testing.T) {
 	if err := os.Symlink(realDir, symlinkDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.EnsureSecureSessionDir(symlinkDir); err == nil {
-		t.Fatal("expected symlink session directory to be rejected, got nil")
+	if err := config.EnsureSecureSessionDir(symlinkDir); err != nil {
+		t.Fatalf("expected symlink to a controlled directory to be accepted, got %v", err)
+	}
+
+	// 3a. A symlink that resolves to nothing is still rejected.
+	dangling := filepath.Join(tmp, "dangling-session-dir")
+	if err := os.Symlink(filepath.Join(tmp, "does-not-exist"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.EnsureSecureSessionDir(dangling); err == nil {
+		t.Fatal("expected dangling symlink to be rejected, got nil")
 	}
 
 	// 4. Regular file instead of directory is rejected
@@ -1196,12 +1207,21 @@ func TestValidateCustomSocketDir(t *testing.T) {
 		t.Fatalf("custom directory permissions were modified: %04o", fi.Mode().Perm())
 	}
 
-	// 2. Symlink custom directory is rejected
+	// 2. A symlink to a directory the user controls is accepted (#397).
 	symlinkCustom := filepath.Join(tmp, "symlink-custom")
 	if err := os.Symlink(validDir, symlinkCustom); err != nil {
 		t.Fatal(err)
 	}
-	if err := config.ValidateCustomSocketDir(symlinkCustom); err == nil {
-		t.Fatal("expected symlink custom directory to be rejected, got nil")
+	if err := config.ValidateCustomSocketDir(symlinkCustom); err != nil {
+		t.Fatalf("expected symlink to a controlled directory to be accepted, got %v", err)
+	}
+
+	// 3. A symlink that resolves to nothing is still rejected.
+	dangling := filepath.Join(tmp, "dangling-custom")
+	if err := os.Symlink(filepath.Join(tmp, "nope"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ValidateCustomSocketDir(dangling); err == nil {
+		t.Fatal("expected dangling symlink to be rejected, got nil")
 	}
 }

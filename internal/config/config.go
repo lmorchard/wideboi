@@ -18,6 +18,7 @@ import (
 	"github.com/lmorchard/wideboi/internal/keys"
 	"github.com/lmorchard/wideboi/internal/logger"
 	"github.com/lmorchard/wideboi/internal/protocol"
+	"github.com/lmorchard/wideboi/internal/transport"
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -161,43 +162,38 @@ func SessionDir() string {
 
 // EnsureSecureSessionDir validates ownership, type, symlinks, and permissions
 // of the managed session directory, creating or securing it as needed.
+//
+// A symlinked directory (macOS /tmp, or a $TMPDIR a user names) is resolved
+// to its real target and that target is checked, so a legitimate link is not
+// refused (#397); the owner and chmod checks run on the resolved target.
 func EnsureSecureSessionDir(dir string) error {
-	fi, err := os.Lstat(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(dir, 0700); err != nil {
-				return fmt.Errorf("creating session directory %s: %w", dir, err)
-			}
-			fi, err = os.Lstat(dir)
-			if err != nil {
-				return fmt.Errorf("inspecting created session directory %s: %w", dir, err)
-			}
-		} else {
-			return fmt.Errorf("inspecting session directory %s: %w", dir, err)
+	resolved, fi, err := transport.SafeDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("creating session directory %s: %w", dir, err)
 		}
+		resolved, fi, err = transport.SafeDir(dir)
 	}
-
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("session directory %s is a symlink", dir)
+	if err != nil {
+		return fmt.Errorf("inspecting session directory %s: %w", dir, err)
 	}
 	if !fi.IsDir() {
 		return fmt.Errorf("session directory %s is not a directory", dir)
 	}
 
-	if err := checkDirOwner(dir, fi); err != nil {
+	if err := checkDirOwner(resolved, fi); err != nil {
 		return err
 	}
 
 	if fi.Mode().Perm()&0077 != 0 {
-		if err := os.Chmod(dir, 0700); err != nil {
-			return fmt.Errorf("securing session directory %s: %w", dir, err)
+		if err := os.Chmod(resolved, 0700); err != nil {
+			return fmt.Errorf("securing session directory %s: %w", resolved, err)
 		}
-		fi, err = os.Lstat(dir)
-		if err != nil {
-			return fmt.Errorf("inspecting session directory %s after chmod: %w", dir, err)
+		if fi, err = os.Lstat(resolved); err != nil {
+			return fmt.Errorf("inspecting session directory %s after chmod: %w", resolved, err)
 		}
 		if fi.Mode().Perm()&0077 != 0 {
-			return fmt.Errorf("session directory %s has insecure permissions %04o", dir, fi.Mode().Perm())
+			return fmt.Errorf("session directory %s has insecure permissions %04o", resolved, fi.Mode().Perm())
 		}
 	}
 
@@ -207,28 +203,25 @@ func EnsureSecureSessionDir(dir string) error {
 // ValidateCustomSocketDir verifies that a user-specified custom socket directory
 // is a real directory and not insecurely accessible by other users.
 func ValidateCustomSocketDir(dir string) error {
-	fi, err := os.Lstat(dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			if err := os.MkdirAll(dir, 0700); err != nil {
-				return fmt.Errorf("creating custom socket directory %s: %w", dir, err)
-			}
-			return nil
+	resolved, fi, err := transport.SafeDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("creating custom socket directory %s: %w", dir, err)
 		}
-		return fmt.Errorf("inspecting custom socket directory %s: %w", dir, err)
+		return nil
 	}
-
-	if fi.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("custom socket directory %s is a symlink", dir)
+	if err != nil {
+		return fmt.Errorf("inspecting custom socket directory %s: %w", dir, err)
 	}
 	if !fi.IsDir() {
 		return fmt.Errorf("custom socket directory %s is not a directory", dir)
 	}
 
-	// Disallow world-writable directory without sticky bit owned by someone else
+	// Disallow a world-writable directory without the sticky bit, owned by
+	// someone else, so one user's socket cannot be swapped for another's.
 	if fi.Mode().Perm()&0002 != 0 && fi.Mode()&os.ModeSticky == 0 {
-		if err := checkDirOwner(dir, fi); err != nil {
-			return fmt.Errorf("custom socket directory %s is world-writable without sticky bit and owned by another user: %w", dir, err)
+		if err := checkDirOwner(resolved, fi); err != nil {
+			return fmt.Errorf("custom socket directory %s is world-writable without sticky bit and owned by another user: %w", resolved, err)
 		}
 	}
 

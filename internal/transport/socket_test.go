@@ -360,29 +360,34 @@ func TestSocketCreatedWithRestrictedPermissionsUnderPermissiveUmask(t *testing.T
 	}
 }
 
-func TestSocketListenerRejectsSymlinks(t *testing.T) {
+// TestSocketListenerSymlinkDirFollowsTarget covers #397: a symlinked socket
+// directory must bind through to its real target rather than be refused, while
+// a symlink that resolves to nothing (or to a non-directory) is still refused.
+func TestSocketListenerSymlinkDirFollowsTarget(t *testing.T) {
 	dir := shortTempDir(t)
-	target := filepath.Join(dir, "target.sock")
-	symlinkPath := filepath.Join(dir, "symlink.sock")
-	if err := os.Symlink(target, symlinkPath); err != nil {
+
+	// A symlink to a real directory: the server must bind through the link.
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0700); err != nil {
 		t.Fatal(err)
 	}
-
-	sl, err := transport.NewSocketListener(symlinkPath)
-	if err == nil {
-		sl.Close()
-		t.Fatal("expected NewSocketListener to fail on symlink socket path, got nil")
-	}
-
-	// Also test symlink in socket directory
-	symlinkDir := filepath.Join(dir, "symlink-dir")
-	if err := os.Symlink(dir, symlinkDir); err != nil {
+	sym := filepath.Join(dir, "sym")
+	if err := os.Symlink(real, sym); err != nil {
 		t.Fatal(err)
 	}
-	sl2, err := transport.NewSocketListener(filepath.Join(symlinkDir, "sub.sock"))
-	if err == nil {
-		sl2.Close()
-		t.Fatal("expected NewSocketListener to fail in symlink directory, got nil")
+	sl, err := transport.NewSocketListener(filepath.Join(sym, "a.sock"))
+	if err != nil {
+		t.Fatalf("expected to bind in symlinked directory, got %v", err)
+	}
+	sl.Close()
+
+	// A symlink to a path that does not exist is still refused.
+	dangling := filepath.Join(dir, "dangling.sock")
+	if err := os.Symlink(filepath.Join(dir, "does-not-exist"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transport.NewSocketListener(dangling); err == nil {
+		t.Fatal("expected NewSocketListener to fail on a dangling symlink, got nil")
 	}
 }
 
