@@ -160,6 +160,20 @@ Repeat timing and concurrency runs. One settle-window change passed its first
 passed four times before exposing two real races. Four fresh runs are a useful
 minimum. Fix the cause rather than choosing a delay that happens to pass once.
 
+A CI red is not always a regression. `verify-exit` is the timing-bound
+subtask in `make check`: it fans out several `ptycheck.py` cases at once, and
+those cases run inside the parallel `make -j$(CHECK_JOBS)` gate, so on a
+loaded runner a signal teardown case can report "never saw the alt-screen
+exit sequence (ESC[?1049l)" because the restore raced a slow runner rather than
+because it is broken. Read the whole job before touching the code: a green
+rerun is the signature of a flake, and a real regression does not heal on its
+own. Look for the runner-load signal elsewhere in the same job -- a `git fetch`
+timeout, a slow step upstream of the assertion -- or a failing assertion on a
+path your diff does not touch. Cap the concurrency of the pty suite under a
+`-j` gate, or give the teardown case its own headroom, so a loaded runner stops
+being mistaken for a defect; until then, rerun first and only chase the code
+when a rerun stays red.
+
 ## Pane teardown is a hangup
 
 Closing a pane closes its PTY master (`ptyx.Hangup`). The kernel sends SIGHUP
