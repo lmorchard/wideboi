@@ -1,0 +1,98 @@
+name: CI (macOS)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  ci:
+    name: CI (make check, macOS)
+    runs-on: macos-latest
+    steps:
+     - name: Checkout
+       uses: actions/checkout@v4
+
+      # Same [noci] escape hatch as ci.yml, so a deliberately skipped merge does
+      # not run the gate on either OS.
+     - name: Check if CI should be skipped
+       id: skip_check
+       env:
+         PR_TITLE: ${{ github.event.pull_request.title }}
+         HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+       run: |
+         COMMIT_MSG=$(git log -1 --format=%B 2>/dev/null || echo "$HEAD_COMMIT_MESSAGE")
+         if [[ "$COMMIT_MSG" == "[noci]"* ]] || [[ "$PR_TITLE" == "[noci]"* ]]; then
+           echo "skip=true" >> "$GITHUB_OUTPUT"
+           echo "CI skipped due to [noci]"
+         else
+           echo "skip=false" >> "$GITHUB_OUTPUT"
+         fi
+
+      # This job exists because the Linux runner in ci.yml cannot see
+      # platform-specific socket-directory behavior: on macOS /tmp is a system
+      # symlink, and a check that refused it passed on Ubuntu while breaking every
+      # --socket /tmp/... and the default session path locally (#397). The macOS
+      # runner runs the same gate that the project runs by hand, so a regression
+      # of exactly that class is caught here.
+      #
+      # Read the pin out of go.mod so CI builds on exactly the Go that
+      # `make check` runs on locally; setup-go resolves `go-version-file` from
+      # the `go` directive, which is the one we pin.
+     - name: Set up Go
+       if: steps.skip_check.outputs.skip != 'true'
+       uses: actions/setup-go@v5
+       with:
+         go-version-file: go.mod
+
+     - name: Download dependencies
+       if: steps.skip_check.outputs.skip != 'true'
+       run: go mod download
+
+     - name: Set up Node.js
+       if: steps.skip_check.outputs.skip != 'true'
+       uses: actions/setup-node@v4
+       with:
+         node-version: '22'
+         cache: npm
+         cache-dependency-path: web/package-lock.json
+
+     - name: Install web dependencies
+       if: steps.skip_check.outputs.skip != 'true'
+       run: npm ci --prefix web
+
+      # web-accept (inside make check) drives the app in a real Chromium. Linux
+      # passes --with-deps to install the system libraries it needs; macOS
+      # bundles what Chromium requires, so install the browser alone.
+     - name: Install browser for acceptance tests
+       if: steps.skip_check.outputs.skip != 'true'
+       run: cd web && npx playwright install chromium
+
+     - name: Set up Buf
+       if: steps.skip_check.outputs.skip != 'true'
+       uses: bufbuild/buf-action@v1
+       with:
+         version: 1.73.0
+         setup_only: true
+
+     - name: Check protobuf bindings
+       if: steps.skip_check.outputs.skip != 'true'
+       run: |
+         buf lint
+         make proto-check
+
+      # make check is the project's own gate -- fmt-check, lint, seam-check,
+      # test, web-test, web-accept, race, verify-exit, smoke, golden,
+      # attach-check. Running anything narrower would let CI and a local run
+      # disagree about what passing means.
+     - name: Run make check
+       if: steps.skip_check.outputs.skip != 'true'
+       run: make check
+
+      # The Linux-only desktop lifecycle job (make desktop-test) is not run
+      # here: it needs the GTK4/WebKitGTK build packages, which are a separate
+      # concern from this socket-directory gate and are covered by the Linux
+      # leg of ci.yml.
+
+     - name: Run dependency audits
+       if: steps.skip_check.outputs.skip != 'true'
+       run: make audit

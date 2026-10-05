@@ -80,6 +80,28 @@ type SocketListener struct {
 	closed bool
 }
 
+// SafeDir resolves dir to the real directory that would hold wideboi's
+// socket and lock files, following symlinks to their target instead of
+// rejecting a link.
+//
+// On macOS /tmp is a system symlink (private/tmp), as is a $TMPDIR a user
+// names, so a check that rejects ModeSymlink refuses all of them (#397). The
+// check that matters is on the resolved target: a link to a directory the user
+// controls is not the redirect the check exists to stop, while a dangling link
+// or a link to a non-directory is. fi is an Lstat of the target; a missing
+// directory surfaces as an os.ErrNotExist error, left for the caller to create.
+func SafeDir(dir string) (string, os.FileInfo, error) {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	fi, err := os.Lstat(resolved)
+	if err != nil {
+		return "", nil, err
+	}
+	return resolved, fi, nil
+}
+
 // NewSocketListener binds a Unix domain socket at path.
 //
 // Ownership of path is an exclusive flock on path+".lock", held for as
@@ -97,17 +119,16 @@ type SocketListener struct {
 // the name taken after the server has gone.
 func NewSocketListener(path string) (*SocketListener, error) {
 	dir := filepath.Dir(path)
-	if fi, err := os.Lstat(dir); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("refusing to bind socket in symlink directory %s", dir)
-		}
-		if !fi.IsDir() {
-			return nil, fmt.Errorf("socket directory %s is not a directory", dir)
-		}
-		if fi.Mode().Perm()&0002 != 0 && fi.Mode()&os.ModeSticky == 0 {
-			if stat, ok := fi.Sys().(*syscall.Stat_t); ok && stat.Uid != uint32(os.Getuid()) {
-				return nil, fmt.Errorf("socket directory %s is world-writable without sticky bit and owned by uid %d", dir, stat.Uid)
-			}
+	// SafeDir resolves a symlinked socket directory (macOS /tmp, a $TMPDIR a
+	// user names) to its real target and runs the checks below on that target.
+	// A dangling link or a link to a non-directory still fails (#397).
+	dir, fi, err := SafeDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Mode().Perm()&0002 != 0 && fi.Mode()&os.ModeSticky == 0 {
+		if stat, ok := fi.Sys().(*syscall.Stat_t); ok && stat.Uid != uint32(os.Getuid()) {
+			return nil, fmt.Errorf("socket directory %s is world-writable without sticky bit and owned by uid %d", dir, stat.Uid)
 		}
 	}
 
