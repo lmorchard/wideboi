@@ -358,6 +358,9 @@ func RestoreState(s *Server) error {
 			p.SetOnBell(func() {
 				s.onPaneBell(id)
 			})
+			p.SetOnClipboard(func(text string) {
+				s.onPaneClipboard(id, text)
+			})
 			p.SetOnOutput(func() {
 				s.onPaneOutput(id)
 			})

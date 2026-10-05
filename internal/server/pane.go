@@ -543,6 +543,13 @@ func (p *Pane) SetOnBell(fn func()) {
 	}
 }
 
+// SetOnClipboard configures a callback for OSC 52 clipboard writes.
+func (p *Pane) SetOnClipboard(fn func(text string)) {
+	if p.grid != nil {
+		p.grid.OnClipboard(fn)
+	}
+}
+
 // SetOnOutput registers a callback invoked when new PTY bytes are written to the terminal grid.
 func (p *Pane) SetOnOutput(fn func()) {
 	p.onOutput = fn

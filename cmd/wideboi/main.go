@@ -87,6 +87,7 @@ func newFlagSet(opts *cliOptions) *flag.FlagSet {
 	fs.StringVar(&opts.flags.TLSKey, "tls-key", "", "path to TLS private key PEM file")
 	fs.StringVar(&opts.flags.Shell, "shell", "", "shell executable path")
 	fs.BoolVar(&opts.flags.DisableAutoCleanup, "disable-auto-cleanup", false, "disable automatic cleanup of logs and session artifacts on clean exit")
+	fs.BoolVar(&opts.flags.DisableClipboard, "disable-clipboard", false, "ignore clipboard writes (OSC 52) from programs in panes")
 	fs.BoolVar(&opts.flags.EndSessionOnOwnerLoss, "end-session-on-owner-loss", false, "end the session when its owning terminal hangs up or the owner dies without detaching")
 	fs.BoolVar(&opts.flags.AllowNested, "allow-nested", false, "allow running nested wideboi sessions inside an existing session")
 	fs.StringVar(&opts.flags.Notifications, "notifications", "", "desktop notifications: auto (default), osc9, osc99, bell, off")
@@ -124,7 +125,7 @@ func parseCLI(args []string) (cliOptions, error) {
 			continue
 		}
 		arg := args[i]
-		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "dump-pane" || arg == "pipe-pane" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust" || arg == "rename-pane") {
+		if opts.subcommand == "" && (arg == "split" || arg == "send" || arg == "capture" || arg == "dump-pane" || arg == "pipe-pane" || arg == "close" || arg == "wait" || arg == "upgrade-server" || arg == "web" || arg == "prompt" || arg == "palette" || arg == "trust" || arg == "untrust" || arg == "rename-pane" || arg == "show-clipboard") {
 			opts.subcommand = arg
 			opts.subcommandArgs = args[i+1:]
 			opts.globalArgs = append([]string(nil), flagArgs...)
@@ -186,6 +187,8 @@ func printHelp(w io.Writer) {
   wideboi [flags] set-pane-status <status> [pane-id]
                              Set or clear a pane's status (working, input, done, failed,
                              idle, clear; uses $WIDEBOI_PANE_ID if omitted)
+  wideboi [flags] show-clipboard [--json]
+                             Print the most recent text a pane copied (OSC 52)
   wideboi [flags] wait [--timeout <duration>] <pane-id>
                              Block until a pane's process exits; exit with its code
                              (124 on timeout). Use split --keep to wait after exit
@@ -225,6 +228,8 @@ Flags:
       --shell <path>     Shell executable to launch in panes
                          (default: $SHELL or /bin/sh)
       --disable-auto-cleanup Disable automatic cleanup of logs and artifacts on clean exit
+      --disable-clipboard
+                         Ignore clipboard writes (OSC 52) from programs in panes
       --end-session-on-owner-loss
                          End the session when the terminal that started it
                          hangs up (default: keep it running, detached)
@@ -249,6 +254,7 @@ Environment Variables:
   WIDEBOI_SHELL          Shell path override
   WIDEBOI_LOG_LEVEL      Log verbosity: trace, debug, info (default), warn, error
   WIDEBOI_AUTO_CLEANUP   Clean dead session artifacts and logs on clean exit (default 1)
+  WIDEBOI_CLIPBOARD      Let programs in panes copy to this terminal's clipboard (default 1)
   WIDEBOI_KEEP_SESSION_ON_OWNER_LOSS
                          Keep the session when its terminal hangs up (default 1)
   WIDEBOI_TRAFFIC_TIMING =1 to time server render, patch build and encode (status --traffic)
@@ -372,6 +378,8 @@ func main() {
 		fatal(runRenamePane(cfg, opts.subcommandArgs, os.Stderr))
 	case "set-pane-status":
 		fatal(runSetPaneStatus(cfg, opts.subcommandArgs, os.Stderr))
+	case "show-clipboard":
+		fatal(runShowClipboard(cfg, opts.subcommandArgs, os.Stdout, os.Stderr))
 	case "wait":
 		code, err := runWait(cfg, opts.subcommandArgs, os.Stderr)
 		fatal(err)
@@ -1165,6 +1173,16 @@ func runClient(cfg config.Config, bindings []keys.Binding, conn net.Conn, server
 					events = t.Events()
 					frame = time.NewTicker(16 * time.Millisecond)
 					frameC = frame.C
+				}
+				screenLock.Unlock()
+			}
+			// A pane copied (OSC 52). Written here rather than by the
+			// client because writeClipboard must not interleave with a
+			// frame flush; the client's switch ignores the type.
+			if m, ok := msg.(protocol.MsgPaneClipboard); ok && cfg.ClipboardEnabled {
+				screenLock.Lock()
+				if !stopped.Load() {
+					writeClipboard(scr, m.Text)
 				}
 				screenLock.Unlock()
 			}

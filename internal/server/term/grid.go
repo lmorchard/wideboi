@@ -87,6 +87,11 @@ type Grid interface {
 	// OnBell registers a callback invoked when the emulator receives a BEL character.
 	OnBell(fn func())
 
+	// OnClipboard registers a callback invoked with the text of each OSC
+	// 52 clipboard write the child makes. Reads and malformed writes
+	// never reach it; see parseOSC52. Like OnBell it runs inside Write.
+	OnClipboard(fn func(text string))
+
 	// SendMouse encodes a mouse event in the child's requested mode and
 	// writes it to the child. Like SendKey it writes to an io.Pipe and
 	// blocks until something reads.
@@ -246,9 +251,10 @@ type vtGrid struct {
 	cursorKeys             atomic.Bool
 	keypadApp              atomic.Bool
 
-	userVarsMu sync.Mutex
-	userVars   map[string]string
-	onBell     func()
+	userVarsMu  sync.Mutex
+	userVars    map[string]string
+	onBell      func()
+	onClipboard func(text string)
 
 	// osc repairs OSC strings x/ansi would cut at a 0x9C byte (#175).
 	// Only Write touches it, under writeResizeMu.
@@ -548,7 +554,64 @@ func NewVTWithTimeouts(cols, rows int, idle, inactivity time.Duration) Grid {
 		return true
 	})
 
+	g.em.RegisterOscHandler(52, func(data []byte) bool {
+		text, ok := parseOSC52(data)
+		if !ok {
+			return false
+		}
+		if g.onClipboard != nil {
+			g.onClipboard(text)
+		}
+		return true
+	})
+
 	return g
+}
+
+// maxClipboardBytes caps one OSC 52 write from a pane. It sits well
+// under x/vt's 4 MB OSC buffer (SetDataSize in vt's emulator.go), past
+// which the parser drops bytes silently and still calls the handler --
+// a truncated payload would otherwise decode as if it were whole.
+const maxClipboardBytes = 1 << 20
+
+// maxClipboardRawBytes caps the payload as the pane sent it, before
+// whitespace is stripped. x/vt truncates the raw OSC, so that is what
+// must stay under 4 MB: otherwise whitespace padding could push a valid
+// tail past the cut while the stripped payload still looks small. Two
+// MiB leaves room for a maximal payload wrapped at 76 columns (~1.4 MB).
+const maxClipboardRawBytes = 2 << 20
+
+// parseOSC52 extracts the text of an OSC 52 clipboard write. data is
+// the whole payload, "52;<selection>;<base64>", as x/vt hands every
+// handler. Reads ("?") and clears (empty) are refused: answering a read
+// would hand the host clipboard to whatever runs in the pane. The
+// selection is ignored; everything goes to the system clipboard.
+func parseOSC52(data []byte) (string, bool) {
+	parts := strings.SplitN(string(data), ";", 3)
+	if len(parts) != 3 || len(parts[2]) > maxClipboardRawBytes {
+		return "", false
+	}
+	payload := strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == ' ' || r == '\t' {
+			return -1 // base64(1) wraps at 76 columns on Linux
+		}
+		return r
+	}, parts[2])
+	if payload == "" || payload == "?" {
+		return "", false
+	}
+	if len(payload) > base64.StdEncoding.EncodedLen(maxClipboardBytes) {
+		return "", false
+	}
+	enc := base64.StdEncoding
+	if len(payload)%4 != 0 {
+		enc = base64.RawStdEncoding
+	}
+	decoded, err := enc.DecodeString(payload)
+	if err != nil || len(decoded) == 0 || len(decoded) > maxClipboardBytes || !utf8.Valid(decoded) {
+		return "", false
+	}
+	return string(decoded), true
 }
 
 // Write serializes against Resize via writeResizeMu; see that field's
@@ -773,6 +836,8 @@ func (g *vtGrid) MouseTracking() bool { return g.mouseModes.Load() != 0 }
 func (g *vtGrid) BracketedPaste() bool { return g.bracketedPaste.Load() }
 
 func (g *vtGrid) OnBell(fn func()) { g.onBell = fn }
+
+func (g *vtGrid) OnClipboard(fn func(text string)) { g.onClipboard = fn }
 
 func (g *vtGrid) SendMouse(m uv.MouseEvent) { g.em.SendMouse(m) }
 

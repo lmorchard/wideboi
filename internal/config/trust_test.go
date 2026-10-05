@@ -279,3 +279,59 @@ width = 80
 		t.Error("expected startup commands on subsequent load")
 	}
 }
+
+// An untrusted project may turn pane clipboard writes off but never back
+// on: the user's global opt-out is a defence against clipboard
+// poisoning, and a checkout must not be able to undo it.
+func TestUntrustedProjectCannotEnableClipboard(t *testing.T) {
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	tmp := t.TempDir()
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
+	xdg := filepath.Join(tmp, "xdg")
+	if err := os.MkdirAll(filepath.Join(xdg, "wideboi"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeGlobal := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(xdg, "wideboi", "config.toml"), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeProject := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(".wideboi.toml", []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := mockEnv(map[string]string{"HOME": tmp, "XDG_CONFIG_HOME": xdg})
+	load := func(trust bool) config.Config {
+		t.Helper()
+		cfg, _, err := config.Load(config.ConfigFlags{TrustProject: trust}, env)
+		if err != nil {
+			t.Fatalf("Load(trust=%v): %v", trust, err)
+		}
+		return cfg
+	}
+
+	writeGlobal("clipboard = false\n")
+	writeProject("clipboard = true\n")
+	if load(false).ClipboardEnabled {
+		t.Error("untrusted project re-enabled clipboard over the global clipboard = false")
+	}
+	if !load(true).ClipboardEnabled {
+		t.Error("trusted project could not enable clipboard over the global setting")
+	}
+
+	writeGlobal("")
+	writeProject("clipboard = false\n")
+	if load(false).ClipboardEnabled {
+		t.Error("untrusted project could not turn clipboard off")
+	}
+}

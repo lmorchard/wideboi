@@ -44,4 +44,5 @@ package protocol
 // 27 adds MsgSetPaneStatusRequest and MsgSetPaneStatusResponse (#382).
 // 28 adds wait-output and wait-status requests and responses (#377).
 // 29 adds collapsed column flag and collapse verbs (#386).
-const Version uint32 = 29
+// 30 adds MsgPaneClipboard and MsgShowClipboardRequest/Response for pane OSC 52 passthrough.
+const Version uint32 = 30

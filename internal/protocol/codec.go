@@ -114,6 +114,8 @@ func MarshalClient(msg any) ([]byte, error) {
 				Until:  until,
 			},
 		}
+	case MsgShowClipboardRequest:
+		env.Msg = &wirepb.ClientMessage_ShowClipboardRequest{ShowClipboardRequest: &wirepb.MsgShowClipboardRequest{}}
 	case MsgWaitRequest:
 		env.Msg = &wirepb.ClientMessage_WaitRequest{WaitRequest: &wirepb.MsgWaitRequest{PaneId: int32(m.PaneID)}}
 	case MsgUpgradeRequest:
@@ -226,6 +228,8 @@ func UnmarshalClient(data []byte) (any, error) {
 			PaneID: int(m.WaitStatusRequest.PaneId),
 			Until:  until,
 		}, nil
+	case *wirepb.ClientMessage_ShowClipboardRequest:
+		return MsgShowClipboardRequest{}, nil
 	case *wirepb.ClientMessage_WaitRequest:
 		return MsgWaitRequest{PaneID: int(m.WaitRequest.PaneId)}, nil
 	case *wirepb.ClientMessage_UpgradeRequest:
@@ -444,6 +448,24 @@ func MarshalServer(msg any) ([]byte, error) {
 				Message: validUTF8(m.Message),
 			},
 		}
+	case MsgPaneClipboard:
+		env.Msg = &wirepb.ServerMessage_PaneClipboard{
+			PaneClipboard: &wirepb.MsgPaneClipboard{
+				PaneId: int32(m.PaneID),
+				Title:  validUTF8(m.Title),
+				Text:   validUTF8(m.Text),
+			},
+		}
+	case MsgShowClipboardResponse:
+		env.Msg = &wirepb.ServerMessage_ShowClipboardResponse{
+			ShowClipboardResponse: &wirepb.MsgShowClipboardResponse{
+				PaneId:    int32(m.PaneID),
+				Title:     validUTF8(m.Title),
+				Text:      validUTF8(m.Text),
+				UnixMilli: m.UnixMilli,
+				Error:     validUTF8(m.Error),
+			},
+		}
 	default:
 		return nil, fmt.Errorf("unsupported server message %T", msg)
 	}
@@ -636,6 +658,20 @@ func UnmarshalServer(data []byte) (any, error) {
 			PaneID: int(m.WaitStatusResponse.PaneId),
 			Status: PaneStatus(m.WaitStatusResponse.Status),
 			Error:  m.WaitStatusResponse.Error,
+		}, nil
+	case *wirepb.ServerMessage_PaneClipboard:
+		return MsgPaneClipboard{
+			PaneID: int(m.PaneClipboard.PaneId),
+			Title:  m.PaneClipboard.Title,
+			Text:   m.PaneClipboard.Text,
+		}, nil
+	case *wirepb.ServerMessage_ShowClipboardResponse:
+		return MsgShowClipboardResponse{
+			PaneID:    int(m.ShowClipboardResponse.PaneId),
+			Title:     m.ShowClipboardResponse.Title,
+			Text:      m.ShowClipboardResponse.Text,
+			UnixMilli: m.ShowClipboardResponse.UnixMilli,
+			Error:     m.ShowClipboardResponse.Error,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown server message %T", env.Msg)

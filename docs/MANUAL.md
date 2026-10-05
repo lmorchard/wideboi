@@ -251,6 +251,18 @@ Terminal settings for OSC 52:
 - **iTerm2:** Enable *Settings → General → Selection → Applications in terminal may access clipboard*.
 - **tmux:** Add `set -g set-clipboard on` to your `tmux.conf`.
 
+### Copying from Programs in a Pane
+
+Programs running in a pane can copy too. When a program emits OSC 52 (Claude Code does when you select text in it), wideboi passes the copy on to your terminal. It works over SSH, where `pbcopy` or `xclip` would copy on the wrong machine.
+
+- **Which client gets it:** the client that last typed, pasted, or clicked in that pane. If that client has gone, or nobody has done any of those yet, every attached client gets it. Scripts driving a pane with `wideboi send` don't count as typing.
+- **Writes only:** a program asking to *read* your clipboard gets no answer. Copies over 1 MiB are dropped.
+- **Web client:** a copy shows a small prompt with a preview. Nothing reaches your clipboard until you click **Copy**. Turn it off with *Settings → Allow panes to copy*.
+- **The last copy is kept:** `wideboi show-clipboard` prints it (see [Headless Control](#7-headless-control-and-automation)).
+- **Turning it off:** set `clipboard = false` in your configuration, `WIDEBOI_CLIPBOARD=0`, or pass `--disable-clipboard`. The setting is per client. An untrusted project `.wideboi.toml` can turn it off but not back on.
+
+This is on by default, and it has a cost: anything printed in a pane can replace your clipboard. For example, `cat`ing a hostile file could swap in a command you then paste. tmux turns pane copies off by default for this reason. If that trade-off doesn't suit you, use `clipboard = false`.
+
 ### Terminal Application Pass-Through
 
 When an application in a pane enables mouse tracking (such as `vim`, `less`, or `htop`), wideboi forwards mouse events directly to that program.
@@ -347,6 +359,21 @@ wideboi capture $PANE_ID -S
 
 # Limit output to the last N lines (-n <lines>)
 wideboi capture $PANE_ID -S -n 50
+```
+
+#### `show-clipboard`
+
+Prints the most recent text a program in a pane copied (OSC 52). Use this when a script needs what an agent copied, or when no client was attached to receive it. It exits non-zero if nothing has been copied since the server started. The copy is held in memory only.
+
+```bash
+# Print the copied text
+wideboi show-clipboard
+
+# Include the pane id, pane title and time as JSON
+wideboi show-clipboard --json
+
+# Session flags go before the subcommand
+wideboi -L project-a show-clipboard
 ```
 
 #### `close`
@@ -505,7 +532,7 @@ A `.wideboi.toml` file in your repository overrides global settings in user conf
 ### Project Configuration Trust Boundary
 
 To prevent untrusted checkouts from executing arbitrary startup commands or exposing unwanted network listeners:
-- **Untrusted Projects:** By default, `.wideboi.toml` only loads safe appearance, layout, and key settings (`layout`, `width_presets`, `pan_step`, `theme`, `mouse`, `auto_cleanup`, `keep_session_on_owner_loss`, `log_level`, `keys`, `prefix`). Sensitive settings (`startup`, `shell`, `socket`, `session`, `websocket`, `websocket_token`, `tls`, `macros`) are ignored.
+- **Untrusted Projects:** By default, `.wideboi.toml` only loads safe appearance, layout, and key settings (`layout`, `width_presets`, `pan_step`, `theme`, `mouse`, `clipboard` (off only), `auto_cleanup`, `keep_session_on_owner_loss`, `log_level`, `keys`, `prefix`). Sensitive settings (`startup`, `shell`, `socket`, `session`, `websocket`, `websocket_token`, `tls`, `macros`) are ignored.
 - **Interactive First-Run Prompt:** When launching wideboi interactively in a terminal with an untrusted `.wideboi.toml` that contains sensitive settings, wideboi prompts: `Trust and execute this project configuration? [y/N]: `. Answering `y` trusts the project and persists its checksum to `trusted.toml`. Answering `n` (or pressing Enter) proceeds untrusted for that session. Non-interactive environments default to untrusted.
 - **Explicit Trust:** Run `wideboi trust` in a project directory to trust its `.wideboi.toml`. This records the canonical path and SHA256 digest in `~/.config/wideboi/trusted.toml`.
 - **Content Tampering:** If `.wideboi.toml` is modified, the SHA256 checksum changes and wideboi automatically reverts to untrusted mode until `wideboi trust` is run again.
@@ -521,6 +548,7 @@ Example configuration file:
 prefix = "ctrl+b"
 layout = "cards"
 mouse = true
+clipboard = true      # let programs in panes copy to your clipboard (OSC 52)
 shell = "/bin/bash"
 websocket = "127.0.0.1:8080"
 auto_cleanup = true

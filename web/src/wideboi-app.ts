@@ -25,6 +25,7 @@ import type { WideboiCommandMenu } from './components/command-menu';
 import './components/command-palette';
 import type { WideboiCommandPalette } from './components/command-palette';
 import './components/context-menu';
+import './components/clipboard-toast';
 import type { ContextMenuAction } from './components/context-menu';
 import { MobileDirectInputController } from './mobile-direct-input';
 
@@ -174,6 +175,9 @@ export class WideboiApp extends LitElement {
   @state() private showMacros = false;
   @state() private showMacroEditor = false;
   @state() private contextMenu = { open: false, x: 0, y: 0, paneId: 0, hasSelection: false };
+  // A pane's clipboard write waiting on the user's Copy click; a newer
+  // one replaces it.
+  @state() private pendingClipboard: { paneId: number; title: string; text: string } | null = null;
   @state() private draftMacroSteps: MacroStep[] = [];
   @state() private paneZooms = new Map<number, number>();
   private searchController = new SearchController({
@@ -743,6 +747,13 @@ export class WideboiApp extends LitElement {
           }
           break;
         }
+        case 'paneClipboard': {
+          const clip = message.msg.value;
+          if (getPref('paneClipboard')) {
+            this.pendingClipboard = { paneId: clip.paneId, title: clip.title, text: clip.text };
+          }
+          break;
+        }
       }
     };
 
@@ -1026,6 +1037,15 @@ export class WideboiApp extends LitElement {
     }
     return copied;
   }
+
+  // Runs inside the Copy click: copyToClipboard calls writeText before
+  // its first await, so the browser still sees the user gesture. The
+  // pref is checked again in case it was turned off while this waited.
+  private handleClipboardToastCopy = () => {
+    const clip = this.pendingClipboard;
+    this.pendingClipboard = null;
+    if (clip && getPref('paneClipboard')) void this.copyToClipboard(clip.text);
+  };
 
   private lastPaste = { text: '', time: 0 };
 
@@ -2370,6 +2390,9 @@ export class WideboiApp extends LitElement {
           @font-size-change=${(e: CustomEvent<number>) => this.handleFontSizeChange(e.detail)}
           @font-size-step=${(e: CustomEvent<number>) => this.stepFontSize(e.detail)}
           @font-size-reset=${() => this.resetFontSize()}
+          @pane-clipboard-change=${(e: CustomEvent<boolean>) => {
+            if (!e.detail) this.pendingClipboard = null;
+          }}
         ></wideboi-settings>
       ` : ''}
       ${this.showCommandMenu ? html`
@@ -2403,6 +2426,15 @@ export class WideboiApp extends LitElement {
         @action=${this.handleContextMenuAction}
         @close=${this.closeContextMenu}
       ></wideboi-context-menu>
+      ${this.pendingClipboard ? html`
+        <wideboi-clipboard-toast
+          .paneId=${this.pendingClipboard.paneId}
+          .paneTitle=${this.pendingClipboard.title}
+          .text=${this.pendingClipboard.text}
+          @copy=${this.handleClipboardToastCopy}
+          @dismiss=${() => { this.pendingClipboard = null; }}
+        ></wideboi-clipboard-toast>
+      ` : ''}
       ${!this.connected ? html`
         <div class="overlay">
           <div class="connection-box">

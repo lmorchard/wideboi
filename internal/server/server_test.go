@@ -2,9 +2,11 @@ package server_test
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1041,4 +1043,361 @@ func TestServerBellNotification(t *testing.T) {
 			}
 		}
 	}
+}
+
+// showClipboard asks the server for its stored clipboard write and
+// returns the response, skipping whatever else the channel carries.
+func showClipboard(t *testing.T, ctx context.Context, tp *transport.InProcChannel) protocol.MsgShowClipboardResponse {
+	t.Helper()
+	tp.SendClient(ctx, protocol.MsgShowClipboardRequest{})
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-tp.ServerSend:
+			if resp, ok := msg.(protocol.MsgShowClipboardResponse); ok {
+				return resp
+			}
+		case <-timeout:
+			t.Fatal("timeout waiting for MsgShowClipboardResponse")
+		}
+	}
+}
+
+func TestServerStoresPaneClipboard(t *testing.T) {
+	tp := transport.NewInProcChannel(64)
+	srv := server.NewServer(tp, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{
+		{Command: "exec sleep 30"},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = srv.Run(ctx) }()
+	defer srv.Close()
+
+	tp.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, tp.ServerSend, 2*time.Second)
+
+	if resp := showClipboard(t, ctx, tp); resp.Error == "" {
+		t.Fatalf("show-clipboard before any copy = %+v, want an error", resp)
+	}
+
+	grid := srv.PaneGrid(1)
+	if grid == nil {
+		t.Fatal("grid for pane 1 not found")
+	}
+	// Zmlyc3Q= is "first", c2Vjb25k is "second": the later write wins.
+	if _, err := grid.Write([]byte("\x1b]52;c;Zmlyc3Q=\x07\x1b]52;c;c2Vjb25k\x07")); err != nil {
+		t.Fatalf("grid.Write: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		resp := showClipboard(t, ctx, tp)
+		if resp.Text == "second" {
+			if resp.PaneID != 1 || resp.Title == "" || resp.UnixMilli == 0 || resp.Error != "" {
+				t.Fatalf("show-clipboard = %+v, want pane 1 with a title and time", resp)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("show-clipboard never returned the second write; last %+v", resp)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// clipTap drains a client's server channel for the life of ctx -- an
+// InProcChannel drops sends when full, and pane updates would fill it --
+// keeping only clipboard writes and show-clipboard responses.
+type clipTap struct {
+	tp    *transport.InProcChannel
+	clips chan protocol.MsgPaneClipboard
+	resps chan protocol.MsgShowClipboardResponse
+}
+
+func newClipTap(ctx context.Context, tp *transport.InProcChannel) *clipTap {
+	c := &clipTap{
+		tp:    tp,
+		clips: make(chan protocol.MsgPaneClipboard, 16),
+		resps: make(chan protocol.MsgShowClipboardResponse, 16),
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-tp.ServerSend:
+				switch m := msg.(type) {
+				case protocol.MsgPaneClipboard:
+					c.clips <- m
+				case protocol.MsgShowClipboardResponse:
+					c.resps <- m
+				}
+			}
+		}
+	}()
+	return c
+}
+
+// barrier round-trips a request through the tap's client. The server
+// handles one client's messages in order, so on return everything that
+// client sent before has been processed.
+func (c *clipTap) barrier(t *testing.T, ctx context.Context) {
+	t.Helper()
+	c.tp.SendClient(ctx, protocol.MsgShowClipboardRequest{})
+	select {
+	case <-c.resps:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for MsgShowClipboardResponse")
+	}
+}
+
+// clipboardServer starts a server with one pane and two attached
+// in-process clients, and returns a tap on each. The caller writes OSC 52 to srv.PaneGrid(1).
+func clipboardServer(t *testing.T, ctx context.Context) (srv *server.Server, tap1, tap2 *clipTap) {
+	t.Helper()
+	tp1 := transport.NewInProcChannel(256)
+	srv = server.NewServer(tp1, "/bin/sh", "")
+	srv.SetCloseGrace(testGrace)
+	srv.SetStartupPanes([]server.StartupPane{{Command: "exec sleep 30"}})
+	go func() { _ = srv.Run(ctx) }()
+	t.Cleanup(func() { srv.Close() })
+
+	tp1.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, tp1.ServerSend, 2*time.Second)
+
+	tp2 := transport.NewInProcChannel(256)
+	srv.AddClientForTest(ctx, tp2)
+	tp2.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, tp2.ServerSend, 2*time.Second)
+
+	return srv, newClipTap(ctx, tp1), newClipTap(ctx, tp2)
+}
+
+// writeOSC52Hello makes pane 1 copy "hello".
+func writeOSC52Hello(t *testing.T, srv *server.Server) {
+	t.Helper()
+	if _, err := srv.PaneGrid(1).Write([]byte("\x1b]52;c;aGVsbG8=\x07")); err != nil {
+		t.Fatalf("grid.Write: %v", err)
+	}
+}
+
+func expectClipboard(t *testing.T, name string, ch <-chan protocol.MsgPaneClipboard) {
+	t.Helper()
+	select {
+	case c := <-ch:
+		if c.PaneID != 1 || c.Text != "hello" || c.Title == "" {
+			t.Fatalf("%s got %+v, want pane 1 'hello' with a title", name, c)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s never received the clipboard write", name)
+	}
+}
+
+// expectNoClipboard is a negative check, so it has to wait out a window
+// rather than a condition; it runs only after a positive delivery to
+// another client, by which time a send to this one would have happened.
+func expectNoClipboard(t *testing.T, name string, ch <-chan protocol.MsgPaneClipboard) {
+	t.Helper()
+	select {
+	case c := <-ch:
+		t.Fatalf("%s received %+v, want nothing", name, c)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestPaneClipboardGoesToLastInputClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, tap2 := clipboardServer(t, ctx)
+
+	tap2.tp.SendClient(ctx, protocol.MsgInput{PaneID: 1, Data: []byte(" ")})
+	tap2.barrier(t, ctx)
+	writeOSC52Hello(t, srv)
+
+	expectClipboard(t, "tp2 (last input)", tap2.clips)
+	expectNoClipboard(t, "tp1", tap1.clips)
+}
+
+func TestPaneClipboardMouseCountsAsInput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, tap2 := clipboardServer(t, ctx)
+
+	tap2.tp.SendClient(ctx, protocol.MsgMouse{PaneID: 1, Kind: protocol.MousePress, X: 1, Y: 1})
+	tap2.barrier(t, ctx)
+	writeOSC52Hello(t, srv)
+
+	expectClipboard(t, "tp2 (last mouse)", tap2.clips)
+	expectNoClipboard(t, "tp1", tap1.clips)
+}
+
+// Motion and wheel are not a person choosing a pane: scrolling a
+// mouse-tracking pane from another client must not steal its copies.
+func TestPaneClipboardIgnoresMouseMotionAndWheel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, tap2 := clipboardServer(t, ctx)
+
+	tap2.tp.SendClient(ctx, protocol.MsgMouse{PaneID: 1, Kind: protocol.MousePress, X: 1, Y: 1})
+	tap2.barrier(t, ctx)
+	tap1.tp.SendClient(ctx, protocol.MsgMouse{PaneID: 1, Kind: protocol.MouseMotion, X: 2, Y: 2})
+	tap1.tp.SendClient(ctx, protocol.MsgMouse{PaneID: 1, Kind: protocol.MouseWheel, X: 2, Y: 2, Button: 64})
+	tap1.tp.SendClient(ctx, protocol.MsgMouse{PaneID: 1, Kind: protocol.MouseRelease, X: 2, Y: 2})
+	tap1.barrier(t, ctx)
+	writeOSC52Hello(t, srv)
+
+	expectClipboard(t, "tp2 (last press)", tap2.clips)
+	expectNoClipboard(t, "tp1 (motion/wheel/release only)", tap1.clips)
+}
+
+func TestPaneClipboardFallsBackToAttachedClients(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, tap2 := clipboardServer(t, ctx)
+
+	writeOSC52Hello(t, srv)
+
+	expectClipboard(t, "tp1", tap1.clips)
+	expectClipboard(t, "tp2", tap2.clips)
+}
+
+func TestPaneClipboardSkipsUnattachedTransports(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, _ := clipboardServer(t, ctx)
+
+	// A CLI command connection: registered, never attached.
+	tp3 := transport.NewInProcChannel(256)
+	srv.AddClientForTest(ctx, tp3)
+	tap3 := newClipTap(ctx, tp3)
+
+	writeOSC52Hello(t, srv)
+
+	expectClipboard(t, "tp1", tap1.clips)
+	expectNoClipboard(t, "tp3 (unattached)", tap3.clips)
+}
+
+func TestPaneClipboardIgnoresSendInputRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, tap2 := clipboardServer(t, ctx)
+
+	// Automation driving a pane is not a person who just copied.
+	tap2.tp.SendClient(ctx, protocol.MsgSendInputRequest{PaneID: 1, Data: []byte(" ")})
+	tap2.barrier(t, ctx)
+	writeOSC52Hello(t, srv)
+
+	expectClipboard(t, "tp1", tap1.clips)
+	expectClipboard(t, "tp2", tap2.clips)
+}
+
+func TestPaneClipboardLastInputClearedOnDisconnect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, tap2 := clipboardServer(t, ctx)
+
+	tap2.tp.SendClient(ctx, protocol.MsgInput{PaneID: 1, Data: []byte(" ")})
+	tap2.barrier(t, ctx)
+	writeOSC52Hello(t, srv)
+	expectClipboard(t, "tp2 (last input)", tap2.clips)
+
+	close(tap2.tp.ClientSend) // the connection ends
+
+	// Until the drop is processed the write still targets tp2, so
+	// repeat it until tp1 -- the fallback -- sees one.
+	deadline := time.After(2 * time.Second)
+	for {
+		writeOSC52Hello(t, srv)
+		select {
+		case c := <-tap1.clips:
+			if c.Text != "hello" {
+				t.Fatalf("tp1 got %+v", c)
+			}
+			return
+		case <-time.After(50 * time.Millisecond):
+		case <-deadline:
+			t.Fatal("tp1 never received a write after tp2 disconnected")
+		}
+	}
+}
+
+// A pane can emit copies far faster than they are delivered. Delivery
+// must stay bounded -- at most one in flight and one waiting, the newest
+// -- and the last copy must be the one that lands.
+func TestPaneClipboardBurstIsBoundedAndLatestWins(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv, tap1, _ := clipboardServer(t, ctx)
+
+	// A stalled client: every clipboard send to it runs out its timeout.
+	slow := &stallingTransport{InProcChannel: transport.NewInProcChannel(256)}
+	srv.AddClientForTest(ctx, slow)
+	slow.SendClient(ctx, protocol.MsgAttach{Cols: 80, Rows: 24})
+	_ = recvLayoutSnapshot(t, slow.ServerSend, 2*time.Second)
+	go func() { // keep its ordinary traffic drained
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-slow.ServerSend:
+			}
+		}
+	}()
+
+	var burst strings.Builder
+	for i := 0; i < 1000; i++ {
+		text := fmt.Sprintf("copy-%04d-%s", i, strings.Repeat("x", 4096))
+		fmt.Fprintf(&burst, "\x1b]52;c;%s\x07", base64.StdEncoding.EncodeToString([]byte(text)))
+	}
+	before := runtime.NumGoroutine()
+	if _, err := srv.PaneGrid(1).Write([]byte(burst.String())); err != nil {
+		t.Fatalf("grid.Write: %v", err)
+	}
+	if grew := runtime.NumGoroutine() - before; grew > 10 {
+		t.Errorf("a burst of 1000 copies left %d extra goroutines; delivery should be bounded", grew)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case c := <-tap1.clips:
+			if strings.HasPrefix(c.Text, "copy-0999-") {
+				if resp := showClipboardVia(t, ctx, tap1); !strings.HasPrefix(resp.Text, "copy-0999-") {
+					t.Fatalf("show-clipboard holds %.10q, want the last copy", resp.Text)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("the last copy of the burst never arrived")
+		}
+	}
+}
+
+// stallingTransport blocks every clipboard send until its context
+// expires, as a socket client that has stopped reading does.
+type stallingTransport struct {
+	*transport.InProcChannel
+}
+
+func (s *stallingTransport) SendServer(ctx context.Context, msg transport.ServerMessage) bool {
+	if _, ok := msg.(protocol.MsgPaneClipboard); ok {
+		<-ctx.Done()
+		return false
+	}
+	return s.InProcChannel.SendServer(ctx, msg)
+}
+
+// showClipboardVia is showClipboard for a client whose channel a tap owns.
+func showClipboardVia(t *testing.T, ctx context.Context, c *clipTap) protocol.MsgShowClipboardResponse {
+	t.Helper()
+	c.tp.SendClient(ctx, protocol.MsgShowClipboardRequest{})
+	select {
+	case r := <-c.resps:
+		return r
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for MsgShowClipboardResponse")
+	}
+	return protocol.MsgShowClipboardResponse{}
 }

@@ -39,6 +39,7 @@ type msgEffects struct {
 	renameResp           *protocol.MsgRenamePaneResponse
 	setStatusResp        *protocol.MsgSetPaneStatusResponse
 	dumpResp             *protocol.MsgDumpPaneResponse
+	showClipboardResp    *protocol.MsgShowClipboardResponse
 	pipeResp             *protocol.MsgPipePaneResponse
 	waitResp             *protocol.MsgWaitResponse
 	waitOutputResp       *protocol.MsgWaitOutputResponse
@@ -164,6 +165,8 @@ func (s *Server) handleClientMsg(ctx context.Context, tp transport.Transport, ms
 		eff = s.handleSetPaneStatusRequestLocked(tp, m)
 	case protocol.MsgDumpPaneRequest:
 		eff = s.handleDumpPaneRequestLocked(tp, m)
+	case protocol.MsgShowClipboardRequest:
+		eff = s.handleShowClipboardRequestLocked(tp, m)
 	case protocol.MsgPipePaneRequest:
 		eff = s.handlePipePaneRequestLocked(ctx, tp, m)
 	case protocol.MsgWaitRequest:
@@ -302,6 +305,22 @@ func (s *Server) handleDumpPaneRequestLocked(tp transport.Transport, m protocol.
 		TotalLines: total,
 		Offset:     m.Offset,
 		Lines:      m.Limit,
+	}
+	return eff
+}
+
+func (s *Server) handleShowClipboardRequestLocked(tp transport.Transport, m protocol.MsgShowClipboardRequest) msgEffects {
+	var eff msgEffects
+	c := s.clipboard
+	if c == nil {
+		eff.showClipboardResp = &protocol.MsgShowClipboardResponse{Error: "no pane has copied anything yet"}
+		return eff
+	}
+	eff.showClipboardResp = &protocol.MsgShowClipboardResponse{
+		PaneID:    c.paneID,
+		Title:     c.title,
+		Text:      c.text,
+		UnixMilli: c.at.UnixMilli(),
 	}
 	return eff
 }
@@ -956,6 +975,7 @@ func (s *Server) handleInputLocked(tp transport.Transport, m protocol.MsgInput) 
 	}
 	if p, ok := s.panes[m.PaneID]; ok {
 		if tp != nil {
+			s.noteInputLocked(m.PaneID, tp)
 			cs := s.clientLocked(tp)
 			if cs.clientScrollOffsets[m.PaneID] > 0 {
 				cs.clientScrollOffsets[m.PaneID] = 0
@@ -992,6 +1012,11 @@ func (s *Server) handleMouseLocked(tp transport.Transport, m protocol.MsgMouse) 
 		return eff
 	}
 	if p, ok := s.panes[m.PaneID]; ok {
+		// A press is a person choosing this pane; motion and wheel
+		// are not, and must not redirect its clipboard writes.
+		if tp != nil && m.Kind == protocol.MousePress {
+			s.noteInputLocked(m.PaneID, tp)
+		}
 		p.SendMouse(m.Decode())
 	}
 	return eff
@@ -1119,6 +1144,9 @@ func (s *Server) applyEffects(ctx context.Context, tp transport.Transport, eff m
 		}
 		if eff.dumpResp != nil {
 			tp.SendServer(ctx, *eff.dumpResp)
+		}
+		if eff.showClipboardResp != nil {
+			tp.SendServer(ctx, *eff.showClipboardResp)
 		}
 		if eff.pipeResp != nil {
 			tp.SendServer(ctx, *eff.pipeResp)

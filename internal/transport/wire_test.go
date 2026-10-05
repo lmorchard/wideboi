@@ -195,6 +195,10 @@ func TestEveryMessageTypeRoundtrips(t *testing.T) {
 		protocol.MsgDumpPaneResponse{PaneID: 2, Text: "dump text\n", TotalLines: 100, Offset: 10, Lines: 20, Error: ""},
 		protocol.MsgPipePaneRequest{PaneID: 2},
 		protocol.MsgPipePaneResponse{PaneID: 2, Data: []byte("raw chunk"), Closed: false, Error: ""},
+		protocol.MsgPaneClipboard{PaneID: 3, Title: "claude", Text: "copied\ntext"},
+		protocol.MsgShowClipboardRequest{},
+		protocol.MsgShowClipboardResponse{PaneID: 3, Title: "claude", Text: "copied", UnixMilli: 1759680000000},
+		protocol.MsgShowClipboardResponse{Error: "no pane has copied anything yet"},
 	}
 
 	for _, msg := range msgs {

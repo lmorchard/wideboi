@@ -43,6 +43,7 @@ func TestParseCLISubcommands(t *testing.T) {
 		{args: []string{"-h"}, wantHelp: true},
 		{args: []string{"trust"}, wantSub: "trust"},
 		{args: []string{"untrust"}, wantSub: "untrust"},
+		{args: []string{"show-clipboard", "--json"}, wantSub: "show-clipboard"},
 	}
 
 	for _, tc := range cases {

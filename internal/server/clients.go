@@ -126,6 +126,11 @@ func (s *Server) removeTransportLocked(tp transport.Transport) {
 	s.transports = out
 	delete(s.clients, tp)
 	delete(s.startedTransports, tp)
+	for paneID, last := range s.lastInput {
+		if last == tp {
+			delete(s.lastInput, paneID)
+		}
+	}
 	delete(s.remoteTransports, tp)
 	s.forgetTrafficLocked(tp)
 	if s.sizeOwner == tp {
