@@ -62,6 +62,20 @@ type Server struct {
 	stopCh          chan struct{}
 	closeOnce       sync.Once
 
+	// clipboard is the most recent pane OSC 52 write, for show-clipboard.
+	// Guarded by mu.
+	clipboard *clipboardEntry
+	// clipboardPending is the newest write not yet delivered, and
+	// clipboardDelivering whether a worker is draining it; both guarded
+	// by clipboardPendingMu, never mu. See onPaneClipboard.
+	clipboardPendingMu  sync.Mutex
+	clipboardPending    *clipboardEntry
+	clipboardDelivering bool
+	// lastInput maps a pane to the client that last typed, pasted or
+	// clicked in it: the one whose user a clipboard write is for.
+	// Guarded by mu; removeTransportLocked forgets departing clients.
+	lastInput map[int]transport.Transport
+
 	// reasonMu guards reason; see CloseFor.
 	reasonMu  sync.Mutex
 	reason    *closeReason
@@ -588,6 +602,9 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 	p.SetOnBell(func() {
 		s.onPaneBell(id)
 	})
+	p.SetOnClipboard(func(text string) {
+		s.onPaneClipboard(id, text)
+	})
 	p.SetOnOutput(func() {
 		s.onPaneOutput(id)
 	})
@@ -615,6 +632,98 @@ func (s *Server) spawnPaneWithSpecLocked(spec StartupPane, afterPaneID int) (*Pa
 
 func (s *Server) onPaneBell(paneID int) {
 	go s.broadcastPaneBell(paneID)
+}
+
+// clipboardEntry is one pane clipboard write, as show-clipboard reports it.
+type clipboardEntry struct {
+	paneID int
+	title  string
+	text   string
+	at     time.Time
+}
+
+// onPaneClipboard runs on the pane's PTY reader inside the grid's
+// Write, which can hold writeResizeMu while an s.mu holder waits in
+// Resize -- so it must not take s.mu. It parks the write in a single
+// slot for one delivery worker. A pane can copy far faster than a slow
+// client accepts sends, so a newer write replaces one still waiting:
+// memory stays bounded at one write in flight and one pending, delivery
+// stays in order, and the last copy is the one that lands.
+func (s *Server) onPaneClipboard(paneID int, text string) {
+	s.clipboardPendingMu.Lock()
+	s.clipboardPending = &clipboardEntry{paneID: paneID, text: text, at: time.Now()}
+	start := !s.clipboardDelivering
+	s.clipboardDelivering = true
+	s.clipboardPendingMu.Unlock()
+	if start {
+		go s.deliverPaneClipboards()
+	}
+}
+
+// deliverPaneClipboards is the delivery worker: it takes the pending
+// write until there is none, then exits.
+func (s *Server) deliverPaneClipboards() {
+	for {
+		s.clipboardPendingMu.Lock()
+		c := s.clipboardPending
+		s.clipboardPending = nil
+		if c == nil {
+			s.clipboardDelivering = false
+			s.clipboardPendingMu.Unlock()
+			return
+		}
+		s.clipboardPendingMu.Unlock()
+		s.deliverPaneClipboard(c)
+	}
+}
+
+// deliverPaneClipboard stores one write for show-clipboard and sends it
+// to its recipients.
+func (s *Server) deliverPaneClipboard(c *clipboardEntry) {
+	s.mu.Lock()
+	if p := s.panes[c.paneID]; p != nil {
+		c.title = p.Title()
+	}
+	if c.title == "" {
+		c.title = fmt.Sprintf("Pane %d", c.paneID)
+	}
+	s.clipboard = c
+	tps := s.clipboardRecipientsLocked(c.paneID)
+	s.mu.Unlock()
+
+	msg := protocol.MsgPaneClipboard{PaneID: c.paneID, Title: c.title, Text: c.text}
+	for _, tp := range tps {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		_ = tp.SendServer(ctx, msg)
+		cancel()
+	}
+}
+
+// noteInputLocked records tp as the client that last sent a person's
+// input to paneID. s.mu must be held.
+func (s *Server) noteInputLocked(paneID int, tp transport.Transport) {
+	if s.lastInput == nil {
+		s.lastInput = make(map[int]transport.Transport)
+	}
+	s.lastInput[paneID] = tp
+}
+
+// clipboardRecipientsLocked picks who gets a pane's clipboard write:
+// the client that last typed or clicked in that pane -- the one whose
+// user just copied -- or, if it is gone or nobody has, every attached
+// client. Attached only: CLI command connections share s.transports and
+// must not receive clipboard text. s.mu must be held.
+func (s *Server) clipboardRecipientsLocked(paneID int) []transport.Transport {
+	if tp, ok := s.lastInput[paneID]; ok && s.isAttachedLocked(tp) {
+		return []transport.Transport{tp}
+	}
+	var out []transport.Transport
+	for _, tp := range s.transports {
+		if s.isAttachedLocked(tp) {
+			out = append(out, tp)
+		}
+	}
+	return out
 }
 
 func (s *Server) onPaneOutput(paneID int) {

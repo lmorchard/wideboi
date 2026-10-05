@@ -169,6 +169,22 @@ message MsgPaneNotification {
   string message = 3;
 }
 
+message MsgPaneClipboard {
+  int32 pane_id = 1;
+  string title = 2;
+  string text = 3;
+}
+
+message MsgShowClipboardRequest {}
+
+message MsgShowClipboardResponse {
+  int32 pane_id = 1;
+  string title = 2;
+  string text = 3;
+  int64 unix_milli = 4;
+  string error = 5;
+}
+
 message ServerMessage {
   oneof msg {
     MsgPaneUpdate pane_update = 1;
@@ -196,6 +212,8 @@ message ServerMessage {
     MsgSetPaneStatusResponse set_pane_status_response = 23;
     MsgWaitOutputResponse wait_output_response = 24;
     MsgWaitStatusResponse wait_status_response = 25;
+    MsgPaneClipboard pane_clipboard = 26;
+    MsgShowClipboardResponse show_clipboard_response = 27;
   }
 }
 
@@ -308,6 +326,7 @@ message ClientMessage {
     MsgSetPaneStatusRequest set_pane_status_request = 25;
     MsgWaitOutputRequest wait_output_request = 26;
     MsgWaitStatusRequest wait_status_request = 27;
+    MsgShowClipboardRequest show_clipboard_request = 28;
   }
 }
 

@@ -71,6 +71,15 @@ describe('preferences module', () => {
     expect(getPref('fontFamily')).toBe('Hack');
   });
 
+  it('lets panes copy by default, and respects a stored opt-out', () => {
+    expect(getPref('paneClipboard')).toBe(true);
+    setPref('paneClipboard', false);
+    expect(mockStorage.getItem('wideboi:paneClipboard')).toBe('false');
+    expect(getPref('paneClipboard')).toBe(false);
+    setPref('paneClipboard', true);
+    expect(getPref('paneClipboard')).toBe(true);
+  });
+
   it('handles invalid macros JSON gracefully', () => {
     mockStorage.setItem('wideboi:macros', 'not-valid-json');
     expect(getPref('macros')).toEqual(DEFAULT_MACROS);

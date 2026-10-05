@@ -39,6 +39,7 @@ var wireSchemaHashes = map[uint32]string{
 	27: "d02f10edf19fa8b204cb703ded0a6d51e487334a26f771f9cfe352703c54674c",
 	28: "4f03942f5ed99698f4234e3c32158d6339d37f81c0ab3cb073d8ef367b21e1d3",
 	29: "c63c3f90654b73bae42cceebc2923c44ebe56da9f6915177cc6ccc974b2a8aa3",
+	30: "584f6600165060ebd66a7670e5fa969abbfcf43cec86124c1befb7ac14a9f391",
 }
 
 func currentWireSchemaHash() (string, error) {

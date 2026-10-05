@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -524,6 +525,44 @@ func registerBuiltins(r *Registry) {
 
 			fmt.Fprint(inv.Stdout, outContent)
 			return nil
+		},
+	})
+
+	r.Register(Command{
+		Name:        "show-clipboard",
+		Description: "Print the most recent text a pane copied (OSC 52)",
+		Category:    "Panes",
+		ArgsUsage:   "[--json]",
+		Run: func(ctx context.Context, inv Invocation) error {
+			fs := flag.NewFlagSet("show-clipboard", flag.ContinueOnError)
+			if inv.Stderr != nil {
+				fs.SetOutput(inv.Stderr)
+			}
+			var asJSON bool
+			fs.BoolVar(&asJSON, "json", false, "print pane id, title, time and text as JSON")
+			if err := fs.Parse(inv.Args); err != nil {
+				return err
+			}
+			if inv.Stdout == nil {
+				return fmt.Errorf("show-clipboard prints to stdout; run it from a shell")
+			}
+			resp, err := RPCQuery[protocol.MsgShowClipboardResponse](ctx, inv, protocol.MsgShowClipboardRequest{}, 5*time.Second)
+			if err != nil {
+				return err
+			}
+			if resp.Error != "" {
+				return fmt.Errorf("%s", resp.Error)
+			}
+			if !asJSON {
+				fmt.Fprint(inv.Stdout, resp.Text)
+				return nil
+			}
+			return json.NewEncoder(inv.Stdout).Encode(struct {
+				PaneID int    `json:"pane_id"`
+				Title  string `json:"title"`
+				Time   string `json:"time"`
+				Text   string `json:"text"`
+			}{resp.PaneID, resp.Title, time.UnixMilli(resp.UnixMilli).UTC().Format(time.RFC3339), resp.Text})
 		},
 	})
 

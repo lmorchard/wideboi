@@ -184,6 +184,26 @@ type MsgPaneNotification struct {
 	Message string
 }
 
+// MsgPaneClipboard carries text a pane wrote to the clipboard with OSC 52.
+type MsgPaneClipboard struct {
+	PaneID int
+	Title  string
+	Text   string
+}
+
+// MsgShowClipboardRequest asks for the most recent pane clipboard write.
+type MsgShowClipboardRequest struct{}
+
+// MsgShowClipboardResponse returns the most recent pane clipboard write,
+// or an error if no pane has made one.
+type MsgShowClipboardResponse struct {
+	PaneID    int    `json:"pane_id"`
+	Title     string `json:"title"`
+	Text      string `json:"text"`
+	UnixMilli int64  `json:"unix_milli"`
+	Error     string `json:"error,omitempty"`
+}
+
 // PlacementKind says what a placement represents, which the renderer
 // cannot infer from geometry: a card sliver and a pane clipped by the
 // viewport edge are both a narrow Dst over a cropped Src, and Z does

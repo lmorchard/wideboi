@@ -972,3 +972,20 @@ func runWaitStatus(cfg config.Config, args []string, stdout, stderr io.Writer) (
 	fmt.Fprintln(stdout, resp.Status.String())
 	return 0, nil
 }
+
+// runShowClipboard runs the registry's show-clipboard against the
+// session the global flags resolved; the registry owns its flags and
+// output, so the CLI and the prompt cannot drift apart.
+func runShowClipboard(cfg config.Config, args []string, stdout, stderr io.Writer) error {
+	cmd, ok := commands.DefaultRegistry.Lookup("show-clipboard")
+	if !ok {
+		return fmt.Errorf("show-clipboard is not registered")
+	}
+	return cmd.Run(context.Background(), commands.Invocation{
+		Cfg:    cfg,
+		Socket: cfg.Socket,
+		Args:   args,
+		Stdout: stdout,
+		Stderr: stderr,
+	})
+}

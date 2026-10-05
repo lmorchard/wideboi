@@ -8,6 +8,7 @@ export interface Preferences {
   fontSize: number;
   fontFamily: string;
   notifications: boolean;
+  paneClipboard: boolean;
 }
 
 const PREF_KEYS: Record<keyof Preferences, { modern: string; legacy?: string }> = {
@@ -17,6 +18,7 @@ const PREF_KEYS: Record<keyof Preferences, { modern: string; legacy?: string }> 
   fontSize: { modern: 'wideboi:fontSize' },
   fontFamily: { modern: 'wideboi:fontFamily' },
   notifications: { modern: 'wideboi:notifications', legacy: 'wideboi.notifications' },
+  paneClipboard: { modern: 'wideboi:paneClipboard' },
 };
 
 function getStorage(): Storage | null {
@@ -83,6 +85,10 @@ export function getPref<K extends keyof Preferences>(key: K): Preferences[K] {
       if (raw === null) return true as Preferences[K];
       return (raw !== 'false' && raw !== 'off') as Preferences[K];
     }
+    case 'paneClipboard': {
+      if (raw === null) return true as Preferences[K];
+      return (raw !== 'false' && raw !== 'off') as Preferences[K];
+    }
   }
 }
 
@@ -115,6 +121,8 @@ export function getDefaultPref<K extends keyof Preferences>(key: K): Preferences
     case 'fontFamily':
       return 'monospace' as Preferences[K];
     case 'notifications':
+      return true as Preferences[K];
+    case 'paneClipboard':
       return true as Preferences[K];
   }
 }

@@ -45,6 +45,11 @@ type Config struct {
 	// rather than as false. Read MouseEnabled, not this.
 	Mouse        *bool `toml:"mouse"`
 	MouseEnabled bool  `toml:"-"`
+	// Clipboard is a pointer so an absent key reads as the default (on)
+	// rather than as false. Read ClipboardEnabled, not this. Off, this
+	// client ignores clipboard writes from panes (OSC 52).
+	Clipboard        *bool `toml:"clipboard"`
+	ClipboardEnabled bool  `toml:"-"`
 	// AutoCleanup is a pointer so an absent key reads as the default (on)
 	// rather than as false. Read AutoCleanupEnabled, not this.
 	AutoCleanup        *bool `toml:"auto_cleanup"`
@@ -127,6 +132,7 @@ type ConfigFlags struct {
 	WebsocketToken     string
 	Shell              string
 	DisableAutoCleanup bool
+	DisableClipboard   bool
 	// EndSessionOnOwnerLoss turns KeepSessionOnOwnerLoss off.
 	EndSessionOnOwnerLoss bool
 	DisableTLS            bool
@@ -374,6 +380,12 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 		if fileCfg.Mouse != nil {
 			cfg.Mouse = fileCfg.Mouse
 		}
+		// An untrusted project may turn pane clipboard writes off but
+		// not on: a user's global opt-out guards against clipboard
+		// poisoning, and a checkout must not be able to undo it.
+		if fileCfg.Clipboard != nil && (trusted || !*fileCfg.Clipboard) {
+			cfg.Clipboard = fileCfg.Clipboard
+		}
 		if fileCfg.AutoCleanup != nil {
 			cfg.AutoCleanup = fileCfg.AutoCleanup
 		}
@@ -530,6 +542,13 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if envNotifications := getenv("WIDEBOI_NOTIFICATIONS"); envNotifications != "" {
 		cfg.Notifications = envNotifications
 	}
+	if envClipboard := getenv("WIDEBOI_CLIPBOARD"); envClipboard != "" {
+		v, err := ParseBoolEnv("WIDEBOI_CLIPBOARD", envClipboard)
+		if err != nil {
+			return Config{}, nil, err
+		}
+		cfg.Clipboard = &v
+	}
 	if envAutoCleanup := getenv("WIDEBOI_AUTO_CLEANUP"); envAutoCleanup != "" {
 		v, err := ParseBoolEnv("WIDEBOI_AUTO_CLEANUP", envAutoCleanup)
 		if err != nil {
@@ -600,6 +619,10 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 	if flags.DisableAutoCleanup {
 		v := false
 		cfg.AutoCleanup = &v
+	}
+	if flags.DisableClipboard {
+		v := false
+		cfg.Clipboard = &v
 	}
 	if flags.EndSessionOnOwnerLoss {
 		v := false
@@ -683,6 +706,9 @@ func Load(flags ConfigFlags, getenv func(string) string) (Config, []keys.Binding
 
 	// Mouse
 	cfg.MouseEnabled = cfg.Mouse == nil || *cfg.Mouse
+
+	// Clipboard
+	cfg.ClipboardEnabled = cfg.Clipboard == nil || *cfg.Clipboard
 
 	// AutoCleanup
 	cfg.AutoCleanupEnabled = cfg.AutoCleanup == nil || *cfg.AutoCleanup

@@ -1225,3 +1225,58 @@ func TestValidateCustomSocketDir(t *testing.T) {
 		t.Fatal("expected dangling symlink to be rejected, got nil")
 	}
 }
+
+func TestLoadClipboard(t *testing.T) {
+	cfg, _, err := config.Load(defaultFlags(), mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.ClipboardEnabled {
+		t.Error("ClipboardEnabled = false by default, want true")
+	}
+
+	tomlPath := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(tomlPath, []byte("clipboard = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(nil))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.ClipboardEnabled {
+		t.Error("ClipboardEnabled = true with clipboard = false in the file")
+	}
+
+	for _, val := range []string{"false", "0", "off"} {
+		cfg, _, err = config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_CLIPBOARD": val}))
+		if err != nil {
+			t.Fatalf("Load() with WIDEBOI_CLIPBOARD=%q error: %v", val, err)
+		}
+		if cfg.ClipboardEnabled {
+			t.Errorf("ClipboardEnabled = true with WIDEBOI_CLIPBOARD=%q", val)
+		}
+	}
+
+	// The env var overrides the file, as every other setting does.
+	cfg, _, err = config.Load(config.ConfigFlags{ConfigFile: tomlPath}, mockEnv(map[string]string{"WIDEBOI_CLIPBOARD": "true"}))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if !cfg.ClipboardEnabled {
+		t.Error("ClipboardEnabled = false with WIDEBOI_CLIPBOARD=true over clipboard = false")
+	}
+
+	if _, _, err := config.Load(defaultFlags(), mockEnv(map[string]string{"WIDEBOI_CLIPBOARD": "maybe"})); err == nil {
+		t.Error("Load() with WIDEBOI_CLIPBOARD=maybe succeeded, want an error")
+	}
+
+	flags := defaultFlags()
+	flags.DisableClipboard = true
+	cfg, _, err = config.Load(flags, mockEnv(map[string]string{"WIDEBOI_CLIPBOARD": "true"}))
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.ClipboardEnabled {
+		t.Error("ClipboardEnabled = true with --disable-clipboard")
+	}
+}

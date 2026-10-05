@@ -66,6 +66,13 @@ export class WideboiSettings extends LitElement {
     this.dispatchEvent(new CustomEvent('layout-change', { detail: val, bubbles: true, composed: true }));
   };
 
+  private handleTogglePaneClipboard = () => {
+    const allowed = !getPref('paneClipboard');
+    setPref('paneClipboard', allowed);
+    this.dispatchEvent(new CustomEvent('pane-clipboard-change', { detail: allowed, bubbles: true, composed: true }));
+    this.requestUpdate();
+  };
+
   private handleToggleNotifications = async () => {
     const current = getPref('notifications');
     if (!current) {
@@ -148,6 +155,12 @@ export class WideboiSettings extends LitElement {
                   : typeof Notification !== 'undefined' && Notification.permission === 'granted'
                     ? 'Enabled (Click to Disable)'
                     : 'Enable Notifications'}
+              </button>
+            </div>
+            <div class="settings-row">
+              <label for="settings-pane-clipboard">Allow panes to copy</label>
+              <button id="settings-pane-clipboard" type="button" @click=${this.handleTogglePaneClipboard}>
+                ${getPref('paneClipboard') ? 'Enabled (Click to Disable)' : 'Disabled (Click to Enable)'}
               </button>
             </div>
           </div>

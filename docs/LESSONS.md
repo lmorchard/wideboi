@@ -51,6 +51,19 @@ pinned versions. These behaviors have already surprised us:
   a UTF-8 character. `✳` (`E2 9C B3`) and many CJK characters (`本` =
   `E6 9C AC`) contain it, so Claude Code's title arrived as `"\xe2"` and its
   tail printed as text. `term.oscScanner` repairs this before the parser (#175).
+- x/vt's parser keeps at most 4 MB of OSC data (`SetDataSize` in its
+  `emulator.go`). Bytes past that are dropped without an error, and the OSC
+  handler still runs on the truncated payload. A handler that decodes its
+  payload, as OSC 52's base64 does, needs its own cap well below that, or a
+  cut-off payload decodes as if it were complete. Cap the payload *as
+  received*: a check after normalising (for example, stripping whitespace)
+  can be beaten by padding that pushes a valid tail past the cut while the
+  normalised payload still looks small. See `maxClipboardRawBytes` and
+  `maxClipboardBytes` in `term/grid.go` (found in review of #400).
+- x/vt has no clipboard (OSC 52) support at all, and an OSC with no registered
+  handler is dropped silently: `logf` is a no-op without `SetLogger`. When a
+  pane program's escape sequence "does nothing", check `RegisterOscHandler`
+  in `grid.go` before suspecting the program.
 
 Keep `term.Grid` narrow so upstream fixes stay behind one interface.
 
@@ -142,6 +155,15 @@ Some tests passed before their intended fixes because another path produced
 the same status. A test that starts green against a known bug needs a different
 assertion. Running the real binary remains necessary even after code review:
 the same author can put the same mistaken assumption in both plan and code.
+
+A server test that must show *backpressure* (a slow or stalled client) can't
+use `transport.InProcChannel` alone: its `SendServer` never blocks, it drops
+the message when the buffer is full. So a pile-up that a real socket client
+would cause never forms, and the test passes on broken code. Wrap it so the
+relevant sends wait out their context, like `stallingTransport` in
+`internal/server/server_test.go` (#400). Likewise, a test asserting something
+does *not* happen must first observe that the action which would cause it
+actually ran: wait for a sentinel, not for output to go quiet (#398).
 
 ## Run fresh tests and restore the binary after a red check
 

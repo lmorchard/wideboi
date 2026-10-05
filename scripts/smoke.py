@@ -31,6 +31,7 @@ from ptylib import (
     ALT_SCREEN_ENTER, ALT_SCREEN_EXIT, Drainer, spawn_in_pty,
     wait_for_exit, descendants, force_cleanup, ps_rows,
     settle_output, still_alive, private_run_dir, run_main, harness_args,
+    wait_until,
 )
 
 CUP = re.compile(rb"\x1b\[(\d+);(\d+)H")
@@ -353,6 +354,55 @@ def case_drag_copies_over_osc52(fail):
     copied = base64.b64decode(m.group(1))
     if b"ABXYCD" not in copied:
         fail(f"clipboard payload lacks the command's output: {copied!r}")
+
+
+OSC52_WRITE = re.compile(rb"\x1b\]52;c;([A-Za-z0-9+/=]*)(?:\x07|\x1b\\)")
+# The pane runs this; "passthrough-ok" in base64. The echo's output reads
+# osc52-done-42 only once the shell has executed the line -- the typed
+# text shows $((40+2)) -- so seeing it proves the printf ran, which
+# output going quiet does not on a loaded machine (#398).
+OSC52_COMMAND = "printf '\\033]52;c;%s\\a' cGFzc3Rocm91Z2gtb2s=; echo osc52-done-$((40+2))\r"
+OSC52_DONE = b"osc52-done-42"
+
+
+def osc52_payloads(out: bytes) -> list[bytes]:
+    return [base64.b64decode(m) for m in OSC52_WRITE.findall(out)]
+
+
+def case_pane_osc52_passes_through(fail):
+    # The pane's printf emits OSC 52 itself; wideboi must re-emit it to
+    # the host. The typed command line holds the base64 only as plain
+    # text, never after ESC ] 52 ; c ; -- so a match is the passthrough.
+    # SSH_TTY is set because that is the scenario, and so that
+    # writeLocalClipboard does not run pbcopy on the dev's machine.
+    s = Session(args=["--layout", "scroll"], env={"SSH_TTY": "/dev/null"})
+    s.type(OSC52_COMMAND)
+    try:
+        wait_until(lambda: b"passthrough-ok" in osc52_payloads(s.output()), timeout=5.0,
+                   what="the pane's OSC 52 on the host terminal")
+    except TimeoutError:
+        fail(f"pane OSC 52 never reached the host terminal; OSC 52 payloads seen: {osc52_payloads(s.output())!r}")
+    s.close()
+
+
+def case_disable_clipboard_blocks_pane_osc52(fail):
+    # The same pane copy with the client told to ignore pane clipboard
+    # writes: no OSC 52 may reach the host at all. The sentinel proves
+    # the printf ran; the settle after it covers server-side delivery,
+    # which no longer depends on the shell being scheduled.
+    s = Session(args=["--layout", "scroll", "--disable-clipboard"], env={"SSH_TTY": "/dev/null"})
+    s.type(OSC52_COMMAND)
+    try:
+        wait_until(lambda: OSC52_DONE in s.output(), timeout=5.0, what="the command's sentinel")
+    except TimeoutError:
+        fail("the pane never ran the OSC 52 command, so the check would prove nothing")
+        s.close()
+        return
+    settle_output(s.drainer, timeout=MIN_SETTLE)
+    out = s.output()
+    s.close()
+    if b"\x1b]52;" in out:
+        fail("--disable-clipboard still wrote an OSC 52 to the host terminal")
 
 
 def case_click_reaches_mouse_tracking_child(fail):
@@ -1198,6 +1248,8 @@ CASES = [
     ("focus switch moves the cursor", case_focus_switch_moves_the_cursor),
     ("click focuses the pane under the pointer", case_click_focuses_pane),
     ("drag copies over OSC 52", case_drag_copies_over_osc52),
+    ("pane OSC 52 passes through", case_pane_osc52_passes_through),
+    ("--disable-clipboard blocks pane OSC 52", case_disable_clipboard_blocks_pane_osc52),
     ("click reaches a mouse-tracking child", case_click_reaches_mouse_tracking_child),
     ("new column opens pane", case_new_column_opens_pane),
     ("cycle width adjusts column", case_cycle_width),

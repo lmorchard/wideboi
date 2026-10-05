@@ -3,6 +3,7 @@ package commands_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -133,7 +134,7 @@ func TestDefaultRegistryBuiltins(t *testing.T) {
 		"new-column", "split", "run",
 		"set-width", "move-left", "move-right",
 		"kill-pane", "close", "rename-pane",
-		"dump-pane", "pipe-pane",
+		"dump-pane", "pipe-pane", "show-clipboard",
 		"toggle-status",
 		"detach", "quit", "help",
 	}
@@ -697,5 +698,112 @@ func TestPipePaneCommand(t *testing.T) {
 	err = r.Execute(ctx, invStdout, ":pipe-pane 99999")
 	if err == nil || !strings.Contains(err.Error(), "99999 not found") {
 		t.Fatalf("expected 'pane 99999 not found' error, got %v", err)
+	}
+}
+
+func TestShowClipboardCommand(t *testing.T) {
+	r := commands.DefaultRegistry
+
+	dir := t.TempDir()
+	sockPath := filepath.Join(dir, "commands.sock")
+	sl, err := transport.NewSocketListener(sockPath)
+	if err != nil {
+		t.Fatalf("NewSocketListener failed: %v", err)
+	}
+	defer sl.Close()
+
+	srv := server.NewServer(nil, "/bin/sh", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv.ListenSocket(ctx, sl)
+	go func() {
+		_ = srv.Run(ctx)
+	}()
+
+	clientConn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dial client: %v", err)
+	}
+	defer clientConn.Close()
+	if _, err := transport.Handshake(clientConn); err != nil {
+		t.Fatalf("handshake client: %v", err)
+	}
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgAttach{Cols: 80, Rows: 24}); err != nil {
+		t.Fatalf("write attach: %v", err)
+	}
+	var paneID int
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for paneID == 0 {
+		msg, err := transport.ReadServerFrame(clientConn)
+		if err != nil {
+			t.Fatalf("reading initial server frame: %v", err)
+		}
+		if snap, ok := msg.(protocol.MsgLayoutSnapshot); ok && len(snap.Columns) > 0 {
+			paneID = snap.Columns[0].PaneID
+		}
+	}
+	// The attached client must keep draining, or the server's sends to
+	// it back up; nothing here reads what it says.
+	_ = clientConn.SetReadDeadline(time.Time{})
+	go func() {
+		for {
+			if _, err := transport.ReadServerFrame(clientConn); err != nil {
+				return
+			}
+		}
+	}()
+
+	inv := func(stdout *bytes.Buffer) commands.Invocation {
+		inv := commands.Invocation{Cfg: config.Config{Socket: sockPath}, Socket: sockPath}
+		if stdout != nil {
+			inv.Stdout = stdout
+		}
+		return inv
+	}
+
+	if err := r.Execute(ctx, inv(&bytes.Buffer{}), ":show-clipboard"); err == nil || !strings.Contains(err.Error(), "no pane has copied") {
+		t.Fatalf("show-clipboard before any copy: err = %v, want 'no pane has copied'", err)
+	}
+	if err := r.Execute(ctx, inv(nil), ":show-clipboard"); err == nil || !strings.Contains(err.Error(), "run it from a shell") {
+		t.Fatalf("show-clipboard without stdout: err = %v, want 'run it from a shell'", err)
+	}
+
+	// The shell in the pane emits the OSC 52 itself; aGVsbG8gY2xpcA== is "hello clip".
+	if err := transport.WriteClientFrame(clientConn, protocol.MsgInput{PaneID: paneID, Data: []byte("printf '\\033]52;c;aGVsbG8gY2xpcA==\\007'\r")}); err != nil {
+		t.Fatalf("write input: %v", err)
+	}
+
+	var out bytes.Buffer
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		out.Reset()
+		err := r.Execute(ctx, inv(&out), ":show-clipboard")
+		if err == nil && out.String() == "hello clip" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("show-clipboard never printed the pane's copy: out=%q err=%v", out.String(), err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	out.Reset()
+	if err := r.Execute(ctx, inv(&out), ":show-clipboard --json"); err != nil {
+		t.Fatalf("show-clipboard --json: %v", err)
+	}
+	var got struct {
+		PaneID int    `json:"pane_id"`
+		Title  string `json:"title"`
+		Time   string `json:"time"`
+		Text   string `json:"text"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("show-clipboard --json output %q: %v", out.String(), err)
+	}
+	if got.PaneID != paneID || got.Text != "hello clip" || got.Title == "" {
+		t.Fatalf("show-clipboard --json = %+v, want pane %d text 'hello clip' and a title", got, paneID)
+	}
+	if _, err := time.Parse(time.RFC3339, got.Time); err != nil {
+		t.Fatalf("show-clipboard --json time %q is not RFC3339: %v", got.Time, err)
 	}
 }
